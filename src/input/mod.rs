@@ -246,293 +246,23 @@ impl State {
             InputEvent::PointerMotion { event, .. } => {
                 use smithay::backend::input::PointerMotionEvent;
 
-                let mut shell = self.common.shell.write().unwrap();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                let maybe_seat = self
+                    .common
+                    .shell
+                    .read()
+                    .unwrap()
+                    .seats
+                    .for_device(&event.device())
+                    .cloned();
+                if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let current_output = seat.active_output();
-
-                    let mut position = seat.get_pointer().unwrap().current_location().as_global();
-
-                    let under = State::surface_under(position, &current_output, &mut *shell)
-                        .map(|(target, pos)| (target, pos.as_logical()));
-
-                    let ptr = seat.get_pointer().unwrap();
-
-                    let mut pointer_locked = false;
-                    let mut pointer_confined = false;
-                    let mut confine_region = None;
-                    if let Some((surface, surface_loc)) = under
-                        .as_ref()
-                        .and_then(|(target, l)| Some((target.wl_surface()?, l)))
-                    {
-                        with_pointer_constraint(&surface, &ptr, |constraint| match constraint {
-                            Some(constraint) if constraint.is_active() => {
-                                // Constraint does not apply if not within region
-                                if !constraint.region().map_or(true, |x| {
-                                    x.contains(
-                                        (ptr.current_location() - *surface_loc).to_i32_round(),
-                                    )
-                                }) {
-                                    return;
-                                }
-                                match &*constraint {
-                                    PointerConstraint::Locked(_locked) => {
-                                        pointer_locked = true;
-                                    }
-                                    PointerConstraint::Confined(confine) => {
-                                        pointer_confined = true;
-                                        confine_region = confine.region().cloned();
-                                    }
-                                }
-                            }
-                            _ => {}
-                        });
-                    }
-                    let original_position = position;
-                    position += event.delta().as_global();
-
-                    let output = shell
-                        .outputs()
-                        .find(|output| output.geometry().to_f64().contains(position))
-                        .cloned()
-                        .unwrap_or(current_output.clone());
-
-                    let new_under = State::surface_under(position, &output, &mut *shell)
-                        .map(|(target, pos)| (target, pos.as_logical()));
-
-                    std::mem::drop(shell);
-                    ptr.relative_motion(
-                        self,
-                        under.clone(),
-                        &RelativeMotionEvent {
-                            delta: event.delta(),
-                            delta_unaccel: event.delta_unaccel(),
-                            utime: event.time(),
-                        },
+                    self.check_end_drag(&seat, event.time_msec());
+                    self.process_motion_relative(
+                        &seat,
+                        event.delta(),
+                        event.delta_unaccel(),
+                        event.time(),
                     );
-
-                    if pointer_locked {
-                        ptr.frame(self);
-                        return;
-                    }
-
-                    if ptr.is_grabbed() {
-                        if seat
-                            .user_data()
-                            .get::<ResizeGrabMarker>()
-                            .map(|marker| marker.get())
-                            .unwrap_or(false)
-                        {
-                            if output != current_output {
-                                ptr.frame(self);
-                                return;
-                            }
-                        }
-                        //If the pointer isn't grabbed, we should check if the focused element should be updated
-                    } else if self.common.config.cosmic_conf.focus_follows_cursor {
-                        let shell = self.common.shell.read().unwrap();
-                        let old_keyboard_target =
-                            State::element_under(original_position, &current_output, &*shell);
-                        let new_keyboard_target = State::element_under(position, &output, &*shell);
-
-                        if old_keyboard_target != new_keyboard_target
-                            && new_keyboard_target.is_some()
-                        {
-                            let create_source = if self.common.pointer_focus_state.is_none() {
-                                true
-                            } else {
-                                let PointerFocusState {
-                                    originally_focused_window,
-                                    scheduled_focused_window,
-                                    token,
-                                } = self.common.pointer_focus_state.as_ref().unwrap();
-
-                                if &new_keyboard_target == originally_focused_window {
-                                    //if we moved to the original window, just cancel the event
-                                    self.common.event_loop_handle.remove(*token);
-                                    //clear the state
-                                    self.common.pointer_focus_state = None;
-                                    false
-                                } else if &new_keyboard_target != scheduled_focused_window {
-                                    //if we moved to a new window, update the scheduled focus
-                                    self.common.event_loop_handle.remove(*token);
-                                    true
-                                } else {
-                                    //the state doesn't need to be updated or cleared
-                                    false
-                                }
-                            };
-
-                            if create_source {
-                                // prevent popups from being unfocusable if there is a gap between them and their parent
-                                let delay = calloop::timer::Timer::from_duration(
-                                    //default to 250ms
-                                    std::time::Duration::from_millis(
-                                        self.common.config.cosmic_conf.focus_follows_cursor_delay,
-                                    ),
-                                );
-                                let seat = seat.clone();
-                                let token = self
-                                    .common
-                                    .event_loop_handle
-                                    .insert_source(delay, move |_, _, state| {
-                                        let target = state
-                                            .common
-                                            .pointer_focus_state
-                                            .as_ref()
-                                            .unwrap()
-                                            .scheduled_focused_window
-                                            .clone();
-                                        //clear it prior in case the user twitches in the microsecond it
-                                        //takes this function to run
-                                        state.common.pointer_focus_state = None;
-
-                                        Shell::set_focus(
-                                            state,
-                                            target.as_ref(),
-                                            &seat,
-                                            Some(SERIAL_COUNTER.next_serial()),
-                                            false,
-                                        );
-
-                                        TimeoutAction::Drop
-                                    })
-                                    .ok();
-                                if token.is_some() {
-                                    let originally_focused_window =
-                                        if self.common.pointer_focus_state.is_none() {
-                                            old_keyboard_target
-                                        } else {
-                                            // In this case, the pointer has moved to a new window (neither original, nor scheduled)
-                                            // so we should preserve the original window for the focus state
-                                            self.common
-                                                .pointer_focus_state
-                                                .as_ref()
-                                                .unwrap()
-                                                .originally_focused_window
-                                                .clone()
-                                        };
-
-                                    self.common.pointer_focus_state = Some(PointerFocusState {
-                                        originally_focused_window,
-                                        scheduled_focused_window: new_keyboard_target,
-                                        token: token.unwrap(),
-                                    });
-                                }
-                            }
-                        }
-                    }
-
-                    let output_geometry = output.geometry();
-
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                    );
-
-                    // If confined, don't move pointer if it would go outside surface or region
-                    if pointer_confined {
-                        if let Some((surface, surface_loc)) = &under {
-                            if new_under.as_ref().and_then(|(under, _)| under.wl_surface())
-                                != surface.wl_surface()
-                            {
-                                ptr.frame(self);
-                                return;
-                            }
-                            if let PointerFocusTarget::WlSurface { surface, .. } = surface {
-                                if under_from_surface_tree(
-                                    surface,
-                                    position.as_logical() - surface_loc.to_f64(),
-                                    (0, 0),
-                                    WindowSurfaceType::ALL,
-                                )
-                                .is_none()
-                                {
-                                    ptr.frame(self);
-                                    return;
-                                }
-                            }
-                            if let Some(region) = confine_region {
-                                if !region
-                                    .contains((position.as_logical() - *surface_loc).to_i32_round())
-                                {
-                                    ptr.frame(self);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    let serial = SERIAL_COUNTER.next_serial();
-                    ptr.motion(
-                        self,
-                        under,
-                        &MotionEvent {
-                            location: position.as_logical(),
-                            serial,
-                            time: event.time_msec(),
-                        },
-                    );
-                    ptr.frame(self);
-
-                    // If pointer is now in a constraint region, activate it
-                    if let Some((under, surface_location)) = new_under
-                        .and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), loc)))
-                    {
-                        with_pointer_constraint(&under, &ptr, |constraint| match constraint {
-                            Some(constraint) if !constraint.is_active() => {
-                                let region = match &*constraint {
-                                    PointerConstraint::Locked(locked) => locked.region(),
-                                    PointerConstraint::Confined(confined) => confined.region(),
-                                };
-                                let point =
-                                    (ptr.current_location() - surface_location).to_i32_round();
-                                if region.map_or(true, |region| region.contains(point)) {
-                                    constraint.activate();
-                                }
-                            }
-                            _ => {}
-                        });
-                    }
-
-                    let mut shell = self.common.shell.write().unwrap();
-                    shell.update_pointer_position(position.to_local(&output), &output);
-
-                    if output != current_output {
-                        for session in cursor_sessions_for_output(&*shell, &current_output) {
-                            session.set_cursor_pos(None);
-                        }
-                        seat.set_active_output(&output);
-                    }
-
-                    for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some((geometry, offset)) = seat.cursor_geometry(
-                            position.as_logical().to_buffer(
-                                output.current_scale().fractional_scale(),
-                                output.current_transform(),
-                                &output_geometry.size.to_f64().as_logical(),
-                            ),
-                            self.common.clock.now(),
-                        ) {
-                            if session
-                                .current_constraints()
-                                .map(|constraint| constraint.size != geometry.size)
-                                .unwrap_or(true)
-                            {
-                                session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
-                                    shm: vec![ShmFormat::Argb8888],
-                                    dma: None,
-                                });
-                            }
-                            session.set_cursor_hotspot(offset);
-                            session.set_cursor_pos(Some(geometry.loc));
-                        }
-                    }
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -1248,6 +978,296 @@ impl State {
             }
             InputEvent::Special(_) => {}
             InputEvent::SwitchToggle { event: _ } => {}
+        }
+    }
+
+    /// Process relative mouse motion
+    fn process_motion_relative(
+        &mut self,
+        seat: &Seat<Self>,
+        delta: Point<f64, Logical>,
+        delta_unaccel: Point<f64, Logical>,
+        time_usec: u64,
+    ) {
+        let mut shell = self.common.shell.write().unwrap();
+        let current_output = seat.active_output();
+
+        let mut position = seat.get_pointer().unwrap().current_location().as_global();
+
+        let under = State::surface_under(position, &current_output, &mut *shell)
+            .map(|(target, pos)| (target, pos.as_logical()));
+
+        let ptr = seat.get_pointer().unwrap();
+
+        let mut pointer_locked = false;
+        let mut pointer_confined = false;
+        let mut confine_region = None;
+        if let Some((surface, surface_loc)) = under
+            .as_ref()
+            .and_then(|(target, l)| Some((target.wl_surface()?, l)))
+        {
+            with_pointer_constraint(&surface, &ptr, |constraint| match constraint {
+                Some(constraint) if constraint.is_active() => {
+                    // Constraint does not apply if not within region
+                    if !constraint.region().map_or(true, |x| {
+                        x.contains((ptr.current_location() - *surface_loc).to_i32_round())
+                    }) {
+                        return;
+                    }
+                    match &*constraint {
+                        PointerConstraint::Locked(_locked) => {
+                            pointer_locked = true;
+                        }
+                        PointerConstraint::Confined(confine) => {
+                            pointer_confined = true;
+                            confine_region = confine.region().cloned();
+                        }
+                    }
+                }
+                _ => {}
+            });
+        }
+        let original_position = position;
+        position += delta.as_global();
+
+        let output = shell
+            .outputs()
+            .find(|output| output.geometry().to_f64().contains(position))
+            .cloned()
+            .unwrap_or(current_output.clone());
+
+        let new_under = State::surface_under(position, &output, &mut *shell)
+            .map(|(target, pos)| (target, pos.as_logical()));
+
+        std::mem::drop(shell);
+
+        ptr.relative_motion(
+            self,
+            under.clone(),
+            &RelativeMotionEvent {
+                delta,
+                delta_unaccel,
+                utime: time_usec,
+            },
+        );
+
+        if pointer_locked {
+            ptr.frame(self);
+            return;
+        }
+
+        if ptr.is_grabbed() {
+            if seat
+                .user_data()
+                .get::<ResizeGrabMarker>()
+                .map(|marker| marker.get())
+                .unwrap_or(false)
+            {
+                if output != current_output {
+                    ptr.frame(self);
+                    return;
+                }
+            }
+            //If the pointer isn't grabbed, we should check if the focused element should be updated
+        } else if self.common.config.cosmic_conf.focus_follows_cursor {
+            let shell = self.common.shell.read().unwrap();
+            let old_keyboard_target =
+                State::element_under(original_position, &current_output, &*shell);
+            let new_keyboard_target = State::element_under(position, &output, &*shell);
+
+            if old_keyboard_target != new_keyboard_target && new_keyboard_target.is_some() {
+                let create_source = if self.common.pointer_focus_state.is_none() {
+                    true
+                } else {
+                    let PointerFocusState {
+                        originally_focused_window,
+                        scheduled_focused_window,
+                        token,
+                    } = self.common.pointer_focus_state.as_ref().unwrap();
+
+                    if &new_keyboard_target == originally_focused_window {
+                        //if we moved to the original window, just cancel the event
+                        self.common.event_loop_handle.remove(*token);
+                        //clear the state
+                        self.common.pointer_focus_state = None;
+                        false
+                    } else if &new_keyboard_target != scheduled_focused_window {
+                        //if we moved to a new window, update the scheduled focus
+                        self.common.event_loop_handle.remove(*token);
+                        true
+                    } else {
+                        //the state doesn't need to be updated or cleared
+                        false
+                    }
+                };
+
+                if create_source {
+                    // prevent popups from being unfocusable if there is a gap between them and their parent
+                    let delay = calloop::timer::Timer::from_duration(
+                        //default to 250ms
+                        std::time::Duration::from_millis(
+                            self.common.config.cosmic_conf.focus_follows_cursor_delay,
+                        ),
+                    );
+                    let seat = seat.clone();
+                    let token = self
+                        .common
+                        .event_loop_handle
+                        .insert_source(delay, move |_, _, state| {
+                            let target = state
+                                .common
+                                .pointer_focus_state
+                                .as_ref()
+                                .unwrap()
+                                .scheduled_focused_window
+                                .clone();
+                            //clear it prior in case the user twitches in the microsecond it
+                            //takes this function to run
+                            state.common.pointer_focus_state = None;
+
+                            Shell::set_focus(
+                                state,
+                                target.as_ref(),
+                                &seat,
+                                Some(SERIAL_COUNTER.next_serial()),
+                                false,
+                            );
+
+                            TimeoutAction::Drop
+                        })
+                        .ok();
+                    if token.is_some() {
+                        let originally_focused_window = if self.common.pointer_focus_state.is_none()
+                        {
+                            old_keyboard_target
+                        } else {
+                            // In this case, the pointer has moved to a new window (neither original, nor scheduled)
+                            // so we should preserve the original window for the focus state
+                            self.common
+                                .pointer_focus_state
+                                .as_ref()
+                                .unwrap()
+                                .originally_focused_window
+                                .clone()
+                        };
+
+                        self.common.pointer_focus_state = Some(PointerFocusState {
+                            originally_focused_window,
+                            scheduled_focused_window: new_keyboard_target,
+                            token: token.unwrap(),
+                        });
+                    }
+                }
+            }
+        }
+
+        let output_geometry = output.geometry();
+
+        position.x = position.x.clamp(
+            output_geometry.loc.x as f64,
+            ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+        );
+        position.y = position.y.clamp(
+            output_geometry.loc.y as f64,
+            ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+        );
+
+        // If confined, don't move pointer if it would go outside surface or region
+        if pointer_confined {
+            if let Some((surface, surface_loc)) = &under {
+                if new_under.as_ref().and_then(|(under, _)| under.wl_surface())
+                    != surface.wl_surface()
+                {
+                    ptr.frame(self);
+                    return;
+                }
+                if let PointerFocusTarget::WlSurface { surface, .. } = surface {
+                    if under_from_surface_tree(
+                        surface,
+                        position.as_logical() - surface_loc.to_f64(),
+                        (0, 0),
+                        WindowSurfaceType::ALL,
+                    )
+                    .is_none()
+                    {
+                        ptr.frame(self);
+                        return;
+                    }
+                }
+                if let Some(region) = confine_region {
+                    if !region.contains((position.as_logical() - *surface_loc).to_i32_round()) {
+                        ptr.frame(self);
+                        return;
+                    }
+                }
+            }
+        }
+
+        let serial = SERIAL_COUNTER.next_serial();
+
+        ptr.motion(
+            self,
+            under,
+            &MotionEvent {
+                location: position.as_logical(),
+                serial,
+                time: (time_usec / 1000) as u32, //: event.time_msec(),
+            },
+        );
+        ptr.frame(self);
+
+        // If pointer is now in a constraint region, activate it
+        if let Some((under, surface_location)) =
+            new_under.and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), loc)))
+        {
+            with_pointer_constraint(&under, &ptr, |constraint| match constraint {
+                Some(constraint) if !constraint.is_active() => {
+                    let region = match &*constraint {
+                        PointerConstraint::Locked(locked) => locked.region(),
+                        PointerConstraint::Confined(confined) => confined.region(),
+                    };
+                    let point = (ptr.current_location() - surface_location).to_i32_round();
+                    if region.map_or(true, |region| region.contains(point)) {
+                        constraint.activate();
+                    }
+                }
+                _ => {}
+            });
+        }
+
+        let mut shell = self.common.shell.write().unwrap();
+        shell.update_pointer_position(position.to_local(&output), &output);
+
+        if output != current_output {
+            for session in cursor_sessions_for_output(&*shell, &current_output) {
+                session.set_cursor_pos(None);
+            }
+            seat.set_active_output(&output);
+        }
+
+        for session in cursor_sessions_for_output(&shell, &output) {
+            if let Some((geometry, offset)) = seat.cursor_geometry(
+                position.as_logical().to_buffer(
+                    output.current_scale().fractional_scale(),
+                    output.current_transform(),
+                    &output_geometry.size.to_f64().as_logical(),
+                ),
+                self.common.clock.now(),
+            ) {
+                if session
+                    .current_constraints()
+                    .map(|constraint| constraint.size != geometry.size)
+                    .unwrap_or(true)
+                {
+                    session.update_constraints(BufferConstraints {
+                        size: geometry.size,
+                        shm: vec![ShmFormat::Argb8888],
+                        dma: None,
+                    });
+                }
+                session.set_cursor_hotspot(offset);
+                session.set_cursor_pos(Some(geometry.loc));
+            }
         }
     }
 
