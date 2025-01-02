@@ -32,8 +32,7 @@ impl DrmLeaseHandler for State {
             .drm_devices
             .get_mut(&node)
             .ok_or(LeaseRejected::default())?;
-
-        let mut builder = DrmLeaseBuilder::new(&backend.drm);
+        let mut builder = DrmLeaseBuilder::new(backend.drm.device());
         for conn in request.connectors {
             if let Some((_, crtc)) = backend
                 .leased_connectors
@@ -44,6 +43,7 @@ impl DrmLeaseHandler for State {
                 builder.add_crtc(*crtc);
                 let planes = backend
                     .drm
+                    .device()
                     .planes(crtc)
                     .map_err(LeaseRejected::with_cause)?;
                 let (primary_plane, primary_plane_claim) = planes
@@ -52,6 +52,7 @@ impl DrmLeaseHandler for State {
                     .find_map(|plane| {
                         backend
                             .drm
+                            .device_mut()
                             .claim_plane(plane.handle, *crtc)
                             .map(|claim| (plane, claim))
                     })
@@ -60,6 +61,7 @@ impl DrmLeaseHandler for State {
                 if let Some((cursor, claim)) = planes.cursor.into_iter().find_map(|plane| {
                     backend
                         .drm
+                        .device_mut()
                         .claim_plane(plane.handle, *crtc)
                         .map(|claim| (plane, claim))
                 }) {

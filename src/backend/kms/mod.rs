@@ -16,7 +16,7 @@ use smithay::{
             dmabuf::Dmabuf,
             gbm::{GbmAllocator, GbmBufferFlags},
         },
-        drm::{DrmDeviceFd, DrmNode, NodeType},
+        drm::{output::DrmOutputRenderElements, DrmDeviceFd, DrmNode, NodeType},
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
@@ -27,13 +27,17 @@ use smithay::{
     output::Output,
     reexports::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
-        drm::control::{crtc, Device as _},
+        drm::{
+            control::{crtc, Device as _},
+            Device as _,
+        },
         input::{self, Libinput},
         wayland_server::{Client, DisplayHandle},
     },
-    utils::{DevPath, Size},
+    utils::{Clock, DevPath, Monotonic, Size},
     wayland::{dmabuf::DmabufGlobal, relative_pointer::RelativePointerManagerState},
 };
+use surface::GbmDrmOutput;
 use tracing::{error, info, trace, warn};
 
 use std::{
@@ -53,7 +57,7 @@ pub(crate) use surface::Surface;
 use device::*;
 pub use surface::Timings;
 
-use super::render::init_shaders;
+use super::render::{init_shaders, output_elements, CursorMode, CLEAR_COLOR};
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -321,6 +325,7 @@ impl State {
                 &mut state.common.workspace_state.update(),
                 &state.common.xdg_activation_state,
                 state.common.startup_done.clone(),
+                &state.common.clock,
             );
             state.common.refresh();
         });
@@ -528,6 +533,7 @@ impl KmsState {
         loop_handle: &LoopHandle<'static, State>,
         shell: Arc<RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
+        clock: &Clock<Monotonic>,
     ) -> Result<Vec<Output>, anyhow::Error> {
         if !self.session.is_active() {
             return Ok(Vec::new());
@@ -554,7 +560,7 @@ impl KmsState {
             // TODO: Right now we always keep crtcs of already enabled outputs,
             //  even if another configuration could potentially enable more outputs
 
-            let res_handles = device.drm.resource_handles()?;
+            let res_handles = device.drm.device().resource_handles()?;
             let free_crtcs = res_handles
                 .crtcs()
                 .iter()
@@ -579,16 +585,20 @@ impl KmsState {
                 });
 
             for conn in open_conns {
-                let conn_info = device.drm.get_connector(conn, false).with_context(|| {
-                    format!(
-                        "Failed to query drm device: {:?}",
-                        device.drm.dev_path().as_deref().map(Path::display),
-                    )
-                })?;
+                let conn_info = device
+                    .drm
+                    .device()
+                    .get_connector(conn, false)
+                    .with_context(|| {
+                        format!(
+                            "Failed to query drm device: {:?}",
+                            device.drm.device().dev_path().as_deref().map(Path::display),
+                        )
+                    })?;
                 'outer: for encoder_info in conn_info
                     .encoders()
                     .iter()
-                    .flat_map(|encoder_handle| device.drm.get_encoder(*encoder_handle))
+                    .flat_map(|encoder_handle| device.drm.device().get_encoder(*encoder_handle))
                 {
                     for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
                         if free_crtcs.contains(&crtc) {
@@ -638,13 +648,20 @@ impl KmsState {
 
         let mut all_outputs = Vec::new();
         for device in self.drm_devices.values_mut() {
-            // reconfigure
+            // reconfigure existing
+            let now = clock.now();
+            let output_map = device
+                .surfaces
+                .iter()
+                .map(|(crtc, surface)| (*crtc, surface.output.clone()))
+                .collect::<HashMap<_, _>>();
+
             for (crtc, surface) in device.surfaces.iter_mut() {
                 let output_config = surface.output.config();
 
                 let drm = &mut device.drm;
                 let conn = surface.connector;
-                let conn_info = drm.get_connector(conn, false)?;
+                let conn_info = drm.device().get_connector(conn, false)?;
                 let mode = conn_info
                     .modes()
                     .iter()
@@ -662,14 +679,64 @@ impl KmsState {
 
                 if !test_only {
                     if !surface.is_active() {
-                        let drm_surface = drm
-                            .create_surface(*crtc, *mode, &[conn])
-                            .with_context(|| "Failed to create drm surface")?;
-                        let gbm = device.gbm.clone();
-                        let cursor_size = drm.cursor_size();
+                        let compositor: GbmDrmOutput = {
+                            let mut planes = drm
+                                .device()
+                                .planes(crtc)
+                                .with_context(|| "Failed to enumerate planes")?;
+                            let driver = drm.device().get_driver().ok();
+
+                            // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
+                            if driver.is_some_and(|driver| {
+                                driver
+                                    .name()
+                                    .to_string_lossy()
+                                    .to_lowercase()
+                                    .contains("nvidia")
+                            }) {
+                                planes.overlay = vec![];
+                            }
+
+                            let mut renderer = self
+                                .api
+                                .single_renderer(&device.render_node)
+                                .with_context(|| "Failed to create renderer")?;
+
+                            let mut elements = DrmOutputRenderElements::default();
+                            for (crtc, output) in output_map.iter() {
+                                let output_elements = output_elements(
+                                    Some(&device.render_node),
+                                    &mut renderer,
+                                    &shell,
+                                    now,
+                                    &output,
+                                    CursorMode::All,
+                                    None,
+                                )
+                                .with_context(|| "Failed to render outputs")?;
+
+                                elements.add_output(crtc, CLEAR_COLOR, output_elements);
+                            }
+
+                            let compositor = drm
+                                .initialize_output(
+                                    *crtc,
+                                    *mode,
+                                    &[conn],
+                                    &surface.output,
+                                    Some(planes),
+                                    &mut renderer,
+                                    &elements,
+                                )
+                                .with_context(|| "Failed to create drm surface")?;
+
+                            let _ = renderer;
+
+                            compositor
+                        };
 
                         if let Some(bpc) = output_config.max_bpc {
-                            if let Err(err) = drm_helpers::set_max_bpc(drm, conn, bpc) {
+                            if let Err(err) = drm_helpers::set_max_bpc(drm.device(), conn, bpc) {
                                 warn!(
                                     ?bpc,
                                     ?err,
@@ -682,7 +749,7 @@ impl KmsState {
                         let vrr = output_config.vrr;
                         std::mem::drop(output_config);
 
-                        match surface.resume(drm_surface, gbm, cursor_size) {
+                        match surface.resume(compositor) {
                             Ok(_) => {
                                 surface.output.set_adaptive_sync_support(
                                     surface.adaptive_sync_support().ok(),
@@ -711,8 +778,29 @@ impl KmsState {
                                 surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
                             }
                         }
-                        surface
-                            .set_mode(*mode)
+
+                        let mut renderer = self
+                            .api
+                            .single_renderer(&device.render_node)
+                            .with_context(|| "Failed to create renderer")?;
+
+                        let mut elements = DrmOutputRenderElements::default();
+                        for (crtc, output) in output_map.iter() {
+                            let output_elements = output_elements(
+                                Some(&device.render_node),
+                                &mut renderer,
+                                &shell,
+                                now,
+                                &output,
+                                CursorMode::All,
+                                None,
+                            )
+                            .with_context(|| "Failed to render outputs")?;
+
+                            elements.add_output(crtc, CLEAR_COLOR, output_elements);
+                        }
+
+                        drm.use_mode(&surface.crtc, *mode, &mut renderer, &elements)
                             .context("Failed to apply new mode")?;
                     }
                 }
@@ -731,6 +819,36 @@ impl KmsState {
                     .map(|(_, output)| output.clone())
                     .collect::<Vec<_>>(),
             );
+
+            {
+                let mut renderer = self
+                    .api
+                    .single_renderer(&device.render_node)
+                    .with_context(|| "Failed to create renderer")?;
+
+                let mut elements = DrmOutputRenderElements::default();
+                for (crtc, output) in output_map.iter() {
+                    let output_elements = output_elements(
+                        Some(&device.render_node),
+                        &mut renderer,
+                        &shell,
+                        now,
+                        &output,
+                        CursorMode::All,
+                        None,
+                    )
+                    .with_context(|| "Failed to render outputs")?;
+
+                    elements.add_output(crtc, CLEAR_COLOR, output_elements);
+                }
+
+                if let Err(err) = device
+                    .drm
+                    .try_to_restore_modifiers(&mut renderer, &elements)
+                {
+                    warn!(?err, "Failed to restore modifiers");
+                }
+            }
         }
 
         // we need to handle mirroring, after all outputs have been enabled
