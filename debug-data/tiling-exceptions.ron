@@ -1,0 +1,50 @@
+[
+	// Any appid title only matching
+	(
+		appid: ".*", 
+		titles: [
+			"Discord Updater",
+		]
+	),
+	// Empty appid title only matches
+	(
+		appid: "", 
+		titles: [
+			"Steam",
+			"wl-clipboard",
+		]
+	),
+
+
+	// Appid matches
+	(appid: "Authy Desktop", titles: [".*"]),
+	(appid: "Com.github.amezin.ddterm", titles: [".*"]),
+	(appid: "Com.github.donadigo.eddy", titles: [".*"]),
+	(appid: "com.system76.CosmicFilesDialog", titles: [".*"]),
+	(appid: "Enpass", titles: ["Enpass Assistant"]),
+	(appid: "Gjs", titles: ["Settings"]),
+	(appid: "Gnome-initial-setup", titles: [".*"]),
+	(appid: "Gnome-terminal", titles: ["Preferences - General"]),
+	(appid: "Guake", titles: [".*"]),
+	(appid: "Io.elementary.sideload", titles: [".*"]),
+	(appid: "KotatogramDesktop", titles: ["Media viewer"]),
+	(appid: "Mozilla VPN", titles: [".*"]),
+	(appid: "update-manager", titles: ["Software Updater"]),
+	(appid: "Solaar", titles: [".*"]),
+	(appid: "Steam", titles: ["^.*?(Guard|Login).*"]),
+	(appid: "TelegramDesktop", titles: ["Media viewer"]),
+	(appid: "Zotero", titles: ["Quick Format Citation"]),
+	(appid: "gjs", titles: [".*"]),
+	(appid: "gnome-screenshot", titles: [".*"]),
+	(appid: "ibus-.*", titles: [".*"]),
+	(appid: "jetbrains-toolbox", titles: [".*"]),
+	(appid: "jetbrains-webstorm", titles: ["Customize WebStorm", "License Activation", "Welcome to WebStorm"]),
+	(appid: "krunner", titles: [".*"]),
+	(appid: "pritunl", titles: [".*"]),
+	(appid: "re.sonny.Junction", titles: [".*"]),
+	(appid: "system76-driver", titles: [".*"]),
+	(appid: "tilda", titles: [".*"]),
+	(appid: "zoom", titles: [".*"]),
+	(appid: "^.*?action=join.*$", titles: [".*"]),
+
+]
