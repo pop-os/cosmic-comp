@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Mutex,
-};
+use std::{collections::HashMap, sync::Mutex};
 
 use cosmic_protocols::{
     overlap_notify::v1::server::{
@@ -169,7 +166,7 @@ pub trait OverlapNotifyHandler: ToplevelInfoHandler {
     fn overlap_notify_state(&mut self) -> &mut OverlapNotifyState;
     fn layer_surface_from_resource(&self, resource: ZwlrLayerSurfaceV1) -> Option<LayerSurface>;
     fn outputs(&self) -> impl Iterator<Item = Output>;
-    fn active_workspaces(&self) -> impl Iterator<Item = (WorkspaceHandle)>;
+    fn active_workspaces(&self) -> impl Iterator<Item = WorkspaceHandle>;
 }
 
 pub struct OverlapNotifyGlobalData {
