@@ -499,6 +499,53 @@ pub enum ElementFilter {
     LayerShellOnly,
 }
 
+pub fn output_elements<R>(
+    _gpu: Option<&DrmNode>,
+    renderer: &mut R,
+    shell: &Arc<RwLock<Shell>>,
+    now: Time<Monotonic>,
+    output: &Output,
+    cursor_mode: CursorMode,
+    _fps: Option<(&EguiState, &Timings)>,
+) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: Send + Clone + 'static,
+    <R as Renderer>::Error: FromGlesError,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+    WorkspaceRenderElement<R>: RenderElement<R>,
+{
+    let shell_guard = shell.read().unwrap();
+
+    let (previous_workspace, workspace) = shell_guard.workspaces.active(output);
+    let (previous_idx, idx) = shell_guard.workspaces.active_num(&output);
+    let previous_workspace = previous_workspace
+        .zip(previous_idx)
+        .map(|((w, start), idx)| (w.handle, idx, start));
+    let workspace = (workspace.handle, idx);
+
+    std::mem::drop(shell_guard);
+
+    let element_filter = if workspace_overview_is_open(output) {
+        ElementFilter::LayerShellOnly
+    } else {
+        ElementFilter::All
+    };
+
+    workspace_elements(
+        _gpu,
+        renderer,
+        shell,
+        now,
+        output,
+        previous_workspace,
+        workspace,
+        cursor_mode,
+        element_filter,
+        _fps,
+    )
+}
+
 #[profiling::function]
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
@@ -511,7 +558,7 @@ pub fn workspace_elements<R>(
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
     _fps: Option<(&EguiState, &Timings)>,
-) -> Result<Vec<CosmicElement<R>>, RenderError<R>>
+) -> Result<Vec<CosmicElement<R>>, RenderError<<R as Renderer>::Error>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: Send + Clone + 'static,
@@ -867,7 +914,7 @@ pub fn render_output<'d, R, Target, OffTarget>(
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
-) -> Result<RenderOutputResult<'d>, RenderError<R>>
+) -> Result<RenderOutputResult<'d>, RenderError<<R as Renderer>::Error>>
 where
     R: Renderer
         + ImportAll
@@ -1026,7 +1073,7 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
-) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R>>
+) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<<R as Renderer>::Error>>
 where
     R: Renderer
         + ImportAll

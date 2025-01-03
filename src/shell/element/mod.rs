@@ -656,8 +656,11 @@ impl CosmicMapped {
         let mut elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
             let window = self.active_window();
             let window_geo = window.geometry();
-            let (min_size, max_size, size) =
-                (window.min_size(), window.max_size(), window.geometry().size);
+            let (min_size, max_size, size) = (
+                window.min_size_without_ssd(),
+                window.max_size_without_ssd(),
+                window.geometry().size,
+            );
 
             let area = Rectangle::<i32, Logical>::from_loc_and_size(
                 location.to_f64().to_logical(scale).to_i32_round(),
@@ -871,7 +874,7 @@ impl CosmicMapped {
         match &self.element {
             CosmicMappedInternal::Window(w) => (!w.surface().is_decorated(pending))
                 .then(|| crate::shell::element::window::SSD_HEIGHT),
-            CosmicMappedInternal::Stack(s) => Some(crate::shell::element::stack::TAB_HEIGHT),
+            CosmicMappedInternal::Stack(_) => Some(crate::shell::element::stack::TAB_HEIGHT),
             _ => unreachable!(),
         }
     }

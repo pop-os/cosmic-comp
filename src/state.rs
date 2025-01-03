@@ -253,6 +253,7 @@ pub enum BackendData {
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
     pub scanout_feedback: DmabufFeedback,
+    pub primary_scanout_feedback: DmabufFeedback,
 }
 
 #[derive(Debug)]
@@ -297,11 +298,16 @@ impl BackendData {
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
         startup_done: Arc<AtomicBool>,
+        clock: &Clock<Monotonic>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
-            BackendData::Kms(ref mut state) => {
-                state.apply_config_for_outputs(test_only, loop_handle, shell.clone(), startup_done)
-            }
+            BackendData::Kms(ref mut state) => state.apply_config_for_outputs(
+                test_only,
+                loop_handle,
+                shell.clone(),
+                startup_done,
+                clock,
+            ),
             BackendData::Winit(ref mut state) => state.apply_config_for_outputs(test_only),
             BackendData::X11(ref mut state) => state.apply_config_for_outputs(test_only),
             _ => unreachable!("No backend set when applying output config"),
@@ -795,7 +801,7 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.scanout_feedback,
+                                &feedback.primary_scanout_feedback,
                             )
                         },
                     )
