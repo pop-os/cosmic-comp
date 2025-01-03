@@ -99,6 +99,10 @@ impl Timings {
         self.vrr = vrr;
     }
 
+    pub fn vrr(&self) -> bool {
+        self.vrr
+    }
+
     pub fn start_render(&mut self, clock: &Clock<Monotonic>) {
         self.pending_frame = Some(PendingFrame {
             render_start: clock.now(),
