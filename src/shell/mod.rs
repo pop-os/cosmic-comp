@@ -3604,6 +3604,27 @@ impl Shell {
                 ManagedLayer::Sticky => unreachable!(),
                 _ => workspace.floating_layer.map(mapped.clone(), geometry.loc),
             }
+
+            let mut state = mapped.maximized_state.lock().unwrap();
+            if let Some(MaximizedState {
+                original_geometry,
+                original_layer: _,
+            }) = *state
+            {
+                *state = Some(MaximizedState {
+                    original_geometry,
+                    original_layer: mapped
+                        .previous_layer
+                        .lock()
+                        .unwrap()
+                        .take()
+                        .unwrap_or(ManagedLayer::Floating),
+                });
+                std::mem::drop(state);
+                workspace
+                    .floating_layer
+                    .map_maximized(mapped.clone(), geometry, false);
+            }
         }
 
         self.append_focus_stack(&mapped, seat);
