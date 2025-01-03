@@ -161,6 +161,7 @@ pub fn fps_ui<'a>(
                                 }
                             });
                         }
+                        ui.label(egui::RichText::new(format!("VRR: {}", timings.vrr())).code());
                         ui.label(egui::RichText::new(format!("FPS: {:>7.3}", avg_fps)).heading());
                         ui.label("Render Times:");
                         ui.label(egui::RichText::new(format!("avg: {:>7.6}", avg)).code());
