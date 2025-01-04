@@ -3567,12 +3567,26 @@ impl Shell {
                 toplevel_leave_workspace(&window, &handle);
             }
 
-            self.workspaces
-                .sets
-                .get_mut(&output)
-                .unwrap()
-                .sticky_layer
-                .map(mapped.clone(), geometry.loc);
+            let set = self.workspaces.sets.get_mut(&output).unwrap();
+            set.sticky_layer.map(mapped.clone(), geometry.loc);
+
+            let mut state = mapped.maximized_state.lock().unwrap();
+            if let Some(MaximizedState {
+                original_geometry,
+                original_layer: _,
+            }) = *state
+            {
+                *state = Some(MaximizedState {
+                    original_geometry,
+                    original_layer: ManagedLayer::Sticky,
+                });
+                std::mem::drop(state);
+                set.workspaces[set.active].floating_layer.map_maximized(
+                    mapped.clone(),
+                    geometry,
+                    false,
+                );
+            }
         } else if let Some(set) = self
             .workspaces
             .sets
@@ -3587,14 +3601,14 @@ impl Shell {
                 toplevel_enter_workspace(&window, &workspace.handle);
                 window.set_sticky(false);
             }
-
-            match mapped
+            let previous_layer = mapped
                 .previous_layer
                 .lock()
                 .unwrap()
                 .take()
-                .unwrap_or(ManagedLayer::Floating)
-            {
+                .unwrap_or(ManagedLayer::Floating);
+            
+            match previous_layer {
                 ManagedLayer::Tiling if workspace.tiling_enabled => {
                     let focus_stack = workspace.focus_stack.get(seat);
                     workspace
@@ -3613,12 +3627,7 @@ impl Shell {
             {
                 *state = Some(MaximizedState {
                     original_geometry,
-                    original_layer: mapped
-                        .previous_layer
-                        .lock()
-                        .unwrap()
-                        .take()
-                        .unwrap_or(ManagedLayer::Floating),
+                    original_layer: previous_layer,
                 });
                 std::mem::drop(state);
                 workspace
