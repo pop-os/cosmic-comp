@@ -18,8 +18,9 @@ use smithay::{
             Format, Fourcc,
         },
         drm::{
-            compositor::FrameFlags, output::DrmOutputManager, DrmDevice, DrmDeviceFd, DrmEvent,
-            DrmNode,
+            compositor::{FrameError, FrameFlags},
+            output::DrmOutputManager,
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode,
         },
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         session::Session,
@@ -620,7 +621,6 @@ impl Device {
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
         shell: &Arc<RwLock<Shell>>,
-        startup_done: bool,
     ) -> Result<()> {
         for surface in self.surfaces.values_mut() {
             surface.allow_frame_flags(flag, flags);
@@ -628,16 +628,11 @@ impl Device {
 
         if !flag {
             let now = clock.now();
-
-            let mut output_map = self
+            let output_map = self
                 .surfaces
                 .iter()
-                .filter(|(_, s)| s.is_active())
                 .map(|(crtc, surface)| (*crtc, surface.output.clone()))
                 .collect::<HashMap<_, _>>();
-            if !startup_done {
-                output_map.clear();
-            }
 
             self.drm.with_compositors::<Result<()>>(|map| {
                 for (crtc, compositor) in map.iter() {
@@ -662,7 +657,11 @@ impl Device {
                         CLEAR_COLOR,
                         FrameFlags::empty(),
                     )?;
-                    compositor.commit_frame()?;
+                    if let Err(err) = compositor.commit_frame() {
+                        if !matches!(err, FrameError::EmptyFrame) {
+                            return Err(err.into());
+                        }
+                    }
                 }
 
                 Ok(())
@@ -685,7 +684,6 @@ impl Device {
             renderer,
             clock,
             shell,
-            true,
         )
     }
 
@@ -695,7 +693,6 @@ impl Device {
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
         shell: &Arc<RwLock<Shell>>,
-        startup_done: bool,
     ) -> Result<()> {
         self.allow_frame_flags(
             flag,
@@ -703,7 +700,6 @@ impl Device {
             renderer,
             clock,
             shell,
-            startup_done,
         )?;
 
         self.drm.with_compositors(|comps| {
