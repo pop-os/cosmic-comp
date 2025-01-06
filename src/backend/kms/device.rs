@@ -277,7 +277,7 @@ impl State {
                 ) {
                     Ok((output, should_expose)) => {
                         if should_expose {
-                            w += output.config().transformed_size().w as u32;
+                            w += output.geometry().size.w as u32;
                             wl_outputs.push(output.clone());
                         }
                         device.outputs.insert(conn, output);
@@ -345,13 +345,7 @@ impl State {
                         .find_map(|(crtc, surface)| (surface.connector == conn).then_some(crtc))
                         .cloned()
                     {
-                        let surface = device.surfaces.remove(&crtc).unwrap();
-                        if surface.output.mirroring().is_none() {
-                            // TODO: move up later outputs?
-                            w = w.saturating_sub(
-                                surface.output.config().transformed_size().w as u32,
-                            );
-                        }
+                        device.surfaces.remove(&crtc).unwrap();
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
@@ -376,7 +370,7 @@ impl State {
                     ) {
                         Ok((output, should_expose)) => {
                             if should_expose {
-                                w += output.config().transformed_size().w as u32;
+                                w += output.geometry().size.w as u32;
                                 outputs_added.push(output.clone());
                             }
 

@@ -3,6 +3,7 @@
 use crate::{
     shell::Shell,
     state::{BackendData, State},
+    utils::prelude::OutputExt,
     wayland::protocols::{
         output_configuration::OutputConfigurationState, workspace::WorkspaceUpdateGuard,
     },
@@ -476,6 +477,16 @@ impl Config {
             output_state.update();
             self.write_outputs(output_state.outputs());
         } else {
+            // we don't have a config, so lets generate somewhat sane positions
+            let mut w = 0;
+            for output in outputs.iter().filter(|o| o.mirroring().is_none()) {
+                {
+                    let mut config = output.config_mut();
+                    config.position = (w, 0);
+                }
+                w += output.geometry().size.w as u32;
+            }
+
             if let Err(err) = backend.apply_config_for_outputs(
                 false,
                 loop_handle,

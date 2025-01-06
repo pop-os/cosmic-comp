@@ -3617,7 +3617,7 @@ impl Shell {
                 .unwrap()
                 .take()
                 .unwrap_or(ManagedLayer::Floating);
-            
+
             match previous_layer {
                 ManagedLayer::Tiling if workspace.tiling_enabled => {
                     let focus_stack = workspace.focus_stack.get(seat);
