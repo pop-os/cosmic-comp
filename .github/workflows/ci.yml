@@ -52,7 +52,7 @@ jobs:
             ~/.cargo/git
           key: ${{ runner.os }}-cargo-rust_stable-${{ hashFiles('**/Cargo.toml') }}
       - name: System dependencies
-        run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libsystemd-dev libdbus-1-dev libdisplay-info-dev
+        run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libsystemd-dev libdbus-1-dev libdisplay-info-dev libpixman-1-dev
       - name: Build cache
         uses: actions/cache@v2
         with:
