@@ -21,7 +21,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: dtolnay/rust-toolchain@stable
-    - run: sudo apt-get update; sudo apt-get install -y libdrm-dev libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev
+    - run: sudo apt-get update; sudo apt-get install -y libdrm-dev libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev
     - run: cargo check --no-default-features
     - run: cargo check --features debug
     - run: cargo check --features profile-with-tracy
