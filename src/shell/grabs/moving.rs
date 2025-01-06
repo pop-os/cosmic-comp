@@ -366,6 +366,7 @@ impl MoveGrab {
             shell
                 .workspaces
                 .active_mut(&self.cursor_output)
+                .unwrap()
                 .tiling_layer
                 .cleanup_drag();
             self.cursor_output = current_output.clone();
@@ -763,7 +764,7 @@ impl Drop for MoveGrab {
                         (grab_state.location.to_i32_round() + grab_state.window_offset).as_global();
                     let mut shell = state.common.shell.write().unwrap();
 
-                    let workspace_handle = shell.active_space(&output).handle;
+                    let workspace_handle = shell.active_space(&output).unwrap().handle;
                     for old_output in window_outputs.iter().filter(|o| *o != &output) {
                         grab_state.window.output_leave(old_output);
                     }
@@ -788,9 +789,12 @@ impl Drop for MoveGrab {
 
                             Some((window, location.to_global(&output)))
                         }
-                        ManagedLayer::Tiling if shell.active_space(&output).tiling_enabled => {
+                        ManagedLayer::Tiling
+                            if shell.active_space(&output).unwrap().tiling_enabled =>
+                        {
                             let (window, location) = shell
                                 .active_space_mut(&output)
+                                .unwrap()
                                 .tiling_layer
                                 .drop_window(grab_state.window);
                             Some((window, location.to_global(&output)))
@@ -801,7 +805,7 @@ impl Drop for MoveGrab {
                                 grab_state.window.geometry().size.as_global(),
                             ));
                             let theme = shell.theme.clone();
-                            let workspace = shell.active_space_mut(&output);
+                            let workspace = shell.active_space_mut(&output).unwrap();
                             let (window, location) = workspace.floating_layer.drop_window(
                                 grab_state.window,
                                 window_location.to_local(&workspace.output),

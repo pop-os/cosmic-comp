@@ -146,6 +146,7 @@ impl Shell {
         let workspace = if workspace.is_none() {
             //should this be the active output or the focused output?
             self.active_space_mut(&seat.focused_or_active_output())
+                .unwrap()
         } else {
             workspace.unwrap()
         };
@@ -181,7 +182,7 @@ impl Shell {
                 }
 
                 let output = seat.focused_or_active_output();
-                let space = self.active_space(&output);
+                let space = self.active_space(&output).unwrap();
                 let stack = space.focus_stack.get(seat);
                 stack.last().cloned()
             })
@@ -404,7 +405,7 @@ impl Common {
                     trace!("Surface dead, focus fixup");
                 }
             } else {
-                let workspace = shell.active_space(&output);
+                let workspace = shell.active_space(&output).unwrap();
                 let focus_stack = workspace.focus_stack.get(&seat);
 
                 if focus_stack.last().is_none() {
@@ -504,7 +505,7 @@ fn focus_target_is_valid(
                 .mapped()
                 .any(|m| m == &mapped);
 
-            let workspace = shell.active_space(&output);
+            let workspace = shell.active_space(&output).unwrap();
             let focus_stack = workspace.focus_stack.get(&seat);
             let is_in_focus_stack = focus_stack.last().map(|m| m == &mapped).unwrap_or(false);
             let has_fullscreen = workspace.get_fullscreen().is_some();
@@ -521,11 +522,12 @@ fn focus_target_is_valid(
         KeyboardFocusTarget::Group(WindowGroup { node, .. }) => shell
             .workspaces
             .active(&output)
+            .unwrap()
             .1
             .tiling_layer
             .has_node(&node),
         KeyboardFocusTarget::Fullscreen(window) => {
-            let workspace = shell.active_space(&output);
+            let workspace = shell.active_space(&output).unwrap();
             let focus_stack = workspace.focus_stack.get(&seat);
 
             focus_stack
@@ -560,15 +562,16 @@ fn update_focus_target(
             })
             .cloned()
             .map(KeyboardFocusTarget::from)
-    } else if let Some(surface) = shell.active_space(&output).get_fullscreen() {
+    } else if let Some(surface) = shell.active_space(&output).unwrap().get_fullscreen() {
         Some(KeyboardFocusTarget::Fullscreen(surface.clone()))
     } else {
         shell
             .active_space(&output)
+            .unwrap()
             .focus_stack
             .get(&seat)
             .last()
-            .or_else(|| shell.active_space(&output).mapped().next())
+            .or_else(|| shell.active_space(&output).unwrap().mapped().next())
             .cloned()
             .map(KeyboardFocusTarget::from)
     }

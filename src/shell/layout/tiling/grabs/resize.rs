@@ -222,7 +222,10 @@ impl ResizeForkGrab {
 
         if let Some(output) = self.output.upgrade() {
             let mut shell = data.common.shell.write().unwrap();
-            let tiling_layer = &mut shell.active_space_mut(&output).tiling_layer;
+            let Some(workspace) = shell.active_space_mut(&output) else {
+                return false;
+            };
+            let tiling_layer = &mut workspace.tiling_layer;
             let gaps = tiling_layer.gaps();
 
             let tree = &mut tiling_layer.queue.trees.back_mut().unwrap().0;

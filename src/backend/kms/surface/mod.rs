@@ -943,7 +943,11 @@ impl SurfaceThreadState {
         let has_active_fullscreen = {
             let shell = self.shell.read().unwrap();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
-            shell.workspaces.active(output).1.get_fullscreen().is_some()
+            if let Some((_, workspace)) = shell.workspaces.active(output) {
+                workspace.get_fullscreen().is_some()
+            } else {
+                false
+            }
         };
 
         if self.vrr_mode == AdaptiveSync::Enabled {
@@ -1457,7 +1461,9 @@ fn render_node_for_output(
         return *target_node;
     }
 
-    let workspace = shell.active_space(output);
+    let Some(workspace) = shell.active_space(output) else {
+        return *target_node;
+    };
     let nodes = workspace
         .get_fullscreen()
         .map(|w| vec![w.clone()])

@@ -408,6 +408,7 @@ impl State {
                         let new_target = shell
                             .workspaces
                             .active(&next_output)
+                            .unwrap()
                             .1
                             .focus_stack
                             .get(&seat)
@@ -495,6 +496,7 @@ impl State {
                         let new_target = shell
                             .workspaces
                             .active(&next_output)
+                            .unwrap()
                             .1
                             .focus_stack
                             .get(&seat)
@@ -554,6 +556,7 @@ impl State {
                         let new_target = shell
                             .workspaces
                             .active(&prev_output)
+                            .unwrap()
                             .1
                             .focus_stack
                             .get(&seat)
@@ -765,7 +768,7 @@ impl State {
                         .next()
                         .cloned();
 
-                    (shell.active_space(&active_output).handle, output)
+                    (shell.active_space(&active_output).unwrap().handle, output)
                 };
                 if let Some(next_output) = next_output {
                     self.common
@@ -785,7 +788,7 @@ impl State {
                         .next()
                         .cloned();
 
-                    (shell.active_space(&active_output).handle, output)
+                    (shell.active_space(&active_output).unwrap().handle, output)
                 };
                 if let Some(prev_output) = prev_output {
                     self.common
@@ -799,7 +802,7 @@ impl State {
                     let shell = self.common.shell.read().unwrap();
 
                     (
-                        shell.active_space(&active_output).handle,
+                        shell.active_space(&active_output).unwrap().handle,
                         shell.next_output(&active_output, direction).cloned(),
                     )
                 };
@@ -865,7 +868,7 @@ impl State {
                     _ => {
                         let current_output = seat.active_output();
                         let mut shell = self.common.shell.write().unwrap();
-                        let workspace = shell.active_space(&current_output);
+                        let workspace = shell.active_space(&current_output).unwrap();
                         if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
                             if workspace.is_tiled(focused_window) {
                                 shell.set_overview_mode(
@@ -884,7 +887,7 @@ impl State {
                 };
                 let mut shell = self.common.shell.write().unwrap();
 
-                let workspace = shell.active_space_mut(&focused_output);
+                let workspace = shell.active_space_mut(&focused_output).unwrap();
                 if workspace.get_fullscreen().is_some() {
                     return; // TODO, is this what we want? Maybe disengage fullscreen instead?
                 }
@@ -909,7 +912,7 @@ impl State {
                     return;
                 };
                 let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&focused_output);
+                let workspace = shell.active_space_mut(&focused_output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
                 let focused_window = focus_stack.last().cloned();
                 if let Some(window) = focused_window {
@@ -922,7 +925,7 @@ impl State {
                     return;
                 };
                 let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space(&focused_output);
+                let workspace = shell.active_space(&focused_output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
                 let focused_window = focus_stack.last().cloned();
                 if let Some(window) = focused_window {
@@ -940,14 +943,14 @@ impl State {
             Action::ToggleOrientation => {
                 let output = seat.active_output();
                 let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&output);
+                let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.tiling_layer.update_orientation(None, &seat);
             }
 
             Action::Orientation(orientation) => {
                 let output = seat.active_output();
                 let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&output);
+                let workspace = shell.active_space_mut(&output).unwrap();
                 workspace
                     .tiling_layer
                     .update_orientation(Some(orientation), &seat);
@@ -991,7 +994,7 @@ impl State {
                 } else {
                     let output = seat.active_output();
                     let mut shell = self.common.shell.write().unwrap();
-                    let workspace = shell.workspaces.active_mut(&output);
+                    let workspace = shell.workspaces.active_mut(&output).unwrap();
                     let mut guard = self.common.workspace_state.update();
                     workspace.toggle_tiling(seat, &mut guard);
                 }
@@ -1002,7 +1005,7 @@ impl State {
                     return;
                 };
                 let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&output);
+                let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.toggle_floating_window_focused(seat);
             }
 
@@ -1035,7 +1038,7 @@ impl State {
         let (token, data) = (token.clone(), data.clone());
 
         let output = shell.seats.last_active().active_output();
-        let workspace = shell.active_space_mut(&output);
+        let workspace = shell.active_space_mut(&output).unwrap();
         workspace.pending_tokens.insert(token.clone());
         let handle = workspace.handle;
         std::mem::drop(shell);

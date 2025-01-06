@@ -117,7 +117,7 @@ pub fn tab_items(
                 let mut shell = state.common.shell.write().unwrap();
                 let seat = shell.seats.last_active().clone();
                 let output = seat.active_output();
-                let workspace = shell.workspaces.active_mut(&output);
+                let workspace = shell.workspaces.active_mut(&output).unwrap();
                 if is_tiled {
                     for mapped in workspace
                         .mapped()

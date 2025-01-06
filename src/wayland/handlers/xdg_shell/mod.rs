@@ -270,13 +270,13 @@ impl XdgShellHandler for State {
                     mapped
                 };
 
-                let workspace_handle = shell.active_space(&output).handle.clone();
+                let workspace_handle = shell.active_space(&output).unwrap().handle.clone();
                 for (window, _) in mapped.windows() {
                     toplevel_enter_output(&window, &output);
                     toplevel_enter_workspace(&window, &workspace_handle);
                 }
 
-                let workspace = shell.active_space_mut(&output);
+                let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.floating_layer.map(mapped.clone(), None);
 
                 workspace.fullscreen_request(
@@ -316,13 +316,13 @@ impl XdgShellHandler for State {
                     };
                     let handle = workspace.handle.clone();
 
-                    let workspace_handle = shell.active_space(&output).handle.clone();
+                    let workspace_handle = shell.active_space(&output).unwrap().handle.clone();
                     for (window, _) in mapped.windows() {
                         toplevel_enter_output(&window, &output);
                         toplevel_enter_workspace(&window, &workspace_handle);
                     }
 
-                    let workspace = shell.active_space_mut(&output);
+                    let workspace = shell.active_space_mut(&output).unwrap();
                     workspace.floating_layer.map(mapped.clone(), None);
 
                     workspace.fullscreen_request(

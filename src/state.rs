@@ -862,25 +862,26 @@ impl Common {
                 }
             });
 
-        let active = shell.active_space(output);
-        active.mapped().for_each(|mapped| {
-            for (window, _) in mapped.windows() {
-                if let Some(feedback) = window
-                    .wl_surface()
-                    .and_then(|wl_surface| {
-                        advertised_node_for_surface(&wl_surface, &self.display_handle)
-                    })
-                    .and_then(|source| dmabuf_feedback(source))
-                {
-                    window.send_dmabuf_feedback(
-                        output,
-                        &feedback,
-                        render_element_states,
-                        surface_primary_scanout_output,
-                    );
+        if let Some(active) = shell.active_space(output) {
+            active.mapped().for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    if let Some(feedback) = window
+                        .wl_surface()
+                        .and_then(|wl_surface| {
+                            advertised_node_for_surface(&wl_surface, &self.display_handle)
+                        })
+                        .and_then(|source| dmabuf_feedback(source))
+                    {
+                        window.send_dmabuf_feedback(
+                            output,
+                            &feedback,
+                            render_element_states,
+                            surface_primary_scanout_output,
+                        );
+                    }
                 }
-            }
-        });
+            });
+        }
 
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
@@ -1041,35 +1042,37 @@ impl Common {
                 }
             });
 
-        let active = shell.active_space(output);
-        active.mapped().for_each(|mapped| {
-            for (window, _) in mapped.windows() {
-                window.send_frame(output, time, throttle(&window), should_send);
-            }
-        });
-
-        // other (throttled) windows
-        active.minimized_windows.iter().for_each(|m| {
-            for (window, _) in m.window.windows() {
-                window.send_frame(output, time, throttle(&window), |_, _| None);
-            }
-        });
-        for space in shell
-            .workspaces
-            .spaces_for_output(output)
-            .filter(|w| w.handle != active.handle)
-        {
-            space.mapped().for_each(|mapped| {
+        if let Some(active) = shell.active_space(output) {
+            active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    let throttle = min(throttle(space), throttle(&window));
-                    window.send_frame(output, time, throttle, |_, _| None);
+                    window.send_frame(output, time, throttle(&window), should_send);
                 }
             });
-            space.minimized_windows.iter().for_each(|m| {
+
+            // other (throttled) windows
+            active.minimized_windows.iter().for_each(|m| {
                 for (window, _) in m.window.windows() {
                     window.send_frame(output, time, throttle(&window), |_, _| None);
                 }
-            })
+            });
+
+            for space in shell
+                .workspaces
+                .spaces_for_output(output)
+                .filter(|w| w.handle != active.handle)
+            {
+                space.mapped().for_each(|mapped| {
+                    for (window, _) in mapped.windows() {
+                        let throttle = min(throttle(space), throttle(&window));
+                        window.send_frame(output, time, throttle, |_, _| None);
+                    }
+                });
+                space.minimized_windows.iter().for_each(|m| {
+                    for (window, _) in m.window.windows() {
+                        window.send_frame(output, time, throttle(&window), |_, _| None);
+                    }
+                })
+            }
         }
 
         shell.override_redirect_windows.iter().for_each(|or| {

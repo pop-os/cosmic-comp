@@ -516,8 +516,42 @@ where
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
     let shell_guard = shell.read().unwrap();
+    #[cfg(feature = "debug")]
+    let mut debug_elements = {
+        let output_geo = output.geometry();
+        let seats = shell_guard.seats.iter().cloned().collect::<Vec<_>>();
+        let scale = output.current_scale().fractional_scale();
 
-    let (previous_workspace, workspace) = shell_guard.workspaces.active(output);
+        if let Some((state, timings)) = _fps {
+            let debug_active = shell_guard.debug_active;
+            vec![fps_ui(
+                _gpu,
+                debug_active,
+                &seats,
+                renderer.glow_renderer_mut(),
+                state,
+                timings,
+                Rectangle::from_loc_and_size(
+                    (0, 0),
+                    (output_geo.size.w.min(400), output_geo.size.h.min(800)),
+                ),
+                scale,
+            )
+            .map_err(FromGlesError::from_gles_error)
+            .map_err(RenderError::Rendering)?
+            .into()]
+        } else {
+            Vec::new()
+        }
+    };
+
+    let Some((previous_workspace, workspace)) = shell_guard.workspaces.active(output) else {
+        #[cfg(not(feature = "debug"))]
+        return Ok(Vec::new());
+        #[cfg(feature = "debug")]
+        return Ok(debug_elements);
+    };
+
     let (previous_idx, idx) = shell_guard.workspaces.active_num(&output);
     let previous_workspace = previous_workspace
         .zip(previous_idx)
@@ -532,7 +566,8 @@ where
         ElementFilter::All
     };
 
-    workspace_elements(
+    #[allow(unused_mut)]
+    let workspace_elements = workspace_elements(
         _gpu,
         renderer,
         shell,
@@ -542,8 +577,15 @@ where
         workspace,
         cursor_mode,
         element_filter,
-        _fps,
-    )
+    )?;
+
+    #[cfg(feature = "debug")]
+    {
+        debug_elements.extend(workspace_elements);
+        Ok(debug_elements)
+    }
+    #[cfg(not(feature = "debug"))]
+    Ok(workspace_elements)
 }
 
 #[profiling::function]
@@ -557,7 +599,6 @@ pub fn workspace_elements<R>(
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
-    _fps: Option<(&EguiState, &Timings)>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<<R as Renderer>::Error>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -587,31 +628,6 @@ where
         cursor_mode,
         element_filter == ElementFilter::ExcludeWorkspaceOverview,
     ));
-
-    #[cfg(feature = "debug")]
-    {
-        let output_geo = output.geometry();
-
-        if let Some((state, timings)) = _fps {
-            let debug_active = shell.read().unwrap().debug_active;
-            let fps_overlay = fps_ui(
-                _gpu,
-                debug_active,
-                &seats,
-                renderer.glow_renderer_mut(),
-                state,
-                timings,
-                Rectangle::from_loc_and_size(
-                    (0, 0),
-                    (output_geo.size.w.min(400), output_geo.size.h.min(800)),
-                ),
-                scale,
-            )
-            .map_err(FromGlesError::from_gles_error)
-            .map_err(RenderError::Rendering)?;
-            elements.push(fps_overlay.into());
-        }
-    }
 
     let shell = shell.read().unwrap();
 
@@ -933,7 +949,10 @@ where
     Target: Clone,
 {
     let shell_ref = shell.read().unwrap();
-    let (previous_workspace, workspace) = shell_ref.workspaces.active(output);
+    let (previous_workspace, workspace) = shell_ref
+        .workspaces
+        .active(output)
+        .ok_or(RenderError::OutputNoMode(OutputNoMode))?;
     let (previous_idx, idx) = shell_ref.workspaces.active_num(output);
     let previous_workspace = previous_workspace
         .zip(previous_idx)
@@ -1099,7 +1118,6 @@ where
         current,
         cursor_mode,
         element_filter,
-        None,
     )?;
 
     if let Some(additional_damage) = additional_damage {
