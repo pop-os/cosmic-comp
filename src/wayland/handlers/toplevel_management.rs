@@ -148,9 +148,10 @@ impl ToplevelManagementHandler for State {
         let mut shell = self.common.shell.write().unwrap();
         let seat = shell.seats.last_active().clone();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
-            if let Some(output) = output {
+            if let Some((output, workspace)) =
+                output.and_then(|output| shell.workspaces.active_mut(&output).map(|w| (output, w)))
+            {
                 let from = minimize_rectangle(&output, window);
-                let workspace = shell.workspaces.active_mut(&output);
                 workspace.fullscreen_request(window, None, from, &seat);
             } else if let Some((output, handle)) = shell
                 .space_for(&mapped)

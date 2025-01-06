@@ -1760,8 +1760,12 @@ impl State {
         focused_output: &Output,
     ) {
         if let Some(focus) = current_focus {
-            if let Some(new_descriptor) =
-                shell.workspaces.active(&focused_output).1.node_desc(focus)
+            if let Some(new_descriptor) = shell
+                .workspaces
+                .active(&focused_output)
+                .unwrap()
+                .1
+                .node_desc(focus)
             {
                 let mut spaces = shell.workspaces.spaces_mut();
                 if old_descriptor.handle != new_descriptor.handle {
@@ -1822,7 +1826,7 @@ impl State {
                 }
             }
         } else {
-            let new_workspace = shell.workspaces.active(&focused_output).1.handle;
+            let new_workspace = shell.workspaces.active(&focused_output).unwrap().1.handle;
             if new_workspace != old_descriptor.handle {
                 let spaces = shell.workspaces.spaces_mut();
                 let (mut old_w, mut other_w) =
@@ -1867,7 +1871,7 @@ impl State {
         output: &Output,
         shell: &Shell,
     ) -> Option<KeyboardFocusTarget> {
-        let (previous_workspace, workspace) = shell.workspaces.active(output);
+        let (previous_workspace, workspace) = shell.workspaces.active(output)?;
         let (previous_idx, idx) = shell.workspaces.active_num(output);
         let previous_workspace = previous_workspace
             .zip(previous_idx)
@@ -1990,7 +1994,7 @@ impl State {
         output: &Output,
         shell: &Shell,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
-        let (previous_workspace, workspace) = shell.workspaces.active(output);
+        let (previous_workspace, workspace) = shell.workspaces.active(output)?;
         let (previous_idx, idx) = shell.workspaces.active_num(output);
         let previous_workspace = previous_workspace
             .zip(previous_idx)
@@ -2122,22 +2126,26 @@ impl State {
     }
 }
 
-fn cursor_sessions_for_output(
-    shell: &Shell,
-    output: &Output,
-) -> impl Iterator<Item = CursorSession> {
-    let workspace = shell.active_space(&output);
-    let maybe_fullscreen = workspace.get_fullscreen();
-    workspace
-        .cursor_sessions()
+fn cursor_sessions_for_output<'a>(
+    shell: &'a Shell,
+    output: &'a Output,
+) -> impl Iterator<Item = CursorSession> + 'a {
+    shell
+        .active_space(&output)
         .into_iter()
-        .chain(
-            maybe_fullscreen
-                .map(|w| w.cursor_sessions())
+        .flat_map(|workspace| {
+            let maybe_fullscreen = workspace.get_fullscreen();
+            workspace
+                .cursor_sessions()
                 .into_iter()
-                .flatten(),
-        )
-        .chain(output.cursor_sessions().into_iter())
+                .chain(
+                    maybe_fullscreen
+                        .map(|w| w.cursor_sessions())
+                        .into_iter()
+                        .flatten(),
+                )
+                .chain(output.cursor_sessions().into_iter())
+        })
 }
 
 fn transform_output_mapped_position<'a, B, E>(output: &Output, event: &E) -> Point<f64, Global>

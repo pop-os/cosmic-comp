@@ -42,7 +42,7 @@ impl XdgActivationHandler for State {
             if let Some(seat) = data.serial.and_then(|(_, seat)| Seat::from_resource(&seat)) {
                 let output = seat.active_output();
                 let mut shell = self.common.shell.write().unwrap();
-                let workspace = shell.active_space_mut(&output);
+                let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.pending_tokens.insert(token.clone());
                 let handle = workspace.handle;
                 data.user_data
@@ -86,7 +86,7 @@ impl XdgActivationHandler for State {
         if valid {
             let output = seat.active_output();
             let mut shell = self.common.shell.write().unwrap();
-            let workspace = shell.active_space_mut(&output);
+            let workspace = shell.active_space_mut(&output).unwrap();
             workspace.pending_tokens.insert(token.clone());
             let handle = workspace.handle;
             data.user_data
@@ -125,7 +125,7 @@ impl XdgActivationHandler for State {
                         }
 
                         let element_workspace = shell.space_for(&element).map(|w| w.handle.clone());
-                        let current_workspace = shell.active_space_mut(&current_output);
+                        let current_workspace = shell.active_space_mut(&current_output).unwrap();
 
                         let in_current_workspace = element_workspace
                             .as_ref()

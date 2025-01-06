@@ -973,22 +973,27 @@ impl Workspaces {
             .and_then(|set| set.workspaces.get_mut(num))
     }
 
-    pub fn active(&self, output: &Output) -> (Option<(&Workspace, WorkspaceDelta)>, &Workspace) {
-        let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
-        (
-            set.previously_active
-                .map(|(idx, start)| (&set.workspaces[idx], start)),
-            &set.workspaces[set.active],
-        )
+    pub fn active(
+        &self,
+        output: &Output,
+    ) -> Option<(Option<(&Workspace, WorkspaceDelta)>, &Workspace)> {
+        self.sets
+            .get(output)
+            .or(self.backup_set.as_ref())
+            .map(|set| {
+                (
+                    set.previously_active
+                        .map(|(idx, start)| (&set.workspaces[idx], start)),
+                    &set.workspaces[set.active],
+                )
+            })
     }
 
-    pub fn active_mut(&mut self, output: &Output) -> &mut Workspace {
-        let set = self
-            .sets
+    pub fn active_mut(&mut self, output: &Output) -> Option<&mut Workspace> {
+        self.sets
             .get_mut(output)
             .or(self.backup_set.as_mut())
-            .unwrap();
-        &mut set.workspaces[set.active]
+            .map(|set| &mut set.workspaces[set.active])
     }
 
     pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
@@ -1434,11 +1439,11 @@ impl Shell {
         }
     }
 
-    pub fn active_space(&self, output: &Output) -> &Workspace {
-        self.workspaces.active(output).1
+    pub fn active_space(&self, output: &Output) -> Option<&Workspace> {
+        self.workspaces.active(output).map(|(_, active)| active)
     }
 
-    pub fn active_space_mut(&mut self, output: &Output) -> &mut Workspace {
+    pub fn active_space_mut(&mut self, output: &Output) -> Option<&mut Workspace> {
         self.workspaces.active_mut(output)
     }
 
@@ -1494,7 +1499,7 @@ impl Shell {
                             .mapped()
                             .any(|m| m == &elem);
 
-                        let workspace = self.active_space(output);
+                        let workspace = self.active_space(output).unwrap();
                         let is_mapped = workspace.mapped().any(|m| m == &elem);
 
                         is_sticky || is_mapped
@@ -1504,7 +1509,7 @@ impl Shell {
             KeyboardFocusTarget::Fullscreen(elem) => self
                 .outputs()
                 .find(|output| {
-                    let workspace = self.active_space(&output);
+                    let workspace = self.active_space(&output).unwrap();
                     workspace.get_fullscreen() == Some(&elem)
                 })
                 .cloned(),
@@ -1513,6 +1518,7 @@ impl Shell {
                 .find(|output| {
                     self.workspaces
                         .active(&output)
+                        .unwrap()
                         .1
                         .tiling_layer
                         .has_node(&node)
@@ -1574,9 +1580,9 @@ impl Shell {
         output: &Output,
         xdg_activation_state: &XdgActivationState,
     ) {
-        self.workspaces
-            .active_mut(output)
-            .refresh(xdg_activation_state)
+        if let Some(w) = self.workspaces.active_mut(output) {
+            w.refresh(xdg_activation_state)
+        }
     }
 
     pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
@@ -1635,6 +1641,7 @@ impl Shell {
             .or_else(|| {
                 self.outputs().find(|o| {
                     self.active_space(o)
+                        .unwrap()
                         .mapped()
                         .any(|e| e.has_surface(surface, WindowSurfaceType::ALL))
                 })
@@ -1904,10 +1911,10 @@ impl Shell {
                 .get(output)
                 .and_then(|set| set.sticky_layer.stacking_indicator()),
             ManagedLayer::Floating => self
-                .active_space(output)
+                .active_space(output)?
                 .floating_layer
                 .stacking_indicator(),
-            ManagedLayer::Tiling => self.active_space(output).tiling_layer.stacking_indicator(),
+            ManagedLayer::Tiling => self.active_space(output)?.tiling_layer.stacking_indicator(),
         }
     }
 
@@ -2092,7 +2099,7 @@ impl Shell {
                 .find(|space| space.handle == handle)
                 .unwrap()
         } else {
-            self.workspaces.active_mut(&output)
+            self.workspaces.active_mut(&output).unwrap() // a seat's active output always has a workspace
         };
         if output != workspace.output {
             output = workspace.output.clone();
@@ -2110,7 +2117,7 @@ impl Shell {
             self.remap_unfullscreened_window(mapped, &old_handle, &new_workspace_handle, layer);
         };
 
-        let active_handle = self.active_space(&output).handle;
+        let active_handle = self.active_space(&output).unwrap().handle;
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
             self.workspaces
                 .spaces()
@@ -2121,7 +2128,7 @@ impl Shell {
                 .find(|space| space.handle == handle)
                 .unwrap()
         } else {
-            self.workspaces.active_mut(&output)
+            self.workspaces.active_mut(&output).unwrap()
         };
 
         toplevel_info.new_toplevel(&window, workspace_state);
@@ -2203,7 +2210,7 @@ impl Shell {
             None
         };
 
-        let active_space = self.active_space(&output);
+        let active_space = self.active_space(&output).unwrap();
         for mapped in active_space.mapped() {
             self.update_reactive_popups(mapped);
         }
@@ -2448,7 +2455,10 @@ impl Shell {
             .map(|ws| ws.handle)
             .ok_or(InvalidWorkspaceIndex)?;
 
-        let from_workspace = self.workspaces.active_mut(from_output);
+        let from_workspace = self
+            .workspaces
+            .active_mut(from_output)
+            .ok_or(InvalidWorkspaceIndex)?;
         let last_focused_window = from_workspace.focus_stack.get(seat).last().cloned();
         let from = from_workspace.handle;
 
@@ -2816,7 +2826,7 @@ impl Shell {
             (
                 initial_window_location,
                 ManagedLayer::Sticky,
-                self.active_space(&cursor_output).handle,
+                self.active_space(&cursor_output).unwrap().handle,
             )
         } else {
             return None;
@@ -2896,7 +2906,7 @@ impl Shell {
             return FocusResult::None;
         };
         let output = seat.active_output();
-        let workspace = self.active_space(&output);
+        let workspace = self.active_space(&output).unwrap();
 
         if workspace.fullscreen.is_some() {
             return FocusResult::None;
@@ -3051,7 +3061,7 @@ impl Shell {
         let Some(output) = seat.focused_output() else {
             return MoveResult::None;
         };
-        let workspace = self.active_space(&output);
+        let workspace = self.active_space(&output).unwrap();
         let focus_stack = workspace.focus_stack.get(seat);
         let Some(last) = focus_stack.last().cloned() else {
             return MoveResult::None;
@@ -3084,7 +3094,7 @@ impl Shell {
             )
         } else {
             let theme = self.theme.clone();
-            let workspace = self.active_space_mut(&output);
+            let workspace = self.active_space_mut(&output).unwrap();
             workspace
                 .floating_layer
                 .move_current_element(direction, seat, ManagedLayer::Floating, theme)
@@ -3697,16 +3707,20 @@ impl Shell {
     ) -> OutputPresentationFeedback {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
 
-        let active = self.active_space(output);
-        active.mapped().for_each(|mapped| {
-            mapped.active_window().take_presentation_feedback(
-                &mut output_presentation_feedback,
-                surface_primary_scanout_output,
-                |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
-                },
-            );
-        });
+        if let Some(active) = self.active_space(output) {
+            active.mapped().for_each(|mapped| {
+                mapped.active_window().take_presentation_feedback(
+                    &mut output_presentation_feedback,
+                    surface_primary_scanout_output,
+                    |surface, _| {
+                        surface_presentation_feedback_flags_from_states(
+                            surface,
+                            render_element_states,
+                        )
+                    },
+                );
+            });
+        }
 
         self.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
