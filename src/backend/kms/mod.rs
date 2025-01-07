@@ -842,7 +842,7 @@ impl KmsState {
                     .collect::<Vec<_>>(),
             );
 
-            {
+            if !device.surfaces.is_empty() {
                 let mut renderer = self
                     .api
                     .single_renderer(&device.render_node)
