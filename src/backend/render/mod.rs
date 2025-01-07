@@ -617,6 +617,9 @@ where
         .iter()
         .cloned()
         .collect::<Vec<_>>();
+    if seats.is_empty() {
+        return Ok(Vec::new());
+    }
     let scale = output.current_scale().fractional_scale();
 
     elements.extend(cursor_elements(
