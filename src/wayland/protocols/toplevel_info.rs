@@ -93,7 +93,7 @@ pub struct ToplevelHandleStateInner<W: Window> {
     workspaces: Vec<WorkspaceHandle>,
     title: String,
     app_id: String,
-    states: Vec<States>,
+    states: Option<Vec<States>>,
     pub(super) window: Option<W>,
 }
 pub type ToplevelHandleState<W> = Mutex<ToplevelHandleStateInner<W>>;
@@ -107,7 +107,7 @@ impl<W: Window> ToplevelHandleStateInner<W> {
             workspaces: Vec::new(),
             title: String::new(),
             app_id: String::new(),
-            states: Vec::new(),
+            states: None,
             window: Some(window.clone()),
         })
     }
@@ -120,7 +120,7 @@ impl<W: Window> ToplevelHandleStateInner<W> {
             workspaces: Vec::new(),
             title: String::new(),
             app_id: String::new(),
-            states: Vec::new(),
+            states: None,
             window: None,
         })
     }
@@ -502,11 +502,12 @@ where
         changed = true;
     }
 
-    if (handle_state.states.contains(&States::Maximized) != window.is_maximized())
-        || (handle_state.states.contains(&States::Fullscreen) != window.is_fullscreen())
-        || (handle_state.states.contains(&States::Activated) != window.is_activated())
-        || (handle_state.states.contains(&States::Minimized) != window.is_minimized())
-    {
+    if handle_state.states.as_ref().map_or(true, |states| {
+        (states.contains(&States::Maximized) != window.is_maximized())
+            || (states.contains(&States::Fullscreen) != window.is_fullscreen())
+            || (states.contains(&States::Activated) != window.is_activated())
+            || (states.contains(&States::Minimized) != window.is_minimized())
+    }) {
         let mut states = Vec::new();
         if window.is_maximized() {
             states.push(States::Maximized);
@@ -525,7 +526,7 @@ where
         {
             states.push(States::Sticky);
         }
-        handle_state.states = states.clone();
+        handle_state.states = Some(states.clone());
 
         let states = states
             .iter()
