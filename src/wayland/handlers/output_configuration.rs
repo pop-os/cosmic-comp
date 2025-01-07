@@ -143,7 +143,7 @@ impl State {
             &self.common.clock,
         );
         if let Err(err) = res {
-            warn!(?err, "Failed to apply config. Resetting");
+            warn!("Failed to apply config. Resetting: {:?}", err);
             for (output, backup) in backups {
                 {
                     let mut current_config = output
@@ -164,7 +164,7 @@ impl State {
                     self.common.startup_done.clone(),
                     &self.common.clock,
                 ) {
-                    error!(?err, "Failed to reset output config.");
+                    error!("Failed to reset output config: {:?}", err);
                 }
             }
             return false;
