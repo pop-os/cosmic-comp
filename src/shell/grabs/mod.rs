@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use cosmic_settings_config::shortcuts;
 use smithay::{
     input::{
@@ -65,6 +67,22 @@ impl GrabStartData {
 pub enum ReleaseMode {
     Click,
     NoMouseButtons,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UngrabOnPointerUp(Cell<bool>);
+impl UngrabOnPointerUp {
+    pub fn new() -> Self {
+        Self(Cell::new(false))
+    }
+
+    pub fn get(&self) -> bool {
+        self.0.get()
+    }
+
+    pub fn set(&self, ungrab: bool) {
+        self.0.set(ungrab);
+    }
 }
 
 mod menu;

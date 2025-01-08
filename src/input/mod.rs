@@ -16,7 +16,7 @@ use crate::{
             target::{KeyboardFocusTarget, PointerFocusTarget},
             Stage,
         },
-        grabs::{ReleaseMode, ResizeEdge},
+        grabs::{ReleaseMode, ResizeEdge, UngrabOnPointerUp},
         layout::{
             floating::ResizeGrabMarker,
             tiling::{NodeDesc, TilingLayout},
@@ -75,7 +75,7 @@ use xkbcommon::xkb::{Keycode, Keysym};
 use std::{
     any::Any,
     borrow::Cow,
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashSet,
     ops::ControlFlow,
     time::{Duration, Instant},
@@ -757,7 +757,13 @@ impl State {
                                                             &state.common.xdg_activation_state,
                                                             false,
                                                         );
+
                                                         drop(shell);
+
+                                                        seat_clone
+                                                            .user_data()
+                                                            .get_or_insert(UngrabOnPointerUp::new)
+                                                            .set(true);
                                                         dispatch_grab(
                                                             res, seat_clone, serial, state,
                                                         );
@@ -835,6 +841,13 @@ impl State {
                                                                 false,
                                                             );
                                                             drop(shell);
+
+                                                            seat_clone
+                                                                .user_data()
+                                                                .get_or_insert(
+                                                                    UngrabOnPointerUp::new,
+                                                                )
+                                                                .set(true);
                                                             dispatch_grab(
                                                                 res, seat_clone, serial, state,
                                                             );
@@ -875,6 +888,13 @@ impl State {
                         },
                     );
                     ptr.frame(self);
+                } else if event.state() == ButtonState::Released {
+                    if let Some(ungrab) = seat.user_data().get::<UngrabOnPointerUp>() {
+                        if ungrab.get() {
+                            ungrab.set(false);
+                            ptr.unset_grab(self, serial, event.time_msec())
+                        }
+                    }
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
