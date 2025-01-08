@@ -515,6 +515,7 @@ impl Program for CosmicWindowInternal {
                                     false,
                                     &state.common.config,
                                     &state.common.event_loop_handle,
+                                    true,
                                 );
 
                                 std::mem::drop(shell);

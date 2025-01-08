@@ -161,7 +161,10 @@ impl Item {
     }
 }
 
-/// Menu that comes up when right-clicking an application header bar
+/// Menu that comes up when:
+/// - Right-clicking an application header bar
+/// - Super + Middle-clicking a window
+/// - Super + Shift + Right-clicking a window
 pub struct ContextMenu {
     items: Vec<Item>,
     selected: AtomicBool,
