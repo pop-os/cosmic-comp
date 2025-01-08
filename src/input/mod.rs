@@ -31,7 +31,7 @@ use crate::{
 };
 use calloop::{
     timer::{TimeoutAction, Timer},
-    RegistrationToken,
+    LoopHandle, RegistrationToken,
 };
 use cosmic_comp_config::{workspace::WorkspaceLayout, NumlockState};
 use cosmic_settings_config::shortcuts;
@@ -58,7 +58,8 @@ use smithay::{
     },
     output::Output,
     reexports::{
-        input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
+        input::Device as InputDevice,
+        wayland_server::protocol::{wl_shm::Format as ShmFormat, wl_surface::WlSurface},
     },
     utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
@@ -693,6 +694,66 @@ impl State {
                                         }
                                     }
 
+                                    fn window_menu(
+                                        seat: Seat<State>,
+                                        evlh: &LoopHandle<State>,
+                                        surface: WlSurface,
+                                        serial: Serial,
+                                    ) {
+                                        evlh.insert_idle(move |state| {
+                                            let shell = state.common.shell.write().unwrap();
+
+                                            let grab = if let Some(mapped) =
+                                                shell.element_for_surface(&surface).cloned()
+                                            {
+                                                let position = if let Some((output, set)) =
+                                                    shell.workspaces.sets.iter().find(|(_, set)| {
+                                                        set.sticky_layer
+                                                            .mapped()
+                                                            .any(|m| m == &mapped)
+                                                    }) {
+                                                    set.sticky_layer
+                                                        .element_geometry(&mapped)
+                                                        .unwrap()
+                                                        .loc
+                                                        .to_global(output)
+                                                } else if let Some(workspace) =
+                                                    shell.space_for(&mapped)
+                                                {
+                                                    let Some(elem_geo) =
+                                                        workspace.element_geometry(&mapped)
+                                                    else {
+                                                        return;
+                                                    };
+                                                    elem_geo.loc.to_global(&workspace.output)
+                                                } else {
+                                                    return;
+                                                };
+                                                let cursor = seat
+                                                    .get_pointer()
+                                                    .unwrap()
+                                                    .current_location()
+                                                    .to_i32_round();
+
+                                                shell.menu_request(
+                                                    &surface,
+                                                    &seat,
+                                                    serial,
+                                                    cursor - position.as_logical(),
+                                                    false,
+                                                    &state.common.config,
+                                                    &state.common.event_loop_handle,
+                                                    false,
+                                                )
+                                            } else {
+                                                None
+                                            };
+                                            drop(shell);
+
+                                            dispatch_grab(grab, seat, serial, state);
+                                        });
+                                    }
+
                                     if let Some(mouse_button) = mouse_button {
                                         match mouse_button {
                                             smithay::backend::input::MouseButton::Left => {
@@ -719,60 +780,88 @@ impl State {
                                                     },
                                                 );
                                             }
+                                            smithay::backend::input::MouseButton::Middle => {
+                                                supress_button();
+                                                window_menu(
+                                                    seat_clone,
+                                                    &self.common.event_loop_handle,
+                                                    surface,
+                                                    serial,
+                                                );
+                                            }
                                             smithay::backend::input::MouseButton::Right => {
                                                 supress_button();
-                                                self.common.event_loop_handle.insert_idle(
-                                                    move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
-                                                        let Some(target_elem) =
-                                                            shell.element_for_surface(&surface)
-                                                        else {
-                                                            return;
-                                                        };
-                                                        let Some(geom) =
-                                                            shell.space_for(target_elem).and_then(
-                                                                |f| f.element_geometry(target_elem),
-                                                            )
-                                                        else {
-                                                            return;
-                                                        };
-                                                        let geom = geom.to_f64();
-                                                        let center =
-                                                            geom.loc + geom.size.downscale(2.0);
-                                                        let offset = center.to_global(&output)
-                                                            - global_position;
-                                                        let edge = match (
-                                                            offset.x > 0.0,
-                                                            offset.y > 0.0,
-                                                        ) {
-                                                            (true, true) => ResizeEdge::TOP_LEFT,
-                                                            (false, true) => ResizeEdge::TOP_RIGHT,
-                                                            (true, false) => {
-                                                                ResizeEdge::BOTTOM_LEFT
-                                                            }
-                                                            (false, false) => {
-                                                                ResizeEdge::BOTTOM_RIGHT
-                                                            }
-                                                        };
-                                                        let res = shell.resize_request(
-                                                            &surface,
-                                                            &seat_clone,
-                                                            serial,
-                                                            edge,
-                                                            state
-                                                                .common
-                                                                .config
-                                                                .cosmic_conf
-                                                                .edge_snap_threshold,
-                                                            false,
-                                                        );
-                                                        drop(shell);
-                                                        dispatch_grab(
-                                                            res, seat_clone, serial, state,
-                                                        );
-                                                    },
-                                                );
+                                                if seat
+                                                    .get_keyboard()
+                                                    .unwrap()
+                                                    .modifier_state()
+                                                    .shift
+                                                {
+                                                    window_menu(
+                                                        seat_clone,
+                                                        &self.common.event_loop_handle,
+                                                        surface,
+                                                        serial,
+                                                    );
+                                                } else {
+                                                    self.common.event_loop_handle.insert_idle(
+                                                        move |state| {
+                                                            let mut shell =
+                                                                state.common.shell.write().unwrap();
+                                                            let Some(target_elem) =
+                                                                shell.element_for_surface(&surface)
+                                                            else {
+                                                                return;
+                                                            };
+                                                            let Some(geom) = shell
+                                                                .space_for(target_elem)
+                                                                .and_then(|f| {
+                                                                    f.element_geometry(target_elem)
+                                                                })
+                                                            else {
+                                                                return;
+                                                            };
+                                                            let geom = geom.to_f64();
+                                                            let center =
+                                                                geom.loc + geom.size.downscale(2.0);
+                                                            let offset = center.to_global(&output)
+                                                                - global_position;
+                                                            let edge = match (
+                                                                offset.x > 0.0,
+                                                                offset.y > 0.0,
+                                                            ) {
+                                                                (true, true) => {
+                                                                    ResizeEdge::TOP_LEFT
+                                                                }
+                                                                (false, true) => {
+                                                                    ResizeEdge::TOP_RIGHT
+                                                                }
+                                                                (true, false) => {
+                                                                    ResizeEdge::BOTTOM_LEFT
+                                                                }
+                                                                (false, false) => {
+                                                                    ResizeEdge::BOTTOM_RIGHT
+                                                                }
+                                                            };
+                                                            let res = shell.resize_request(
+                                                                &surface,
+                                                                &seat_clone,
+                                                                serial,
+                                                                edge,
+                                                                state
+                                                                    .common
+                                                                    .config
+                                                                    .cosmic_conf
+                                                                    .edge_snap_threshold,
+                                                                false,
+                                                            );
+                                                            drop(shell);
+                                                            dispatch_grab(
+                                                                res, seat_clone, serial, state,
+                                                            );
+                                                        },
+                                                    );
+                                                }
                                             }
                                             _ => {}
                                         }
@@ -807,8 +896,6 @@ impl State {
                         },
                     );
                     ptr.frame(self);
-                } else if event.state() == ButtonState::Released {
-                    ptr.unset_grab(self, serial, event.time_msec())
                 }
             }
             InputEvent::PointerAxis { event, .. } => {

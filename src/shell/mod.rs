@@ -2603,10 +2603,11 @@ impl Shell {
         target_stack: bool,
         config: &Config,
         evlh: &LoopHandle<'static, State>,
+        client_initiated: bool,
     ) -> Option<(MenuGrab, Focus)> {
         let serial = serial.into();
         let Some(GrabStartData::Pointer(start_data)) =
-            check_grab_preconditions(&seat, surface, serial, true)
+            check_grab_preconditions(&seat, surface, serial, client_initiated)
         else {
             return None;
         };
