@@ -75,7 +75,7 @@ use xkbcommon::xkb::{Keycode, Keysym};
 use std::{
     any::Any,
     borrow::Cow,
-    cell::{Cell, RefCell},
+    cell::RefCell,
     collections::HashSet,
     ops::ControlFlow,
     time::{Duration, Instant},
