@@ -74,6 +74,7 @@
               fontconfig
               stdenv.cc.cc.lib
               pixman
+              libdisplay-info
             ];
 
             runtimeDependencies = with pkgs; [
