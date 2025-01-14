@@ -20,8 +20,8 @@ cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["call
 cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", rev = "d218c76", default-features = false, features = ["server"]}
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
 libdisplay-info = "0.2.0"
-egui = {version = "0.29.0", optional = true}
-egui_plot = {version = "0.29.0", optional = true}
+egui = {version = "0.30.0", optional = true}
+egui_plot = {version = "0.30.0", optional = true}
 i18n-embed = {version = "0.14", features = ["fluent-system", "desktop-requester"]}
 i18n-embed-fl = "0.8"
 iced_tiny_skia = {git = "https://github.com/pop-os/libcosmic/"}
@@ -85,14 +85,14 @@ features = [
   "xwayland",
 ]
 git = "https://github.com/smithay/smithay.git"
-rev = "3b0ecce"
+rev = "fe31867"
 version = "0.3"
 
 [dependencies.smithay-egui]
 features = ["svg"]
 git = "https://github.com/Smithay/smithay-egui.git"
 optional = true
-rev = "6118550"
+rev = "0b013bf"
 
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
@@ -117,4 +117,4 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "1ceba66" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "fe31867" }

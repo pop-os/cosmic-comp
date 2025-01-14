@@ -531,9 +531,8 @@ where
                 renderer.glow_renderer_mut(),
                 state,
                 timings,
-                Rectangle::from_loc_and_size(
-                    (0, 0),
-                    (output_geo.size.w.min(400), output_geo.size.h.min(800)),
+                Rectangle::from_size(
+                    (output_geo.size.w.min(400), output_geo.size.h.min(800)).into(),
                 ),
                 scale,
             )
