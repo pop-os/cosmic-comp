@@ -119,4 +119,4 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/Smithay/smithay.git"]
-smithay = { git = "https://github.com/smithay//smithay", rev = "9fbc9fb" }
+smithay = { git = "https://github.com/smithay//smithay", rev = "1ceba66" }
