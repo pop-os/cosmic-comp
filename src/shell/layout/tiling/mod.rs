@@ -2589,8 +2589,18 @@ impl TilingLayout {
                 }
                 _ => unreachable!(),
             }
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-            self.queue.push_tree(tree, None, blocker);
+
+            let should_configure =
+                tree.traverse_pre_order(&group_id)
+                    .unwrap()
+                    .all(|node| match node.data() {
+                        Data::Mapped { mapped, .. } => mapped.latest_size_committed(),
+                        _ => true,
+                    });
+            if should_configure {
+                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                self.queue.push_tree(tree, None, blocker);
+            }
 
             return true;
         }
