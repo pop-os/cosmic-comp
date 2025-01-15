@@ -990,7 +990,9 @@ impl FloatingLayout {
             geo.as_local()
                 .to_global(self.space.outputs().next().unwrap()),
         );
-        mapped.configure();
+        if mapped.latest_size_committed() {
+            mapped.configure();
+        }
 
         true
     }
