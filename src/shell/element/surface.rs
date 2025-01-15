@@ -45,6 +45,7 @@ use smithay::{
     },
     xwayland::{xwm::X11Relatable, X11Surface},
 };
+use tracing::trace;
 
 use crate::{
     state::{State, SurfaceDmabufFeedback},
@@ -496,6 +497,60 @@ impl CosmicSurface {
                     .unwrap_or(false)
             }),
             WindowSurface::X11(_surface) => true,
+        }
+    }
+
+    pub fn serial_past(&self, serial: &Serial) -> bool {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
+                let attrs = states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                attrs
+                    .current_serial
+                    .as_ref()
+                    .map(|s| s >= serial)
+                    .unwrap_or(false)
+            }),
+            WindowSurface::X11(_surface) => true,
+        }
+    }
+
+    pub fn latest_size_committed(&self) -> bool {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                with_states(toplevel.wl_surface(), |states| {
+                    let attributes = states
+                        .data_map
+                        .get::<XdgToplevelSurfaceData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+
+                    let current_server = attributes.current_server_state();
+                    if attributes.current.size == current_server.size {
+                        // The window had committed for our previous size change, so we can
+                        // change the size again.
+                        trace!(
+                            "current size matches server size: {:?}",
+                            attributes.current.size
+                        );
+                        true
+                    } else {
+                        // The window had not committed for our previous size change yet.
+                        // This throttling is done because some clients do not batch size requests,
+                        // leading to bad behavior with very fast input devices (i.e. a 1000 Hz
+                        // mouse). This throttling also helps interactive resize transactions
+                        // preserve visual consistency.
+                        trace!("throttling resize");
+                        false
+                    }
+                })
+            }
+            WindowSurface::X11(_) => true,
         }
     }
 
