@@ -217,8 +217,14 @@ impl ResizeForkGrab {
 
 impl ResizeForkGrab {
     // Returns `true` if grab should be unset
-    fn update_location(&mut self, data: &mut State, location: Point<f64, Logical>) -> bool {
+    fn update_location(
+        &mut self,
+        data: &mut State,
+        location: Point<f64, Logical>,
+        force: bool,
+    ) -> bool {
         let delta = location - self.last_loc.as_logical();
+        self.last_loc = location.as_global();
 
         if let Some(output) = self.output.upgrade() {
             let mut shell = data.common.shell.write().unwrap();
@@ -228,7 +234,7 @@ impl ResizeForkGrab {
             let tiling_layer = &mut workspace.tiling_layer;
             let gaps = tiling_layer.gaps();
 
-            let tree = &mut tiling_layer.queue.trees.back_mut().unwrap().0;
+            let mut tree = tiling_layer.queue.trees.back().unwrap().0.copy_clone();
             match &mut self.old_tree {
                 Some(old_tree) => {
                     // it would be so nice to just `zip` here, but `zip` just returns `None` once either returns `None`.
@@ -258,7 +264,7 @@ impl ResizeForkGrab {
                         *old_tree = tree.copy_clone();
                         self.accumulated_delta = 0.0;
                     } else {
-                        *tree = old_tree.copy_clone();
+                        tree = old_tree.copy_clone();
                     }
                 }
                 x @ None => {
@@ -283,6 +289,10 @@ impl ResizeForkGrab {
                 if first_elem.is_none() || second_elem.is_none() {
                     return true;
                 };
+
+                if self.accumulated_delta.round() as i32 == 0 {
+                    return false;
+                }
 
                 match tree.get_mut(&self.node).unwrap().data_mut() {
                     Data::Group {
@@ -319,9 +329,18 @@ impl ResizeForkGrab {
                     _ => unreachable!(),
                 }
 
-                self.last_loc = location.as_global();
-                let blocker = TilingLayout::update_positions(&output, tree, gaps);
-                tiling_layer.pending_blockers.extend(blocker);
+                let should_configure = force
+                    || tree
+                        .traverse_pre_order(&self.node)
+                        .unwrap()
+                        .all(|node| match node.data() {
+                            Data::Mapped { mapped, .. } => mapped.latest_size_committed(),
+                            _ => true,
+                        });
+                if should_configure {
+                    let blocker = TilingLayout::update_positions(&output, &mut tree, gaps);
+                    tiling_layer.queue.push_tree(tree, None, blocker);
+                }
             } else {
                 return true;
             }
@@ -348,7 +367,7 @@ impl PointerGrab<State> for ResizeForkGrab {
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
 
-        if self.update_location(data, event.location) {
+        if self.update_location(data, event.location, false) {
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
@@ -477,7 +496,9 @@ impl PointerGrab<State> for ResizeForkGrab {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, data: &mut State) {
+        self.update_location(data, self.last_loc.as_logical(), true);
+    }
 }
 
 impl TouchGrab<State> for ResizeForkGrab {
@@ -515,7 +536,7 @@ impl TouchGrab<State> for ResizeForkGrab {
         seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
-            if self.update_location(data, event.location) {
+            if self.update_location(data, event.location, false) {
                 handle.unset_grab(self, data);
             }
         }
@@ -558,5 +579,7 @@ impl TouchGrab<State> for ResizeForkGrab {
         handle.orientation(data, event, seq)
     }
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, data: &mut State) {
+        self.update_location(data, self.last_loc.as_logical(), true);
+    }
 }
