@@ -130,7 +130,6 @@ impl TreeQueue {
 pub struct TilingLayout {
     output: Output,
     queue: TreeQueue,
-    pending_blockers: Vec<TilingBlocker>,
     placeholder_id: Id,
     swapping_stack_surface_id: Id,
     last_overview_hover: Option<(Option<Instant>, TargetZone)>,
@@ -353,7 +352,6 @@ impl TilingLayout {
                 animation_start: None,
             },
             output: output.clone(),
-            pending_blockers: Vec::new(),
             placeholder_id: Id::new(),
             swapping_stack_surface_id: Id::new(),
             last_overview_hover: None,
@@ -2345,8 +2343,20 @@ impl TilingLayout {
 
     pub fn update_animation_state(&mut self) -> HashMap<ClientId, Client> {
         let mut clients = HashMap::new();
-        for blocker in self.pending_blockers.drain(..) {
-            clients.extend(blocker.signal_ready());
+        let mut ready_trees = 0;
+        for (_, _, blocker) in self.queue.trees.iter().skip(1) {
+            if let Some(blocker) = blocker.as_ref() {
+                if blocker.is_processed() {
+                    ready_trees += 1;
+                }
+                if blocker.is_ready() {
+                    clients.extend(blocker.clients());
+                    continue;
+                }
+                break;
+            } else {
+                ready_trees += 1;
+            }
         }
 
         if let Some(start) = self.queue.animation_start {
@@ -2361,6 +2371,7 @@ impl TilingLayout {
             {
                 let _ = self.queue.animation_start.take();
                 let _ = self.queue.trees.pop_front();
+                ready_trees -= 1;
                 let front = self.queue.trees.front_mut().unwrap();
                 if let Some(root_id) = front.0.root_node_id() {
                     for node in front
@@ -2383,28 +2394,12 @@ impl TilingLayout {
             }
         }
 
-        let ready_trees = self
-            .queue
-            .trees
-            .iter()
-            .skip(1)
-            .take_while(|(_, _, blocker)| {
-                blocker
-                    .as_ref()
-                    .map(|blocker| blocker.is_ready() && blocker.is_signaled())
-                    .unwrap_or(true)
-            })
-            .count();
-
         // merge
         let other_duration = if ready_trees > 1 {
             self.queue
                 .trees
                 .drain(1..ready_trees)
-                .fold(None, |res, (_, duration, blocker)| {
-                    if let Some(blocker) = blocker {
-                        clients.extend(blocker.signal_ready());
-                    }
+                .fold(None, |res, (_, duration, _)| {
                     Some(
                         res.map(|old_duration: Duration| old_duration.max(duration))
                             .unwrap_or(duration),
@@ -2416,13 +2411,10 @@ impl TilingLayout {
 
         // start
         if ready_trees > 0 {
-            let (_, duration, blocker) = self.queue.trees.get_mut(1).unwrap();
+            let (_, duration, _) = self.queue.trees.get_mut(1).unwrap();
             *duration = other_duration
                 .map(|other| other.max(*duration))
                 .unwrap_or(*duration);
-            if let Some(blocker) = blocker {
-                clients.extend(blocker.signal_ready());
-            }
             self.queue.animation_start = Some(Instant::now());
         }
 
