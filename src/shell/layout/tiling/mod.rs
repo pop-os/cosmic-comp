@@ -3965,9 +3965,17 @@ impl TilingLayout {
             .then(|| &self.queue.trees.front().unwrap().0);
 
         let percentage = if let Some(animation_start) = self.queue.animation_start {
-            let percentage = Instant::now().duration_since(animation_start).as_millis() as f32
-                / duration.as_millis() as f32;
-            ease(EaseInOutCubic, 0.0, 1.0, percentage)
+            if *duration == Duration::ZERO {
+                1.0
+            } else {
+                let now = Instant::now();
+                let total = duration.as_millis() as f32;
+                let since = now.duration_since(animation_start).as_millis() as f32;
+                let percentage = since / total;
+                debug_assert!(!percentage.is_nan());
+                debug_assert!(!percentage.is_infinite());
+                ease(EaseInOutCubic, 0.0, 1.0, percentage)
+            }
         } else {
             1.0
         };
