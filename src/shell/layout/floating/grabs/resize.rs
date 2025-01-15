@@ -120,7 +120,9 @@ impl ResizeSurfaceGrab {
             },
             self.last_window_size.as_global(),
         ));
-        self.window.configure();
+        if self.window.latest_size_committed() {
+            self.window.configure();
+        }
 
         false
     }
