@@ -33,6 +33,7 @@ pub trait Window: IsAlive + Clone + PartialEq + Send {
     fn is_fullscreen(&self) -> bool;
     fn is_minimized(&self) -> bool;
     fn is_sticky(&self) -> bool;
+    fn is_resizing(&self) -> bool;
     fn global_geometry(&self) -> Option<Rectangle<i32, Global>>;
     fn user_data(&self) -> &UserDataMap;
 }
@@ -536,12 +537,14 @@ where
         changed = true;
     }
 
-    let geometry = window.global_geometry();
     let mut geometry_changed = false;
-    if handle_state.geometry != geometry {
-        handle_state.geometry = geometry;
-        changed = true;
-        geometry_changed = true;
+    if !window.is_resizing() {
+        let geometry = window.global_geometry();
+        if handle_state.geometry != geometry {
+            handle_state.geometry = geometry;
+            changed = true;
+            geometry_changed = true;
+        }
     }
 
     if let Ok(client) = dh.get_client(instance.id()) {
