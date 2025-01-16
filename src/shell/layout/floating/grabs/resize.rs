@@ -28,6 +28,7 @@ use smithay::{
         },
         Seat,
     },
+    output::Output,
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
 };
 
@@ -56,6 +57,7 @@ pub struct ResizeSurfaceGrab {
     seat: Seat<State>,
     window: CosmicMapped,
     edges: ResizeEdge,
+    output: Output,
     initial_window_size: Size<i32, Logical>,
     last_window_size: Size<i32, Logical>,
     release: ReleaseMode,
@@ -111,15 +113,11 @@ impl ResizeSurfaceGrab {
 
         self.last_window_size = (new_window_width, new_window_height).into();
 
+        let mut win_loc = location.as_local().to_global(&self.output).to_i32_round();
+        win_loc.y += self.window.ssd_height(false).unwrap_or(0);
         self.window.set_resizing(true);
-        self.window.set_geometry(Rectangle::new(
-            if let Some(s) = self.window.active_window().x11_surface() {
-                s.geometry().loc.as_global()
-            } else {
-                (0, 0).into()
-            },
-            self.last_window_size.as_global(),
-        ));
+        self.window
+            .set_geometry(Rectangle::new(win_loc, self.last_window_size.as_global()));
         if self.window.latest_size_committed() {
             self.window.configure();
         }
@@ -376,6 +374,7 @@ impl ResizeSurfaceGrab {
         start_data: GrabStartData,
         mapped: CosmicMapped,
         edges: ResizeEdge,
+        output: Output,
         initial_window_location: Point<i32, Local>,
         initial_window_size: Size<i32, Logical>,
         seat: &Seat<State>,
@@ -414,6 +413,7 @@ impl ResizeSurfaceGrab {
             seat: seat.clone(),
             window: mapped,
             edges,
+            output,
             initial_window_size,
             last_window_size: initial_window_size,
             release,
@@ -525,14 +525,6 @@ impl ResizeSurfaceGrab {
         }
 
         self.window.set_resizing(false);
-        self.window.set_geometry(Rectangle::new(
-            if let Some(x11_surface) = self.window.active_window().x11_surface() {
-                x11_surface.geometry().loc.as_global()
-            } else {
-                (0, 0).into()
-            },
-            self.last_window_size.as_global(),
-        ));
         self.window.configure();
 
         let mut resize_state = self.window.resize_state.lock().unwrap();

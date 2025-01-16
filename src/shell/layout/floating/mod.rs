@@ -899,6 +899,7 @@ impl FloatingLayout {
                 start_data,
                 mapped.clone(),
                 edges,
+                self.space.outputs().next().cloned().unwrap(),
                 location,
                 size,
                 seat,
