@@ -156,19 +156,21 @@ pub fn init_backend(
         }
     }
 
-    let kms = match &mut state.backend {
-        BackendData::Kms(kms) => kms,
-        _ => unreachable!(),
-    };
-    if let Some(primary_node) = kms
-        .primary_node
-        .and_then(|node| node.node_with_type(NodeType::Primary).and_then(|x| x.ok()))
-    {
-        if let Some(device) = kms.drm_devices.get(&primary_node) {
-            let import_device = device.drm.device().device_fd().clone();
-            if supports_syncobj_eventfd(&import_device) {
-                let syncobj_state = DrmSyncobjState::new::<State>(&dh, import_device);
-                kms.syncobj_state = Some(syncobj_state);
+    if !crate::utils::env::bool_var("COSMIC_DISABLE_SYNCOBJ").unwrap_or(false) {
+        let kms = match &mut state.backend {
+            BackendData::Kms(kms) => kms,
+            _ => unreachable!(),
+        };
+        if let Some(primary_node) = kms
+            .primary_node
+            .and_then(|node| node.node_with_type(NodeType::Primary).and_then(|x| x.ok()))
+        {
+            if let Some(device) = kms.drm_devices.get(&primary_node) {
+                let import_device = device.drm.device().device_fd().clone();
+                if supports_syncobj_eventfd(&import_device) {
+                    let syncobj_state = DrmSyncobjState::new::<State>(&dh, import_device);
+                    kms.syncobj_state = Some(syncobj_state);
+                }
             }
         }
     }
