@@ -1,4 +1,4 @@
-# COSIC Compositor
+# COSMIC Compositor
 
 This is the Wayland compositor used by COSMIC Epoch.
 
