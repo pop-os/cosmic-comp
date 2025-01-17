@@ -1112,7 +1112,8 @@ impl SurfaceThreadState {
                 None,
                 Kind::Unspecified,
             );
-            let texture_geometry = texture_elem.geometry(1.0.into());
+            let texture_geometry =
+                texture_elem.geometry(self.output.current_scale().fractional_scale().into());
             elements = constrain_render_elements(
                 std::iter::once(texture_elem),
                 (0, 0),
