@@ -19,7 +19,7 @@ use crate::{
         grabs::{ReleaseMode, ResizeEdge},
         layout::{
             floating::ResizeGrabMarker,
-            tiling::{NodeDesc, TilingLayout},
+            tiling::{NodeDesc, SwapWindowGrab, TilingLayout},
         },
         SeatExt, Trigger,
     },
@@ -44,7 +44,7 @@ use smithay::{
         TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
         TabletToolTipState, TouchEvent,
     },
-    desktop::{utils::under_from_surface_tree, WindowSurfaceType},
+    desktop::{utils::under_from_surface_tree, PopupKeyboardGrab, WindowSurfaceType},
     input::{
         keyboard::{FilterResult, KeysymHandle, ModifiersState},
         pointer::{
@@ -1428,7 +1428,12 @@ impl State {
 
         let keyboard = seat.get_keyboard().unwrap();
         let pointer = seat.get_pointer().unwrap();
-        let is_grabbed = keyboard.is_grabbed() || pointer.is_grabbed();
+        // We're only interested in filtering keyboard grabs if we initiated them.
+        // The easiest way to check that is to check the type of the grab.
+        let keyboard_grabbed = keyboard.with_grab(|_serial, grab| {
+            grab.is::<SwapWindowGrab>() || grab.is::<PopupKeyboardGrab<State>>()
+        }) == Some(true);
+        let is_grabbed = keyboard_grabbed || pointer.is_grabbed();
 
         let current_focus = keyboard.current_focus();
         //this should fall back to active output since there may not be a focused output
