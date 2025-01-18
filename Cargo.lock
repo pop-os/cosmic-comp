@@ -616,12 +616,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "clipboard_macos"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2#6b9faab87bea9cebec6ae036906fd67fed254f5f"
+dependencies = [
+ "objc",
+ "objc-foundation",
+ "objc_id",
+]
+
+[[package]]
 name = "clipboard_wayland"
 version = "0.2.2"
 source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13#a83bf83784276aaa882ef13555295a2ad9edd265"
 dependencies = [
- "dnd",
- "mime 0.1.0",
+ "dnd 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
+ "mime 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
+ "smithay-clipboard",
+]
+
+[[package]]
+name = "clipboard_wayland"
+version = "0.2.2"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2#6b9faab87bea9cebec6ae036906fd67fed254f5f"
+dependencies = [
+ "dnd 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
+ "mime 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
  "smithay-clipboard",
 ]
 
@@ -629,6 +649,15 @@ dependencies = [
 name = "clipboard_x11"
 version = "0.4.2"
 source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13#a83bf83784276aaa882ef13555295a2ad9edd265"
+dependencies = [
+ "thiserror",
+ "x11rb",
+]
+
+[[package]]
+name = "clipboard_x11"
+version = "0.4.2"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2#6b9faab87bea9cebec6ae036906fd67fed254f5f"
 dependencies = [
  "thiserror",
  "x11rb",
@@ -862,7 +891,7 @@ dependencies = [
 [[package]]
 name = "cosmic-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic/#5422ab3130a0f943c71fda558d61c815086e6f40"
+source = "git+https://github.com/pop-os/libcosmic/#1914006cdd689491e3199d9887a715866c91d8aa"
 dependencies = [
  "atomicwrites",
  "calloop 0.14.1",
@@ -881,7 +910,7 @@ dependencies = [
 [[package]]
 name = "cosmic-config-derive"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/libcosmic/#5422ab3130a0f943c71fda558d61c815086e6f40"
+source = "git+https://github.com/pop-os/libcosmic/#1914006cdd689491e3199d9887a715866c91d8aa"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -903,7 +932,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#747e482ca197497ee3bc5f6e9dcd23c73e592e47"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#fe529ae0edda45d53f3bd3a579c3a8f77457905a"
 dependencies = [
  "cosmic-config",
  "serde",
@@ -1209,7 +1238,19 @@ version = "0.1.0"
 source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13#a83bf83784276aaa882ef13555295a2ad9edd265"
 dependencies = [
  "bitflags 2.6.0",
- "mime 0.1.0",
+ "mime 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
+ "raw-window-handle",
+ "smithay-client-toolkit",
+ "smithay-clipboard",
+]
+
+[[package]]
+name = "dnd"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2#6b9faab87bea9cebec6ae036906fd67fed254f5f"
+dependencies = [
+ "bitflags 2.6.0",
+ "mime 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
  "raw-window-handle",
  "smithay-client-toolkit",
  "smithay-clipboard",
@@ -2298,28 +2339,28 @@ name = "iced"
 version = "0.14.0-dev"
 source = "git+https://github.com/pop-os/libcosmic/#a6db807c1bbffc90b68513171348cad0b4469eac"
 dependencies = [
- "dnd",
+ "dnd 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
  "iced_core",
  "iced_futures",
  "iced_renderer",
  "iced_widget",
  "image",
- "mime 0.1.0",
+ "mime 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
  "thiserror",
- "window_clipboard",
+ "window_clipboard 0.4.1 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
 ]
 
 [[package]]
 name = "iced_core"
 version = "0.14.0-dev"
-source = "git+https://github.com/pop-os/libcosmic/#5422ab3130a0f943c71fda558d61c815086e6f40"
+source = "git+https://github.com/pop-os/libcosmic/#1914006cdd689491e3199d9887a715866c91d8aa"
 dependencies = [
  "bitflags 2.6.0",
  "bytes",
- "dnd",
+ "dnd 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
  "glam",
  "log",
- "mime 0.1.0",
+ "mime 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
  "num-traits",
  "once_cell",
  "palette",
@@ -2329,13 +2370,13 @@ dependencies = [
  "smol_str",
  "thiserror",
  "web-time",
- "window_clipboard",
+ "window_clipboard 0.4.1 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
 ]
 
 [[package]]
 name = "iced_futures"
 version = "0.14.0-dev"
-source = "git+https://github.com/pop-os/libcosmic/#5422ab3130a0f943c71fda558d61c815086e6f40"
+source = "git+https://github.com/pop-os/libcosmic/#1914006cdd689491e3199d9887a715866c91d8aa"
 dependencies = [
  "futures",
  "iced_core",
@@ -2397,12 +2438,12 @@ version = "0.14.0-dev"
 source = "git+https://github.com/pop-os/libcosmic/#a6db807c1bbffc90b68513171348cad0b4469eac"
 dependencies = [
  "bytes",
- "dnd",
+ "dnd 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
  "iced_core",
  "iced_futures",
  "raw-window-handle",
  "thiserror",
- "window_clipboard",
+ "window_clipboard 0.4.1 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
 ]
 
 [[package]]
@@ -2457,7 +2498,7 @@ name = "iced_widget"
 version = "0.14.0-dev"
 source = "git+https://github.com/pop-os/libcosmic/#a6db807c1bbffc90b68513171348cad0b4469eac"
 dependencies = [
- "dnd",
+ "dnd 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
  "iced_renderer",
  "iced_runtime",
  "num-traits",
@@ -2466,7 +2507,7 @@ dependencies = [
  "rustc-hash 2.0.0",
  "thiserror",
  "unicode-segmentation",
- "window_clipboard",
+ "window_clipboard 0.4.1 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
 ]
 
 [[package]]
@@ -3113,6 +3154,14 @@ dependencies = [
 name = "mime"
 version = "0.1.0"
 source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13#a83bf83784276aaa882ef13555295a2ad9edd265"
+dependencies = [
+ "smithay-clipboard",
+]
+
+[[package]]
+name = "mime"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2#6b9faab87bea9cebec6ae036906fd67fed254f5f"
 dependencies = [
  "smithay-clipboard",
 ]
@@ -5925,11 +5974,26 @@ version = "0.4.1"
 source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13#a83bf83784276aaa882ef13555295a2ad9edd265"
 dependencies = [
  "clipboard-win",
- "clipboard_macos",
- "clipboard_wayland",
- "clipboard_x11",
- "dnd",
- "mime 0.1.0",
+ "clipboard_macos 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
+ "clipboard_wayland 0.2.2 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
+ "clipboard_x11 0.4.2 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
+ "dnd 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
+ "mime 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13)",
+ "raw-window-handle",
+ "thiserror",
+]
+
+[[package]]
+name = "window_clipboard"
+version = "0.4.1"
+source = "git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2#6b9faab87bea9cebec6ae036906fd67fed254f5f"
+dependencies = [
+ "clipboard-win",
+ "clipboard_macos 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
+ "clipboard_wayland 0.2.2 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
+ "clipboard_x11 0.4.2 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
+ "dnd 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
+ "mime 0.1.0 (git+https://github.com/pop-os/window_clipboard.git?tag=pop-0.13-2)",
  "raw-window-handle",
  "thiserror",
 ]
