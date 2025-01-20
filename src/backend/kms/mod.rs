@@ -679,6 +679,7 @@ impl KmsState {
             let output_map = device
                 .surfaces
                 .iter()
+                .filter(|(_, s)| s.is_active())
                 .map(|(crtc, surface)| (*crtc, surface.output.clone()))
                 .collect::<HashMap<_, _>>();
 
