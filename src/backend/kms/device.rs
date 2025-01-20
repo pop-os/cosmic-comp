@@ -625,6 +625,7 @@ impl Device {
             let output_map = self
                 .surfaces
                 .iter()
+                .filter(|(_, s)| s.is_active())
                 .map(|(crtc, surface)| (*crtc, surface.output.clone()))
                 .collect::<HashMap<_, _>>();
 
