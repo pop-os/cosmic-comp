@@ -217,6 +217,10 @@ impl CursorStateInner {
             .entry(shape)
             .or_insert_with(|| Cursor::load(&self.cursor_theme, shape, self.cursor_size))
     }
+
+    pub fn size(&self) -> u32 {
+        self.cursor_size
+    }
 }
 
 pub fn load_cursor_theme() -> (CursorTheme, u32) {
@@ -292,6 +296,7 @@ where
         let frame = state
             .get_named_cursor(current_cursor)
             .get_image(integer_scale, time.as_millis());
+        let actual_scale = (frame.size / state.size()).max(1);
 
         let pointer_images = &mut state.image_cache;
         let maybe_image =
@@ -305,7 +310,7 @@ where
                     &frame.pixels_rgba,
                     Fourcc::Argb8888,
                     (frame.width as i32, frame.height as i32),
-                    integer_scale as i32,
+                    actual_scale as i32,
                     Transform::Normal,
                     None,
                 );
