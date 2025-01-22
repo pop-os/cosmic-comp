@@ -36,7 +36,7 @@ once_cell = "1.18.0"
 ordered-float = "4.0"
 png = "0.17.5"
 regex = "1"
-ron = "0.8"
+ron = "0.9.0-alpha.0"
 rust-embed = {version = "8.0", features = ["debug-embed"]}
 sanitize-filename = "0.5.0"
 sendfd = "0.4.1"
