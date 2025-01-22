@@ -181,7 +181,6 @@ impl CosmicStack {
                 let old_idx = p.active.swap(idx, Ordering::SeqCst);
                 if old_idx == idx {
                     p.reenter.store(true, Ordering::SeqCst);
-                    p.previous_keyboard.store(old_idx, Ordering::SeqCst);
                 }
             } else {
                 let mut windows = p.windows.lock().unwrap();
@@ -261,13 +260,10 @@ impl CosmicStack {
         let result = self.0.with_program(|p| match direction {
             FocusDirection::Left => {
                 if !p.group_focused.load(Ordering::SeqCst) {
-                    if let Ok(old) =
-                        p.active
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                val.checked_sub(1)
-                            })
+                    if p.active
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| val.checked_sub(1))
+                        .is_ok()
                     {
-                        p.previous_keyboard.store(old, Ordering::SeqCst);
                         p.scroll_to_focus.store(true, Ordering::SeqCst);
                         true
                     } else {
@@ -280,17 +276,16 @@ impl CosmicStack {
             FocusDirection::Right => {
                 if !p.group_focused.load(Ordering::SeqCst) {
                     let max = p.windows.lock().unwrap().len();
-                    if let Ok(old) =
-                        p.active
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                if val < max - 1 {
-                                    Some(val + 1)
-                                } else {
-                                    None
-                                }
-                            })
+                    if p.active
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                            if val < max - 1 {
+                                Some(val + 1)
+                            } else {
+                                None
+                            }
+                        })
+                        .is_ok()
                     {
-                        p.previous_keyboard.store(old, Ordering::SeqCst);
                         p.scroll_to_focus.store(true, Ordering::SeqCst);
                         true
                     } else {
@@ -353,7 +348,6 @@ impl CosmicStack {
             if let Some(val) = next {
                 let old = p.active.swap(val, Ordering::SeqCst);
                 windows.swap(old, val);
-                p.previous_keyboard.store(old, Ordering::SeqCst);
                 p.scroll_to_focus.store(true, Ordering::SeqCst);
                 MoveResult::Handled
             } else {
@@ -399,8 +393,7 @@ impl CosmicStack {
     pub fn set_active(&self, window: &CosmicSurface) {
         self.0.with_program(|p| {
             if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
-                let old = p.active.swap(val, Ordering::SeqCst);
-                p.previous_keyboard.store(old, Ordering::SeqCst);
+                p.active.store(val, Ordering::SeqCst);
             }
         });
         self.0
