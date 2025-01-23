@@ -1026,6 +1026,25 @@ impl State {
 
             Action::Spawn(command) => self.spawn_command(command),
 
+            x @ Action::ZoomIn | x @ Action::ZoomOut => {
+                let mut shell = self.common.shell.write().unwrap();
+                let pointer_loc = seat.get_pointer().unwrap().current_location().as_global();
+                let (zoom_seat, _, current_level) = shell
+                    .zoom_level()
+                    .unwrap_or_else(|| (seat.clone(), pointer_loc, 1.0));
+                if &zoom_seat == seat {
+                    shell.trigger_zoom(
+                        seat,
+                        pointer_loc,
+                        match x {
+                            Action::ZoomIn => current_level + 1.0,
+                            Action::ZoomOut => (current_level - 1.0).max(1.0),
+                            _ => unreachable!(),
+                        },
+                    );
+                }
+            }
+
             // Do nothing
             Action::Disable => (),
         }
