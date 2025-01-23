@@ -220,6 +220,7 @@ impl IndicatorShader {
         color: [f32; 3],
     ) -> PixelShaderElement {
         let thickness = (thickness as f64 * scale).round() as u8;
+        let radius = (radius as f64 * scale).round() as u8;
 
         let settings = IndicatorSettings {
             thickness,
