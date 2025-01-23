@@ -775,7 +775,7 @@ name = "cosmic-client-toolkit"
 version = "0.1.0"
 source = "git+https://github.com/pop-os/cosmic-protocols?rev=d218c76#d218c76b58c7a3b20dd5e7943f93fc306a1b81b8"
 dependencies = [
- "cosmic-protocols 0.1.0 (git+https://github.com/pop-os/cosmic-protocols?rev=d218c76)",
+ "cosmic-protocols",
  "libc",
  "smithay-client-toolkit",
  "wayland-client",
@@ -792,7 +792,7 @@ dependencies = [
  "calloop 0.14.1",
  "cosmic-comp-config",
  "cosmic-config",
- "cosmic-protocols 0.1.0 (git+https://github.com/pop-os/cosmic-protocols?branch=main)",
+ "cosmic-protocols",
  "cosmic-settings-config",
  "drm-ffi 0.8.0",
  "edid-rs",
@@ -890,19 +890,6 @@ dependencies = [
  "thiserror",
  "tracing",
  "xdg",
-]
-
-[[package]]
-name = "cosmic-protocols"
-version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-protocols?branch=main#d218c76b58c7a3b20dd5e7943f93fc306a1b81b8"
-dependencies = [
- "bitflags 2.6.0",
- "wayland-backend",
- "wayland-protocols",
- "wayland-protocols-wlr",
- "wayland-scanner",
- "wayland-server",
 ]
 
 [[package]]
