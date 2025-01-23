@@ -24,10 +24,12 @@ where
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    Workspace(RelocateRenderElement<CropRenderElement<WorkspaceRenderElement<R>>>),
-    Cursor(RelocateRenderElement<CursorRenderElement<R>>),
+    Workspace(
+        RelocateRenderElement<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>,
+    ),
+    Cursor(RescaleRenderElement<RelocateRenderElement<CursorRenderElement<R>>>),
     Dnd(WaylandSurfaceRenderElement<R>),
-    MoveGrab(CosmicMappedRenderElement<R>),
+    MoveGrab(RescaleRenderElement<CosmicMappedRenderElement<R>>),
     AdditionalDamage(DamageElement),
     Mirror(
         CropRenderElement<
@@ -266,29 +268,19 @@ where
     }
 }
 
-impl<R> From<CropRenderElement<WorkspaceRenderElement<R>>> for CosmicElement<R>
+impl<R> From<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>
+    for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     <R as Renderer>::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: CropRenderElement<WorkspaceRenderElement<R>>) -> Self {
+    fn from(elem: CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>) -> Self {
         Self::Workspace(RelocateRenderElement::from_element(
             elem,
             (0, 0),
             Relocate::Relative,
         ))
-    }
-}
-
-impl<R> From<CosmicMappedRenderElement<R>> for CosmicElement<R>
-where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
-    CosmicMappedRenderElement<R>: RenderElement<R>,
-{
-    fn from(elem: CosmicMappedRenderElement<R>) -> Self {
-        Self::MoveGrab(elem)
     }
 }
 
