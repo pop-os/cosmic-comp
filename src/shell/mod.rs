@@ -245,6 +245,29 @@ pub struct PendingLayer {
     pub output: Output,
 }
 
+pub struct ZoomState {
+    seat: Seat<State>,
+    level: f64,
+    focal_point: Point<f64, Global>,
+    previous: Option<(f64, Instant)>,
+}
+
+impl ZoomState {
+    pub fn level(&self) -> (Seat<State>, Point<f64, Global>, f64) {
+        if let Some((old, start)) = self.previous.as_ref() {
+            let percentage = Instant::now().duration_since(*start).as_millis() as f32
+                / ANIMATION_DURATION.as_millis() as f32;
+            (
+                self.seat.clone(),
+                self.focal_point,
+                ease(EaseInOutCubic, *old, self.level, percentage),
+            )
+        } else {
+            (self.seat.clone(), self.focal_point, self.level)
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Shell {
     pub workspaces: Workspaces,
@@ -270,6 +293,7 @@ pub struct Shell {
         Output,
     )>,
     resize_indicator: Option<ResizeIndicator>,
+    zoom_state: Option<ZoomState>,
     tiling_exceptions: TilingExceptions,
 
     #[cfg(feature = "debug")]
@@ -1315,6 +1339,7 @@ impl Shell {
             resize_mode: ResizeMode::None,
             resize_state: None,
             resize_indicator: None,
+            zoom_state: None,
             tiling_exceptions,
 
             #[cfg(feature = "debug")]
@@ -1939,6 +1964,10 @@ impl Shell {
                 .stacking_indicator(),
             ManagedLayer::Tiling => self.active_space(output)?.tiling_layer.stacking_indicator(),
         }
+    }
+
+    pub fn zoom_level(&self) -> Option<(Seat<State>, Point<f64, Global>, f64)> {
+        self.zoom_state.as_ref().map(|s| s.level())
     }
 
     fn refresh(

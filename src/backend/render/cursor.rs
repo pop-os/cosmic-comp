@@ -256,6 +256,7 @@ pub fn draw_cursor<R>(
     seat: &Seat<State>,
     location: Point<f64, Logical>,
     scale: Scale<f64>,
+    buffer_scale: f64,
     time: Time<Monotonic>,
     draw_default: bool,
 ) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
@@ -292,7 +293,7 @@ where
             return Vec::new();
         }
 
-        let integer_scale = scale.x.max(scale.y).ceil() as u32;
+        let integer_scale = (scale.x.max(scale.y) * buffer_scale).ceil() as u32;
         let frame = state
             .get_named_cursor(current_cursor)
             .get_image(integer_scale, time.as_millis());
