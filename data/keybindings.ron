@@ -70,6 +70,9 @@
     (modifiers: [Super], key: "r"): Resizing(Outwards),
     (modifiers: [Super, Shift], key: "r"): Resizing(Inwards),
 
+    (modifiers: [Super], key: "equal"): ZoomIn,
+    (modifiers: [Super], key: "minus"): ZoomOut,
+
     (modifiers: [Super], key: "b"): System(WebBrowser),
     (modifiers: [Super], key: "f"): System(HomeFolder),
     (modifiers: [Super], key: "t"): System(Terminal),

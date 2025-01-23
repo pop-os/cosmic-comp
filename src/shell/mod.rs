@@ -1966,6 +1966,24 @@ impl Shell {
         }
     }
 
+    pub fn trigger_zoom(
+        &mut self,
+        seat: &Seat<State>,
+        focal_point: Point<f64, Global>,
+        level: f64,
+    ) {
+        if level == 1. {
+            self.zoom_state.take();
+        } else {
+            self.zoom_state = Some(ZoomState {
+                seat: seat.clone(),
+                level,
+                focal_point,
+                previous: None,
+            });
+        }
+    }
+
     pub fn zoom_level(&self) -> Option<(Seat<State>, Point<f64, Global>, f64)> {
         self.zoom_state.as_ref().map(|s| s.level())
     }
