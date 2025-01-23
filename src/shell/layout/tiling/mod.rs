@@ -5323,7 +5323,7 @@ where
         percentage,
         swap_tree,
         swap_desc.as_ref(),
-        |node_id, data, geo, original_geo, alpha, animating| {
+        |node_id, data, geo, _original_geo, alpha, animating| {
             if swap_desc.as_ref().map(|desc| &desc.node) == Some(&node_id)
                 || focused.as_ref() == Some(&node_id)
             {
@@ -5484,14 +5484,14 @@ where
                     })
                     .unwrap_or(false)
                 {
-                    let mut geo = mapped.active_window_geometry().as_local();
-                    geo.loc += original_geo.loc;
+                    let mut active_geo = mapped.active_window_geometry().as_local();
+                    active_geo.loc += geo.loc - mapped.geometry().loc.as_local();
                     elements.insert(
                         0,
                         CosmicMappedRenderElement::Overlay(BackdropShader::element(
                             renderer,
                             Key::Window(Usage::Overlay, mapped.key()),
-                            geo,
+                            active_geo,
                             0.0,
                             0.3,
                             group_color,
