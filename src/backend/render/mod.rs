@@ -42,7 +42,7 @@ use smithay::{
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-                utils::{CropRenderElement, Relocate, RelocateRenderElement},
+                utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
                 AsRenderElements, Element, Id, Kind, RenderElement,
             },
             gles::{
@@ -404,6 +404,7 @@ pub enum CursorMode {
 pub fn cursor_elements<'a, 'frame, R>(
     renderer: &mut R,
     seats: impl Iterator<Item = &'a Seat<State>>,
+    zoom_level: Option<(Seat<State>, Point<f64, Global>, f64)>,
     theme: &Theme,
     now: Time<Monotonic>,
     output: &Output,
@@ -416,6 +417,9 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     let scale = output.current_scale().fractional_scale();
+    let (focal_point, zoom_scale) = zoom_level
+        .map(|(_, p, s)| (p.to_local(&output), s))
+        .unwrap_or_else(|| ((0., 0.).into(), 1.));
     let mut elements = Vec::new();
 
     for seat in seats {
@@ -432,15 +436,23 @@ where
                     &seat,
                     location,
                     scale.into(),
+                    zoom_scale,
                     now,
                     mode != CursorMode::NotDefault,
                 )
                 .into_iter()
                 .map(|(elem, hotspot)| {
-                    CosmicElement::Cursor(RelocateRenderElement::from_element(
-                        elem,
-                        Point::from((-hotspot.x, -hotspot.y)),
-                        Relocate::Relative,
+                    CosmicElement::Cursor(RescaleRenderElement::from_element(
+                        RelocateRenderElement::from_element(
+                            elem,
+                            Point::from((-hotspot.x, -hotspot.y)),
+                            Relocate::Relative,
+                        ),
+                        focal_point
+                            .as_logical()
+                            .to_physical(output.current_scale().fractional_scale())
+                            .to_i32_round(),
+                        zoom_scale,
                     ))
                 }),
             );
@@ -469,9 +481,18 @@ where
             .lock()
             .unwrap()
             .as_ref()
-            .map(|state| state.render::<CosmicElement<R>, R>(renderer, output, theme))
+            .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output, theme))
         {
-            elements.extend(grab_elements);
+            elements.extend(grab_elements.into_iter().map(|elem| {
+                CosmicElement::MoveGrab(RescaleRenderElement::from_element(
+                    elem,
+                    focal_point
+                        .as_logical()
+                        .to_physical(output.current_scale().fractional_scale())
+                        .to_i32_round(),
+                    zoom_scale,
+                ))
+            }));
         }
 
         if let Some(grab_elements) = seat
@@ -483,7 +504,16 @@ where
             .as_ref()
             .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output))
         {
-            elements.extend(grab_elements.into_iter().map(Into::into));
+            elements.extend(grab_elements.into_iter().map(|elem| {
+                CosmicElement::MoveGrab(RescaleRenderElement::from_element(
+                    elem,
+                    focal_point
+                        .as_logical()
+                        .to_physical(output.current_scale().fractional_scale())
+                        .to_i32_round(),
+                    zoom_scale,
+                ))
+            }));
         }
     }
 
@@ -565,12 +595,14 @@ where
     } else {
         ElementFilter::All
     };
+    let zoom_level = shell.read().unwrap().zoom_level();
 
     #[allow(unused_mut)]
     let workspace_elements = workspace_elements(
         _gpu,
         renderer,
         shell,
+        zoom_level,
         now,
         output,
         previous_workspace,
@@ -593,6 +625,7 @@ pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
     shell: &Arc<RwLock<Shell>>,
+    zoom_level: Option<(Seat<State>, Point<f64, Global>, f64)>,
     now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
@@ -625,6 +658,7 @@ where
     elements.extend(cursor_elements(
         renderer,
         seats.iter(),
+        zoom_level.clone(),
         &theme,
         now,
         output,
@@ -680,8 +714,23 @@ where
         .size
         .as_logical()
         .to_physical_precise_round(scale);
+    let (focal_point, zoom_scale) = zoom_level
+        .map(|(_, p, s)| (p.to_local(&output), s))
+        .unwrap_or_else(|| ((0., 0.).into(), 1.));
+
     let crop_to_output = |element: WorkspaceRenderElement<R>| {
-        CropRenderElement::from_element(element.into(), scale, Rectangle::from_size(output_size))
+        CropRenderElement::from_element(
+            RescaleRenderElement::from_element(
+                element.into(),
+                focal_point
+                    .as_logical()
+                    .to_physical(output.current_scale().fractional_scale())
+                    .to_i32_round(),
+                zoom_scale,
+            ),
+            scale,
+            Rectangle::from_size(output_size),
+        )
     };
 
     render_input_order(
@@ -964,6 +1013,7 @@ where
     } else {
         ElementFilter::All
     };
+    let zoom_level = shell.read().unwrap().zoom_level();
 
     let result = render_workspace(
         gpu,
@@ -973,6 +1023,7 @@ where
         age,
         None,
         shell,
+        zoom_level,
         now,
         output,
         previous_workspace,
@@ -1085,6 +1136,7 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     age: usize,
     additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
     shell: &Arc<RwLock<Shell>>,
+    zoom_level: Option<(Seat<State>, Point<f64, Global>, f64)>,
     now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
@@ -1111,6 +1163,7 @@ where
         gpu,
         renderer,
         shell,
+        zoom_level,
         now,
         output,
         previous,
