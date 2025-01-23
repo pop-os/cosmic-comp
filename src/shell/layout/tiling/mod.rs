@@ -5272,14 +5272,16 @@ where
         )
         .unwrap();
 
-        indicators.push(IndicatorShader::focus_element(
-            renderer,
-            Key::Static(swapping_stack_surface_id.clone()),
-            swap_geo,
-            4,
-            output_scale,
-            transition.unwrap_or(1.0),
-            [window_hint.red, window_hint.green, window_hint.blue],
+        swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
+            IndicatorShader::focus_element(
+                renderer,
+                Key::Static(swapping_stack_surface_id.clone()),
+                swap_geo,
+                4,
+                output_scale,
+                transition.unwrap_or(1.0),
+                [window_hint.red, window_hint.green, window_hint.blue],
+            ),
         ));
 
         let render_loc =
