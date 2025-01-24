@@ -3,6 +3,7 @@
 pub mod env;
 mod ids;
 pub(crate) use self::ids::id_gen;
+pub mod float;
 pub mod geometry;
 pub mod iced;
 pub mod prelude;
