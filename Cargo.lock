@@ -1466,7 +1466,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4391,7 +4391,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4676,8 +4676,8 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "smithay"
-version = "0.3.0"
-source = "git+https://github.com/smithay//smithay?rev=fe31867#fe31867e3afac2543c4016fb8ed99df3e11eb6da"
+version = "0.4.0"
+source = "git+https://github.com/smithay/smithay.git?rev=f93476c#f93476cebab3d47f6729354805b3e184f6878ef2"
 dependencies = [
  "appendlist",
  "ash",
@@ -4765,7 +4765,7 @@ dependencies = [
 [[package]]
 name = "smithay-egui"
 version = "0.1.0"
-source = "git+https://github.com/Smithay/smithay-egui.git?rev=0b013bf#0b013bf934b5691de246e918914b62878fdb0db4"
+source = "git+https://github.com/Smithay/smithay-egui.git?rev=e9411da#e9411da9932316d6770661788c348f4b5a9be184"
 dependencies = [
  "cgmath",
  "egui",
@@ -4991,7 +4991,7 @@ dependencies = [
  "getrandom",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5965,7 +5965,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
