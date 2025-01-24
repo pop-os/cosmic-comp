@@ -47,6 +47,7 @@ pub use self::types::*;
 use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, TileBehavior, XkbConfig,
+    ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -766,6 +767,12 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<u64>(&config, "focus_follows_cursor_delay");
                 if new != state.common.config.cosmic_conf.focus_follows_cursor_delay {
                     state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
+                }
+            }
+            "accessibility_zoom" => {
+                let new = get_config::<ZoomConfig>(&config, "accessibility_zoom");
+                if new != state.common.config.cosmic_conf.accessibility_zoom {
+                    state.common.config.cosmic_conf.accessibility_zoom = new;
                 }
             }
             _ => {}

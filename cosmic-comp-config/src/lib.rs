@@ -31,6 +31,7 @@ pub struct CosmicCompConfig {
     pub focus_follows_cursor_delay: u64,
     /// Let X11 applications scale themselves
     pub descale_xwayland: bool,
+    pub accessibility_zoom: ZoomConfig,
 }
 
 impl Default for CosmicCompConfig {
@@ -60,6 +61,7 @@ impl Default for CosmicCompConfig {
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
             descale_xwayland: false,
+            accessibility_zoom: ZoomConfig::default(),
         }
     }
 }
@@ -104,4 +106,28 @@ fn default_repeat_rate() -> u32 {
 
 fn default_repeat_delay() -> u32 {
     600
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ZoomConfig {
+    pub start_on_login: bool,
+    pub increment: u32,
+    pub view_moves: ZoomMovement,
+}
+
+impl Default for ZoomConfig {
+    fn default() -> Self {
+        ZoomConfig {
+            start_on_login: false,
+            increment: 100,
+            view_moves: ZoomMovement::OnEdge,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum ZoomMovement {
+    OnEdge,
+    Centered,
+    Continuously,
 }
