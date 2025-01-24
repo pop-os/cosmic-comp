@@ -45,7 +45,7 @@ pub use self::types::*;
 use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
-    XkbConfig,
+    XkbConfig, ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -850,6 +850,12 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<u32>(&config, "edge_snap_threshold");
                 if new != state.common.config.cosmic_conf.edge_snap_threshold {
                     state.common.config.cosmic_conf.edge_snap_threshold = new;
+                }
+            }
+            "accessibility_zoom" => {
+                let new = get_config::<ZoomConfig>(&config, "accessibility_zoom");
+                if new != state.common.config.cosmic_conf.accessibility_zoom {
+                    state.common.config.cosmic_conf.accessibility_zoom = new;
                 }
             }
             _ => {}
