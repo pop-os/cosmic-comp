@@ -1028,20 +1028,24 @@ impl State {
 
             x @ Action::ZoomIn | x @ Action::ZoomOut => {
                 let mut shell = self.common.shell.write().unwrap();
-                let pointer_loc = seat.get_pointer().unwrap().current_location().as_global();
-                let (zoom_seat, _, current_level) = shell
-                    .zoom_level()
-                    .unwrap_or_else(|| (seat.clone(), pointer_loc, 1.0));
+                let (zoom_seat, current_level) = shell
+                    .zoom_level(None)
+                    .map(|(s, _, l)| (s, l))
+                    .unwrap_or_else(|| (seat.clone(), 1.0));
                 if &zoom_seat == seat {
+                    let increment =
+                        self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
                     shell.trigger_zoom(
                         seat,
-                        pointer_loc,
                         match x {
-                            Action::ZoomIn => current_level + 1.0,
-                            Action::ZoomOut => (current_level - 1.0).max(1.0),
+                            Action::ZoomIn => current_level + increment,
+                            Action::ZoomOut => (current_level - increment).max(1.0),
                             _ => unreachable!(),
                         },
+                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
                     );
+
+                    // TODO: persist state, if enable_on_startup
                 }
             }
 
