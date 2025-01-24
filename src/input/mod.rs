@@ -518,6 +518,11 @@ impl State {
 
                     let mut shell = self.common.shell.write().unwrap();
                     shell.update_pointer_position(position.to_local(&output), &output);
+                    shell.update_focal_point(
+                        &seat,
+                        original_position,
+                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                    );
 
                     if output != current_output {
                         for session in cursor_sessions_for_output(&*shell, &current_output) {

@@ -10,10 +10,13 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
-use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
+use crate::{
+    utils::{float::NextDown, tween::EasePoint},
+    wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities},
+};
 use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
-    TileBehavior,
+    TileBehavior, ZoomMovement,
 };
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
@@ -245,25 +248,112 @@ pub struct PendingLayer {
     pub output: Output,
 }
 
-pub struct ZoomState {
+struct ZoomState {
     seat: Seat<State>,
     level: f64,
-    focal_point: Point<f64, Global>,
-    previous: Option<(f64, Instant)>,
+    movement: ZoomMovement,
+    previous_level: Option<(f64, Instant)>,
+}
+
+#[derive(Debug)]
+struct OutputZoomState {
+    focal_point: Point<f64, Local>,
+    previous_point: Option<(Point<f64, Local>, Instant)>,
+}
+
+impl OutputZoomState {
+    pub fn new(
+        seat: &Seat<State>,
+        output: &Output,
+        movement: ZoomMovement,
+        level: f64,
+    ) -> OutputZoomState {
+        let cursor_position = seat.get_pointer().unwrap().current_location().as_global();
+        let output_geometry = output.geometry().to_f64();
+        let focal_point = if output_geometry.contains(cursor_position) {
+            match movement {
+                ZoomMovement::Continuously | ZoomMovement::OnEdge => {
+                    cursor_position.to_local(&output)
+                }
+                ZoomMovement::Centered => {
+                    let mut zoomed_output_geometry = output_geometry;
+                    zoomed_output_geometry = zoomed_output_geometry.downscale(level);
+                    zoomed_output_geometry.loc =
+                        cursor_position - zoomed_output_geometry.size.downscale(2.).to_point();
+
+                    let mut focal_point = zoomed_output_geometry
+                        .loc
+                        .to_local(&output)
+                        .upscale(level)
+                        .to_global(&output);
+                    focal_point.x = focal_point.x.clamp(
+                        output_geometry.loc.x as f64,
+                        ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                    );
+                    focal_point.y = focal_point.y.clamp(
+                        output_geometry.loc.y as f64,
+                        ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                    );
+                    focal_point.to_local(&output)
+                }
+            }
+        } else {
+            (output_geometry.size.w / 2., output_geometry.size.h / 2.).into()
+        };
+
+        OutputZoomState {
+            focal_point,
+            previous_point: None,
+        }
+    }
+
+    fn focal_point(&mut self) -> Point<f64, Local> {
+        if let Some((old_point, start)) = self.previous_point.as_ref() {
+            let duration_since = Instant::now().duration_since(*start);
+            if duration_since > ANIMATION_DURATION {
+                self.previous_point.take();
+                return self.focal_point;
+            }
+
+            let percentage =
+                duration_since.as_millis() as f32 / ANIMATION_DURATION.as_millis() as f32;
+            ease(
+                EaseInOutCubic,
+                EasePoint(*old_point),
+                EasePoint(self.focal_point),
+                percentage,
+            )
+            .0
+        } else {
+            self.focal_point
+        }
+    }
 }
 
 impl ZoomState {
-    pub fn level(&self) -> (Seat<State>, Point<f64, Global>, f64) {
-        if let Some((old, start)) = self.previous.as_ref() {
+    pub fn level(&self, output: Option<&Output>) -> (Seat<State>, Point<f64, Global>, f64) {
+        let active_output = self.seat.active_output();
+        let output = output.unwrap_or(&active_output);
+        let output_state = output.user_data().get_or_insert_threadsafe(|| {
+            Mutex::new(OutputZoomState::new(
+                &self.seat,
+                output,
+                self.movement,
+                self.level,
+            ))
+        });
+        let focal_point = output_state.lock().unwrap().focal_point().to_global(output);
+
+        if let Some((old_level, start)) = self.previous_level.as_ref() {
             let percentage = Instant::now().duration_since(*start).as_millis() as f32
                 / ANIMATION_DURATION.as_millis() as f32;
             (
                 self.seat.clone(),
-                self.focal_point,
-                ease(EaseInOutCubic, *old, self.level, percentage),
+                focal_point,
+                ease(EaseInOutCubic, *old_level, self.level, percentage),
             )
         } else {
-            (self.seat.clone(), self.focal_point, self.level)
+            (self.seat.clone(), focal_point, self.level)
         }
     }
 }
@@ -1833,6 +1923,24 @@ impl Shell {
             .workspaces
             .spaces()
             .any(|workspace| workspace.animations_going())
+            || self.zoom_state.as_ref().is_some_and(|state| {
+                state.previous_level.is_some()
+                    || self.outputs().any(|o| {
+                        o.user_data()
+                            .get_or_insert_threadsafe(|| {
+                                Mutex::new(OutputZoomState::new(
+                                    &state.seat,
+                                    o,
+                                    state.movement,
+                                    state.level,
+                                ))
+                            })
+                            .lock()
+                            .unwrap()
+                            .previous_point
+                            .is_some()
+                    })
+            })
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
@@ -1966,26 +2074,124 @@ impl Shell {
         }
     }
 
-    pub fn trigger_zoom(
+    pub fn trigger_zoom(&mut self, seat: &Seat<State>, level: f64, movement: ZoomMovement) {
+        if self.zoom_state.is_none() && level == 1. {
+            return;
+        }
+
+        let previous_level = if let Some(old_state) = self.zoom_state.take() {
+            if &old_state.seat != seat {
+                return;
+            }
+
+            old_state.level
+        } else {
+            for output in self.outputs() {
+                if let Some(output_state) = output.user_data().get::<Mutex<OutputZoomState>>() {
+                    *output_state.lock().unwrap() =
+                        OutputZoomState::new(seat, output, movement, level);
+                }
+            }
+            1.0
+        };
+
+        self.zoom_state = Some(ZoomState {
+            seat: seat.clone(),
+            level,
+            movement,
+            previous_level: Some((previous_level, Instant::now())),
+        });
+    }
+
+    pub fn update_focal_point(
         &mut self,
         seat: &Seat<State>,
-        focal_point: Point<f64, Global>,
-        level: f64,
+        original_position: Point<f64, Global>,
+        movement: ZoomMovement,
     ) {
-        if level == 1. {
-            self.zoom_state.take();
-        } else {
-            self.zoom_state = Some(ZoomState {
-                seat: seat.clone(),
-                level,
-                focal_point,
-                previous: None,
+        if let Some(state) = self.zoom_state.as_mut() {
+            if &state.seat != seat {
+                return;
+            }
+
+            let output = seat.active_output();
+            let output_state = output.user_data().get_or_insert_threadsafe(|| {
+                Mutex::new(OutputZoomState::new(seat, &output, movement, state.level))
             });
+            let mut output_state_ref = output_state.lock().unwrap();
+
+            // animate movement type changes
+            if state.movement != movement {
+                output_state_ref.previous_point =
+                    Some((output_state_ref.focal_point, Instant::now()));
+                state.movement = movement;
+            }
+
+            let cursor_position = seat
+                .get_pointer()
+                .unwrap()
+                .current_location()
+                .as_global()
+                .to_local(&output);
+            match movement {
+                ZoomMovement::Continuously => output_state_ref.focal_point = cursor_position,
+                ZoomMovement::OnEdge => {
+                    let output_geometry = output.geometry().to_f64();
+                    let mut zoomed_output_geometry = output_geometry;
+
+                    zoomed_output_geometry.loc -= output_state_ref.focal_point.to_global(&output);
+                    zoomed_output_geometry = zoomed_output_geometry.downscale(state.level);
+                    zoomed_output_geometry.loc += output_state_ref.focal_point.to_global(&output);
+
+                    if !zoomed_output_geometry.contains(cursor_position.to_global(&output)) {
+                        let mut diff = output_state_ref.focal_point.to_global(&output)
+                            + (cursor_position.to_global(&output) - original_position)
+                                .upscale(state.level);
+                        diff.x = diff.x.clamp(
+                            output_geometry.loc.x as f64,
+                            ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                        );
+                        diff.y = diff.y.clamp(
+                            output_geometry.loc.y as f64,
+                            ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                        );
+                        diff -= output_state_ref.focal_point.to_global(&output);
+
+                        output_state_ref.focal_point += diff.as_logical().as_local();
+                    }
+                }
+                ZoomMovement::Centered => {
+                    let output_geometry = output.geometry().to_f64();
+
+                    let mut zoomed_output_geometry = output_geometry;
+                    zoomed_output_geometry = zoomed_output_geometry.downscale(state.level);
+                    zoomed_output_geometry.loc = cursor_position.to_global(&output)
+                        - zoomed_output_geometry.size.downscale(2.).to_point();
+
+                    let mut focal_point = zoomed_output_geometry
+                        .loc
+                        .to_local(&output)
+                        .upscale(state.level)
+                        .to_global(&output);
+                    focal_point.x = focal_point.x.clamp(
+                        output_geometry.loc.x as f64,
+                        ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                    );
+                    focal_point.y = focal_point.y.clamp(
+                        output_geometry.loc.y as f64,
+                        ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                    );
+                    output_state_ref.focal_point = focal_point.to_local(&output);
+                }
+            }
         }
     }
 
-    pub fn zoom_level(&self) -> Option<(Seat<State>, Point<f64, Global>, f64)> {
-        self.zoom_state.as_ref().map(|s| s.level())
+    pub fn zoom_level(
+        &self,
+        output: Option<&Output>,
+    ) -> Option<(Seat<State>, Point<f64, Global>, f64)> {
+        self.zoom_state.as_ref().map(|s| s.level(output))
     }
 
     fn refresh(
@@ -2021,6 +2227,18 @@ impl Shell {
                 self.resize_indicator = None;
             }
             _ => {}
+        }
+
+        if let Some(zoom_state) = self.zoom_state.as_mut() {
+            if zoom_state
+                .previous_level
+                .as_ref()
+                .is_some_and(|(_, start)| {
+                    Instant::now().duration_since(*start) > ANIMATION_DURATION
+                })
+            {
+                zoom_state.previous_level.take();
+            }
         }
 
         self.workspaces

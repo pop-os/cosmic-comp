@@ -595,7 +595,7 @@ where
     } else {
         ElementFilter::All
     };
-    let zoom_level = shell.read().unwrap().zoom_level();
+    let zoom_level = shell.read().unwrap().zoom_level(Some(&output));
 
     #[allow(unused_mut)]
     let workspace_elements = workspace_elements(
@@ -1013,7 +1013,7 @@ where
     } else {
         ElementFilter::All
     };
-    let zoom_level = shell.read().unwrap().zoom_level();
+    let zoom_level = shell.read().unwrap().zoom_level(Some(&output));
 
     let result = render_workspace(
         gpu,
