@@ -12,7 +12,7 @@ use smithay::{
     backend::input::{Device, DeviceCapability},
     desktop::utils::bbox_from_surface_tree,
     input::{
-        keyboard::{KeyboardHandle, LedState, XkbConfig},
+        keyboard::{LedState, XkbConfig},
         pointer::{CursorImageAttributes, CursorImageStatus},
         Seat, SeatState,
     },
