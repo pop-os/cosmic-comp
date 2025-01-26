@@ -178,7 +178,7 @@ pub fn create_seat(
     output: &Output,
     config: &Config,
     name: String,
-) -> (Seat<State>, KeyboardHandle<State>) {
+) -> Seat<State> {
     let mut seat = seat_state.new_wl_seat(dh, name);
     let userdata = seat.user_data();
     userdata.insert_if_missing_threadsafe(SeatId::default);
@@ -203,28 +203,27 @@ pub fn create_seat(
     // So instead of doing the right thing (and initialize these capabilities as matching
     // devices appear), we have to surrender to reality and just always expose a keyboard and pointer.
     let conf = config.xkb_config();
-    let keyboard = seat
-        .add_keyboard(
-            xkb_config_to_wl(&conf),
+    seat.add_keyboard(
+        xkb_config_to_wl(&conf),
+        (conf.repeat_delay as i32).abs(),
+        (conf.repeat_rate as i32).abs(),
+    )
+    .or_else(|err| {
+        warn!(
+            ?err,
+            "Failed to load provided xkb config. Trying default...",
+        );
+        seat.add_keyboard(
+            XkbConfig::default(),
             (conf.repeat_delay as i32).abs(),
             (conf.repeat_rate as i32).abs(),
         )
-        .or_else(|err| {
-            warn!(
-                ?err,
-                "Failed to load provided xkb config. Trying default...",
-            );
-            seat.add_keyboard(
-                XkbConfig::default(),
-                (conf.repeat_delay as i32).abs(),
-                (conf.repeat_rate as i32).abs(),
-            )
-        })
-        .expect("Failed to load xkb configuration files");
+    })
+    .expect("Failed to load xkb configuration files");
     seat.add_pointer();
     seat.add_touch();
 
-    (seat, keyboard)
+    seat
 }
 
 pub trait SeatExt {
