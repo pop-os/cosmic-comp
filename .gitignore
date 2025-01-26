@@ -14,3 +14,4 @@ vendor.tar
 .vscode
 *.log
 /result
+build/*

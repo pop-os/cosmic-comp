@@ -53,19 +53,29 @@ install:
 	install -Dm0644 "data/keybindings.ron" "$(KEYBINDINGS_CONF)"
 	install -Dm0644 "data/tiling-exceptions.ron" "$(TILING_EXCEPTIONS_CONF)"
 
-install-bare-session: install
-	install -Dm0644 "data/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
+gen-template:
+	mkdir build || true
+	sed -f data/replace.sed data/cosmic-comp.service > build/cosmic-comp.service
+	sed -f data/replace.sed data/cosmic.desktop > build/cosmic.desktop
+
+install-bare-session: install gen-template
+	install -Dm0644 "build/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
 	install -Dm0644 "data/cosmic-session.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-session.target"
 	install -Dm0644 "data/cosmic-session-pre.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-session-pre.target"
-	install -Dm0644 "data/cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp.service"
+	install -Dm0644 "build/cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp.service"
 	install -Dm0755 "data/cosmic-service" "$(DESTDIR)/$(bindir)/cosmic-service"
 
 install-debug:
 	install -Dm0755 "$(CARGO_TARGET_DIR)/$(TARGET)/$(BINARY)" "$(DEBUG_TARGET_BIN)"
 
-install-debug-session: install-debug
-	install -Dm0644 "debug-data/debug-cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/debug-cosmic.desktop"
-	install -Dm0644 "debug-data/debug-cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/debug-cosmic-comp.service"
+gen-debug-template:
+	mkdir build || true
+	sed -f debug-data/replace.sed data/cosmic-comp.service > build/debug-cosmic-comp.service
+	sed -f debug-data/replace.sed data/cosmic.desktop > build/debug-cosmic.desktop
+
+install-debug-session: install-debug gen-debug-template
+	install -Dm0644 "build/debug-cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/debug-cosmic.desktop"
+	install -Dm0644 "build/debug-cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/debug-cosmic-comp.service"
 	install -Dm0755 "debug-data/debug-cosmic-service" "$(DESTDIR)/$(bindir)/debug-cosmic-service"
 
 uninstall:
