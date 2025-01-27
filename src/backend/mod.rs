@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::State;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use cosmic_comp_config::NumlockState;
+use smithay::backend::input::{self as smithay_input};
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
+use smithay::utils::SERIAL_COUNTER;
 use tracing::{info, warn};
 
 pub mod render;
@@ -58,6 +61,11 @@ pub fn init_backend_auto(
             &state.common.config,
             "seat-0".into(),
         );
+
+        let keyboard = initial_seat
+            .get_keyboard()
+            .ok_or_else(|| anyhow!("`shell::create_seat` did not setup keyboard"))?;
+
         state
             .common
             .shell
@@ -66,6 +74,44 @@ pub fn init_backend_auto(
             .seats
             .add_seat(initial_seat);
 
+        let desired_numlock = state
+            .common
+            .config
+            .cosmic_conf
+            .keyboard_config
+            .numlock_state;
+        // Restore numlock state based on config.
+        let toggle_numlock = match desired_numlock {
+            NumlockState::BootOff => keyboard.modifier_state().num_lock,
+            NumlockState::BootOn => !keyboard.modifier_state().num_lock,
+            NumlockState::LastBoot => {
+                keyboard.modifier_state().num_lock
+                    != state.common.config.dynamic_conf.numlock().last_state
+            }
+        };
+
+        // If we're enabling numlock...
+        if toggle_numlock {
+            /// Linux scancode for numlock key.
+            const NUMLOCK_SCANCODE: u32 = 69;
+            /// Offset used to convert Linux scancode to X11 keycode.
+            const X11_KEYCODE_OFFSET: u32 = 8;
+
+            let mut input = |key_state| {
+                let time = state.common.clock.now().as_millis();
+                let _ = keyboard.input(
+                    state,
+                    smithay_input::Keycode::new(NUMLOCK_SCANCODE + X11_KEYCODE_OFFSET),
+                    key_state,
+                    SERIAL_COUNTER.next_serial(),
+                    time,
+                    |_, _, _| smithay::input::keyboard::FilterResult::<()>::Forward,
+                );
+            };
+            // Press and release the numlock key to update modifiers.
+            input(smithay_input::KeyState::Pressed);
+            input(smithay_input::KeyState::Released);
+        }
         {
             {
                 state
