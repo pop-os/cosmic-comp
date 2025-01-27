@@ -6,6 +6,7 @@ use smithay::{
     output::Output,
     reexports::wayland_server::{
         backend::{ClientData, ClientId, GlobalId, ObjectId},
+        protocol::wl_output::WlOutput,
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
 };
@@ -70,6 +71,7 @@ pub struct WorkspaceGroupHandle {
 #[derive(Default)]
 pub struct WorkspaceGroupDataInner {
     outputs: Vec<Output>,
+    wl_outputs: HashSet<WlOutput>,
     capabilities: Vec<GroupCapabilities>,
     workspace_count: usize,
 }
@@ -905,26 +907,25 @@ where
         .unwrap();
     let mut changed = false;
     if let Ok(client) = dh.get_client(instance.id()) {
-        for new_output in group
-            .outputs
-            .iter()
-            .filter(|o| !handle_state.outputs.contains(o))
-        {
-            for wl_output in new_output.client_outputs(&client) {
-                instance.output_enter(&wl_output);
+        for output in &group.outputs {
+            for wl_output in output.client_outputs(&client) {
+                if handle_state.wl_outputs.insert(wl_output.clone()) {
+                    instance.output_enter(&wl_output);
+                    changed = true;
+                }
             }
-            changed = true;
         }
-        for old_output in handle_state
-            .outputs
-            .iter()
-            .filter(|o| !group.outputs.contains(o))
-        {
-            for wl_output in old_output.client_outputs(&client) {
+
+        handle_state.wl_outputs.retain(|wl_output| {
+            let retain =
+                wl_output.is_alive() && group.outputs.iter().any(|output| output.owns(wl_output));
+            if !retain {
                 instance.output_leave(&wl_output);
+                changed = true;
             }
-            changed = true;
-        }
+            retain
+        });
+
         handle_state.outputs = group.outputs.clone();
     }
 
