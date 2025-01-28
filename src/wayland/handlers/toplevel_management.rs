@@ -10,7 +10,7 @@ use smithay::{
 };
 
 use crate::{
-    shell::{CosmicSurface, Shell, WorkspaceDelta},
+    shell::{element::CosmicWindow, CosmicSurface, Shell, WorkspaceDelta},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoHandler,
@@ -109,8 +109,28 @@ impl ToplevelManagementHandler for State {
         };
 
         let mut shell = self.common.shell.write().unwrap();
-        if let Some(mapped) = shell.element_for_surface(window).cloned() {
-            if let Some(from_workspace) = shell.space_for(&mapped) {
+        if let Some(mut mapped) = shell.element_for_surface(window).cloned() {
+            if let Some(from_workspace) = shell.space_for_mut(&mapped) {
+                // If window is part of a stack, remove it and map it outside the stack
+                if let Some(stack) = mapped.stack_ref() {
+                    stack.remove_window(&window);
+                    mapped = CosmicWindow::new(
+                        window.clone(),
+                        self.common.event_loop_handle.clone(),
+                        self.common.theme.clone(),
+                    )
+                    .into();
+                    if from_workspace.tiling_enabled {
+                        from_workspace.tiling_layer.map(
+                            mapped.clone(),
+                            None::<std::iter::Empty<_>>,
+                            None,
+                        );
+                    } else {
+                        from_workspace.floating_layer.map(mapped.clone(), None);
+                    }
+                }
+
                 let from_handle = from_workspace.handle;
                 let seat = shell.seats.last_active().clone();
                 let res = shell.move_window(
