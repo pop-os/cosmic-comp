@@ -109,33 +109,24 @@ impl ToplevelManagementHandler for State {
         };
 
         let mut shell = self.common.shell.write().unwrap();
-        let from_workspace = shell.workspaces.spaces().find(|w| {
-            w.mapped()
-                .flat_map(|m| m.windows().map(|(s, _)| s))
-                .any(|w| &w == window)
-        });
-        if let Some(from_workspace) = from_workspace {
-            let mapped = from_workspace
-                .mapped()
-                .find(|m| m.windows().any(|(w, _)| &w == window))
-                .unwrap()
-                .clone();
-            let from_handle = from_workspace.handle;
-            let seat = shell.seats.last_active().clone();
-            let res = shell.move_window(
-                Some(&seat),
-                &mapped,
-                &from_handle,
-                &to_handle,
-                false,
-                None,
-                &mut self.common.workspace_state.update(),
-            );
-            if let Some((target, _)) = res {
-                std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, true);
+        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+            if let Some(from_workspace) = shell.space_for(&mapped) {
+                let from_handle = from_workspace.handle;
+                let seat = shell.seats.last_active().clone();
+                let res = shell.move_window(
+                    Some(&seat),
+                    &mapped,
+                    &from_handle,
+                    &to_handle,
+                    false,
+                    None,
+                    &mut self.common.workspace_state.update(),
+                );
+                if let Some((target, _)) = res {
+                    std::mem::drop(shell);
+                    Shell::set_focus(self, Some(&target), &seat, None, true);
+                }
             }
-            return;
         }
     }
 
