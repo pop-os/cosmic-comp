@@ -10,7 +10,7 @@ use smithay::{
 };
 
 use crate::{
-    shell::{CosmicSurface, Shell, WorkspaceDelta},
+    shell::{element::CosmicWindow, CosmicSurface, Shell, WorkspaceDelta},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoHandler,
@@ -109,33 +109,44 @@ impl ToplevelManagementHandler for State {
         };
 
         let mut shell = self.common.shell.write().unwrap();
-        let from_workspace = shell.workspaces.spaces().find(|w| {
-            w.mapped()
-                .flat_map(|m| m.windows().map(|(s, _)| s))
-                .any(|w| &w == window)
-        });
-        if let Some(from_workspace) = from_workspace {
-            let mapped = from_workspace
-                .mapped()
-                .find(|m| m.windows().any(|(w, _)| &w == window))
-                .unwrap()
-                .clone();
-            let from_handle = from_workspace.handle;
-            let seat = shell.seats.last_active().clone();
-            let res = shell.move_window(
-                Some(&seat),
-                &mapped,
-                &from_handle,
-                &to_handle,
-                false,
-                None,
-                &mut self.common.workspace_state.update(),
-            );
-            if let Some((target, _)) = res {
-                std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, true);
+        if let Some(mut mapped) = shell.element_for_surface(window).cloned() {
+            if let Some(from_workspace) = shell.space_for_mut(&mapped) {
+                // If window is part of a stack, remove it and map it outside the stack
+                if let Some(stack) = mapped.stack_ref() {
+                    stack.remove_window(&window);
+                    mapped = CosmicWindow::new(
+                        window.clone(),
+                        self.common.event_loop_handle.clone(),
+                        self.common.theme.clone(),
+                    )
+                    .into();
+                    if from_workspace.tiling_enabled {
+                        from_workspace.tiling_layer.map(
+                            mapped.clone(),
+                            None::<std::iter::Empty<_>>,
+                            None,
+                        );
+                    } else {
+                        from_workspace.floating_layer.map(mapped.clone(), None);
+                    }
+                }
+
+                let from_handle = from_workspace.handle;
+                let seat = shell.seats.last_active().clone();
+                let res = shell.move_window(
+                    Some(&seat),
+                    &mapped,
+                    &from_handle,
+                    &to_handle,
+                    false,
+                    None,
+                    &mut self.common.workspace_state.update(),
+                );
+                if let Some((target, _)) = res {
+                    std::mem::drop(shell);
+                    Shell::set_focus(self, Some(&target), &seat, None, true);
+                }
             }
-            return;
         }
     }
 
