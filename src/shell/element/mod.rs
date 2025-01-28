@@ -4,6 +4,7 @@ use crate::{
     utils::{iced::IcedElementInternal, prelude::*},
 };
 use calloop::LoopHandle;
+use cosmic_comp_config::StackBehavior;
 use id_tree::NodeId;
 use smithay::{
     backend::{
@@ -553,6 +554,7 @@ impl CosmicMapped {
         &mut self,
         (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
+        config: StackBehavior,
     ) {
         match &self.element {
             CosmicMappedInternal::Window(window) => {
@@ -560,7 +562,7 @@ impl CosmicMapped {
                 let activated = surface.is_activated(true);
                 let handle = window.loop_handle();
 
-                let stack = CosmicStack::new(std::iter::once(surface), handle, theme);
+                let stack = CosmicStack::new(std::iter::once(surface), handle, theme, config);
                 if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
                     stack.set_geometry(geo.to_global(&output));
                 }
@@ -884,6 +886,13 @@ impl CosmicMapped {
                 .then(|| crate::shell::element::window::SSD_HEIGHT),
             CosmicMappedInternal::Stack(_) => Some(crate::shell::element::stack::TAB_HEIGHT),
             _ => unreachable!(),
+        }
+    }
+
+    pub fn update_stack_behavior(&mut self, behavior: &StackBehavior) {
+        if let CosmicMappedInternal::Stack(stack) = &mut self.element {
+            let mut inner = stack.0 .0.lock().unwrap();
+            inner.update_stack_behavior(behavior);
         }
     }
 }
