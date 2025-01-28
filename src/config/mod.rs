@@ -33,6 +33,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap},
     fs::OpenOptions,
+    io::Write,
     path::PathBuf,
     sync::{atomic::AtomicBool, Arc, RwLock},
 };
@@ -46,6 +47,7 @@ pub use self::types::*;
 use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, TileBehavior, XkbConfig,
+    ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -600,7 +602,15 @@ impl<'a, T: Serialize> std::ops::DerefMut for PersistenceGuard<'a, T> {
 impl<'a, T: Serialize> Drop for PersistenceGuard<'a, T> {
     fn drop(&mut self) {
         if let Some(path) = self.0.as_ref() {
-            let writer = match OpenOptions::new()
+            let content = match ron::ser::to_string_pretty(&self.1, Default::default()) {
+                Ok(content) => content,
+                Err(err) => {
+                    warn!("Failed to serialize: {:?}", err);
+                    return;
+                }
+            };
+
+            let mut writer = match OpenOptions::new()
                 .create(true)
                 .truncate(true)
                 .write(true)
@@ -612,8 +622,11 @@ impl<'a, T: Serialize> Drop for PersistenceGuard<'a, T> {
                     return;
                 }
             };
-            if let Err(err) = ron::ser::to_writer_pretty(writer, &self.1, Default::default()) {
+
+            if let Err(err) = writer.write_all(content.as_bytes()) {
                 warn!(?err, "Failed to persist {}", path.display());
+            } else {
+                let _ = writer.flush();
             }
         }
     }
@@ -754,6 +767,12 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<u64>(&config, "focus_follows_cursor_delay");
                 if new != state.common.config.cosmic_conf.focus_follows_cursor_delay {
                     state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
+                }
+            }
+            "accessibility_zoom" => {
+                let new = get_config::<ZoomConfig>(&config, "accessibility_zoom");
+                if new != state.common.config.cosmic_conf.accessibility_zoom {
+                    state.common.config.cosmic_conf.accessibility_zoom = new;
                 }
             }
             _ => {}

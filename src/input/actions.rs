@@ -1026,6 +1026,29 @@ impl State {
 
             Action::Spawn(command) => self.spawn_command(command),
 
+            x @ Action::ZoomIn | x @ Action::ZoomOut => {
+                let mut shell = self.common.shell.write().unwrap();
+                let (zoom_seat, current_level) = shell
+                    .zoom_level(None)
+                    .map(|(s, _, l)| (s, l))
+                    .unwrap_or_else(|| (seat.clone(), 1.0));
+                if &zoom_seat == seat {
+                    let increment =
+                        self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
+                    shell.trigger_zoom(
+                        seat,
+                        match x {
+                            Action::ZoomIn => current_level + increment,
+                            Action::ZoomOut => (current_level - increment).max(1.0),
+                            _ => unreachable!(),
+                        },
+                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                    );
+
+                    // TODO: persist state, if enable_on_startup
+                }
+            }
+
             // Do nothing
             Action::Disable => (),
         }

@@ -1578,7 +1578,7 @@ impl FloatingLayout {
                             active_window_hint.blue,
                         ],
                     );
-                    window_elements.push(element.into());
+                    window_elements.insert(0, element.into());
                 }
             }
 
