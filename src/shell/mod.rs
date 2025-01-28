@@ -1,6 +1,6 @@
 use calloop::LoopHandle;
 use focus::target::WindowGroup;
-use grabs::SeatMoveGrabState;
+use grabs::{DistanceSwitchGrab, SeatMoveGrabState};
 use indexmap::IndexMap;
 use layout::TilingExceptions;
 use std::{
@@ -2564,10 +2564,11 @@ impl Shell {
         target_stack: bool,
         config: &Config,
         evlh: &LoopHandle<'static, State>,
+        client_initiated: bool,
     ) -> Option<(MenuGrab, Focus)> {
         let serial = serial.into();
         let Some(GrabStartData::Pointer(start_data)) =
-            check_grab_preconditions(&seat, surface, serial, true)
+            check_grab_preconditions(&seat, surface, serial, client_initiated)
         else {
             return None;
         };
@@ -2659,6 +2660,31 @@ impl Shell {
         );
 
         Some((grab, Focus::Keep))
+    }
+
+    pub fn distance_switch_request<Moved: FnOnce(&mut State), Unmoved: FnOnce(&mut State)>(
+        &mut self,
+        surface: &WlSurface,
+        seat: &Seat<State>,
+        serial: impl Into<Option<Serial>>,
+        config: &Config,
+        on_moved: Moved,
+        on_unmoved: Unmoved,
+        client_initiated: bool,
+    ) -> Option<(DistanceSwitchGrab<Moved, Unmoved>, Focus)> {
+        let serial = serial.into();
+
+        let start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
+
+        Some((
+            DistanceSwitchGrab {
+                moved: Some(on_moved),
+                unmoved: Some(on_unmoved),
+                start: start_data,
+                pointer_moved_epsilon: config.cosmic_conf.pointer_moved_epsilon,
+            },
+            Focus::Keep,
+        ))
     }
 
     pub fn move_request(

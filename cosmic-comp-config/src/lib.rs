@@ -31,6 +31,8 @@ pub struct CosmicCompConfig {
     pub focus_follows_cursor_delay: u64,
     /// Let X11 applications scale themselves
     pub descale_xwayland: bool,
+    /// How far the pointer can travel before it's considered as moved
+    pub pointer_moved_epsilon: u32,
 }
 
 impl Default for CosmicCompConfig {
@@ -60,6 +62,7 @@ impl Default for CosmicCompConfig {
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
             descale_xwayland: false,
+            pointer_moved_epsilon: 10,
         }
     }
 }
