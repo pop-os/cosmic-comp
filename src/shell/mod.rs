@@ -2274,9 +2274,9 @@ impl Shell {
                     .position(|(s, _)| &s == surface)
                     .map(|idx| (idx, m.clone()))
             });
-            let surface = if let Some((idx, mut mapped)) = sticky_res {
+            let surface = if let Some((idx, mapped)) = sticky_res {
                 if mapped.is_stack() {
-                    mapped.stack_ref_mut().unwrap().remove_idx(idx)
+                    mapped.stack_ref().unwrap().remove_idx(idx)
                 } else {
                     set.sticky_layer.unmap(&mapped);
                     Some(mapped.active_window())
@@ -2289,19 +2289,19 @@ impl Shell {
             {
                 if set.minimized_windows.get(idx).unwrap().window.is_stack() {
                     let window = &mut set.minimized_windows.get_mut(idx).unwrap().window;
-                    let stack = window.stack_ref_mut().unwrap();
+                    let stack = window.stack_ref().unwrap();
                     let idx = stack.surfaces().position(|s| &s == surface);
                     idx.and_then(|idx| stack.remove_idx(idx))
                 } else {
                     Some(set.minimized_windows.remove(idx).window.active_window())
                 }
-            } else if let Some((workspace, mut elem)) = set.workspaces.iter_mut().find_map(|w| {
+            } else if let Some((workspace, elem)) = set.workspaces.iter_mut().find_map(|w| {
                 w.element_for_surface(&surface)
                     .cloned()
                     .map(|elem| (w, elem))
             }) {
                 if elem.is_stack() {
-                    let stack = elem.stack_ref_mut().unwrap();
+                    let stack = elem.stack_ref().unwrap();
                     let idx = stack.surfaces().position(|s| &s == surface);
                     idx.and_then(|idx| stack.remove_idx(idx))
                 } else {
@@ -2676,7 +2676,7 @@ impl Shell {
         let serial = serial.into();
 
         let mut start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
-        let mut old_mapped = self.element_for_surface(surface).cloned()?;
+        let old_mapped = self.element_for_surface(surface).cloned()?;
         if old_mapped.is_minimized() {
             return None;
         }
@@ -2840,7 +2840,7 @@ impl Shell {
         toplevel_leave_output(&window, &cursor_output);
 
         if move_out_of_stack {
-            old_mapped.stack_ref_mut().unwrap().remove_window(&window);
+            old_mapped.stack_ref().unwrap().remove_window(&window);
             self.workspaces
                 .space_for_handle_mut(&workspace_handle)
                 .unwrap()

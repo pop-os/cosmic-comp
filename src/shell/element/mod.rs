@@ -542,13 +542,6 @@ impl CosmicMapped {
         }
     }
 
-    pub fn stack_ref_mut(&mut self) -> Option<&mut CosmicStack> {
-        match &mut self.element {
-            CosmicMappedInternal::Stack(stack) => Some(stack),
-            _ => None,
-        }
-    }
-
     pub fn convert_to_stack(
         &mut self,
         (output, overlap): (&Output, Rectangle<i32, Logical>),

@@ -103,10 +103,10 @@ pub fn tab_items(
 
     vec![
         Item::new(fl!("window-menu-unstack"), move |handle| {
-            let mut mapped = unstack_clone_stack.clone();
+            let mapped = unstack_clone_stack.clone();
             let surface = unstack_clone_tab.clone();
             let _ = handle.insert_idle(move |state| {
-                mapped.stack_ref_mut().unwrap().remove_window(&surface);
+                mapped.stack_ref().unwrap().remove_window(&surface);
                 let mapped: CosmicMapped = CosmicWindow::new(
                     surface,
                     state.common.event_loop_handle.clone(),

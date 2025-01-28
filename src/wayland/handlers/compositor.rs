@@ -213,9 +213,9 @@ impl CompositorHandler for State {
                         })
                         .then(|| state.element())
                 });
-            if let Some(mut window) = moved_window {
+            if let Some(window) = moved_window {
                 if window.is_stack() {
-                    let stack = window.stack_ref_mut().unwrap();
+                    let stack = window.stack_ref().unwrap();
                     if let Some(i) = stack.surfaces().position(|s| {
                         s.wl_surface()
                             .as_deref()

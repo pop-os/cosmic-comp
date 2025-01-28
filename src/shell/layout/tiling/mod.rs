@@ -1665,11 +1665,11 @@ impl TilingLayout {
                         .unwrap();
 
                     let stack_data = tree.get_mut(&next_child_id).unwrap().data_mut();
-                    let mut mapped = match stack_data {
+                    let mapped = match stack_data {
                         Data::Mapped { mapped, .. } => mapped.clone(),
                         _ => unreachable!(),
                     };
-                    let stack = mapped.stack_ref_mut().unwrap();
+                    let stack = mapped.stack_ref().unwrap();
 
                     let surface = match node.data() {
                         Data::Mapped { mapped, .. } => mapped.active_window(),
@@ -2744,7 +2744,7 @@ impl TilingLayout {
                 match tree.get_mut(window_id).unwrap().data_mut() {
                     Data::Mapped { mapped, .. } => {
                         mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone());
-                        let Some(stack) = mapped.stack_ref_mut() else {
+                        let Some(stack) = mapped.stack_ref() else {
                             unreachable!()
                         };
                         for surface in window.windows().map(|s| s.0) {

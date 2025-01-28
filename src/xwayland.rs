@@ -627,13 +627,13 @@ impl XwmHandler for State {
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write().unwrap();
-        if let Some(mut mapped) = shell.element_for_surface(&window).cloned() {
+        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.unminimize_request(&mapped, &seat);
             if mapped.is_stack() {
                 let maybe_surface = mapped.windows().find(|(w, _)| w.is_window(&window));
                 if let Some((surface, _)) = maybe_surface {
-                    mapped.stack_ref_mut().unwrap().set_active(&surface);
+                    mapped.stack_ref().unwrap().set_active(&surface);
                 }
             }
         }
