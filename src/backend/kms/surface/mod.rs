@@ -3,7 +3,8 @@
 use crate::{
     backend::render::{
         element::{CosmicElement, DamageElement},
-        init_shaders, output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR,
+        init_shaders, output_elements, update_postprocess_shader, CursorMode, GlMultiRenderer,
+        PostprocessShader, CLEAR_COLOR,
     },
     config::AdaptiveSync,
     shell::Shell,
@@ -40,9 +41,9 @@ use smithay::{
                 utils::{constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior},
                 Element, Kind, RenderElementStates,
             },
-            gles::{GlesRenderbuffer, GlesTexture},
+            gles::{element::TextureShaderElement, GlesRenderbuffer, GlesRenderer, GlesTexture},
             glow::GlowRenderer,
-            multigpu::{Error as MultiError, GpuManager},
+            multigpu::{ApiDevice, Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
             Bind, ImportDma, Offscreen, Renderer, Texture,
@@ -74,7 +75,7 @@ use smithay::{
 use tracing::{error, trace, warn};
 
 use std::{
-    borrow::BorrowMut,
+    borrow::{Borrow, BorrowMut},
     collections::{HashMap, HashSet},
     mem,
     sync::{
@@ -136,7 +137,8 @@ pub struct SurfaceThreadState {
 
     output: Output,
     mirroring: Option<Output>,
-    mirroring_textures: HashMap<DrmNode, MirroringState>,
+    offscreen_textures: HashMap<DrmNode, OffscreenState>,
+    postprocess_shader: Option<String>,
 
     shell: Arc<RwLock<Shell>>,
 
@@ -147,13 +149,14 @@ pub struct SurfaceThreadState {
     egui: EguiState,
 }
 
+// Used for mirroring and postprocessing
 #[derive(Debug)]
-struct MirroringState {
+struct OffscreenState {
     texture: TextureRenderBuffer<GlesTexture>,
     damage_tracker: OutputDamageTracker,
 }
 
-impl MirroringState {
+impl OffscreenState {
     fn new_with_renderer(
         renderer: &mut GlMultiRenderer,
         format: Fourcc,
@@ -179,7 +182,7 @@ impl MirroringState {
 
         let damage_tracker = OutputDamageTracker::from_output(output);
 
-        Ok(MirroringState {
+        Ok(OffscreenState {
             texture: texture_buffer,
             damage_tracker,
         })
@@ -236,6 +239,7 @@ pub enum ThreadCommand {
         node: DrmNode,
     },
     UpdateMirroring(Option<Output>),
+    UpdatePostprocessShader(Option<String>),
     VBlank(Option<DrmEventMetadata>),
     ScheduleRender,
     AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
@@ -400,6 +404,12 @@ impl Surface {
             .send(ThreadCommand::UpdateMirroring(output));
     }
 
+    pub fn set_postprocess_shader(&mut self, shader: Option<String>) {
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::UpdatePostprocessShader(shader));
+    }
+
     pub fn adaptive_sync_support(&self) -> Result<VrrSupport> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let _ = self
@@ -536,7 +546,8 @@ fn surface_thread(
 
         output,
         mirroring: None,
-        mirroring_textures: HashMap::new(),
+        offscreen_textures: HashMap::new(),
+        postprocess_shader: None,
 
         shell,
         loop_handle: event_loop.handle(),
@@ -573,6 +584,9 @@ fn surface_thread(
             }
             Event::Msg(ThreadCommand::UpdateMirroring(mirroring_output)) => {
                 state.update_mirroring(mirroring_output);
+            }
+            Event::Msg(ThreadCommand::UpdatePostprocessShader(shader)) => {
+                state.update_postprocess_shader(shader);
             }
             Event::Msg(ThreadCommand::AdaptiveSyncAvailable(result)) => {
                 if let Some(compositor) = state.compositor.as_mut() {
@@ -708,6 +722,7 @@ impl SurfaceThreadState {
         let mut renderer =
             unsafe { GlowRenderer::new(egl) }.context("Failed to create renderer")?;
         init_shaders(renderer.borrow_mut()).context("Failed to initialize shaders")?;
+        update_postprocess_shader(renderer.borrow_mut(), self.postprocess_shader.as_deref());
 
         #[cfg(feature = "debug")]
         {
@@ -1044,34 +1059,47 @@ impl SurfaceThreadState {
                     .collect()
             }).unwrap_or_default();
 
+        let postprocess_shader = Borrow::<GlesRenderer>::borrow(renderer.as_mut())
+            .egl_context()
+            .user_data()
+            .get::<PostprocessShader>()
+            .and_then(|x| x.0.lock().unwrap().clone());
+
         // actual rendering
-        let res = if let Some(mirrored_output) = self.mirroring.as_ref().filter(|mirrored_output| {
-            mirrored_output.current_mode().is_some_and(|mirror_mode| {
-                self.output
-                    .current_mode()
-                    .is_some_and(|mode| mode != mirror_mode)
-            }) || mirrored_output.current_scale().fractional_scale()
-                != self.output.current_scale().fractional_scale()
-        }) {
-            let mirroring_state = {
-                let entry = self.mirroring_textures.entry(self.target_node);
+        // Render offscreen first if postprocessing, or mirroring with different size
+        let source_output = self
+            .mirroring
+            .as_ref()
+            .filter(|mirrored_output| {
+                mirrored_output.current_mode().is_some_and(|mirror_mode| {
+                    self.output
+                        .current_mode()
+                        .is_some_and(|mode| mode != mirror_mode)
+                }) || mirrored_output.current_scale().fractional_scale()
+                    != self.output.current_scale().fractional_scale()
+            })
+            .or(postprocess_shader.as_ref().map(|_| &self.output));
+        let mut postproc_states = None; // TODO better way?
+        let res = if let Some(source_output) = source_output {
+            let offscreen_state = {
+                let entry = self.offscreen_textures.entry(self.target_node);
                 let mut new_state = None;
                 if matches!(entry, std::collections::hash_map::Entry::Vacant(_)) {
-                    new_state = Some(MirroringState::new_with_renderer(
+                    new_state = Some(OffscreenState::new_with_renderer(
                         &mut renderer,
                         compositor.format(),
-                        mirrored_output,
+                        source_output,
                     )?);
                 }
                 // I really want a failable initializer...
                 entry.or_insert_with(|| new_state.unwrap())
             };
 
-            mirroring_state
+            offscreen_state
                 .texture
                 .render()
                 .draw::<_, <GlMultiRenderer as Renderer>::Error>(|tex| {
-                    let res = match mirroring_state.damage_tracker.render_output_with(
+                    let res = match offscreen_state.damage_tracker.render_output_with(
                         &mut renderer,
                         tex.clone(),
                         1,
@@ -1083,9 +1111,13 @@ impl SurfaceThreadState {
                         Err(RenderError::OutputNoMode(_)) => unreachable!(),
                     };
 
+                    if self.mirroring.is_none() {
+                        postproc_states = Some(res.states);
+                    }
+
                     renderer.wait(&res.sync)?;
 
-                    let transform = mirrored_output.current_transform();
+                    let transform = source_output.current_transform();
                     let area = tex.size().to_logical(1, transform);
 
                     Ok(res
@@ -1102,32 +1134,57 @@ impl SurfaceThreadState {
 
             let texture_elem = TextureRenderElement::from_texture_render_buffer(
                 (0., 0.),
-                &mirroring_state.texture,
+                &offscreen_state.texture,
                 Some(1.0),
                 None,
                 None,
                 Kind::Unspecified,
             );
+
             let texture_geometry = texture_elem.geometry(1.0.into());
-            elements = constrain_render_elements(
-                std::iter::once(texture_elem),
-                (0, 0),
-                Rectangle::from_size(
-                    self.output
-                        .geometry()
-                        .size
-                        .as_logical()
-                        .to_f64()
-                        .to_physical(self.output.current_scale().fractional_scale())
-                        .to_i32_round(),
-                ),
-                texture_geometry,
-                ConstrainScaleBehavior::Fit,
-                ConstrainAlign::CENTER,
-                1.0,
-            )
-            .map(CosmicElement::Mirror)
-            .collect::<Vec<_>>();
+            elements = if let Some(shader) = &postprocess_shader {
+                let texture_elem =
+                    TextureShaderElement::new(texture_elem, shader.clone(), Vec::new());
+                constrain_render_elements(
+                    std::iter::once(texture_elem),
+                    (0, 0),
+                    Rectangle::from_size(
+                        self.output
+                            .geometry()
+                            .size
+                            .as_logical()
+                            .to_f64()
+                            .to_physical(self.output.current_scale().fractional_scale())
+                            .to_i32_round(),
+                    ),
+                    texture_geometry,
+                    ConstrainScaleBehavior::Fit,
+                    ConstrainAlign::CENTER,
+                    1.0,
+                )
+                .map(CosmicElement::Postprocess)
+                .collect::<Vec<_>>()
+            } else {
+                constrain_render_elements(
+                    std::iter::once(texture_elem),
+                    (0, 0),
+                    Rectangle::from_size(
+                        self.output
+                            .geometry()
+                            .size
+                            .as_logical()
+                            .to_f64()
+                            .to_physical(self.output.current_scale().fractional_scale())
+                            .to_i32_round(),
+                    ),
+                    texture_geometry,
+                    ConstrainScaleBehavior::Fit,
+                    ConstrainAlign::CENTER,
+                    1.0,
+                )
+                .map(CosmicElement::Mirror)
+                .collect::<Vec<_>>()
+            };
 
             renderer = self.api.single_renderer(&self.target_node).unwrap();
             if let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr)) {
@@ -1324,7 +1381,8 @@ impl SurfaceThreadState {
                         }
 
                         if self.mirroring.is_none() {
-                            let states = frame_result.states;
+                            // If postprocessing, use states from first render
+                            let states = postproc_states.unwrap_or(frame_result.states);
                             self.send_dmabuf_feedback(states);
                         }
 
@@ -1421,7 +1479,16 @@ impl SurfaceThreadState {
 
     fn update_mirroring(&mut self, mirroring_output: Option<Output>) {
         self.mirroring = mirroring_output;
-        self.mirroring_textures.clear();
+        self.offscreen_textures.clear();
+    }
+
+    fn update_postprocess_shader(&mut self, shader: Option<String>) {
+        // XXX unwrap
+        for device in self.api.devices_mut().unwrap() {
+            update_postprocess_shader(device.renderer_mut().borrow_mut(), shader.as_deref());
+        }
+        self.postprocess_shader = shader;
+        self.offscreen_textures.clear();
     }
 
     fn send_frame_callbacks(&mut self) {
