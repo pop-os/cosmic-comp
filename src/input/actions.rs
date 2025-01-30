@@ -827,15 +827,41 @@ impl State {
                         };
 
                         if let Some(direction) = dir {
-                            self.handle_shortcut_action(
-                                Action::SwitchOutput(direction),
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                true,
-                            )
+                            match direction {
+                                Direction::Left => {
+                                    self.handle_shortcut_action(
+                                        Action::PreviousWorkspace,
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        Some(direction),
+                                        true,
+                                    );
+                                }
+                                Direction::Right => {
+                                    self.handle_shortcut_action(
+                                        Action::NextWorkspace,
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        Some(direction),
+                                        true,
+                                    );
+                                }
+                                _ => {
+                                    self.handle_shortcut_action(
+                                        Action::SwitchOutput(direction),
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        Some(direction),
+                                        true,
+                                    );
+                                }
+                            }
                         }
                     }
                     FocusResult::Handled => {}
