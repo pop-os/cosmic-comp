@@ -553,34 +553,43 @@ impl WorkspaceSet {
 
     fn ensure_last_empty(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
         // add empty at the end, if necessary
-        if self
-            .workspaces
-            .last()
-            .map(|last| !last.is_empty())
-            .unwrap_or(true)
-        {
+        if self.workspaces.last().map_or(true, |last| !last.is_empty()) {
             self.add_empty_workspace(state);
         }
 
-        // remove empty workspaces in between, if they are not active
+        // remove other empty workspaces
         let len = self.workspaces.len();
-        let mut keep = vec![true; len];
-        for (i, workspace) in self.workspaces.iter().enumerate() {
-            if workspace.is_empty() && i != self.active && i != len - 1 {
-                state.remove_workspace(workspace.handle);
-                keep[i] = false;
-            }
-        }
+        let kept: Vec<bool> = self
+            .workspaces
+            .iter()
+            .enumerate()
+            .map(|(i, workspace)| {
+                let previous_is_empty =
+                    i > 0 && self.workspaces.get(i - 1).map_or(false, |w| w.is_empty());
+                let keep = if workspace.is_empty() {
+                    // Keep empty workspace if it's active, or it's the last workspace,
+                    // and the previous worspace is not both active and empty.
+                    i == self.active
+                        || (i == len - 1 && !(i == self.active + 1 && previous_is_empty))
+                } else {
+                    true
+                };
+                if !keep {
+                    state.remove_workspace(workspace.handle);
+                }
+                keep
+            })
+            .collect();
 
-        let mut iter = keep.iter();
+        let mut iter = kept.iter();
         self.workspaces.retain(|_| *iter.next().unwrap());
-        self.active -= keep
+        self.active -= kept
             .iter()
             .take(self.active + 1)
-            .filter(|keep| !**keep)
+            .filter(|kept| !**kept)
             .count();
 
-        if keep.iter().any(|val| *val == false) {
+        if kept.iter().any(|val| *val == false) {
             for (i, workspace) in self.workspaces.iter().enumerate() {
                 workspace_set_idx(state, i as u8 + 1, self.idx, &workspace.handle);
             }
