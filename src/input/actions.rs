@@ -1133,11 +1133,13 @@ fn to_previous_workspace(
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
 ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
-    let workspace = shell
-        .workspaces
-        .active_num(&current_output)
-        .1
-        .saturating_sub(1);
+    let workspace = shell.workspaces.active_num(&current_output).1;
+
+    if workspace == 0 {
+        return Err(InvalidWorkspaceIndex);
+    }
+
+    let workspace = workspace.saturating_sub(1);
 
     shell.activate(
         &current_output,
