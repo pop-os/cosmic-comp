@@ -1747,12 +1747,12 @@ impl Shell {
                 let geo = o.geometry();
                 match direction {
                     Direction::Left | Direction::Right => {
-                        !(geo.loc.y + geo.size.h < current_output_geo.loc.y
-                            || geo.loc.y > current_output_geo.loc.y + current_output_geo.size.h)
+                        geo.loc.y < current_output_geo.loc.y + current_output_geo.size.h
+                            && geo.loc.y + geo.size.h > current_output_geo.loc.y
                     }
                     Direction::Up | Direction::Down => {
-                        !(geo.loc.x + geo.size.w < current_output_geo.loc.x
-                            || geo.loc.x > current_output_geo.loc.x + current_output_geo.size.w)
+                        geo.loc.x < current_output_geo.loc.x + current_output_geo.size.w
+                            && geo.loc.x + geo.size.w > current_output_geo.loc.x
                     }
                 }
             })
