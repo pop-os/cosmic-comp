@@ -7,7 +7,7 @@ use smithay::{
     reexports::{
         wayland_protocols::ext::workspace::v1::server::{
             ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1,
-            ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
+            ext_workspace_handle_v1::ExtWorkspaceHandleV1,
             ext_workspace_manager_v1::ExtWorkspaceManagerV1,
         },
         wayland_server::{
@@ -52,6 +52,17 @@ bitflags::bitflags! {
         const Rename = 16;
         /// cosmic specific
         const SetTilingState = 32;
+    }
+}
+
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+    pub struct State: u32 {
+        const Active = 1;
+        const Urgent = 2;
+        const Hidden = 4;
+        /// cosmic specific
+        const Pinned = 8;
     }
 }
 
@@ -147,7 +158,7 @@ pub struct Workspace {
     name: String,
     capabilities: WorkspaceCapabilities,
     coordinates: Vec<u32>,
-    states: ext_workspace_handle_v1::State,
+    states: State,
     tiling: zcosmic_workspace_handle_v2::TilingState,
     ext_id: Option<String>,
 }
@@ -205,6 +216,20 @@ pub enum Request {
         workspace: WorkspaceHandle,
         group: WorkspaceGroupHandle,
     },
+    SetPin {
+        workspace: WorkspaceHandle,
+        pinned: bool,
+    },
+    MoveBefore {
+        workspace: WorkspaceHandle,
+        other_workspace: WorkspaceHandle,
+        axis: u32,
+    },
+    MoveAfter {
+        workspace: WorkspaceHandle,
+        other_workspace: WorkspaceHandle,
+        axis: u32,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -253,7 +278,7 @@ where
         );
 
         let cosmic_v2_global = dh.create_global::<D, ZcosmicWorkspaceManagerV2, _>(
-            1,
+            2,
             WorkspaceGlobalData {
                 filter: Box::new(client_filter.clone()),
             },
@@ -329,10 +354,7 @@ where
         })
     }
 
-    pub fn workspace_states(
-        &self,
-        workspace: &WorkspaceHandle,
-    ) -> Option<ext_workspace_handle_v1::State> {
+    pub fn workspace_states(&self, workspace: &WorkspaceHandle) -> Option<State> {
         self.groups
             .iter()
             .find_map(|g| Some(g.workspaces.iter().find(|w| w.id == workspace.id)?.states))
@@ -528,7 +550,7 @@ where
                 name: Default::default(),
                 capabilities: WorkspaceCapabilities::empty(),
                 coordinates: Default::default(),
-                states: ext_workspace_handle_v1::State::empty(),
+                states: State::empty(),
                 ext_id,
             };
             group.workspaces.push(workspace);
@@ -680,18 +702,11 @@ where
         }
     }
 
-    pub fn workspace_states(
-        &self,
-        workspace: &WorkspaceHandle,
-    ) -> Option<ext_workspace_handle_v1::State> {
+    pub fn workspace_states(&self, workspace: &WorkspaceHandle) -> Option<State> {
         self.0.workspace_states(workspace)
     }
 
-    pub fn add_workspace_state(
-        &mut self,
-        workspace: &WorkspaceHandle,
-        state: ext_workspace_handle_v1::State,
-    ) {
+    pub fn add_workspace_state(&mut self, workspace: &WorkspaceHandle, state: State) {
         if let Some(workspace) = self
             .0
             .groups
@@ -702,11 +717,7 @@ where
         }
     }
 
-    pub fn remove_workspace_state(
-        &mut self,
-        workspace: &WorkspaceHandle,
-        state: ext_workspace_handle_v1::State,
-    ) {
+    pub fn remove_workspace_state(&mut self, workspace: &WorkspaceHandle, state: State) {
         if let Some(workspace) = self
             .0
             .groups
