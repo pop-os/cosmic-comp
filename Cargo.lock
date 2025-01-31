@@ -786,10 +786,10 @@ dependencies = [
 [[package]]
 name = "cosmic-client-toolkit"
 version = "0.1.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?rev=e706814#e706814a5c30fac6382b2306c40067496f2c03c2"
+source = "git+https://github.com/pop-os//cosmic-protocols?branch=workspace-v2-pin-move#3fcbd95ac6c2824a82ac4c452bf3c4acfd829c8a"
 dependencies = [
  "bitflags 2.8.0",
- "cosmic-protocols",
+ "cosmic-protocols 0.1.0 (git+https://github.com/pop-os//cosmic-protocols?branch=workspace-v2-pin-move)",
  "libc",
  "smithay-client-toolkit",
  "wayland-client",
@@ -806,7 +806,7 @@ dependencies = [
  "calloop 0.14.2",
  "cosmic-comp-config",
  "cosmic-config",
- "cosmic-protocols",
+ "cosmic-protocols 0.1.0 (git+https://github.com/pop-os/cosmic-protocols//?branch=workspace-v2-pin-move)",
  "cosmic-settings-config",
  "egui",
  "egui_plot",
@@ -907,11 +907,24 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?rev=e706814#e706814a5c30fac6382b2306c40067496f2c03c2"
+source = "git+https://github.com/pop-os//cosmic-protocols?branch=workspace-v2-pin-move#3fcbd95ac6c2824a82ac4c452bf3c4acfd829c8a"
 dependencies = [
  "bitflags 2.8.0",
  "wayland-backend",
  "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wayland-scanner",
+ "wayland-server",
+]
+
+[[package]]
+name = "cosmic-protocols"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/cosmic-protocols//?branch=workspace-v2-pin-move#3fcbd95ac6c2824a82ac4c452bf3c4acfd829c8a"
+dependencies = [
+ "bitflags 2.8.0",
+ "wayland-backend",
  "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-scanner",
