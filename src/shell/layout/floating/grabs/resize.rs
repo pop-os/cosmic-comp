@@ -58,6 +58,7 @@ pub struct ResizeSurfaceGrab {
     window: CosmicMapped,
     edges: ResizeEdge,
     output: Output,
+    initial_window_location: Point<i32, Local>,
     initial_window_size: Size<i32, Logical>,
     last_window_size: Size<i32, Logical>,
     release: ReleaseMode,
@@ -91,6 +92,25 @@ impl ResizeSurfaceGrab {
             }
 
             new_window_width = (self.initial_window_size.w as f64 + dx) as i32;
+
+            // If the resizing vertical edge is close to our output's edge in the same direction, snap to it.
+            let output_geom = self.output.geometry().to_local(&self.output);
+            if self.edges.intersects(ResizeEdge::LEFT) {
+                if (self.initial_window_location.x - dx as i32 - output_geom.loc.x).abs() < 10 {
+                    new_window_width = self.initial_window_size.w - output_geom.loc.x
+                        + self.initial_window_location.x;
+                }
+            } else {
+                if (self.initial_window_location.x + self.initial_window_size.w + dx as i32
+                    - output_geom.loc.x
+                    - output_geom.size.w)
+                    .abs()
+                    < 10
+                {
+                    new_window_width =
+                        output_geom.loc.x - self.initial_window_location.x + output_geom.size.w;
+                }
+            }
         }
 
         if self.edges.intersects(top_bottom) {
@@ -99,6 +119,25 @@ impl ResizeSurfaceGrab {
             }
 
             new_window_height = (self.initial_window_size.h as f64 + dy) as i32;
+
+            // If the resizing horizontal edge is close to our output's edge in the same direction, snap to it.
+            let output_geom = self.output.geometry().to_local(&self.output);
+            if self.edges.intersects(ResizeEdge::TOP) {
+                if (self.initial_window_location.y - dy as i32 - output_geom.loc.y).abs() < 10 {
+                    new_window_height = self.initial_window_size.h - output_geom.loc.y
+                        + self.initial_window_location.y;
+                }
+            } else {
+                if (self.initial_window_location.y + self.initial_window_size.h + dy as i32
+                    - output_geom.loc.y
+                    - output_geom.size.h)
+                    .abs()
+                    < 10
+                {
+                    new_window_height =
+                        output_geom.loc.y - self.initial_window_location.y + output_geom.size.h;
+                }
+            }
         }
 
         let (min_size, max_size) = (self.window.min_size(), self.window.max_size());
@@ -414,6 +453,7 @@ impl ResizeSurfaceGrab {
             window: mapped,
             edges,
             output,
+            initial_window_location,
             initial_window_size,
             last_window_size: initial_window_size,
             release,
