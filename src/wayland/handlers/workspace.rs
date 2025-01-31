@@ -4,7 +4,7 @@ use crate::{
     shell::WorkspaceDelta,
     utils::prelude::*,
     wayland::protocols::workspace::{
-        delegate_workspace, Request, WorkspaceHandler, WorkspaceState,
+        delegate_workspace, Request, State as WState, WorkspaceHandler, WorkspaceState,
     },
 };
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
@@ -54,6 +54,55 @@ impl WorkspaceHandler for State {
                             &mut guard,
                         );
                     }
+                }
+                Request::SetPin { workspace, pinned } => {
+                    let mut shell = self.common.shell.write().unwrap();
+                    if let Some(workspace) = shell.workspaces.space_for_handle_mut(&workspace) {
+                        workspace.pinned = pinned;
+                        let mut update = self.common.workspace_state.update();
+                        if pinned {
+                            update.add_workspace_state(&workspace.handle, WState::Pinned);
+                            // TODO: Also need to update on changing other properties that are saved
+                            shell.workspaces.persist(&self.common.config);
+                        } else {
+                            update.remove_workspace_state(&workspace.handle, WState::Pinned);
+                            shell.workspaces.persist(&self.common.config);
+                        }
+                    }
+                }
+                Request::MoveBefore {
+                    workspace,
+                    other_workspace,
+                    axis,
+                } => {
+                    if axis != 0 {
+                        continue;
+                    }
+                    let mut shell = self.common.shell.write().unwrap();
+                    let mut update = self.common.workspace_state.update();
+                    shell.workspaces.move_workspace(
+                        &workspace,
+                        &other_workspace,
+                        &mut update,
+                        false,
+                    );
+                }
+                Request::MoveAfter {
+                    workspace,
+                    other_workspace,
+                    axis,
+                } => {
+                    if axis != 0 {
+                        continue;
+                    }
+                    let mut shell = self.common.shell.write().unwrap();
+                    let mut update = self.common.workspace_state.update();
+                    shell.workspaces.move_workspace(
+                        &workspace,
+                        &other_workspace,
+                        &mut update,
+                        true,
+                    );
                 }
                 _ => {}
             }

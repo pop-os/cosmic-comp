@@ -13,7 +13,7 @@ use smithay::reexports::{
 use std::sync::Mutex;
 
 use super::{
-    Request, Workspace, WorkspaceCapabilities, WorkspaceData, WorkspaceGlobalData,
+    Request, State, Workspace, WorkspaceCapabilities, WorkspaceData, WorkspaceGlobalData,
     WorkspaceHandler, WorkspaceManagerData, WorkspaceState,
 };
 
@@ -21,6 +21,7 @@ use super::{
 pub struct CosmicWorkspaceV2DataInner {
     capabilities: Option<zcosmic_workspace_handle_v2::WorkspaceCapabilities>,
     tiling: Option<zcosmic_workspace_handle_v2::TilingState>,
+    states: Option<zcosmic_workspace_handle_v2::State>,
 }
 
 pub struct CosmicWorkspaceV2Data {
@@ -164,6 +165,100 @@ where
                     }
                 }
             }
+            zcosmic_workspace_handle_v2::Request::Pin => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    if let Ok(manager) =
+                        workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
+                    {
+                        let mut state = manager
+                            .data::<WorkspaceManagerData>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::SetPin {
+                            workspace: workspace_handle,
+                            pinned: true,
+                        });
+                    }
+                }
+            }
+            zcosmic_workspace_handle_v2::Request::Unpin => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    if let Ok(manager) =
+                        workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
+                    {
+                        let mut state = manager
+                            .data::<WorkspaceManagerData>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::SetPin {
+                            workspace: workspace_handle,
+                            pinned: false,
+                        });
+                    }
+                }
+            }
+            zcosmic_workspace_handle_v2::Request::MoveBefore {
+                other_workspace,
+                axis,
+            } => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    if let Some(other_workspace) = state
+                        .workspace_state()
+                        .get_ext_workspace_handle(&other_workspace)
+                    {
+                        if let Ok(manager) =
+                            workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
+                        {
+                            let mut state = manager
+                                .data::<WorkspaceManagerData>()
+                                .unwrap()
+                                .lock()
+                                .unwrap();
+                            state.requests.push(Request::MoveBefore {
+                                workspace: workspace_handle,
+                                other_workspace,
+                                axis,
+                            });
+                        }
+                    }
+                }
+            }
+            zcosmic_workspace_handle_v2::Request::MoveAfter {
+                other_workspace,
+                axis,
+            } => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    if let Some(other_workspace) = state
+                        .workspace_state()
+                        .get_ext_workspace_handle(&other_workspace)
+                    {
+                        if let Ok(manager) =
+                            workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
+                        {
+                            let mut state = manager
+                                .data::<WorkspaceManagerData>()
+                                .unwrap()
+                                .lock()
+                                .unwrap();
+                            state.requests.push(Request::MoveAfter {
+                                workspace: workspace_handle,
+                                other_workspace,
+                                axis,
+                            });
+                        }
+                    }
+                }
+            }
             zcosmic_workspace_handle_v2::Request::Destroy => {}
             _ => unreachable!(),
         }
@@ -193,6 +288,12 @@ pub fn send_workspace_to_client(
             WorkspaceCapabilities::SetTilingState => {
                 Some(zcosmic_workspace_handle_v2::WorkspaceCapabilities::SetTilingState)
             }
+            WorkspaceCapabilities::Pin => {
+                Some(zcosmic_workspace_handle_v2::WorkspaceCapabilities::Pin)
+            }
+            WorkspaceCapabilities::Move => {
+                Some(zcosmic_workspace_handle_v2::WorkspaceCapabilities::Move)
+            }
             _ => None,
         })
         .collect::<zcosmic_workspace_handle_v2::WorkspaceCapabilities>();
@@ -210,6 +311,22 @@ pub fn send_workspace_to_client(
         instance.tiling_state(workspace.tiling);
         handle_state.tiling = Some(workspace.tiling);
         changed = true;
+    }
+
+    if instance.version() >= zcosmic_workspace_handle_v2::EVT_STATE_SINCE {
+        let states = workspace
+            .states
+            .iter()
+            .filter_map(|state| match state {
+                State::Pinned => Some(zcosmic_workspace_handle_v2::State::Pinned),
+                _ => None,
+            })
+            .collect::<zcosmic_workspace_handle_v2::State>();
+        if handle_state.states != Some(states) {
+            instance.state(states);
+            handle_state.states = Some(states);
+            changed = true;
+        }
     }
 
     changed

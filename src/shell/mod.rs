@@ -6,15 +6,20 @@ use layout::TilingExceptions;
 use std::{
     collections::HashMap,
     sync::{atomic::Ordering, Mutex},
+    thread,
     time::{Duration, Instant},
 };
 use wayland_backend::server::ClientId;
 
-use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
+use crate::wayland::{
+    handlers::data_device,
+    protocols::workspace::{State as WState, WorkspaceCapabilities},
+};
 use cosmic_comp_config::{
-    workspace::{WorkspaceLayout, WorkspaceMode},
+    workspace::{PinnedWorkspace, WorkspaceLayout, WorkspaceMode},
     TileBehavior, ZoomConfig, ZoomMovement,
 };
+use cosmic_config::ConfigSet;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
 use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
@@ -38,10 +43,7 @@ use smithay::{
     },
     output::{Output, WeakOutput},
     reexports::{
-        wayland_protocols::ext::{
-            session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
-            workspace::v1::server::ext_workspace_handle_v1::State as WState,
-        },
+        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
         wayland_server::{protocol::wl_surface::WlSurface, Client},
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
@@ -54,6 +56,7 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
+use tracing::error;
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -368,9 +371,46 @@ fn create_workspace(
     }
     state.set_workspace_capabilities(
         &workspace_handle,
-        WorkspaceCapabilities::Activate | WorkspaceCapabilities::SetTilingState,
+        WorkspaceCapabilities::Activate
+            | WorkspaceCapabilities::SetTilingState
+            | WorkspaceCapabilities::Pin
+            | WorkspaceCapabilities::Move,
     );
     Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
+}
+
+fn create_workspace_from_pinned(
+    pinned: &PinnedWorkspace,
+    state: &mut WorkspaceUpdateGuard<'_, State>,
+    output: &Output,
+    group_handle: &WorkspaceGroupHandle,
+    active: bool,
+    theme: cosmic::Theme,
+) -> Workspace {
+    let workspace_handle = state
+        .create_workspace(
+            &group_handle,
+            if pinned.tiling_enabled {
+                TilingState::TilingEnabled
+            } else {
+                TilingState::FloatingOnly
+            },
+            // TODO Set id for persistent workspaces
+            None,
+        )
+        .unwrap();
+    state.add_workspace_state(&workspace_handle, WState::Pinned);
+    if active {
+        state.add_workspace_state(&workspace_handle, WState::Active);
+    }
+    state.set_workspace_capabilities(
+        &workspace_handle,
+        WorkspaceCapabilities::Activate
+            | WorkspaceCapabilities::SetTilingState
+            | WorkspaceCapabilities::Pin
+            | WorkspaceCapabilities::Move,
+    );
+    Workspace::from_pinned(pinned, workspace_handle, output.clone(), theme.clone())
 }
 
 /* We will probably need this again at some point
@@ -545,7 +585,11 @@ impl WorkspaceSet {
         xdg_activation_state: &XdgActivationState,
     ) {
         // add empty at the end, if necessary
-        if self.workspaces.last().map_or(true, |last| !last.is_empty()) {
+        if self
+            .workspaces
+            .last()
+            .map_or(true, |last| !last.is_empty() || last.pinned)
+        {
             self.add_empty_workspace(state);
         }
 
@@ -556,8 +600,11 @@ impl WorkspaceSet {
             .iter()
             .enumerate()
             .map(|(i, workspace)| {
-                let previous_is_empty =
-                    i > 0 && self.workspaces.get(i - 1).map_or(false, |w| w.is_empty());
+                let previous_is_empty = i > 0
+                    && self
+                        .workspaces
+                        .get(i - 1)
+                        .map_or(false, |w| w.is_empty() && !w.pinned);
                 let keep = if workspace.can_auto_remove(xdg_activation_state) {
                     // Keep empty workspace if it's active, or it's the last workspace,
                     // and the previous worspace is not both active and empty.
@@ -650,6 +697,8 @@ pub struct Workspaces {
     autotile: bool,
     autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
+    // Persisted workspace to add on first `output_add`
+    persisted_workspaces: Vec<PinnedWorkspace>,
 }
 
 impl Workspaces {
@@ -662,6 +711,7 @@ impl Workspaces {
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
+            persisted_workspaces: config.cosmic_conf.pinned_workspaces.clone(),
         }
     }
 
@@ -685,6 +735,20 @@ impl Workspaces {
                 WorkspaceSet::new(workspace_state, &output, self.autotile, self.theme.clone())
             });
         workspace_state.add_group_output(&set.group, &output);
+
+        // If this is the first output added, create workspaces for pinned workspaces from config
+        for pinned in std::mem::take(&mut self.persisted_workspaces) {
+            tracing::error!("pinned workspace: {:?}", pinned);
+            let workspace = create_workspace_from_pinned(
+                &pinned,
+                workspace_state,
+                output,
+                &set.group,
+                false,
+                self.theme.clone(),
+            );
+            set.workspaces.push(workspace);
+        }
 
         // Remove workspaces that prefer this output from other sets
         let mut moved_workspaces = self
@@ -836,6 +900,73 @@ impl Workspaces {
         }
     }
 
+    // Move a workspace before/after a different workspace
+    pub fn move_workspace(
+        &mut self,
+        handle: &WorkspaceHandle,
+        other_handle: &WorkspaceHandle,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        after: bool,
+    ) {
+        if handle == other_handle {
+            return;
+        }
+
+        let (Some(old_output), Some(new_output)) = (
+            self.space_for_handle(handle).map(|w| w.output.clone()),
+            self.space_for_handle(other_handle)
+                .map(|w| w.output.clone()),
+        ) else {
+            return;
+        };
+
+        // Check which workspace is active on the new set; before removing from the
+        // old set in cause we're moving an active workspace within the same set.
+        let new_set = &mut self.sets[&new_output];
+        let previous_active_handle = new_set.workspaces[new_set.active].handle;
+
+        // Remove workspace from old set
+        let old_set = &mut self.sets[&old_output];
+        let mut workspace = if new_output != old_output {
+            old_set.remove_workspace(workspace_state, handle).unwrap()
+        } else {
+            // If set is the same, just remove it here without adding empty workspace,
+            // updating `active`, etc.
+            let idx = old_set
+                .workspaces
+                .iter()
+                .position(|w| w.handle == *handle)
+                .unwrap();
+            old_set.workspaces.remove(idx)
+        };
+
+        let new_set = &mut self.sets[&new_output];
+
+        if new_output != old_output {
+            workspace_state.remove_workspace_state(&workspace.handle, WState::Active);
+            workspace_state.move_workspace_to_group(new_set.group, workspace.handle);
+            workspace.set_output(&new_output, true);
+            workspace.refresh();
+        }
+
+        // Insert workspace into new set, relative to `other_handle`
+        let idx = new_set
+            .workspaces
+            .iter()
+            .position(|w| w.handle == *other_handle)
+            .unwrap();
+        let insert_idx = if after { idx + 1 } else { idx };
+        new_set.workspaces.insert(insert_idx, workspace);
+
+        new_set.active = new_set
+            .workspaces
+            .iter()
+            .position(|w| w.handle == previous_active_handle)
+            .unwrap();
+
+        new_set.update_workspace_idxs(workspace_state);
+    }
+
     pub fn update_config(
         &mut self,
         config: &Config,
@@ -937,7 +1068,7 @@ impl Workspaces {
                     .sets
                     .values()
                     .flat_map(|set| set.workspaces.last())
-                    .any(|w| w.mapped().next().is_some())
+                    .any(|w| !w.is_empty() || w.pinned)
                 {
                     for set in self.sets.values_mut() {
                         set.add_empty_workspace(workspace_state);
@@ -1155,6 +1286,21 @@ impl Workspaces {
     ) {
         self.autotile = autotile;
         self.apply_tile_change(guard, seats);
+    }
+
+    pub fn persist(&self, config: &Config) {
+        let pinned_workspaces: Vec<PinnedWorkspace> = self
+            .sets
+            .values()
+            .flat_map(|set| &set.workspaces)
+            .flat_map(|w| w.to_pinned())
+            .collect();
+        let config = config.cosmic_helper.clone();
+        thread::spawn(move || {
+            if let Err(err) = config.set("pinned_workspaces", pinned_workspaces) {
+                error!(?err, "Failed to update pinned_workspaces key");
+            }
+        });
     }
 }
 
