@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod input;
+pub mod output;
 pub mod workspace;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -25,6 +26,7 @@ pub enum NumlockState {
 #[version = 1]
 pub struct CosmicCompConfig {
     pub workspaces: workspace::WorkspaceConfig,
+    pub pinned_workspaces: Vec<workspace::PinnedWorkspace>,
     pub input_default: input::InputConfig,
     pub input_touchpad: input::InputConfig,
     pub input_devices: HashMap<String, input::InputConfig>,
@@ -57,6 +59,7 @@ impl Default for CosmicCompConfig {
     fn default() -> Self {
         Self {
             workspaces: Default::default(),
+            pinned_workspaces: Vec::new(),
             input_default: Default::default(),
             // By default, enable tap-to-click and disable-while-typing.
             input_touchpad: input::InputConfig {

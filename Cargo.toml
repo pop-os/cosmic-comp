@@ -15,7 +15,7 @@ anyhow = {version = "1.0.51", features = ["backtrace"]}
 bitflags = "2.4"
 bytemuck = "1.12"
 calloop = {version = "0.14.1", features = ["executor"]}
-cosmic-comp-config = {path = "cosmic-comp-config"}
+cosmic-comp-config = {path = "cosmic-comp-config", features = ["libdisplay-info"]}
 cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
 cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", rev = "e706814", default-features = false, features = ["server"]}
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
@@ -59,7 +59,7 @@ zbus = "4.4.0"
 profiling = { version = "1.0" }
 rustix = { version = "0.38.32", features = ["process"] }
 smallvec = "1.13.2"
-rand = "0.8.5"
+rand = "0.9.0"
 reis = { version = "0.4", features = ["calloop"] }
 # CLI arguments
 clap_lex = "0.7"
@@ -119,8 +119,8 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "67df697" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "67df697" }
+cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
+cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch."https://github.com/smithay/smithay"]
 smithay = { git = "https://github.com/smithay/smithay//", rev = "ce61c9b" }
