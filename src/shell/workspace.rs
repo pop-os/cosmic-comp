@@ -80,6 +80,7 @@ pub struct Workspace {
     pub minimized_windows: Vec<MinimizedWindow>,
     pub tiling_enabled: bool,
     pub fullscreen: Option<FullscreenSurface>,
+    pub pinned: bool,
 
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
@@ -250,6 +251,7 @@ impl Workspace {
             tiling_enabled,
             minimized_windows: Vec::new(),
             fullscreen: None,
+            pinned: false,
             handle,
             focus_stack: FocusStacks::default(),
             screencopy: ScreencopySessions::default(),
@@ -263,6 +265,8 @@ impl Workspace {
             dirty: AtomicBool::new(false),
         }
     }
+
+    // TODO function to add pinned workspace from persistent state
 
     #[profiling::function]
     pub fn refresh(&mut self, xdg_activation_state: &XdgActivationState) {
