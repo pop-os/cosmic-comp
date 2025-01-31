@@ -786,10 +786,10 @@ dependencies = [
 [[package]]
 name = "cosmic-client-toolkit"
 version = "0.1.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?rev=e706814#e706814a5c30fac6382b2306c40067496f2c03c2"
+source = "git+https://github.com/pop-os//cosmic-protocols?branch=workspace-v2-pin-move#d372fc1432595cdea3d6e7830969e24a593a3684"
 dependencies = [
  "bitflags 2.8.0",
- "cosmic-protocols",
+ "cosmic-protocols 0.1.0 (git+https://github.com/pop-os//cosmic-protocols?branch=workspace-v2-pin-move)",
  "libc",
  "smithay-client-toolkit",
  "wayland-client",
@@ -806,7 +806,7 @@ dependencies = [
  "calloop 0.14.2",
  "cosmic-comp-config",
  "cosmic-config",
- "cosmic-protocols",
+ "cosmic-protocols 0.1.0 (git+https://github.com/pop-os/cosmic-protocols//?branch=workspace-v2-pin-move)",
  "cosmic-settings-config",
  "egui",
  "egui_plot",
@@ -907,11 +907,24 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?rev=e706814#e706814a5c30fac6382b2306c40067496f2c03c2"
+source = "git+https://github.com/pop-os//cosmic-protocols?branch=workspace-v2-pin-move#d372fc1432595cdea3d6e7830969e24a593a3684"
 dependencies = [
  "bitflags 2.8.0",
  "wayland-backend",
  "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wayland-scanner",
+ "wayland-server",
+]
+
+[[package]]
+name = "cosmic-protocols"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/cosmic-protocols//?branch=workspace-v2-pin-move#d372fc1432595cdea3d6e7830969e24a593a3684"
+dependencies = [
+ "bitflags 2.8.0",
+ "wayland-backend",
  "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-scanner",
@@ -2912,7 +2925,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5280,7 +5293,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69fff37da548239c3bf9e64a12193d261e8b22b660991c6fd2df057c168f435f"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
