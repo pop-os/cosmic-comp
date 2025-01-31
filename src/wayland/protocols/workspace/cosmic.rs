@@ -9,7 +9,7 @@ use smithay::{
 };
 
 use super::{
-    GroupCapabilities, Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler,
+    GroupCapabilities, Request, State, Workspace, WorkspaceCapabilities, WorkspaceClientHandler,
     WorkspaceData, WorkspaceGlobalData, WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle,
     WorkspaceHandler, WorkspaceState,
 };
@@ -249,6 +249,81 @@ where
                     });
                 }
             }
+            zcosmic_workspace_handle_v1::Request::Pin => {
+                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::SetPin {
+                        workspace: workspace_handle,
+                        pinned: true,
+                    });
+                }
+            }
+            zcosmic_workspace_handle_v1::Request::Unpin => {
+                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::SetPin {
+                        workspace: workspace_handle,
+                        pinned: false,
+                    });
+                }
+            }
+            zcosmic_workspace_handle_v1::Request::MoveBefore {
+                other_workspace,
+                axis,
+            } => {
+                if let Some(workspace) = state.workspace_state().get_workspace_handle(obj) {
+                    if let Some(other_workspace) = state
+                        .workspace_state()
+                        .get_workspace_handle(&other_workspace)
+                    {
+                        let mut state = client
+                            .get_data::<<D as WorkspaceHandler>::Client>()
+                            .unwrap()
+                            .workspace_state()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::MoveBefore {
+                            workspace,
+                            other_workspace,
+                            axis,
+                        });
+                    }
+                }
+            }
+            zcosmic_workspace_handle_v1::Request::MoveAfter {
+                other_workspace,
+                axis,
+            } => {
+                if let Some(workspace) = state.workspace_state().get_workspace_handle(obj) {
+                    if let Some(other_workspace) = state
+                        .workspace_state()
+                        .get_workspace_handle(&other_workspace)
+                    {
+                        let mut state = client
+                            .get_data::<<D as WorkspaceHandler>::Client>()
+                            .unwrap()
+                            .workspace_state()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::MoveAfter {
+                            workspace,
+                            other_workspace,
+                            axis,
+                        });
+                    }
+                }
+            }
+
             zcosmic_workspace_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
                     for workspace in &mut group.workspaces {
@@ -454,15 +529,10 @@ where
             .states
             .iter()
             .filter_map(|state| match state {
-                ext_workspace_handle_v1::State::Active => {
-                    Some(zcosmic_workspace_handle_v1::State::Active)
-                }
-                ext_workspace_handle_v1::State::Urgent => {
-                    Some(zcosmic_workspace_handle_v1::State::Urgent)
-                }
-                ext_workspace_handle_v1::State::Hidden => {
-                    Some(zcosmic_workspace_handle_v1::State::Hidden)
-                }
+                State::Active => Some(zcosmic_workspace_handle_v1::State::Active),
+                State::Urgent => Some(zcosmic_workspace_handle_v1::State::Urgent),
+                State::Hidden => Some(zcosmic_workspace_handle_v1::State::Hidden),
+                State::Pinned => Some(zcosmic_workspace_handle_v1::State::Pinned),
                 _ => None,
             })
             .flat_map(|state| (state as u32).to_ne_bytes())
