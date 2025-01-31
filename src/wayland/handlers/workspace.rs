@@ -5,7 +5,7 @@ use crate::{
     state::ClientState,
     utils::prelude::*,
     wayland::protocols::workspace::{
-        delegate_workspace, Request, WorkspaceClientHandler, WorkspaceClientState,
+        delegate_workspace, Request, State as WState, WorkspaceClientHandler, WorkspaceClientState,
         WorkspaceHandler, WorkspaceState,
     },
 };
@@ -63,6 +63,48 @@ impl WorkspaceHandler for State {
                             &mut guard,
                         );
                     }
+                }
+                Request::SetPin { workspace, pinned } => {
+                    let mut shell = self.common.shell.write().unwrap();
+                    if let Some(workspace) = shell.workspaces.space_for_handle_mut(&workspace) {
+                        workspace.pinned = pinned;
+                        let mut update = self.common.workspace_state.update();
+                        if pinned {
+                            update.add_workspace_state(&workspace.handle, WState::Pinned);
+                        } else {
+                            update.remove_workspace_state(&workspace.handle, WState::Pinned);
+                        }
+                    }
+                }
+                Request::MoveBefore {
+                    workspace,
+                    other_workspace,
+                    axis,
+                } => {
+                    // TODO protocol error if axis doesn't match coordinates?
+                    let mut shell = self.common.shell.write().unwrap();
+                    let mut update = self.common.workspace_state.update();
+                    shell.workspaces.move_workspace(
+                        &workspace,
+                        &other_workspace,
+                        &mut update,
+                        false,
+                    );
+                }
+                Request::MoveAfter {
+                    workspace,
+                    other_workspace,
+                    axis,
+                } => {
+                    // TODO protocol error if axis doesn't match coordinates?
+                    let mut shell = self.common.shell.write().unwrap();
+                    let mut update = self.common.workspace_state.update();
+                    shell.workspaces.move_workspace(
+                        &workspace,
+                        &other_workspace,
+                        &mut update,
+                        true,
+                    );
                 }
                 _ => {}
             }
