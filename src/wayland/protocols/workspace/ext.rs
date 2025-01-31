@@ -10,7 +10,7 @@ use smithay::reexports::wayland_server::{
 use std::sync::Mutex;
 
 use super::{
-    Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceGlobalData,
+    Request, State, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceGlobalData,
     WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle, WorkspaceHandler, WorkspaceState,
 };
 
@@ -453,9 +453,19 @@ where
         changed = true;
     }
 
-    if handle_state.states != Some(workspace.states) {
-        instance.state(workspace.states);
-        handle_state.states = Some(workspace.states.clone());
+    let states = workspace
+        .states
+        .iter()
+        .filter_map(|state| match state {
+            State::Active => Some(ext_workspace_handle_v1::State::Active),
+            State::Urgent => Some(ext_workspace_handle_v1::State::Urgent),
+            State::Hidden => Some(ext_workspace_handle_v1::State::Hidden),
+            _ => None,
+        })
+        .collect();
+    if handle_state.states != Some(states) {
+        instance.state(states);
+        handle_state.states = Some(states);
         changed = true;
     }
     // TODO ext_workspace_handle_v1::id
