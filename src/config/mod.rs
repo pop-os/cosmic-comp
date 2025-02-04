@@ -228,7 +228,7 @@ impl Config {
 
         // Source key bindings from com.system76.CosmicSettings.Shortcuts
         let settings_context = shortcuts::context().expect("Failed to load shortcuts config");
-        let system_actions = shortcuts::system_actions(&config);
+        let system_actions = shortcuts::system_actions(&settings_context);
         let mut shortcuts = shortcuts::shortcuts(&settings_context);
 
         // Add any missing default shortcuts recommended by the compositor.
