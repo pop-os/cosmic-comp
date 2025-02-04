@@ -1032,20 +1032,39 @@ impl State {
                     .zoom_level(None)
                     .map(|(s, _, l)| (s, l))
                     .unwrap_or_else(|| (seat.clone(), 1.0));
-                if &zoom_seat == seat {
+
+                if current_level == 1. && matches!(x, Action::ZoomOut) {
+                    return;
+                }
+                let new_level = if current_level == 1. && matches!(x, Action::ZoomIn) {
+                    self.common.config.dynamic_conf.zoom_state().last_level
+                } else {
                     let increment =
                         self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
+                    match x {
+                        Action::ZoomIn => current_level + increment,
+                        Action::ZoomOut => (current_level - increment).max(1.0),
+                        _ => unreachable!(),
+                    }
+                };
+
+                if &zoom_seat == seat {
                     shell.trigger_zoom(
                         seat,
-                        match x {
-                            Action::ZoomIn => current_level + increment,
-                            Action::ZoomOut => (current_level - increment).max(1.0),
-                            _ => unreachable!(),
-                        },
+                        new_level,
                         self.common.config.cosmic_conf.accessibility_zoom.view_moves,
                     );
 
-                    // TODO: persist state, if enable_on_startup
+                    if new_level > 1.
+                        && self
+                            .common
+                            .config
+                            .cosmic_conf
+                            .accessibility_zoom
+                            .start_on_login
+                    {
+                        self.common.config.dynamic_conf.zoom_state_mut().last_level = new_level;
+                    }
                 }
             }
 
