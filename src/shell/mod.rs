@@ -2259,6 +2259,10 @@ impl Shell {
             {
                 zoom_state.previous_level.take();
             }
+
+            if zoom_state.level == 1. && zoom_state.previous_level.is_none() {
+                self.zoom_state.take();
+            }
         }
 
         self.workspaces
