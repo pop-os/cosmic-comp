@@ -277,11 +277,11 @@ impl State {
     fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
         let mut shell = self.common.shell.write().unwrap();
 
-        if let Some((window, _, _)) = shell
+        if let Some(window) = shell
             .pending_windows
             .iter()
-            .find(|(window, _, _)| window.wl_surface().as_deref() == Some(surface))
-            .cloned()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface))
+            .map(|pending| pending.surface.clone())
         {
             if let Some(toplevel) = window.0.toplevel() {
                 if toplevel_ensure_initial_configure(&toplevel)
@@ -305,11 +305,11 @@ impl State {
             }
         }
 
-        if let Some((layer_surface, _, _)) = shell
+        if let Some(layer_surface) = shell
             .pending_layers
             .iter()
-            .find(|(layer_surface, _, _)| layer_surface.wl_surface() == surface)
-            .cloned()
+            .find(|pending| pending.surface.wl_surface() == surface)
+            .map(|pending| pending.surface.clone())
         {
             if !layer_surface_check_inital_configure(&layer_surface) {
                 // compute initial dimensions by mapping

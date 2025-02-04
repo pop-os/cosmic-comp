@@ -2,7 +2,9 @@ use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
     backend::render::cursor::{load_cursor_theme, Cursor},
-    shell::{focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, Shell},
+    shell::{
+        focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow, Shell,
+    },
     state::State,
     utils::prelude::*,
     wayland::handlers::{
@@ -349,16 +351,21 @@ impl XwmHandler for State {
         }
 
         let surface = CosmicSurface::from(window);
-        shell.pending_windows.push((surface, seat, None));
+        shell.pending_windows.push(PendingWindow {
+            surface,
+            seat,
+            fullscreen: None,
+            maximized: false,
+        });
     }
 
     fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
         let mut shell = self.common.shell.write().unwrap();
-        if let Some((window, _, _)) = shell
+        if let Some(window) = shell
             .pending_windows
             .iter()
-            .find(|(window, _, _)| window.x11_surface() == Some(&surface))
-            .cloned()
+            .find(|pending| pending.surface.x11_surface() == Some(&surface))
+            .map(|pending| pending.surface.clone())
         {
             if !shell
                 .pending_activations
@@ -606,6 +613,12 @@ impl XwmHandler for State {
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.maximize_request(&mapped, &seat);
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.maximized = true;
         }
     }
 
@@ -613,6 +626,12 @@ impl XwmHandler for State {
         let mut shell = self.common.shell.write().unwrap();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             shell.unmaximize_request(&mapped);
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.maximized = false;
         }
     }
 
@@ -659,16 +678,13 @@ impl XwmHandler for State {
                         .fullscreen_request(&surface, None, from, &seat);
                 }
             }
-        } else {
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
             let output = seat.active_output();
-            if let Some(o) = shell
-                .pending_windows
-                .iter_mut()
-                .find(|(s, _, _)| s.x11_surface() == Some(&window))
-                .map(|(_, _, o)| o)
-            {
-                *o = Some(output);
-            }
+            pending.fullscreen = Some(output);
         }
     }
 
@@ -683,6 +699,12 @@ impl XwmHandler for State {
                 let previous = workspace.unfullscreen_request(&window);
                 assert!(previous.is_none());
             }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.fullscreen.take();
         }
     }
 
