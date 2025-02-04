@@ -2219,7 +2219,7 @@ impl Shell {
         }
 
         if !should_be_fullscreen && should_be_maximized {
-            self.maximize_request(&mapped, &seat);
+            self.maximize_request(&mapped, &seat, false);
         }
 
         let new_target = if (workspace_output == seat.active_output()
@@ -3239,7 +3239,7 @@ impl Shell {
             if window.is_fullscreen(true) {
                 return;
             }
-            self.maximize_request(window, seat);
+            self.maximize_request(window, seat, true);
         }
     }
 
@@ -3310,7 +3310,7 @@ impl Shell {
         }
     }
 
-    pub fn maximize_request(&mut self, mapped: &CosmicMapped, seat: &Seat<State>) {
+    pub fn maximize_request(&mut self, mapped: &CosmicMapped, seat: &Seat<State>, animate: bool) {
         self.unminimize_request(mapped, seat);
         let (original_layer, floating_layer, original_geometry) = if let Some(set) = self
             .workspaces
@@ -3339,7 +3339,7 @@ impl Shell {
                 original_layer,
             });
             std::mem::drop(state);
-            floating_layer.map_maximized(mapped.clone(), original_geometry, true);
+            floating_layer.map_maximized(mapped.clone(), original_geometry, animate);
         }
     }
 
@@ -3568,7 +3568,7 @@ impl Shell {
 
             if was_maximized {
                 if let Some(KeyboardFocusTarget::Element(mapped)) = res.as_ref() {
-                    self.maximize_request(mapped, seat);
+                    self.maximize_request(mapped, seat, false);
                 }
             }
 

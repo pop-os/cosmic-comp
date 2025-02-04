@@ -612,7 +612,7 @@ impl XwmHandler for State {
         let mut shell = self.common.shell.write().unwrap();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             let seat = shell.seats.last_active().clone();
-            shell.maximize_request(&mapped, &seat);
+            shell.maximize_request(&mapped, &seat, true);
         } else if let Some(pending) = shell
             .pending_windows
             .iter_mut()
