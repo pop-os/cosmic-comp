@@ -2143,7 +2143,26 @@ impl Shell {
                     zoomed_output_geometry = zoomed_output_geometry.downscale(state.level);
                     zoomed_output_geometry.loc += output_state_ref.focal_point.to_global(&output);
 
-                    if !zoomed_output_geometry.contains(cursor_position.to_global(&output)) {
+                    if !zoomed_output_geometry.contains(original_position) {
+                        zoomed_output_geometry.loc = cursor_position.to_global(&output)
+                            - zoomed_output_geometry.size.downscale(2.).to_point();
+                        let mut focal_point = zoomed_output_geometry
+                            .loc
+                            .to_local(&output)
+                            .upscale(state.level)
+                            .to_global(&output);
+                        focal_point.x = focal_point.x.clamp(
+                            output_geometry.loc.x as f64,
+                            ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                        );
+                        focal_point.y = focal_point.y.clamp(
+                            output_geometry.loc.y as f64,
+                            ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                        );
+                        output_state_ref.previous_point =
+                            Some((output_state_ref.focal_point, Instant::now()));
+                        output_state_ref.focal_point = focal_point.to_local(&output);
+                    } else if !zoomed_output_geometry.contains(cursor_position.to_global(&output)) {
                         let mut diff = output_state_ref.focal_point.to_global(&output)
                             + (cursor_position.to_global(&output) - original_position)
                                 .upscale(state.level);
