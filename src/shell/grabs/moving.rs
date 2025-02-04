@@ -409,7 +409,6 @@ impl MoveGrab {
                 } else {
                     grab_state.location.y
                 };
-                dbg!(grab_state.location);
             }
 
             for output in shell.outputs() {
