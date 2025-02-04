@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{element::CosmicWindow, grabs::ReleaseMode, CosmicMapped, CosmicSurface, ManagedLayer},
+    shell::{
+        element::CosmicWindow, grabs::ReleaseMode, CosmicMapped, CosmicSurface, ManagedLayer,
+        PendingWindow,
+    },
     utils::prelude::*,
     wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
 };
@@ -45,7 +48,12 @@ impl XdgShellHandler for State {
         let mut shell = self.common.shell.write().unwrap();
         let seat = shell.seats.last_active().clone();
         let window = CosmicSurface::from(surface);
-        shell.pending_windows.push((window, seat, None));
+        shell.pending_windows.push(PendingWindow {
+            surface: window,
+            seat,
+            fullscreen: None,
+            maximized: false,
+        });
         // We will position the window after the first commit, when we know its size hints
     }
 
@@ -219,6 +227,12 @@ impl XdgShellHandler for State {
         if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.maximize_request(&mapped, &seat)
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
+        {
+            pending.maximized = true;
         }
     }
 
@@ -226,6 +240,12 @@ impl XdgShellHandler for State {
         let mut shell = self.common.shell.write().unwrap();
         if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
             shell.unmaximize_request(&mapped);
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
+        {
+            pending.maximized = false;
         }
     }
 
@@ -339,15 +359,12 @@ impl XdgShellHandler for State {
                     workspace.fullscreen_request(&window, None, from, &seat)
                 }
             }
-        } else {
-            if let Some(o) = shell
-                .pending_windows
-                .iter_mut()
-                .find(|(s, _, _)| s.wl_surface().as_deref() == Some(surface.wl_surface()))
-                .map(|(_, _, o)| o)
-            {
-                *o = Some(output);
-            }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
+        {
+            pending.fullscreen = Some(output);
         }
     }
 
@@ -376,6 +393,12 @@ impl XdgShellHandler for State {
                     );
                 }
             }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
+        {
+            pending.fullscreen.take();
         }
     }
 

@@ -230,11 +230,26 @@ impl From<&CosmicSurface> for ActivationKey {
 }
 
 #[derive(Debug)]
+pub struct PendingWindow {
+    pub surface: CosmicSurface,
+    pub seat: Seat<State>,
+    pub fullscreen: Option<Output>,
+    pub maximized: bool,
+}
+
+#[derive(Debug)]
+pub struct PendingLayer {
+    pub surface: LayerSurface,
+    pub seat: Seat<State>,
+    pub output: Output,
+}
+
+#[derive(Debug)]
 pub struct Shell {
     pub workspaces: Workspaces,
 
-    pub pending_windows: Vec<(CosmicSurface, Seat<State>, Option<Output>)>,
-    pub pending_layers: Vec<(LayerSurface, Output, Seat<State>)>,
+    pub pending_windows: Vec<PendingWindow>,
+    pub pending_layers: Vec<PendingLayer>,
     pub pending_activations: HashMap<ActivationKey, ActivationContext>,
     pub override_redirect_windows: Vec<X11Surface>,
     pub session_lock: Option<SessionLock>,
@@ -1603,14 +1618,14 @@ impl Shell {
             })
             // pending layer map surface?
             .or_else(|| {
-                self.pending_layers.iter().find_map(|(l, output, _)| {
+                self.pending_layers.iter().find_map(|pending| {
                     let mut found = false;
-                    l.with_surfaces(|s, _| {
+                    pending.surface.with_surfaces(|s, _| {
                         if s == surface {
                             found = true;
                         }
                     });
-                    found.then_some(output)
+                    found.then_some(&pending.output)
                 })
             })
             // override redirect window?
@@ -1966,8 +1981,10 @@ impl Shell {
             .iter()
             .for_each(|or| or.refresh());
 
-        self.pending_layers.retain(|(s, _, _)| s.alive());
-        self.pending_windows.retain(|(s, _, _)| s.alive());
+        self.pending_layers
+            .retain(|pending| pending.surface.alive());
+        self.pending_windows
+            .retain(|pending| pending.surface.alive());
     }
 
     pub fn update_pointer_position(&mut self, location: Point<f64, Local>, output: &Output) {
@@ -2058,9 +2075,14 @@ impl Shell {
         let pos = self
             .pending_windows
             .iter()
-            .position(|(w, _, _)| w == window)
+            .position(|pending| &pending.surface == window)
             .unwrap();
-        let (window, seat, output) = self.pending_windows.remove(pos);
+        let PendingWindow {
+            surface: window,
+            seat,
+            fullscreen: output,
+            maximized: should_be_maximized,
+        } = self.pending_windows.remove(pos);
 
         let parent_is_sticky = if let Some(toplevel) = window.0.toplevel() {
             if let Some(parent) = toplevel.parent() {
@@ -2146,7 +2168,7 @@ impl Shell {
 
         let maybe_focused = workspace.focus_stack.get(&seat).iter().next().cloned();
         if let Some(focused) = maybe_focused {
-            if (focused.is_stack() && !is_dialog && !should_be_fullscreen)
+            if (focused.is_stack() && !is_dialog && !should_be_fullscreen && !should_be_maximized)
                 && !(workspace.is_tiled(&focused) && floating_exception)
             {
                 focused.stack_ref().unwrap().add_window(window, None);
@@ -2196,6 +2218,10 @@ impl Shell {
             self.toggle_sticky(&seat, &mapped);
         }
 
+        if !should_be_fullscreen && should_be_maximized {
+            self.maximize_request(&mapped, &seat);
+        }
+
         let new_target = if (workspace_output == seat.active_output()
             && active_handle == workspace_handle)
             || parent_is_sticky
@@ -2237,12 +2263,12 @@ impl Shell {
         let pos = self
             .pending_layers
             .iter()
-            .position(|(l, _, _)| l == layer_surface)
+            .position(|pending| &pending.surface == layer_surface)
             .unwrap();
-        let (layer_surface, output, _seat) = self.pending_layers.remove(pos);
+        let pending = self.pending_layers.remove(pos);
 
         let wants_focus = {
-            with_states(layer_surface.wl_surface(), |states| {
+            with_states(pending.surface.wl_surface(), |states| {
                 let mut state = states.cached_state.get::<LayerSurfaceCachedState>();
                 matches!(state.current().layer, Layer::Top | Layer::Overlay)
                     && state.current().keyboard_interactivity != KeyboardInteractivity::None
@@ -2250,14 +2276,14 @@ impl Shell {
         };
 
         {
-            let mut map = layer_map_for_output(&output);
-            map.map_layer(&layer_surface).unwrap();
+            let mut map = layer_map_for_output(&pending.output);
+            map.map_layer(&pending.surface).unwrap();
         }
         for workspace in self.workspaces.spaces_mut() {
             workspace.tiling_layer.recalculate();
         }
 
-        wants_focus.then(|| layer_surface.into())
+        wants_focus.then(|| pending.surface.into())
     }
 
     pub fn unmap_surface<S>(
@@ -2314,7 +2340,12 @@ impl Shell {
 
             if let Some(surface) = surface {
                 toplevel_info.remove_toplevel(&surface);
-                self.pending_windows.push((surface, seat.clone(), None));
+                self.pending_windows.push(PendingWindow {
+                    surface,
+                    seat: seat.clone(),
+                    fullscreen: None,
+                    maximized: false,
+                });
                 return;
             }
         }

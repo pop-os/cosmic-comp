@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::utils::prelude::*;
+use crate::{shell::PendingLayer, utils::prelude::*};
 use smithay::{
     delegate_layer_shell,
     desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
@@ -32,9 +32,11 @@ impl WlrLayerShellHandler for State {
             .as_ref()
             .and_then(Output::from_resource)
             .unwrap_or_else(|| seat.active_output());
-        shell
-            .pending_layers
-            .push((LayerSurface::new(surface, namespace), output, seat));
+        shell.pending_layers.push(PendingLayer {
+            surface: LayerSurface::new(surface, namespace),
+            output,
+            seat,
+        });
     }
 
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
