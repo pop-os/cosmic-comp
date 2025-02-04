@@ -2079,7 +2079,7 @@ impl Shell {
             return;
         }
 
-        let previous_level = if let Some(old_state) = self.zoom_state.take() {
+        let previous_level = if let Some(old_state) = self.zoom_state.as_ref() {
             if &old_state.seat != seat {
                 return;
             }
@@ -2092,7 +2092,7 @@ impl Shell {
                         OutputZoomState::new(seat, output, movement, level);
                 }
             }
-            1.0
+            1.
         };
 
         self.zoom_state = Some(ZoomState {
