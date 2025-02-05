@@ -2075,7 +2075,13 @@ impl Shell {
         }
     }
 
-    pub fn trigger_zoom(&mut self, seat: &Seat<State>, level: f64, movement: ZoomMovement) {
+    pub fn trigger_zoom(
+        &mut self,
+        seat: &Seat<State>,
+        level: f64,
+        movement: ZoomMovement,
+        animate: bool,
+    ) {
         if self.zoom_state.is_none() && level == 1. {
             return;
         }
@@ -2100,7 +2106,7 @@ impl Shell {
             seat: seat.clone(),
             level,
             movement,
-            previous_level: Some((previous_level, Instant::now())),
+            previous_level: animate.then_some((previous_level, Instant::now())),
         });
     }
 
