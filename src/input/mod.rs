@@ -835,37 +835,82 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
-                    if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
-                        if horizontal_amount != 0.0 {
-                            frame =
-                                frame.value(Axis::Horizontal, scroll_factor * horizontal_amount);
-                            if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
-                                frame = frame.v120(
-                                    Axis::Horizontal,
-                                    (discrete * scroll_factor).round() as i32,
-                                );
+                    if seat.get_keyboard().unwrap().modifier_state().logo {
+                        if let Some(mut percentage) = event
+                            .amount_v120(Axis::Vertical)
+                            .map(|val| val / 120.)
+                            .or_else(|| event.amount(Axis::Vertical))
+                            .map(|val| val * scroll_factor)
+                        {
+                            let mut shell = self.common.shell.write().unwrap();
+                            let (zoom_seat, current_level) = shell
+                                .zoom_level(None)
+                                .map(|(s, _, l)| (s, l))
+                                .unwrap_or_else(|| (seat.clone(), 1.0));
+
+                            if current_level == 1. && percentage.is_sign_positive() {
+                                return;
                             }
-                        } else if event.source() == AxisSource::Finger {
-                            frame = frame.stop(Axis::Horizontal);
-                        }
-                    }
-                    if let Some(vertical_amount) = event.amount(Axis::Vertical) {
-                        if vertical_amount != 0.0 {
-                            frame = frame.value(Axis::Vertical, scroll_factor * vertical_amount);
-                            if let Some(discrete) = event.amount_v120(Axis::Vertical) {
-                                frame = frame.v120(
-                                    Axis::Vertical,
-                                    (discrete * scroll_factor).round() as i32,
-                                );
+                            if event.source() == AxisSource::Wheel {
+                                percentage *= 5.;
                             }
-                        } else if event.source() == AxisSource::Finger {
-                            frame = frame.stop(Axis::Vertical);
+
+                            let new_level = (current_level - percentage as f64 / 100.).max(1.0);
+                            if zoom_seat == seat {
+                                shell.trigger_zoom(
+                                    &seat,
+                                    new_level,
+                                    self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                                    event.source() == AxisSource::Wheel,
+                                );
+
+                                if new_level > 1.
+                                    && self
+                                        .common
+                                        .config
+                                        .cosmic_conf
+                                        .accessibility_zoom
+                                        .start_on_login
+                                {
+                                    self.common.config.dynamic_conf.zoom_state_mut().last_level =
+                                        new_level;
+                                }
+                            }
                         }
+                    } else {
+                        let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
+                        if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
+                            if horizontal_amount != 0.0 {
+                                frame = frame
+                                    .value(Axis::Horizontal, scroll_factor * horizontal_amount);
+                                if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
+                                    frame = frame.v120(
+                                        Axis::Horizontal,
+                                        (discrete * scroll_factor).round() as i32,
+                                    );
+                                }
+                            } else if event.source() == AxisSource::Finger {
+                                frame = frame.stop(Axis::Horizontal);
+                            }
+                        }
+                        if let Some(vertical_amount) = event.amount(Axis::Vertical) {
+                            if vertical_amount != 0.0 {
+                                frame =
+                                    frame.value(Axis::Vertical, scroll_factor * vertical_amount);
+                                if let Some(discrete) = event.amount_v120(Axis::Vertical) {
+                                    frame = frame.v120(
+                                        Axis::Vertical,
+                                        (discrete * scroll_factor).round() as i32,
+                                    );
+                                }
+                            } else if event.source() == AxisSource::Finger {
+                                frame = frame.stop(Axis::Vertical);
+                            }
+                        }
+                        let ptr = seat.get_pointer().unwrap();
+                        ptr.axis(self, frame);
+                        ptr.frame(self);
                     }
-                    let ptr = seat.get_pointer().unwrap();
-                    ptr.axis(self, frame);
-                    ptr.frame(self);
                 }
             }
 

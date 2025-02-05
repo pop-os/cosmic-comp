@@ -1053,6 +1053,7 @@ impl State {
                         seat,
                         new_level,
                         self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                        true,
                     );
 
                     if new_level > 1.
