@@ -7,7 +7,7 @@ use smithay::{
     delegate_compositor,
     desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
-    utils::SERIAL_COUNTER,
+    utils::{Logical, Size, SERIAL_COUNTER},
     wayland::{
         compositor::{
             add_blocker, add_pre_commit_hook, with_states, BufferAssignment, CompositorClientState,
@@ -27,7 +27,10 @@ use smithay::{
 };
 use std::sync::Mutex;
 
-fn toplevel_ensure_initial_configure(toplevel: &ToplevelSurface) -> bool {
+fn toplevel_ensure_initial_configure(
+    toplevel: &ToplevelSurface,
+    size: Option<Size<i32, Logical>>,
+) -> bool {
     // send the initial configure if relevant
     let initial_configure_sent = with_states(toplevel.wl_surface(), |states| {
         states
@@ -39,8 +42,7 @@ fn toplevel_ensure_initial_configure(toplevel: &ToplevelSurface) -> bool {
             .initial_configure_sent
     });
     if !initial_configure_sent {
-        // TODO: query expected size from shell (without inserting and mapping)
-        toplevel.with_pending_state(|states| states.size = None);
+        toplevel.with_pending_state(|states| states.size = size);
         toplevel.send_configure();
     }
     initial_configure_sent
@@ -277,17 +279,26 @@ impl State {
     fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
         let mut shell = self.common.shell.write().unwrap();
 
-        if let Some(window) = shell
+        if let Some(pending) = shell
             .pending_windows
             .iter()
             .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface))
-            .map(|pending| pending.surface.clone())
         {
-            if let Some(toplevel) = window.0.toplevel() {
-                if toplevel_ensure_initial_configure(&toplevel)
+            if let Some(toplevel) = pending.surface.0.toplevel() {
+                let initial_size = if let Some(output) = pending.fullscreen.as_ref() {
+                    Some(output.geometry().size.as_logical())
+                } else if pending.maximized {
+                    let active_output = shell.seats.last_active().active_output();
+                    let zone = layer_map_for_output(&active_output).non_exclusive_zone();
+                    Some(zone.size)
+                } else {
+                    None
+                };
+                if toplevel_ensure_initial_configure(&toplevel, initial_size)
                     && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
                         .unwrap_or(false)
                 {
+                    let window = pending.surface.clone();
                     window.on_commit();
                     let res = shell.map_window(
                         &window,
