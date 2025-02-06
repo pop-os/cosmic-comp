@@ -2896,6 +2896,7 @@ impl Shell {
             initial_window_location,
             cursor_output,
             active_hint,
+            config.cosmic_conf.window_snap_threshold as f64,
             layer,
             release,
             evlh.clone(),
@@ -3147,6 +3148,7 @@ impl Shell {
 
     pub fn menu_resize_request(
         &mut self,
+        config: &Config,
         mapped: &CosmicMapped,
         seat: &Seat<State>,
         edge: ResizeEdge,
@@ -3213,6 +3215,7 @@ impl Shell {
         start_data.set_focus(focus.clone());
 
         let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
+            config,
             mapped,
             seat,
             start_data.clone(),
@@ -3388,6 +3391,7 @@ impl Shell {
 
     pub fn resize_request(
         &mut self,
+        config: &Config,
         surface: &WlSurface,
         seat: &Seat<State>,
         serial: impl Into<Option<Serial>>,
@@ -3415,6 +3419,7 @@ impl Shell {
         };
 
         let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
+            config,
             &mapped,
             seat,
             start_data.clone(),

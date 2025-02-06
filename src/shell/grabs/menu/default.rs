@@ -288,7 +288,12 @@ pub fn window_items(
                     let _ = handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write().unwrap();
                         let seat = shell.seats.last_active().clone();
-                        let res = shell.menu_resize_request(&resize_clone, &seat, ResizeEdge::TOP);
+                        let res = shell.menu_resize_request(
+                            &state.common.config,
+                            &resize_clone,
+                            &seat,
+                            ResizeEdge::TOP,
+                        );
 
                         std::mem::drop(shell);
                         if let Some(((target, loc), (grab, focus))) = res {
@@ -318,7 +323,12 @@ pub fn window_items(
                     let _ = handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write().unwrap();
                         let seat = shell.seats.last_active().clone();
-                        let res = shell.menu_resize_request(&resize_clone, &seat, ResizeEdge::LEFT);
+                        let res = shell.menu_resize_request(
+                            &state.common.config,
+                            &resize_clone,
+                            &seat,
+                            ResizeEdge::LEFT,
+                        );
 
                         std::mem::drop(shell);
                         if let Some(((target, loc), (grab, focus))) = res {
@@ -348,8 +358,12 @@ pub fn window_items(
                     let _ = handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write().unwrap();
                         let seat = shell.seats.last_active().clone();
-                        let res =
-                            shell.menu_resize_request(&resize_clone, &seat, ResizeEdge::RIGHT);
+                        let res = shell.menu_resize_request(
+                            &state.common.config,
+                            &resize_clone,
+                            &seat,
+                            ResizeEdge::RIGHT,
+                        );
 
                         std::mem::drop(shell);
                         if let Some(((target, loc), (grab, focus))) = res {
@@ -379,8 +393,12 @@ pub fn window_items(
                     let _ = handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write().unwrap();
                         let seat = shell.seats.last_active().clone();
-                        let res =
-                            shell.menu_resize_request(&resize_clone, &seat, ResizeEdge::BOTTOM);
+                        let res = shell.menu_resize_request(
+                            &state.common.config,
+                            &resize_clone,
+                            &seat,
+                            ResizeEdge::BOTTOM,
+                        );
 
                         std::mem::drop(shell);
                         if let Some(((target, loc), (grab, focus))) = res {

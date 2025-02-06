@@ -1355,6 +1355,7 @@ impl PointerTarget<State> for CosmicStack {
                 };
                 self.0.loop_handle().insert_idle(move |state| {
                     let res = state.common.shell.write().unwrap().resize_request(
+                        &state.common.config,
                         &surface,
                         &seat,
                         serial,

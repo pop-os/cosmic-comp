@@ -197,9 +197,14 @@ impl XdgShellHandler for State {
     ) {
         let seat = Seat::from_resource(&seat).unwrap();
         let mut shell = self.common.shell.write().unwrap();
-        if let Some((grab, focus)) =
-            shell.resize_request(surface.wl_surface(), &seat, serial, edges.into(), true)
-        {
+        if let Some((grab, focus)) = shell.resize_request(
+            &self.common.config,
+            surface.wl_surface(),
+            &seat,
+            serial,
+            edges.into(),
+            true,
+        ) {
             std::mem::drop(shell);
             if grab.is_touch_grab() {
                 seat.get_touch().unwrap().set_grab(self, grab, serial)

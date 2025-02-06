@@ -756,6 +756,7 @@ impl State {
                                                             }
                                                         };
                                                         let res = shell.resize_request(
+                                                            &state.common.config,
                                                             &surface,
                                                             &seat_clone,
                                                             serial,
