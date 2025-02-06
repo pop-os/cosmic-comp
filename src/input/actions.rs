@@ -182,6 +182,18 @@ impl State {
                 );
             }
 
+            Action::ToggleStickyVisibility => {
+                let mut shell = self.common.shell.write().unwrap();
+                let sticky_visible = shell.workspaces.sticky_visible;
+                if sticky_visible {
+                    shell.workspaces.sticky_visible = false;
+                    shell.minimize_sticky();
+                } else {
+                    shell.workspaces.sticky_visible = true;
+                    shell.unminimize_sticky();
+                }
+            }
+
             Action::NextWorkspace => {
                 let next = to_next_workspace(
                     &mut *self.common.shell.write().unwrap(),
