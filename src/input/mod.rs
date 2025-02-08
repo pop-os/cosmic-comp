@@ -23,7 +23,7 @@ use crate::{
         },
         SeatExt, Trigger,
     },
-    utils::{prelude::*, quirks::workspace_overview_is_open},
+    utils::{float::NextDown, prelude::*, quirks::workspace_overview_is_open},
     wayland::{
         handlers::screencopy::SessionHolder,
         protocols::screencopy::{BufferConstraints, CursorSession},
@@ -502,6 +502,11 @@ impl State {
 
                     let mut shell = self.common.shell.write().unwrap();
                     shell.update_pointer_position(position.to_local(&output), &output);
+                    shell.update_focal_point(
+                        &seat,
+                        original_position,
+                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                    );
 
                     if output != current_output {
                         for session in cursor_sessions_for_output(&*shell, &current_output) {
@@ -809,37 +814,82 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
-                    if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
-                        if horizontal_amount != 0.0 {
-                            frame =
-                                frame.value(Axis::Horizontal, scroll_factor * horizontal_amount);
-                            if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
-                                frame = frame.v120(
-                                    Axis::Horizontal,
-                                    (discrete * scroll_factor).round() as i32,
-                                );
+                    if seat.get_keyboard().unwrap().modifier_state().logo {
+                        if let Some(mut percentage) = event
+                            .amount_v120(Axis::Vertical)
+                            .map(|val| val / 120.)
+                            .or_else(|| event.amount(Axis::Vertical))
+                            .map(|val| val * scroll_factor)
+                        {
+                            let mut shell = self.common.shell.write().unwrap();
+                            let (zoom_seat, current_level) = shell
+                                .zoom_level(None)
+                                .map(|(s, _, l)| (s, l))
+                                .unwrap_or_else(|| (seat.clone(), 1.0));
+
+                            if current_level == 1. && percentage.is_sign_positive() {
+                                return;
                             }
-                        } else if event.source() == AxisSource::Finger {
-                            frame = frame.stop(Axis::Horizontal);
-                        }
-                    }
-                    if let Some(vertical_amount) = event.amount(Axis::Vertical) {
-                        if vertical_amount != 0.0 {
-                            frame = frame.value(Axis::Vertical, scroll_factor * vertical_amount);
-                            if let Some(discrete) = event.amount_v120(Axis::Vertical) {
-                                frame = frame.v120(
-                                    Axis::Vertical,
-                                    (discrete * scroll_factor).round() as i32,
-                                );
+                            if event.source() == AxisSource::Wheel {
+                                percentage *= 5.;
                             }
-                        } else if event.source() == AxisSource::Finger {
-                            frame = frame.stop(Axis::Vertical);
+
+                            let new_level = (current_level - percentage as f64 / 100.).max(1.0);
+                            if zoom_seat == seat {
+                                shell.trigger_zoom(
+                                    &seat,
+                                    new_level,
+                                    self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                                    event.source() == AxisSource::Wheel,
+                                );
+
+                                if new_level > 1.
+                                    && self
+                                        .common
+                                        .config
+                                        .cosmic_conf
+                                        .accessibility_zoom
+                                        .start_on_login
+                                {
+                                    self.common.config.dynamic_conf.zoom_state_mut().last_level =
+                                        new_level;
+                                }
+                            }
                         }
+                    } else {
+                        let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
+                        if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
+                            if horizontal_amount != 0.0 {
+                                frame = frame
+                                    .value(Axis::Horizontal, scroll_factor * horizontal_amount);
+                                if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
+                                    frame = frame.v120(
+                                        Axis::Horizontal,
+                                        (discrete * scroll_factor).round() as i32,
+                                    );
+                                }
+                            } else if event.source() == AxisSource::Finger {
+                                frame = frame.stop(Axis::Horizontal);
+                            }
+                        }
+                        if let Some(vertical_amount) = event.amount(Axis::Vertical) {
+                            if vertical_amount != 0.0 {
+                                frame =
+                                    frame.value(Axis::Vertical, scroll_factor * vertical_amount);
+                                if let Some(discrete) = event.amount_v120(Axis::Vertical) {
+                                    frame = frame.v120(
+                                        Axis::Vertical,
+                                        (discrete * scroll_factor).round() as i32,
+                                    );
+                                }
+                            } else if event.source() == AxisSource::Finger {
+                                frame = frame.stop(Axis::Vertical);
+                            }
+                        }
+                        let ptr = seat.get_pointer().unwrap();
+                        ptr.axis(self, frame);
+                        ptr.frame(self);
                     }
-                    let ptr = seat.get_pointer().unwrap();
-                    ptr.axis(self, frame);
-                    ptr.frame(self);
                 }
             }
 
@@ -2185,33 +2235,4 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
         None
     };
     map_to_output.or_else(|| shell.builtin_output())
-}
-
-// FIXME: When f64::next_down reaches stable rust, use that instead
-trait NextDown {
-    fn next_lower(self) -> Self;
-}
-
-impl NextDown for f64 {
-    fn next_lower(self) -> Self {
-        // We must use strictly integer arithmetic to prevent denormals from
-        // flushing to zero after an arithmetic operation on some platforms.
-        const NEG_TINY_BITS: u64 = 0x8000_0000_0000_0001; // Smallest (in magnitude) negative f64.
-        const CLEAR_SIGN_MASK: u64 = 0x7fff_ffff_ffff_ffff;
-
-        let bits = self.to_bits();
-        if self.is_nan() || bits == Self::NEG_INFINITY.to_bits() {
-            return self;
-        }
-
-        let abs = bits & CLEAR_SIGN_MASK;
-        let next_bits = if abs == 0 {
-            NEG_TINY_BITS
-        } else if bits == abs {
-            bits - 1
-        } else {
-            bits + 1
-        };
-        Self::from_bits(next_bits)
-    }
 }

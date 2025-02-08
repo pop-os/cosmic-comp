@@ -281,6 +281,7 @@ pub fn render_workspace_to_buffer(
                 age,
                 additional_damage,
                 &common.shell,
+                None,
                 common.clock.now(),
                 &output,
                 None,
@@ -311,6 +312,7 @@ pub fn render_workspace_to_buffer(
                 age,
                 additional_damage,
                 &common.shell,
+                None,
                 common.clock.now(),
                 &output,
                 None,
@@ -525,6 +527,7 @@ pub fn render_window_to_buffer(
                         &seat,
                         location,
                         1.0.into(),
+                        1.0,
                         common.clock.now(),
                         true,
                     )
@@ -719,6 +722,7 @@ pub fn render_cursor_to_buffer(
             &seat,
             Point::from((0.0, 0.0)),
             1.0.into(),
+            1.0,
             common.clock.now(),
             true,
         )

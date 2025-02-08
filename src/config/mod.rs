@@ -47,6 +47,7 @@ pub use self::types::*;
 use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, TileBehavior, XkbConfig,
+    ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -68,6 +69,7 @@ pub struct Config {
 #[derive(Debug)]
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
+    accessibility_zoom: (Option<PathBuf>, ZoomState),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -169,6 +171,11 @@ impl OutputConfig {
             refresh: self.mode_refresh() as i32,
         }
     }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+pub struct ZoomState {
+    pub last_level: f64,
 }
 
 impl Config {
@@ -309,7 +316,7 @@ impl Config {
         };
 
         Config {
-            dynamic_conf: Self::load_dynamic(xdg.as_ref()),
+            dynamic_conf: Self::load_dynamic(xdg.as_ref(), &cosmic_comp_config),
             cosmic_conf: cosmic_comp_config,
             cosmic_helper: config,
             settings_context,
@@ -319,13 +326,21 @@ impl Config {
         }
     }
 
-    fn load_dynamic(xdg: Option<&xdg::BaseDirectories>) -> DynamicConfig {
+    fn load_dynamic(
+        xdg: Option<&xdg::BaseDirectories>,
+        cosmic: &CosmicCompConfig,
+    ) -> DynamicConfig {
         let output_path =
             xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
         let outputs = Self::load_outputs(&output_path);
 
+        let zoom_path =
+            xdg.and_then(|base| base.place_state_file("cosmic-comp/a11y_zoom.ron").ok());
+        let zoom = Self::load_zoom_state(&zoom_path, cosmic);
+
         DynamicConfig {
             outputs: (output_path, outputs),
+            accessibility_zoom: (zoom_path, zoom),
         }
     }
 
@@ -370,6 +385,35 @@ impl Config {
 
         OutputsConfig {
             config: HashMap::new(),
+        }
+    }
+
+    fn load_zoom_state(path: &Option<PathBuf>, cosmic: &CosmicCompConfig) -> ZoomState {
+        if let Some(path) = path.as_ref() {
+            if path.exists() {
+                match ron::de::from_reader::<_, ZoomState>(
+                    OpenOptions::new().read(true).open(path).unwrap(),
+                ) {
+                    Ok(mut config) => {
+                        if config.last_level <= 1.0 {
+                            warn!("Invalid level, resetting");
+                            config.last_level =
+                                1.0 + cosmic.accessibility_zoom.increment as f64 / 100.0;
+                        }
+                        return config;
+                    }
+                    Err(err) => {
+                        warn!(?err, "Failed to read zoom_state, resetting..");
+                        if let Err(err) = std::fs::remove_file(path) {
+                            error!(?err, "Failed to remove zoom_state.");
+                        }
+                    }
+                };
+            }
+        }
+
+        ZoomState {
+            last_level: 1.0 + cosmic.accessibility_zoom.increment as f64 / 100.0,
         }
     }
 
@@ -639,6 +683,17 @@ impl DynamicConfig {
     pub fn outputs_mut(&mut self) -> PersistenceGuard<'_, OutputsConfig> {
         PersistenceGuard(self.outputs.0.clone(), &mut self.outputs.1)
     }
+
+    pub fn zoom_state(&self) -> &ZoomState {
+        &self.accessibility_zoom.1
+    }
+
+    pub fn zoom_state_mut(&mut self) -> PersistenceGuard<'_, ZoomState> {
+        PersistenceGuard(
+            self.accessibility_zoom.0.clone(),
+            &mut self.accessibility_zoom.1,
+        )
+    }
 }
 
 fn get_config<T: Default + serde::de::DeserializeOwned>(
@@ -766,6 +821,36 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<u64>(&config, "focus_follows_cursor_delay");
                 if new != state.common.config.cosmic_conf.focus_follows_cursor_delay {
                     state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
+                }
+            }
+            "accessibility_zoom" => {
+                let new = get_config::<ZoomConfig>(&config, "accessibility_zoom");
+                if new != state.common.config.cosmic_conf.accessibility_zoom {
+                    if new.start_on_login
+                        && !state
+                            .common
+                            .config
+                            .cosmic_conf
+                            .accessibility_zoom
+                            .start_on_login
+                    {
+                        let level = state
+                            .common
+                            .shell
+                            .read()
+                            .unwrap()
+                            .zoom_level(None)
+                            .map_or(1., |(_, _, level)| level);
+                        state.common.config.dynamic_conf.zoom_state_mut().last_level = if level
+                            != 1.
+                        {
+                            level
+                        } else {
+                            1. + state.common.config.cosmic_conf.accessibility_zoom.increment as f64
+                                / 100.
+                        };
+                    }
+                    state.common.config.cosmic_conf.accessibility_zoom = new;
                 }
             }
             _ => {}
