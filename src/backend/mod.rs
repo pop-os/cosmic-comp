@@ -94,23 +94,7 @@ pub fn init_backend_auto(
         if toggle_numlock {
             /// Linux scancode for numlock key.
             const NUMLOCK_SCANCODE: u32 = 69;
-            /// Offset used to convert Linux scancode to X11 keycode.
-            const X11_KEYCODE_OFFSET: u32 = 8;
-
-            let mut input = |key_state| {
-                let time = state.common.clock.now().as_millis();
-                let _ = keyboard.input(
-                    state,
-                    smithay_input::Keycode::new(NUMLOCK_SCANCODE + X11_KEYCODE_OFFSET),
-                    key_state,
-                    SERIAL_COUNTER.next_serial(),
-                    time,
-                    |_, _, _| smithay::input::keyboard::FilterResult::<()>::Forward,
-                );
-            };
-            // Press and release the numlock key to update modifiers.
-            input(smithay_input::KeyState::Pressed);
-            input(smithay_input::KeyState::Released);
+            crate::config::change_modifier_state(&keyboard, NUMLOCK_SCANCODE, state);
         }
         {
             {

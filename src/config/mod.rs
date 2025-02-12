@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use smithay::utils::{Clock, Monotonic};
 use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
-    backend::input::KeyState,
+    backend::input::{self as smithay_input, KeyState},
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
     output::{Mode, Output},
     reexports::{
@@ -25,7 +25,7 @@ pub use smithay::{
             TapButtonMap,
         },
     },
-    utils::{Logical, Physical, Point, Size, Transform},
+    utils::{Logical, Physical, Point, Size, Transform, SERIAL_COUNTER},
 };
 use std::{
     cell::RefCell,
@@ -694,6 +694,30 @@ fn update_input(state: &mut State) {
     }
 }
 
+pub fn change_modifier_state(
+    keyboard: &smithay::input::keyboard::KeyboardHandle<State>,
+    scan_code: u32,
+    state: &mut State,
+) {
+    /// Offset used to convert Linux scancode to X11 keycode.
+    const X11_KEYCODE_OFFSET: u32 = 8;
+
+    let mut input = |key_state, scan_code| {
+        let time = state.common.clock.now().as_millis();
+        let _ = keyboard.input(
+            state,
+            smithay_input::Keycode::new(scan_code + X11_KEYCODE_OFFSET),
+            key_state,
+            SERIAL_COUNTER.next_serial(),
+            time,
+            |_, _, _| smithay::input::keyboard::FilterResult::<()>::Forward,
+        );
+    };
+
+    input(smithay_input::KeyState::Pressed, scan_code);
+    input(smithay_input::KeyState::Released, scan_code);
+}
+
 fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut State) {
     for key in &keys {
         match key.as_str() {
@@ -710,6 +734,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     .collect::<Vec<_>>();
                 for seat in seats.into_iter() {
                     if let Some(keyboard) = seat.get_keyboard() {
+                        let old_modifier_state = keyboard.modifier_state();
                         keyboard.change_repeat_info(
                             (value.repeat_rate as i32).abs(), // Negative values are illegal
                             (value.repeat_delay as i32).abs(),
@@ -717,6 +742,16 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(&value)) {
                             error!(?err, "Failed to load provided xkb config");
                             // TODO Revert to default?
+                        }
+
+                        // Press and release the numlock key to update modifiers.
+                        if old_modifier_state.num_lock != keyboard.modifier_state().num_lock {
+                            const NUMLOCK_SCANCODE: u32 = 69;
+                            change_modifier_state(&keyboard, NUMLOCK_SCANCODE, state);
+                        }
+                        if old_modifier_state.caps_lock != keyboard.modifier_state().caps_lock {
+                            const CAPSLOCK_SCANCODE: u32 = 58;
+                            change_modifier_state(&keyboard, CAPSLOCK_SCANCODE, state);
                         }
                     }
                 }
