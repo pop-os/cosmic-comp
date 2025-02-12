@@ -1,10 +1,12 @@
 use crate::{shell::ActivationKey, state::ClientState, utils::prelude::*};
 use crate::{state::State, wayland::protocols::workspace::WorkspaceHandle};
-use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::State as WState;
 use smithay::{
     delegate_xdg_activation,
     input::Seat,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    reexports::{
+        wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1::State as WState,
+        wayland_server::protocol::wl_surface::WlSurface,
+    },
     wayland::xdg_activation::{
         XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
     },

@@ -15,9 +15,7 @@ use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
     TileBehavior,
 };
-use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::{
-    State as WState, TilingState,
-};
+use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
 use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use keyframe::{ease, functions::EaseInOutCubic};
@@ -40,7 +38,10 @@ use smithay::{
     },
     output::Output,
     reexports::{
-        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
+        wayland_protocols::ext::{
+            session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
+            workspace::v1::server::ext_workspace_handle_v1::State as WState,
+        },
         wayland_server::{protocol::wl_surface::WlSurface, Client},
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
@@ -350,15 +351,14 @@ fn create_workspace(
             } else {
                 TilingState::FloatingOnly
             },
+            // TODO Set id for persistent workspaces
+            None,
         )
         .unwrap();
     if active {
         state.add_workspace_state(&workspace_handle, WState::Active);
     }
-    state.set_workspace_capabilities(
-        &workspace_handle,
-        [WorkspaceCapabilities::Activate].into_iter(),
-    );
+    state.set_workspace_capabilities(&workspace_handle, WorkspaceCapabilities::Activate);
     Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
 }
 
@@ -376,12 +376,11 @@ fn move_workspace_to_group(
             } else {
                 TilingState::FloatingOnly
             },
+            // TODO Set id for persistent workspaces
+            None,
         )
         .unwrap();
-    workspace_state.set_workspace_capabilities(
-        &workspace.handle,
-        [WorkspaceCapabilities::Activate].into_iter(),
-    );
+    workspace_state.set_workspace_capabilities(&workspace.handle, WorkspaceCapabilities::Activate);
     for window in workspace.mapped() {
         for (surface, _) in window.windows() {
             toplevel_leave_workspace(&surface, &old_workspace_handle);
