@@ -1,31 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::{
-    reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1::{self},
-    reexports::wayland_server::{
-        backend::{ClientData, ClientId},
-        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
-    },
+use smithay::reexports::wayland_server::{
+    backend::{ClientData, ClientId},
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
 
 use super::{
-    GroupCapabilities, Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler,
-    WorkspaceData, WorkspaceGlobalData, WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle,
+    Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceData,
+    WorkspaceGlobalData, WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle,
     WorkspaceHandler, WorkspaceState,
 };
 
-use cosmic_protocols::workspace::v1::server::{
-    zcosmic_workspace_group_handle_v1::{self, ZcosmicWorkspaceGroupHandleV1},
-    zcosmic_workspace_handle_v1::{self, ZcosmicWorkspaceHandleV1},
-    zcosmic_workspace_manager_v1::{self, ZcosmicWorkspaceManagerV1},
+use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
+    ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
+    ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
+    ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
 };
 
-impl<D> GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
+impl<D> GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+        + Dispatch<ExtWorkspaceManagerV1, ()>
+        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
+        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -34,7 +31,7 @@ where
         state: &mut D,
         dh: &DisplayHandle,
         _client: &Client,
-        resource: New<ZcosmicWorkspaceManagerV1>,
+        resource: New<ExtWorkspaceManagerV1>,
         _global_data: &WorkspaceGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
@@ -44,7 +41,7 @@ where
             send_group_to_client::<D>(dh, &instance, group);
         }
         instance.done();
-        state.instances.push(instance);
+        state.ext_instances.push(instance);
     }
 
     fn can_view(client: Client, global_data: &WorkspaceGlobalData) -> bool {
@@ -52,12 +49,12 @@ where
     }
 }
 
-impl<D> Dispatch<ZcosmicWorkspaceManagerV1, (), D> for WorkspaceState<D>
+impl<D> Dispatch<ExtWorkspaceManagerV1, (), D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+        + Dispatch<ExtWorkspaceManagerV1, ()>
+        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
+        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -65,15 +62,15 @@ where
     fn request(
         state: &mut D,
         client: &Client,
-        obj: &ZcosmicWorkspaceManagerV1,
-        request: zcosmic_workspace_manager_v1::Request,
+        obj: &ExtWorkspaceManagerV1,
+        request: ext_workspace_manager_v1::Request,
         _data: &(),
         dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_workspace_manager_v1::Request::Commit => {
-                if state.workspace_state().instances.contains(obj) {
+            ext_workspace_manager_v1::Request::Commit => {
+                if state.workspace_state().ext_instances.contains(obj) {
                     let mut client_state = client
                         .get_data::<<D as WorkspaceHandler>::Client>()
                         .unwrap()
@@ -83,8 +80,11 @@ where
                     state.commit_requests(dh, std::mem::take(&mut client_state.requests));
                 }
             }
-            zcosmic_workspace_manager_v1::Request::Stop => {
-                state.workspace_state_mut().instances.retain(|i| i != obj);
+            ext_workspace_manager_v1::Request::Stop => {
+                state
+                    .workspace_state_mut()
+                    .ext_instances
+                    .retain(|i| i != obj);
                 // without an instance, the whole send_group_to_client machinery doesn't work
                 // so there is no way for the whole clients hierachy to get any new events
             }
@@ -92,25 +92,20 @@ where
         }
     }
 
-    fn destroyed(
-        state: &mut D,
-        _client: ClientId,
-        resource: &ZcosmicWorkspaceManagerV1,
-        _data: &(),
-    ) {
+    fn destroyed(state: &mut D, _client: ClientId, resource: &ExtWorkspaceManagerV1, _data: &()) {
         state
             .workspace_state_mut()
-            .instances
+            .ext_instances
             .retain(|i| i != resource);
     }
 }
 
-impl<D> Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData, D> for WorkspaceState<D>
+impl<D> Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData, D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+        + Dispatch<ExtWorkspaceManagerV1, ()>
+        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
+        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -118,19 +113,19 @@ where
     fn request(
         state: &mut D,
         client: &Client,
-        obj: &ZcosmicWorkspaceGroupHandleV1,
-        request: zcosmic_workspace_group_handle_v1::Request,
+        obj: &ExtWorkspaceGroupHandleV1,
+        request: ext_workspace_group_handle_v1::Request,
         _data: &WorkspaceGroupData,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_workspace_group_handle_v1::Request::CreateWorkspace { workspace } => {
+            ext_workspace_group_handle_v1::Request::CreateWorkspace { workspace } => {
                 if let Some(id) = state
                     .workspace_state()
                     .groups
                     .iter()
-                    .find(|g| g.instances.contains(obj))
+                    .find(|g| g.ext_instances.contains(obj))
                     .map(|g| g.id)
                 {
                     let mut state = client
@@ -145,9 +140,9 @@ where
                     });
                 }
             }
-            zcosmic_workspace_group_handle_v1::Request::Destroy => {
+            ext_workspace_group_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
-                    group.instances.retain(|i| i != obj)
+                    group.ext_instances.retain(|i| i != obj)
                 }
             }
             _ => {}
@@ -157,21 +152,21 @@ where
     fn destroyed(
         state: &mut D,
         _client: ClientId,
-        resource: &ZcosmicWorkspaceGroupHandleV1,
+        resource: &ExtWorkspaceGroupHandleV1,
         _data: &WorkspaceGroupData,
     ) {
         for group in &mut state.workspace_state_mut().groups {
-            group.instances.retain(|i| i != resource)
+            group.ext_instances.retain(|i| i != resource)
         }
     }
 }
 
-impl<D> Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData, D> for WorkspaceState<D>
+impl<D> Dispatch<ExtWorkspaceHandleV1, WorkspaceData, D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+        + Dispatch<ExtWorkspaceManagerV1, ()>
+        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
+        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -179,15 +174,17 @@ where
     fn request(
         state: &mut D,
         client: &Client,
-        obj: &ZcosmicWorkspaceHandleV1,
-        request: zcosmic_workspace_handle_v1::Request,
+        obj: &ExtWorkspaceHandleV1,
+        request: ext_workspace_handle_v1::Request,
         _data: &WorkspaceData,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_workspace_handle_v1::Request::Activate => {
-                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
+            ext_workspace_handle_v1::Request::Activate => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(obj)
+                {
                     let mut state = client
                         .get_data::<<D as WorkspaceHandler>::Client>()
                         .unwrap()
@@ -197,8 +194,10 @@ where
                     state.requests.push(Request::Activate(workspace_handle));
                 }
             }
-            zcosmic_workspace_handle_v1::Request::Deactivate => {
-                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
+            ext_workspace_handle_v1::Request::Deactivate => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(obj)
+                {
                     let mut state = client
                         .get_data::<<D as WorkspaceHandler>::Client>()
                         .unwrap()
@@ -208,8 +207,10 @@ where
                     state.requests.push(Request::Deactivate(workspace_handle));
                 }
             }
-            zcosmic_workspace_handle_v1::Request::Remove => {
-                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
+            ext_workspace_handle_v1::Request::Remove => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(obj)
+                {
                     let mut state = client
                         .get_data::<<D as WorkspaceHandler>::Client>()
                         .unwrap()
@@ -219,40 +220,34 @@ where
                     state.requests.push(Request::Remove(workspace_handle));
                 }
             }
-            zcosmic_workspace_handle_v1::Request::Rename { name } => {
-                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
-                    let mut state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
+            ext_workspace_handle_v1::Request::Assign { workspace_group } => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(obj)
+                {
+                    if let Some(group_id) = state
                         .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.requests.push(Request::Rename {
-                        workspace: workspace_handle,
-                        name,
-                    });
+                        .groups
+                        .iter()
+                        .find(|g| g.ext_instances.contains(&workspace_group))
+                        .map(|g| g.id)
+                    {
+                        let mut state = client
+                            .get_data::<<D as WorkspaceHandler>::Client>()
+                            .unwrap()
+                            .workspace_state()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::Assign {
+                            workspace: workspace_handle,
+                            group: WorkspaceGroupHandle { id: group_id },
+                        });
+                    }
                 }
             }
-            zcosmic_workspace_handle_v1::Request::SetTilingState {
-                state: tiling_state,
-            } => {
-                if let Some(workspace_handle) = state.workspace_state().get_workspace_handle(obj) {
-                    let mut state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
-                        .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.requests.push(Request::SetTilingState {
-                        workspace: workspace_handle,
-                        state: tiling_state,
-                    });
-                }
-            }
-            zcosmic_workspace_handle_v1::Request::Destroy => {
+            ext_workspace_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
                     for workspace in &mut group.workspaces {
-                        workspace.instances.retain(|i| i != obj)
+                        workspace.ext_instances.retain(|i| i != obj)
                     }
                 }
             }
@@ -263,12 +258,12 @@ where
     fn destroyed(
         state: &mut D,
         _client: ClientId,
-        resource: &ZcosmicWorkspaceHandleV1,
+        resource: &ExtWorkspaceHandleV1,
         _data: &WorkspaceData,
     ) {
         for group in &mut state.workspace_state_mut().groups {
             for workspace in &mut group.workspaces {
-                workspace.instances.retain(|i| i != resource)
+                workspace.ext_instances.retain(|i| i != resource)
             }
         }
     }
@@ -276,34 +271,34 @@ where
 
 pub(super) fn send_group_to_client<D>(
     dh: &DisplayHandle,
-    mngr: &ZcosmicWorkspaceManagerV1,
+    mngr: &ExtWorkspaceManagerV1,
     group: &mut WorkspaceGroup,
 ) -> bool
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+        + Dispatch<ExtWorkspaceManagerV1, ()>
+        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
+        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     let instance = match group
-        .instances
+        .ext_instances
         .iter_mut()
         .find(|i| i.id().same_client_as(&mngr.id()))
     {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.id()) {
-                if let Ok(handle) = client.create_resource::<ZcosmicWorkspaceGroupHandleV1, _, D>(
+                if let Ok(handle) = client.create_resource::<ExtWorkspaceGroupHandleV1, _, D>(
                     dh,
                     mngr.version(),
                     WorkspaceGroupData::default(),
                 ) {
                     mngr.workspace_group(&handle);
-                    group.instances.push(handle);
-                    group.instances.last_mut().unwrap()
+                    group.ext_instances.push(handle);
+                    group.ext_instances.last_mut().unwrap()
                 } else {
                     return false;
                 }
@@ -343,16 +338,7 @@ where
     }
 
     if handle_state.capabilities != group.capabilities {
-        let caps = group
-            .capabilities
-            .iter()
-            .filter_map(|cap| match cap {
-                GroupCapabilities::CreateWorkspace => Some(zcosmic_workspace_group_handle_v1::ZcosmicWorkspaceGroupCapabilitiesV1::CreateWorkspace),
-                _ => None,
-            })
-            .flat_map(|cap| (cap as u32).to_ne_bytes())
-            .collect::<Vec<u8>>();
-        instance.capabilities(caps);
+        instance.capabilities(group.capabilities);
         handle_state.capabilities = group.capabilities.clone();
         changed = true;
     }
@@ -363,7 +349,7 @@ where
     handle_state.workspace_count = group.workspaces.len();
 
     for workspace in &mut group.workspaces {
-        if send_workspace_to_client::<D>(dh, instance, workspace) {
+        if send_workspace_to_client::<D>(dh, mngr, instance, workspace) {
             changed = true;
         }
     }
@@ -373,34 +359,39 @@ where
 
 fn send_workspace_to_client<D>(
     dh: &DisplayHandle,
-    group: &ZcosmicWorkspaceGroupHandleV1,
+    mngr: &ExtWorkspaceManagerV1,
+    group: &ExtWorkspaceGroupHandleV1,
     workspace: &mut Workspace,
 ) -> bool
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+        + Dispatch<ExtWorkspaceManagerV1, ()>
+        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
+        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     let instance = match workspace
-        .instances
+        .ext_instances
         .iter_mut()
-        .find(|i| i.id().same_client_as(&group.id()))
+        .find(|i| Resource::id(*i).same_client_as(&mngr.id()))
     {
         Some(i) => i,
         None => {
-            if let Ok(client) = dh.get_client(group.id()) {
-                if let Ok(handle) = client.create_resource::<ZcosmicWorkspaceHandleV1, _, D>(
+            if let Ok(client) = dh.get_client(mngr.id()) {
+                if let Ok(handle) = client.create_resource::<ExtWorkspaceHandleV1, _, D>(
                     dh,
-                    group.version(),
+                    mngr.version(),
                     WorkspaceData::default(),
                 ) {
-                    group.workspace(&handle);
-                    workspace.instances.push(handle);
-                    workspace.instances.last_mut().unwrap()
+                    mngr.workspace(&handle);
+                    group.workspace_enter(&handle);
+                    if let Some(id) = workspace.ext_id.clone() {
+                        handle.id(id);
+                    }
+                    workspace.ext_instances.push(handle);
+                    workspace.ext_instances.last_mut().unwrap()
                 } else {
                     return false;
                 }
@@ -434,61 +425,30 @@ where
             .iter()
             .filter_map(|cap| match cap {
                 WorkspaceCapabilities::Activate => {
-                    Some(zcosmic_workspace_handle_v1::ZcosmicWorkspaceCapabilitiesV1::Activate)
+                    Some(ext_workspace_handle_v1::WorkspaceCapabilities::Activate)
                 }
                 WorkspaceCapabilities::Deactivate => {
-                    Some(zcosmic_workspace_handle_v1::ZcosmicWorkspaceCapabilitiesV1::Deactivate)
+                    Some(ext_workspace_handle_v1::WorkspaceCapabilities::Deactivate)
                 }
                 WorkspaceCapabilities::Remove => {
-                    Some(zcosmic_workspace_handle_v1::ZcosmicWorkspaceCapabilitiesV1::Remove)
+                    Some(ext_workspace_handle_v1::WorkspaceCapabilities::Remove)
                 }
-                WorkspaceCapabilities::Rename => {
-                    Some(zcosmic_workspace_handle_v1::ZcosmicWorkspaceCapabilitiesV1::Rename)
+                WorkspaceCapabilities::Assign => {
+                    Some(ext_workspace_handle_v1::WorkspaceCapabilities::Assign)
                 }
-                WorkspaceCapabilities::SetTilingState => Some(
-                    zcosmic_workspace_handle_v1::ZcosmicWorkspaceCapabilitiesV1::SetTilingState,
-                ),
                 _ => None,
             })
-            .flat_map(|cap| (cap as u32).to_ne_bytes())
-            .collect::<Vec<u8>>();
+            .collect::<ext_workspace_handle_v1::WorkspaceCapabilities>();
         instance.capabilities(caps);
         handle_state.capabilities = workspace.capabilities.clone();
         changed = true;
     }
     if handle_state.states != workspace.states {
-        let states = workspace
-            .states
-            .iter()
-            .filter_map(|state| match state {
-                ext_workspace_handle_v1::State::Active => {
-                    Some(zcosmic_workspace_handle_v1::State::Active)
-                }
-                ext_workspace_handle_v1::State::Urgent => {
-                    Some(zcosmic_workspace_handle_v1::State::Urgent)
-                }
-                ext_workspace_handle_v1::State::Hidden => {
-                    Some(zcosmic_workspace_handle_v1::State::Hidden)
-                }
-                _ => None,
-            })
-            .flat_map(|state| (state as u32).to_ne_bytes())
-            .collect::<Vec<u8>>();
-        instance.state(states);
+        instance.state(workspace.states);
         handle_state.states = workspace.states.clone();
         changed = true;
     }
-    if instance.version() >= zcosmic_workspace_handle_v1::EVT_TILING_STATE_SINCE {
-        if handle_state
-            .tiling
-            .map(|state| state != workspace.tiling)
-            .unwrap_or(true)
-        {
-            instance.tiling_state(workspace.tiling);
-            handle_state.tiling = Some(workspace.tiling);
-            changed = true;
-        }
-    }
+    // TODO ext_workspace_handle_v1::id
 
     changed
 }
