@@ -12,6 +12,8 @@ use cosmic_config::{ConfigGet, CosmicConfigEntry};
 use cosmic_settings_config::window_rules::ApplicationException;
 use cosmic_settings_config::{shortcuts, window_rules, Shortcuts};
 use serde::{Deserialize, Serialize};
+use smithay::utils::{Clock, Monotonic};
+use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
     backend::input::KeyState,
     input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
@@ -24,10 +26,6 @@ pub use smithay::{
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},
-};
-use smithay::{
-    utils::{Clock, Monotonic},
-    wayland::xdg_activation::XdgActivationState,
 };
 use std::{
     cell::RefCell,
@@ -46,7 +44,8 @@ mod types;
 pub use self::types::*;
 use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
-    input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, TileBehavior, XkbConfig,
+    input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
+    XkbConfig,
 };
 
 #[derive(Debug)]
@@ -68,6 +67,7 @@ pub struct Config {
 #[derive(Debug)]
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
+    numlock: (Option<PathBuf>, NumlockStateConfig),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -91,6 +91,11 @@ impl From<Output> for OutputInfo {
             model: physical.model,
         }
     }
+}
+
+#[derive(Default, Debug, Deserialize, Serialize)]
+pub struct NumlockStateConfig {
+    pub last_state: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
@@ -323,9 +328,13 @@ impl Config {
         let output_path =
             xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
         let outputs = Self::load_outputs(&output_path);
+        let numlock_path =
+            xdg.and_then(|base| base.place_state_file("cosmic-comp/numlock.ron").ok());
+        let numlock = Self::load_numlock(&numlock_path);
 
         DynamicConfig {
             outputs: (output_path, outputs),
+            numlock: (numlock_path, numlock),
         }
     }
 
@@ -371,6 +380,24 @@ impl Config {
         OutputsConfig {
             config: HashMap::new(),
         }
+    }
+
+    fn load_numlock(path: &Option<PathBuf>) -> NumlockStateConfig {
+        path.as_deref()
+            .filter(|path| path.exists())
+            .and_then(|path| {
+                ron::de::from_reader::<_, NumlockStateConfig>(
+                    OpenOptions::new().read(true).open(path).unwrap(),
+                )
+                .map_err(|err| {
+                    warn!(?err, "Failed to read numlock.ron, resetting..");
+                    if let Err(err) = std::fs::remove_file(path) {
+                        error!(?err, "Failed to remove numlock.ron.");
+                    }
+                })
+                .ok()
+            })
+            .unwrap_or_default()
     }
 
     pub fn shortcut_for_action(&self, action: &shortcuts::Action) -> Option<String> {
@@ -639,6 +666,14 @@ impl DynamicConfig {
     pub fn outputs_mut(&mut self) -> PersistenceGuard<'_, OutputsConfig> {
         PersistenceGuard(self.outputs.0.clone(), &mut self.outputs.1)
     }
+
+    pub fn numlock(&self) -> &NumlockStateConfig {
+        &self.numlock.1
+    }
+
+    pub fn numlock_mut(&mut self) -> PersistenceGuard<'_, NumlockStateConfig> {
+        PersistenceGuard(self.numlock.0.clone(), &mut self.numlock.1)
+    }
 }
 
 fn get_config<T: Default + serde::de::DeserializeOwned>(
@@ -687,6 +722,14 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
                 state.common.atspi_ei.update_keymap(value.clone());
                 state.common.config.cosmic_conf.xkb_config = value;
+            }
+            "keyboard_config" => {
+                let value = get_config::<KeyboardConfig>(&config, "keyboard_config");
+                state.common.config.cosmic_conf.keyboard_config = value;
+                let shell = state.common.shell.read().unwrap();
+                let seat = shell.seats.last_active();
+                state.common.config.dynamic_conf.numlock_mut().last_state =
+                    seat.get_keyboard().unwrap().modifier_state().num_lock;
             }
             "input_default" => {
                 let value = get_config::<InputConfig>(&config, "input_default");

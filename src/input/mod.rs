@@ -33,7 +33,7 @@ use calloop::{
     timer::{TimeoutAction, Timer},
     RegistrationToken,
 };
-use cosmic_comp_config::workspace::WorkspaceLayout;
+use cosmic_comp_config::{workspace::WorkspaceLayout, NumlockState};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
 use smithay::{
@@ -240,6 +240,22 @@ impl State {
                             });
                         }
                         self.handle_action(action, &seat, serial, time, pattern, None, true)
+                    }
+
+                    // If we want to track numlock state so it can be reused on the next boot...
+                    if let NumlockState::LastBoot =
+                        self.common.config.cosmic_conf.keyboard_config.numlock_state
+                    {
+                        // .. and the state has been updated ...
+                        if self.common.config.dynamic_conf.numlock().last_state
+                            != keyboard.modifier_state().num_lock
+                        {
+                            // ... then record the updated state.
+                            // The call to `numlock_mut` will generate a `PersistenceGuard`. The
+                            // `PersistenceGuard` will write to a file when it's dropped here.
+                            self.common.config.dynamic_conf.numlock_mut().last_state =
+                                keyboard.modifier_state().num_lock;
+                        }
                     }
                 }
             }
