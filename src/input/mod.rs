@@ -21,6 +21,7 @@ use crate::{
             floating::ResizeGrabMarker,
             tiling::{NodeDesc, SwapWindowGrab, TilingLayout},
         },
+        zoom::ZoomState,
         SeatExt, Trigger,
     },
     utils::{float::NextDown, prelude::*, quirks::workspace_overview_is_open},
@@ -1187,7 +1188,8 @@ impl State {
                         return;
                     };
 
-                    let position = transform_output_mapped_position(&output, &event);
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1218,7 +1220,8 @@ impl State {
                         return;
                     };
 
-                    let position = transform_output_mapped_position(&output, &event);
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1302,7 +1305,8 @@ impl State {
                         return;
                     };
 
-                    let position = transform_output_mapped_position(&output, &event);
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1366,7 +1370,8 @@ impl State {
                         return;
                     };
 
-                    let position = transform_output_mapped_position(&output, &event);
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1939,6 +1944,7 @@ impl State {
             element_filter,
             |stage| {
                 match stage {
+                    Stage::ZoomUI => {}
                     Stage::SessionLock(lock_surface) => {
                         return ControlFlow::Break(Ok(lock_surface
                             .cloned()
@@ -2067,6 +2073,15 @@ impl State {
             element_filter,
             |stage| {
                 match stage {
+                    Stage::ZoomUI => {
+                        if let Some(zoom_state) = shell.zoom_state() {
+                            if let Some((target, loc)) =
+                                zoom_state.surface_under(output, global_pos)
+                            {
+                                return ControlFlow::Break(Ok(Some((target, loc))));
+                            }
+                        }
+                    }
                     Stage::SessionLock(lock_surface) => {
                         return ControlFlow::Break(Ok(lock_surface.map(|surface| {
                             (
@@ -2196,13 +2211,19 @@ fn cursor_sessions_for_output<'a>(
         })
 }
 
-fn transform_output_mapped_position<'a, B, E>(output: &Output, event: &E) -> Point<f64, Global>
+fn transform_output_mapped_position<'a, B, E>(
+    output: &Output,
+    event: &E,
+    zoom_state: Option<&ZoomState>,
+) -> Point<f64, Global>
 where
     B: InputBackend,
     E: AbsolutePositionEvent<B>,
     B::Device: 'static,
 {
-    let geometry = output.geometry();
+    let geometry = zoom_state
+        .and_then(|state| output.zoomed_geometry(state.current_level()))
+        .unwrap_or_else(|| output.geometry());
     let transform = output.current_transform();
     let size = transform
         .invert()

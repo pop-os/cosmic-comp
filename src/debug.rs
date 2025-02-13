@@ -323,6 +323,7 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
             window.surface().title()
         ),
         Some(ResizeFork(_)) => String::from("Resize UI"),
+        Some(ZoomUI(_)) => String::from("Zoom UI"),
         None => format!("None"),
     }
 }
