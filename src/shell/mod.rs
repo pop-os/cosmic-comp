@@ -10,10 +10,7 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
-use crate::{
-    utils::{float::NextDown, tween::EasePoint},
-    wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities},
-};
+use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
 use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
     TileBehavior, ZoomConfig, ZoomMovement,
@@ -85,9 +82,11 @@ pub mod grabs;
 pub mod layout;
 mod seats;
 mod workspace;
+pub mod zoom;
 pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
 pub use self::seats::*;
 pub use self::workspace::*;
+use self::zoom::{OutputZoomState, ZoomState};
 
 use self::{
     element::{
@@ -246,116 +245,6 @@ pub struct PendingLayer {
     pub surface: LayerSurface,
     pub seat: Seat<State>,
     pub output: Output,
-}
-
-struct ZoomState {
-    seat: Seat<State>,
-    level: f64,
-    movement: ZoomMovement,
-    previous_level: Option<(f64, Instant)>,
-}
-
-#[derive(Debug)]
-struct OutputZoomState {
-    focal_point: Point<f64, Local>,
-    previous_point: Option<(Point<f64, Local>, Instant)>,
-}
-
-impl OutputZoomState {
-    pub fn new(
-        seat: &Seat<State>,
-        output: &Output,
-        movement: ZoomMovement,
-        level: f64,
-    ) -> OutputZoomState {
-        let cursor_position = seat.get_pointer().unwrap().current_location().as_global();
-        let output_geometry = output.geometry().to_f64();
-        let focal_point = if output_geometry.contains(cursor_position) {
-            match movement {
-                ZoomMovement::Continuously | ZoomMovement::OnEdge => {
-                    cursor_position.to_local(&output)
-                }
-                ZoomMovement::Centered => {
-                    let mut zoomed_output_geometry = output_geometry;
-                    zoomed_output_geometry = zoomed_output_geometry.downscale(level);
-                    zoomed_output_geometry.loc =
-                        cursor_position - zoomed_output_geometry.size.downscale(2.).to_point();
-
-                    let mut focal_point = zoomed_output_geometry
-                        .loc
-                        .to_local(&output)
-                        .upscale(level)
-                        .to_global(&output);
-                    focal_point.x = focal_point.x.clamp(
-                        output_geometry.loc.x as f64,
-                        ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                    );
-                    focal_point.y = focal_point.y.clamp(
-                        output_geometry.loc.y as f64,
-                        ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                    );
-                    focal_point.to_local(&output)
-                }
-            }
-        } else {
-            (output_geometry.size.w / 2., output_geometry.size.h / 2.).into()
-        };
-
-        OutputZoomState {
-            focal_point,
-            previous_point: None,
-        }
-    }
-
-    fn focal_point(&mut self) -> Point<f64, Local> {
-        if let Some((old_point, start)) = self.previous_point.as_ref() {
-            let duration_since = Instant::now().duration_since(*start);
-            if duration_since > ANIMATION_DURATION {
-                self.previous_point.take();
-                return self.focal_point;
-            }
-
-            let percentage =
-                duration_since.as_millis() as f32 / ANIMATION_DURATION.as_millis() as f32;
-            ease(
-                EaseInOutCubic,
-                EasePoint(*old_point),
-                EasePoint(self.focal_point),
-                percentage,
-            )
-            .0
-        } else {
-            self.focal_point
-        }
-    }
-}
-
-impl ZoomState {
-    pub fn level(&self, output: Option<&Output>) -> (Seat<State>, Point<f64, Global>, f64) {
-        let active_output = self.seat.active_output();
-        let output = output.unwrap_or(&active_output);
-        let output_state = output.user_data().get_or_insert_threadsafe(|| {
-            Mutex::new(OutputZoomState::new(
-                &self.seat,
-                output,
-                self.movement,
-                self.level,
-            ))
-        });
-        let focal_point = output_state.lock().unwrap().focal_point().to_global(output);
-
-        if let Some((old_level, start)) = self.previous_level.as_ref() {
-            let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                / ANIMATION_DURATION.as_millis() as f32;
-            (
-                self.seat.clone(),
-                focal_point,
-                ease(EaseInOutCubic, *old_level, self.level, percentage),
-            )
-        } else {
-            (self.seat.clone(), focal_point, self.level)
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -1279,6 +1168,20 @@ impl Common {
             &self.xdg_activation_state,
         );
 
+        if let Some(state) = shell.zoom_state.as_ref() {
+            output.user_data().insert_if_missing_threadsafe(|| {
+                Mutex::new(OutputZoomState::new(
+                    &state.seat,
+                    output,
+                    state.level,
+                    state.increment,
+                    state.movement,
+                    self.event_loop_handle.clone(),
+                    shell.theme.clone(),
+                ))
+            });
+        }
+
         std::mem::drop(shell);
         self.refresh(); // fixes indicies of any moved workspaces
     }
@@ -1941,18 +1844,8 @@ impl Shell {
                 state.previous_level.is_some()
                     || self.outputs().any(|o| {
                         o.user_data()
-                            .get_or_insert_threadsafe(|| {
-                                Mutex::new(OutputZoomState::new(
-                                    &state.seat,
-                                    o,
-                                    state.movement,
-                                    state.level,
-                                ))
-                            })
-                            .lock()
-                            .unwrap()
-                            .previous_point
-                            .is_some()
+                            .get::<Mutex<OutputZoomState>>()
+                            .is_some_and(|state| state.lock().unwrap().is_animating())
                     })
             })
     }
@@ -2092,8 +1985,9 @@ impl Shell {
         &mut self,
         seat: &Seat<State>,
         level: f64,
-        movement: ZoomMovement,
+        zoom_config: &ZoomConfig,
         animate: bool,
+        loop_handle: &LoopHandle<'static, State>,
     ) {
         if self.zoom_state.is_none() && level == 1. {
             return;
@@ -2104,13 +1998,38 @@ impl Shell {
                 return;
             }
 
-            old_state.level
+            for output in self.outputs() {
+                let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+                output_state.lock().unwrap().update(
+                    level,
+                    zoom_config.view_moves,
+                    zoom_config.increment,
+                );
+            }
+
+            old_state.animating_level()
         } else {
             for output in self.outputs() {
-                if let Some(output_state) = output.user_data().get::<Mutex<OutputZoomState>>() {
-                    *output_state.lock().unwrap() =
-                        OutputZoomState::new(seat, output, movement, level);
-                }
+                let output_state = output.user_data().get_or_insert_threadsafe(|| {
+                    Mutex::new(OutputZoomState::new(
+                        seat,
+                        output,
+                        level,
+                        zoom_config.increment,
+                        zoom_config.view_moves,
+                        loop_handle.clone(),
+                        self.theme.clone(),
+                    ))
+                });
+                *output_state.lock().unwrap() = OutputZoomState::new(
+                    seat,
+                    output,
+                    level,
+                    zoom_config.increment,
+                    zoom_config.view_moves,
+                    loop_handle.clone(),
+                    self.theme.clone(),
+                );
             }
             1.
         };
@@ -2118,7 +2037,8 @@ impl Shell {
         self.zoom_state = Some(ZoomState {
             seat: seat.clone(),
             level,
-            movement,
+            increment: zoom_config.increment,
+            movement: zoom_config.view_moves,
             previous_level: animate.then_some((previous_level, Instant::now())),
         });
     }
@@ -2134,103 +2054,19 @@ impl Shell {
                 return;
             }
 
-            let output = seat.active_output();
-            let output_state = output.user_data().get_or_insert_threadsafe(|| {
-                Mutex::new(OutputZoomState::new(seat, &output, movement, state.level))
-            });
-            let mut output_state_ref = output_state.lock().unwrap();
+            let cursor_position = seat.get_pointer().unwrap().current_location().as_global();
 
-            // animate movement type changes
-            if state.movement != movement {
-                output_state_ref.previous_point =
-                    Some((output_state_ref.focal_point, Instant::now()));
-                state.movement = movement;
-            }
-
-            let cursor_position = seat
-                .get_pointer()
-                .unwrap()
-                .current_location()
-                .as_global()
-                .to_local(&output);
-            match movement {
-                ZoomMovement::Continuously => output_state_ref.focal_point = cursor_position,
-                ZoomMovement::OnEdge => {
-                    let output_geometry = output.geometry().to_f64();
-                    let mut zoomed_output_geometry = output_geometry;
-
-                    zoomed_output_geometry.loc -= output_state_ref.focal_point.to_global(&output);
-                    zoomed_output_geometry = zoomed_output_geometry.downscale(state.level);
-                    zoomed_output_geometry.loc += output_state_ref.focal_point.to_global(&output);
-
-                    if !zoomed_output_geometry.contains(original_position) {
-                        zoomed_output_geometry.loc = cursor_position.to_global(&output)
-                            - zoomed_output_geometry.size.downscale(2.).to_point();
-                        let mut focal_point = zoomed_output_geometry
-                            .loc
-                            .to_local(&output)
-                            .upscale(state.level)
-                            .to_global(&output);
-                        focal_point.x = focal_point.x.clamp(
-                            output_geometry.loc.x as f64,
-                            ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                        );
-                        focal_point.y = focal_point.y.clamp(
-                            output_geometry.loc.y as f64,
-                            ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                        );
-                        output_state_ref.previous_point =
-                            Some((output_state_ref.focal_point, Instant::now()));
-                        output_state_ref.focal_point = focal_point.to_local(&output);
-                    } else if !zoomed_output_geometry.contains(cursor_position.to_global(&output)) {
-                        let mut diff = output_state_ref.focal_point.to_global(&output)
-                            + (cursor_position.to_global(&output) - original_position)
-                                .upscale(state.level);
-                        diff.x = diff.x.clamp(
-                            output_geometry.loc.x as f64,
-                            ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                        );
-                        diff.y = diff.y.clamp(
-                            output_geometry.loc.y as f64,
-                            ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                        );
-                        diff -= output_state_ref.focal_point.to_global(&output);
-
-                        output_state_ref.focal_point += diff.as_logical().as_local();
-                    }
-                }
-                ZoomMovement::Centered => {
-                    let output_geometry = output.geometry().to_f64();
-
-                    let mut zoomed_output_geometry = output_geometry;
-                    zoomed_output_geometry = zoomed_output_geometry.downscale(state.level);
-                    zoomed_output_geometry.loc = cursor_position.to_global(&output)
-                        - zoomed_output_geometry.size.downscale(2.).to_point();
-
-                    let mut focal_point = zoomed_output_geometry
-                        .loc
-                        .to_local(&output)
-                        .upscale(state.level)
-                        .to_global(&output);
-                    focal_point.x = focal_point.x.clamp(
-                        output_geometry.loc.x as f64,
-                        ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                    );
-                    focal_point.y = focal_point.y.clamp(
-                        output_geometry.loc.y as f64,
-                        ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                    );
-                    output_state_ref.focal_point = focal_point.to_local(&output);
-                }
-            }
+            state.update_focal_point(
+                &seat.active_output(),
+                cursor_position,
+                original_position,
+                movement,
+            );
         }
     }
 
-    pub fn zoom_level(
-        &self,
-        output: Option<&Output>,
-    ) -> Option<(Seat<State>, Point<f64, Global>, f64)> {
-        self.zoom_state.as_ref().map(|s| s.level(output))
+    pub fn zoom_state(&self) -> Option<&ZoomState> {
+        self.zoom_state.as_ref()
     }
 
     fn refresh(
@@ -2281,6 +2117,18 @@ impl Shell {
 
             if zoom_state.level == 1. && zoom_state.previous_level.is_none() {
                 self.zoom_state.take();
+            }
+
+            if self.zoom_state.is_some() {
+                for output in self.outputs() {
+                    output
+                        .user_data()
+                        .get::<Mutex<OutputZoomState>>()
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .refresh();
+                }
             }
         }
 

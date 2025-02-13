@@ -18,6 +18,7 @@ use crate::{
         focus::{render_input_order, target::WindowGroup, Stage},
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
         layout::tiling::ANIMATION_DURATION,
+        zoom::ZoomState,
         CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
         WorkspaceRenderElement,
     },
@@ -404,7 +405,7 @@ pub enum CursorMode {
 pub fn cursor_elements<'a, 'frame, R>(
     renderer: &mut R,
     seats: impl Iterator<Item = &'a Seat<State>>,
-    zoom_level: Option<(Seat<State>, Point<f64, Global>, f64)>,
+    zoom_state: Option<&ZoomState>,
     theme: &Theme,
     now: Time<Monotonic>,
     output: &Output,
@@ -417,8 +418,13 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     let scale = output.current_scale().fractional_scale();
-    let (focal_point, zoom_scale) = zoom_level
-        .map(|(_, p, s)| (p.to_local(&output), s))
+    let (focal_point, zoom_scale) = zoom_state
+        .map(|state| {
+            (
+                state.focal_point(Some(&output)).to_local(&output),
+                state.animating_level(),
+            )
+        })
         .unwrap_or_else(|| ((0., 0.).into(), 1.));
     let mut elements = Vec::new();
 
@@ -495,23 +501,32 @@ where
             }));
         }
 
-        if let Some(grab_elements) = seat
+        if let Some((grab_elements, should_scale)) = seat
             .user_data()
             .get::<SeatMenuGrabState>()
             .unwrap()
             .lock()
             .unwrap()
             .as_ref()
-            .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output))
+            .map(|state| {
+                (
+                    state.render::<CosmicMappedRenderElement<R>, R>(renderer, output),
+                    !state.is_in_screen_space(),
+                )
+            })
         {
             elements.extend(grab_elements.into_iter().map(|elem| {
                 CosmicElement::MoveGrab(RescaleRenderElement::from_element(
                     elem,
-                    focal_point
-                        .as_logical()
-                        .to_physical(output.current_scale().fractional_scale())
-                        .to_i32_round(),
-                    zoom_scale,
+                    if should_scale {
+                        focal_point
+                            .as_logical()
+                            .to_physical(output.current_scale().fractional_scale())
+                            .to_i32_round()
+                    } else {
+                        Point::from((0, 0))
+                    },
+                    if should_scale { zoom_scale } else { 1.0 },
                 ))
             }));
         }
@@ -595,14 +610,14 @@ where
     } else {
         ElementFilter::All
     };
-    let zoom_level = shell.read().unwrap().zoom_level(Some(&output));
+    let zoom_state = shell.read().unwrap().zoom_state().cloned();
 
     #[allow(unused_mut)]
     let workspace_elements = workspace_elements(
         _gpu,
         renderer,
         shell,
-        zoom_level,
+        zoom_state.as_ref(),
         now,
         output,
         previous_workspace,
@@ -625,7 +640,7 @@ pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
     shell: &Arc<RwLock<Shell>>,
-    zoom_level: Option<(Seat<State>, Point<f64, Global>, f64)>,
+    zoom_level: Option<&ZoomState>,
     now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
@@ -642,18 +657,16 @@ where
 {
     let mut elements = Vec::new();
 
-    let theme = shell.read().unwrap().theme().clone();
-    let seats = shell
-        .read()
-        .unwrap()
-        .seats
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let shell_ref = shell.read().unwrap();
+    let seats = shell_ref.seats.iter().cloned().collect::<Vec<_>>();
     if seats.is_empty() {
         return Ok(Vec::new());
     }
+    let theme = shell_ref.theme().clone();
     let scale = output.current_scale().fractional_scale();
+    // we don't want to hold a shell lock across `cursor_elements`,
+    // that is prone to deadlock with the main-thread on some grabs.
+    std::mem::drop(shell_ref);
 
     elements.extend(cursor_elements(
         renderer,
@@ -667,7 +680,6 @@ where
     ));
 
     let shell = shell.read().unwrap();
-
     let overview = shell.overview_mode();
     let (resize_mode, resize_indicator) = shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
@@ -715,7 +727,12 @@ where
         .as_logical()
         .to_physical_precise_round(scale);
     let (focal_point, zoom_scale) = zoom_level
-        .map(|(_, p, s)| (p.to_local(&output), s))
+        .map(|state| {
+            (
+                state.focal_point(Some(&output)).to_local(&output),
+                state.animating_level(),
+            )
+        })
         .unwrap_or_else(|| ((0., 0.).into(), 1.));
 
     let crop_to_output = |element: WorkspaceRenderElement<R>| {
@@ -741,6 +758,9 @@ where
         element_filter,
         |stage| {
             match stage {
+                Stage::ZoomUI => {
+                    elements.extend(ZoomState::render(renderer, output));
+                }
                 Stage::SessionLock(lock_surface) => {
                     elements.extend(
                         session_lock_elements(renderer, output, lock_surface)
@@ -1006,6 +1026,7 @@ where
         .zip(previous_idx)
         .map(|((w, start), idx)| (w.handle, idx, start));
     let workspace = (workspace.handle, idx);
+    let zoom_state = shell_ref.zoom_state().cloned();
     std::mem::drop(shell_ref);
 
     let element_filter = if workspace_overview_is_open(output) {
@@ -1013,7 +1034,6 @@ where
     } else {
         ElementFilter::All
     };
-    let zoom_level = shell.read().unwrap().zoom_level(Some(&output));
 
     let result = render_workspace(
         gpu,
@@ -1023,7 +1043,7 @@ where
         age,
         None,
         shell,
-        zoom_level,
+        zoom_state.as_ref(),
         now,
         output,
         previous_workspace,
@@ -1136,7 +1156,7 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     age: usize,
     additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
     shell: &Arc<RwLock<Shell>>,
-    zoom_level: Option<(Seat<State>, Point<f64, Global>, f64)>,
+    zoom_level: Option<&ZoomState>,
     now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
