@@ -590,7 +590,7 @@ where
         .iter()
         .filter(|w| !handle_state.workspaces.contains(w))
     {
-        if let Some(handle) = workspace_state.raw_workspace_handle(&new_workspace, &instance.id()) {
+        for handle in workspace_state.raw_workspace_handles(&new_workspace, &instance.id()) {
             instance.workspace_enter(&handle);
             changed = true;
         }
@@ -600,7 +600,7 @@ where
         .iter()
         .filter(|w| !state.workspaces.contains(w))
     {
-        if let Some(handle) = workspace_state.raw_workspace_handle(&old_workspace, &instance.id()) {
+        for handle in workspace_state.raw_workspace_handles(&old_workspace, &instance.id()) {
             instance.workspace_leave(&handle);
             changed = true;
         }

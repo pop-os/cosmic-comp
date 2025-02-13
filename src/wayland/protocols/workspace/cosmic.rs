@@ -130,7 +130,7 @@ where
                     .workspace_state()
                     .groups
                     .iter()
-                    .find(|g| g.instances.contains(obj))
+                    .find(|g| g.instances.iter().any(|(_, i)| i == obj))
                     .map(|g| g.id)
                 {
                     let mut state = client
@@ -147,7 +147,7 @@ where
             }
             zcosmic_workspace_group_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
-                    group.instances.retain(|i| i != obj)
+                    group.instances.retain(|(_, i)| i != obj)
                 }
             }
             _ => {}
@@ -161,7 +161,7 @@ where
         _data: &WorkspaceGroupData,
     ) {
         for group in &mut state.workspace_state_mut().groups {
-            group.instances.retain(|i| i != resource)
+            group.instances.retain(|(_, i)| i != resource)
         }
     }
 }
@@ -252,7 +252,7 @@ where
             zcosmic_workspace_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
                     for workspace in &mut group.workspaces {
-                        workspace.instances.retain(|i| i != obj)
+                        workspace.instances.retain(|(_, i)| i != obj)
                     }
                 }
             }
@@ -268,7 +268,7 @@ where
     ) {
         for group in &mut state.workspace_state_mut().groups {
             for workspace in &mut group.workspaces {
-                workspace.instances.retain(|i| i != resource)
+                workspace.instances.retain(|(_, i)| i != resource)
             }
         }
     }
@@ -288,11 +288,7 @@ where
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
-    let instance = match group
-        .instances
-        .iter_mut()
-        .find(|i| i.id().same_client_as(&mngr.id()))
-    {
+    let (_, instance) = match group.instances.iter_mut().find(|(m, _)| m == mngr) {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.id()) {
@@ -302,7 +298,7 @@ where
                     WorkspaceGroupData::default(),
                 ) {
                     mngr.workspace_group(&handle);
-                    group.instances.push(handle);
+                    group.instances.push((mngr.downgrade(), handle));
                     group.instances.last_mut().unwrap()
                 } else {
                     return false;
@@ -363,7 +359,7 @@ where
     handle_state.workspace_count = group.workspaces.len();
 
     for workspace in &mut group.workspaces {
-        if send_workspace_to_client::<D>(dh, instance, workspace) {
+        if send_workspace_to_client::<D>(dh, mngr, instance, workspace) {
             changed = true;
         }
     }
@@ -373,6 +369,7 @@ where
 
 fn send_workspace_to_client<D>(
     dh: &DisplayHandle,
+    mngr: &ZcosmicWorkspaceManagerV1,
     group: &ZcosmicWorkspaceGroupHandleV1,
     workspace: &mut Workspace,
 ) -> bool
@@ -385,11 +382,7 @@ where
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
-    let instance = match workspace
-        .instances
-        .iter_mut()
-        .find(|i| i.id().same_client_as(&group.id()))
-    {
+    let (_, instance) = match workspace.instances.iter_mut().find(|(m, _)| m == mngr) {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(group.id()) {
@@ -399,7 +392,7 @@ where
                     WorkspaceData::default(),
                 ) {
                     group.workspace(&handle);
-                    workspace.instances.push(handle);
+                    workspace.instances.push((mngr.downgrade(), handle));
                     workspace.instances.last_mut().unwrap()
                 } else {
                     return false;
