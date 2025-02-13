@@ -92,7 +92,13 @@ impl State {
         }
     }
 
-    pub fn handle_swipe_action(&mut self, action: gestures::SwipeAction, seat: &Seat<State>) {
+    pub fn handle_swipe_action(
+        &mut self,
+        action: gestures::SwipeAction,
+        seat: &Seat<State>,
+        event_time: u32,
+        continuation: bool,
+    ) {
         use gestures::SwipeAction;
 
         match action {
@@ -111,6 +117,35 @@ impl State {
                     true,
                     &mut self.common.workspace_state.update(),
                 );
+            }
+            SwipeAction::Drag if !continuation => {
+                use smithay::backend::input::{ButtonState, MouseButton};
+
+                let left_handed = self
+                    .common
+                    .config
+                    .cosmic_conf
+                    .input_touchpad
+                    .left_handed
+                    .unwrap_or(false);
+                let (button, mouse_button) = if left_handed {
+                    (super::BTN_RIGHT, MouseButton::Right)
+                } else {
+                    (super::BTN_LEFT, MouseButton::Left)
+                };
+                self.process_pointer_button(
+                    seat,
+                    button,
+                    ButtonState::Pressed,
+                    Some(mouse_button),
+                    event_time,
+                );
+            }
+            SwipeAction::Drag => {
+                // Do not press again if this is a continuation.
+            }
+            SwipeAction::DragEnd(_) => {
+                // Not a user-triggered action.
             }
         }
     }

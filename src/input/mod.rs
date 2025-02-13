@@ -40,7 +40,7 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
         GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
-        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState,
+        InputEvent, KeyState, KeyboardKeyEvent, MouseButton, PointerAxisEvent, ProximityState,
         TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
         TabletToolTipState, TouchEvent,
     },
@@ -60,7 +60,7 @@ use smithay::{
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
     },
-    utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{with_pointer_constraint, PointerConstraint},
@@ -158,6 +158,10 @@ impl ModifiersShortcutQueue {
         *set = None;
     }
 }
+
+// libinput's BTN_LEFT and BTN_RIGHT
+const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
 
 impl State {
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
@@ -263,293 +267,23 @@ impl State {
             InputEvent::PointerMotion { event, .. } => {
                 use smithay::backend::input::PointerMotionEvent;
 
-                let mut shell = self.common.shell.write().unwrap();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                let maybe_seat = self
+                    .common
+                    .shell
+                    .read()
+                    .unwrap()
+                    .seats
+                    .for_device(&event.device())
+                    .cloned();
+                if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let current_output = seat.active_output();
-
-                    let mut position = seat.get_pointer().unwrap().current_location().as_global();
-
-                    let under = State::surface_under(position, &current_output, &mut *shell)
-                        .map(|(target, pos)| (target, pos.as_logical()));
-
-                    let ptr = seat.get_pointer().unwrap();
-
-                    let mut pointer_locked = false;
-                    let mut pointer_confined = false;
-                    let mut confine_region = None;
-                    if let Some((surface, surface_loc)) = under
-                        .as_ref()
-                        .and_then(|(target, l)| Some((target.wl_surface()?, l)))
-                    {
-                        with_pointer_constraint(&surface, &ptr, |constraint| match constraint {
-                            Some(constraint) if constraint.is_active() => {
-                                // Constraint does not apply if not within region
-                                if !constraint.region().map_or(true, |x| {
-                                    x.contains(
-                                        (ptr.current_location() - *surface_loc).to_i32_round(),
-                                    )
-                                }) {
-                                    return;
-                                }
-                                match &*constraint {
-                                    PointerConstraint::Locked(_locked) => {
-                                        pointer_locked = true;
-                                    }
-                                    PointerConstraint::Confined(confine) => {
-                                        pointer_confined = true;
-                                        confine_region = confine.region().cloned();
-                                    }
-                                }
-                            }
-                            _ => {}
-                        });
-                    }
-                    let original_position = position;
-                    position += event.delta().as_global();
-
-                    let output = shell
-                        .outputs()
-                        .find(|output| output.geometry().to_f64().contains(position))
-                        .cloned()
-                        .unwrap_or(current_output.clone());
-
-                    let new_under = State::surface_under(position, &output, &mut *shell)
-                        .map(|(target, pos)| (target, pos.as_logical()));
-
-                    std::mem::drop(shell);
-                    ptr.relative_motion(
-                        self,
-                        under.clone(),
-                        &RelativeMotionEvent {
-                            delta: event.delta(),
-                            delta_unaccel: event.delta_unaccel(),
-                            utime: event.time(),
-                        },
+                    self.check_end_drag(&seat, event.time_msec());
+                    self.process_motion_relative(
+                        &seat,
+                        event.delta(),
+                        event.delta_unaccel(),
+                        event.time(),
                     );
-
-                    if pointer_locked {
-                        ptr.frame(self);
-                        return;
-                    }
-
-                    if ptr.is_grabbed() {
-                        if seat
-                            .user_data()
-                            .get::<ResizeGrabMarker>()
-                            .map(|marker| marker.get())
-                            .unwrap_or(false)
-                        {
-                            if output != current_output {
-                                ptr.frame(self);
-                                return;
-                            }
-                        }
-                        //If the pointer isn't grabbed, we should check if the focused element should be updated
-                    } else if self.common.config.cosmic_conf.focus_follows_cursor {
-                        let shell = self.common.shell.read().unwrap();
-                        let old_keyboard_target =
-                            State::element_under(original_position, &current_output, &*shell);
-                        let new_keyboard_target = State::element_under(position, &output, &*shell);
-
-                        if old_keyboard_target != new_keyboard_target
-                            && new_keyboard_target.is_some()
-                        {
-                            let create_source = if self.common.pointer_focus_state.is_none() {
-                                true
-                            } else {
-                                let PointerFocusState {
-                                    originally_focused_window,
-                                    scheduled_focused_window,
-                                    token,
-                                } = self.common.pointer_focus_state.as_ref().unwrap();
-
-                                if &new_keyboard_target == originally_focused_window {
-                                    //if we moved to the original window, just cancel the event
-                                    self.common.event_loop_handle.remove(*token);
-                                    //clear the state
-                                    self.common.pointer_focus_state = None;
-                                    false
-                                } else if &new_keyboard_target != scheduled_focused_window {
-                                    //if we moved to a new window, update the scheduled focus
-                                    self.common.event_loop_handle.remove(*token);
-                                    true
-                                } else {
-                                    //the state doesn't need to be updated or cleared
-                                    false
-                                }
-                            };
-
-                            if create_source {
-                                // prevent popups from being unfocusable if there is a gap between them and their parent
-                                let delay = calloop::timer::Timer::from_duration(
-                                    //default to 250ms
-                                    std::time::Duration::from_millis(
-                                        self.common.config.cosmic_conf.focus_follows_cursor_delay,
-                                    ),
-                                );
-                                let seat = seat.clone();
-                                let token = self
-                                    .common
-                                    .event_loop_handle
-                                    .insert_source(delay, move |_, _, state| {
-                                        let target = state
-                                            .common
-                                            .pointer_focus_state
-                                            .as_ref()
-                                            .unwrap()
-                                            .scheduled_focused_window
-                                            .clone();
-                                        //clear it prior in case the user twitches in the microsecond it
-                                        //takes this function to run
-                                        state.common.pointer_focus_state = None;
-
-                                        Shell::set_focus(
-                                            state,
-                                            target.as_ref(),
-                                            &seat,
-                                            Some(SERIAL_COUNTER.next_serial()),
-                                            false,
-                                        );
-
-                                        TimeoutAction::Drop
-                                    })
-                                    .ok();
-                                if token.is_some() {
-                                    let originally_focused_window =
-                                        if self.common.pointer_focus_state.is_none() {
-                                            old_keyboard_target
-                                        } else {
-                                            // In this case, the pointer has moved to a new window (neither original, nor scheduled)
-                                            // so we should preserve the original window for the focus state
-                                            self.common
-                                                .pointer_focus_state
-                                                .as_ref()
-                                                .unwrap()
-                                                .originally_focused_window
-                                                .clone()
-                                        };
-
-                                    self.common.pointer_focus_state = Some(PointerFocusState {
-                                        originally_focused_window,
-                                        scheduled_focused_window: new_keyboard_target,
-                                        token: token.unwrap(),
-                                    });
-                                }
-                            }
-                        }
-                    }
-
-                    let output_geometry = output.geometry();
-
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
-                    );
-
-                    // If confined, don't move pointer if it would go outside surface or region
-                    if pointer_confined {
-                        if let Some((surface, surface_loc)) = &under {
-                            if new_under.as_ref().and_then(|(under, _)| under.wl_surface())
-                                != surface.wl_surface()
-                            {
-                                ptr.frame(self);
-                                return;
-                            }
-                            if let PointerFocusTarget::WlSurface { surface, .. } = surface {
-                                if under_from_surface_tree(
-                                    surface,
-                                    position.as_logical() - surface_loc.to_f64(),
-                                    (0, 0),
-                                    WindowSurfaceType::ALL,
-                                )
-                                .is_none()
-                                {
-                                    ptr.frame(self);
-                                    return;
-                                }
-                            }
-                            if let Some(region) = confine_region {
-                                if !region
-                                    .contains((position.as_logical() - *surface_loc).to_i32_round())
-                                {
-                                    ptr.frame(self);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    let serial = SERIAL_COUNTER.next_serial();
-                    ptr.motion(
-                        self,
-                        under,
-                        &MotionEvent {
-                            location: position.as_logical(),
-                            serial,
-                            time: event.time_msec(),
-                        },
-                    );
-                    ptr.frame(self);
-
-                    // If pointer is now in a constraint region, activate it
-                    if let Some((under, surface_location)) = new_under
-                        .and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), loc)))
-                    {
-                        with_pointer_constraint(&under, &ptr, |constraint| match constraint {
-                            Some(constraint) if !constraint.is_active() => {
-                                let region = match &*constraint {
-                                    PointerConstraint::Locked(locked) => locked.region(),
-                                    PointerConstraint::Confined(confined) => confined.region(),
-                                };
-                                let point =
-                                    (ptr.current_location() - surface_location).to_i32_round();
-                                if region.map_or(true, |region| region.contains(point)) {
-                                    constraint.activate();
-                                }
-                            }
-                            _ => {}
-                        });
-                    }
-
-                    let mut shell = self.common.shell.write().unwrap();
-                    shell.update_pointer_position(position.to_local(&output), &output);
-
-                    if output != current_output {
-                        for session in cursor_sessions_for_output(&*shell, &current_output) {
-                            session.set_cursor_pos(None);
-                        }
-                        seat.set_active_output(&output);
-                    }
-
-                    for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some((geometry, offset)) = seat.cursor_geometry(
-                            position.as_logical().to_buffer(
-                                output.current_scale().fractional_scale(),
-                                output.current_transform(),
-                                &output_geometry.size.to_f64().as_logical(),
-                            ),
-                            self.common.clock.now(),
-                        ) {
-                            if session
-                                .current_constraints()
-                                .map(|constraint| constraint.size != geometry.size)
-                                .unwrap_or(true)
-                            {
-                                session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
-                                    shm: vec![ShmFormat::Argb8888],
-                                    dma: None,
-                                });
-                            }
-                            session.set_cursor_hotspot(offset);
-                            session.set_cursor_pos(Some(geometry.loc));
-                        }
-                    }
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -563,6 +297,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    self.check_end_drag(&seat, event.time_msec());
                     let output = seat.active_output();
                     let geometry = output.geometry();
                     let position = geometry.loc.to_f64()
@@ -619,9 +354,8 @@ impl State {
                 }
             }
             InputEvent::PointerButton { event, .. } => {
-                use smithay::backend::input::{ButtonState, PointerButtonEvent};
+                use smithay::backend::input::PointerButtonEvent;
 
-                //
                 let Some(seat) = self
                     .common
                     .shell
@@ -635,176 +369,14 @@ impl State {
                 };
                 self.common.idle_notifier_state.notify_activity(&seat);
 
-                let current_focus = seat.get_keyboard().unwrap().current_focus();
-                let shortcuts_inhibited = current_focus.is_some_and(|f| {
-                    f.wl_surface()
-                        .and_then(|surface| {
-                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                                .map(|inhibitor| inhibitor.is_active())
-                        })
-                        .unwrap_or(false)
-                });
-
-                let serial = SERIAL_COUNTER.next_serial();
-                let button = event.button_code();
-                let mut pass_event = !seat.supressed_buttons().remove(button);
-                if event.state() == ButtonState::Pressed {
-                    // change the keyboard focus unless the pointer is grabbed
-                    // We test for any matching surface type here but always use the root
-                    // (in case of a window the toplevel) surface for the focus.
-                    // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
-                    if !seat.get_pointer().unwrap().is_grabbed() {
-                        let output = seat.active_output();
-
-                        let global_position =
-                            seat.get_pointer().unwrap().current_location().as_global();
-                        let under = {
-                            let shell = self.common.shell.read().unwrap();
-                            State::element_under(global_position, &output, &shell)
-                        };
-                        if let Some(target) = under {
-                            if let Some(surface) = target.toplevel().map(Cow::into_owned) {
-                                if seat.get_keyboard().unwrap().modifier_state().logo
-                                    && !shortcuts_inhibited
-                                {
-                                    let seat_clone = seat.clone();
-                                    let mouse_button = PointerButtonEvent::button(&event);
-
-                                    let mut supress_button = || {
-                                        // If the logo is held then the pointer event is
-                                        // aimed at the compositor and shouldn't be passed
-                                        // to the application.
-                                        pass_event = false;
-                                        seat.supressed_buttons().add(button);
-                                    };
-
-                                    fn dispatch_grab<G: PointerGrab<State> + 'static>(
-                                        grab: Option<(G, smithay::input::pointer::Focus)>,
-                                        seat: Seat<State>,
-                                        serial: Serial,
-                                        state: &mut State,
-                                    ) {
-                                        if let Some((target, focus)) = grab {
-                                            seat.modifiers_shortcut_queue().clear();
-
-                                            seat.get_pointer()
-                                                .unwrap()
-                                                .set_grab(state, target, serial, focus);
-                                        }
-                                    }
-
-                                    if let Some(mouse_button) = mouse_button {
-                                        match mouse_button {
-                                            smithay::backend::input::MouseButton::Left => {
-                                                supress_button();
-                                                self.common.event_loop_handle.insert_idle(
-                                                    move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
-                                                        let res = shell.move_request(
-                                                            &surface,
-                                                            &seat_clone,
-                                                            serial,
-                                                            ReleaseMode::NoMouseButtons,
-                                                            false,
-                                                            &state.common.config,
-                                                            &state.common.event_loop_handle,
-                                                            &state.common.xdg_activation_state,
-                                                            false,
-                                                        );
-                                                        drop(shell);
-                                                        dispatch_grab(
-                                                            res, seat_clone, serial, state,
-                                                        );
-                                                    },
-                                                );
-                                            }
-                                            smithay::backend::input::MouseButton::Right => {
-                                                supress_button();
-                                                self.common.event_loop_handle.insert_idle(
-                                                    move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
-                                                        let Some(target_elem) =
-                                                            shell.element_for_surface(&surface)
-                                                        else {
-                                                            return;
-                                                        };
-                                                        let Some(geom) =
-                                                            shell.space_for(target_elem).and_then(
-                                                                |f| f.element_geometry(target_elem),
-                                                            )
-                                                        else {
-                                                            return;
-                                                        };
-                                                        let geom = geom.to_f64();
-                                                        let center =
-                                                            geom.loc + geom.size.downscale(2.0);
-                                                        let offset = center.to_global(&output)
-                                                            - global_position;
-                                                        let edge = match (
-                                                            offset.x > 0.0,
-                                                            offset.y > 0.0,
-                                                        ) {
-                                                            (true, true) => ResizeEdge::TOP_LEFT,
-                                                            (false, true) => ResizeEdge::TOP_RIGHT,
-                                                            (true, false) => {
-                                                                ResizeEdge::BOTTOM_LEFT
-                                                            }
-                                                            (false, false) => {
-                                                                ResizeEdge::BOTTOM_RIGHT
-                                                            }
-                                                        };
-                                                        let res = shell.resize_request(
-                                                            &surface,
-                                                            &seat_clone,
-                                                            serial,
-                                                            edge,
-                                                            false,
-                                                        );
-                                                        drop(shell);
-                                                        dispatch_grab(
-                                                            res, seat_clone, serial, state,
-                                                        );
-                                                    },
-                                                );
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-
-                            Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
-                        }
-                    }
-                } else {
-                    let mut shell = self.common.shell.write().unwrap();
-                    if let Some(Trigger::Pointer(action_button)) =
-                        shell.overview_mode().0.active_trigger()
-                    {
-                        if *action_button == button {
-                            shell.set_overview_mode(None, self.common.event_loop_handle.clone());
-                        }
-                    }
-                    std::mem::drop(shell);
-                };
-
-                let ptr = seat.get_pointer().unwrap();
-                if pass_event {
-                    ptr.button(
-                        self,
-                        &ButtonEvent {
-                            button,
-                            state: event.state(),
-                            serial,
-                            time: event.time_msec(),
-                        },
-                    );
-                    ptr.frame(self);
-                } else if event.state() == ButtonState::Released {
-                    ptr.unset_grab(self, serial, event.time_msec())
-                }
+                self.check_end_drag(&seat, event.time_msec());
+                self.process_pointer_button(
+                    &seat,
+                    event.button_code(),
+                    event.state(),
+                    event.button(),
+                    event.time_msec(),
+                )
             }
             InputEvent::PointerAxis { event, .. } => {
                 let scroll_factor =
@@ -824,6 +396,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    self.check_end_drag(&seat, event.time_msec());
 
                     let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
                     if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
@@ -870,9 +443,37 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
-                        self.common.gesture_state = Some(GestureState::new(event.fingers()));
+                    if event.fingers() == 3
+                        || (event.fingers() > 3
+                            && !workspace_overview_is_open(&seat.active_output()))
+                    {
+                        // Handle the DragEnd state.
+                        let mut continuation = false;
+                        if let Some(GestureState {
+                            action: Some(SwipeAction::DragEnd(ref token)),
+                            ..
+                        }) = self.common.gesture_state
+                        {
+                            if self.common.event_loop_handle.disable(token).is_ok() {
+                                // The token was still valid. Remove the event and return true to
+                                // signify the drag should continue.
+                                self.common.event_loop_handle.remove(*token);
+                                if event.fingers() == 3 {
+                                    // If this is a three-finger swipe, then it's a continuation of
+                                    // the three-finger drag
+                                    continuation = true
+                                } else {
+                                    // This is a four-finger swipe, so end the current drag before
+                                    // starting a new swipe action
+                                    self.end_drag(&seat, event.time_msec());
+                                }
+                            }
+                        };
+
+                        self.common.gesture_state =
+                            Some(GestureState::new(event.fingers(), continuation));
                     } else {
+                        self.check_end_drag(&seat, event.time_msec());
                         let serial = SERIAL_COUNTER.next_serial();
                         let pointer = seat.get_pointer().unwrap();
                         pointer.gesture_swipe_begin(
@@ -898,6 +499,7 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let mut activate_action: Option<SwipeAction> = None;
+                    let mut continuation = false;
                     if let Some(ref mut gesture_state) = self.common.gesture_state {
                         let first_update = gesture_state.update(
                             event.delta(),
@@ -914,7 +516,22 @@ impl State {
                                 }
                             }
                             activate_action = match gesture_state.fingers {
-                                3 => None, // TODO: 3 finger gestures
+                                3 => {
+                                    // Start a drag if three-finger drag enabled, and it's not a
+                                    // continuation of a previous drag.
+                                    (self
+                                        .common
+                                        .config
+                                        .cosmic_conf
+                                        .input_touchpad
+                                        .three_finger_drag
+                                        .unwrap_or(false))
+                                    .then(|| {
+                                        continuation = gesture_state.continuation;
+                                        SwipeAction::Drag
+                                    })
+                                    // TODO other 3-finger gestures
+                                }
                                 4 => {
                                     if self.common.config.cosmic_conf.workspaces.workspace_layout
                                         == WorkspaceLayout::Horizontal
@@ -969,6 +586,15 @@ impl State {
                                     gesture_state.delta,
                                 )
                             }
+                            Some(SwipeAction::Drag) => {
+                                self.process_motion_relative(
+                                    &seat,
+                                    // TODO extract acceleration scale into config
+                                    event.delta().upscale(2.0),
+                                    event.delta(),
+                                    event.time(),
+                                );
+                            }
                             _ => {}
                         }
                     } else {
@@ -983,7 +609,7 @@ impl State {
                     }
 
                     if let Some(action) = activate_action {
-                        self.handle_swipe_action(action, &seat);
+                        self.handle_swipe_action(action, &seat, event.time_msec(), continuation);
                     }
                 }
             }
@@ -998,7 +624,8 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if let Some(ref gesture_state) = self.common.gesture_state {
+                    if let Some(ref mut gesture_state) = self.common.gesture_state {
+                        let mut clear_state = true;
                         match gesture_state.action {
                             Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
                                 let velocity = gesture_state.velocity();
@@ -1016,9 +643,52 @@ impl State {
                                     &mut self.common.workspace_state.update(),
                                 );
                             }
+                            Some(SwipeAction::Drag) => {
+                                // Start a delayed drag-end event. This will allow a user to lift
+                                // their fingers and continue the drag event. When the event needs
+                                // to continue or end due to a different pointer interaction, the
+                                // token can be used to cancel the delayed end and either continue
+                                // the drag or activate it immediately via `State::end_drag`.
+                                // TODO reword above.
+                                let delay_ms = self
+                                    .common
+                                    .config
+                                    .cosmic_conf
+                                    .input_touchpad
+                                    .three_finger_drag_delay
+                                    .unwrap_or(1000);
+                                let delay = calloop::timer::Timer::from_duration(
+                                    std::time::Duration::from_millis(delay_ms as u64),
+                                );
+                                let seat = seat.clone();
+                                let time = event.time_msec();
+                                let token = self
+                                    .common
+                                    .event_loop_handle
+                                    .insert_source(delay, move |_, _, state| {
+                                        if let Some(SwipeAction::DragEnd(_)) = state
+                                            .common
+                                            .gesture_state
+                                            .as_ref()
+                                            .and_then(|g| g.action)
+                                        {
+                                            state.end_drag(&seat, time);
+                                            state.common.gesture_state = None;
+                                        }
+
+                                        TimeoutAction::Drop
+                                    })
+                                    .ok();
+                                if let Some(token) = token {
+                                    gesture_state.action = Some(SwipeAction::DragEnd(token));
+                                    clear_state = false;
+                                }
+                            }
                             _ => {}
+                        };
+                        if clear_state {
+                            self.common.gesture_state = None;
                         }
-                        self.common.gesture_state = None;
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();
                         let pointer = seat.get_pointer().unwrap();
@@ -1429,6 +1099,496 @@ impl State {
             InputEvent::Special(_) => {}
             InputEvent::SwitchToggle { event: _ } => {}
         }
+    }
+
+    /// Process relative mouse motion
+    fn process_motion_relative(
+        &mut self,
+        seat: &Seat<Self>,
+        delta: Point<f64, Logical>,
+        delta_unaccel: Point<f64, Logical>,
+        time_usec: u64,
+    ) {
+        let mut shell = self.common.shell.write().unwrap();
+        let current_output = seat.active_output();
+
+        let mut position = seat.get_pointer().unwrap().current_location().as_global();
+
+        let under = State::surface_under(position, &current_output, &mut *shell)
+            .map(|(target, pos)| (target, pos.as_logical()));
+
+        let ptr = seat.get_pointer().unwrap();
+
+        let mut pointer_locked = false;
+        let mut pointer_confined = false;
+        let mut confine_region = None;
+        if let Some((surface, surface_loc)) = under
+            .as_ref()
+            .and_then(|(target, l)| Some((target.wl_surface()?, l)))
+        {
+            with_pointer_constraint(&surface, &ptr, |constraint| match constraint {
+                Some(constraint) if constraint.is_active() => {
+                    // Constraint does not apply if not within region
+                    if !constraint.region().map_or(true, |x| {
+                        x.contains((ptr.current_location() - *surface_loc).to_i32_round())
+                    }) {
+                        return;
+                    }
+                    match &*constraint {
+                        PointerConstraint::Locked(_locked) => {
+                            pointer_locked = true;
+                        }
+                        PointerConstraint::Confined(confine) => {
+                            pointer_confined = true;
+                            confine_region = confine.region().cloned();
+                        }
+                    }
+                }
+                _ => {}
+            });
+        }
+        let original_position = position;
+        position += delta.as_global();
+
+        let output = shell
+            .outputs()
+            .find(|output| output.geometry().to_f64().contains(position))
+            .cloned()
+            .unwrap_or(current_output.clone());
+
+        let new_under = State::surface_under(position, &output, &mut *shell)
+            .map(|(target, pos)| (target, pos.as_logical()));
+
+        std::mem::drop(shell);
+
+        ptr.relative_motion(
+            self,
+            under.clone(),
+            &RelativeMotionEvent {
+                delta,
+                delta_unaccel,
+                utime: time_usec,
+            },
+        );
+
+        if pointer_locked {
+            ptr.frame(self);
+            return;
+        }
+
+        if ptr.is_grabbed() {
+            if seat
+                .user_data()
+                .get::<ResizeGrabMarker>()
+                .map(|marker| marker.get())
+                .unwrap_or(false)
+            {
+                if output != current_output {
+                    ptr.frame(self);
+                    return;
+                }
+            }
+            //If the pointer isn't grabbed, we should check if the focused element should be updated
+        } else if self.common.config.cosmic_conf.focus_follows_cursor {
+            let shell = self.common.shell.read().unwrap();
+            let old_keyboard_target =
+                State::element_under(original_position, &current_output, &*shell);
+            let new_keyboard_target = State::element_under(position, &output, &*shell);
+
+            if old_keyboard_target != new_keyboard_target && new_keyboard_target.is_some() {
+                let create_source = if self.common.pointer_focus_state.is_none() {
+                    true
+                } else {
+                    let PointerFocusState {
+                        originally_focused_window,
+                        scheduled_focused_window,
+                        token,
+                    } = self.common.pointer_focus_state.as_ref().unwrap();
+
+                    if &new_keyboard_target == originally_focused_window {
+                        //if we moved to the original window, just cancel the event
+                        self.common.event_loop_handle.remove(*token);
+                        //clear the state
+                        self.common.pointer_focus_state = None;
+                        false
+                    } else if &new_keyboard_target != scheduled_focused_window {
+                        //if we moved to a new window, update the scheduled focus
+                        self.common.event_loop_handle.remove(*token);
+                        true
+                    } else {
+                        //the state doesn't need to be updated or cleared
+                        false
+                    }
+                };
+
+                if create_source {
+                    // prevent popups from being unfocusable if there is a gap between them and their parent
+                    let delay = calloop::timer::Timer::from_duration(
+                        //default to 250ms
+                        std::time::Duration::from_millis(
+                            self.common.config.cosmic_conf.focus_follows_cursor_delay,
+                        ),
+                    );
+                    let seat = seat.clone();
+                    let token = self
+                        .common
+                        .event_loop_handle
+                        .insert_source(delay, move |_, _, state| {
+                            let target = state
+                                .common
+                                .pointer_focus_state
+                                .as_ref()
+                                .unwrap()
+                                .scheduled_focused_window
+                                .clone();
+                            //clear it prior in case the user twitches in the microsecond it
+                            //takes this function to run
+                            state.common.pointer_focus_state = None;
+
+                            Shell::set_focus(
+                                state,
+                                target.as_ref(),
+                                &seat,
+                                Some(SERIAL_COUNTER.next_serial()),
+                                false,
+                            );
+
+                            TimeoutAction::Drop
+                        })
+                        .ok();
+                    if token.is_some() {
+                        let originally_focused_window = if self.common.pointer_focus_state.is_none()
+                        {
+                            old_keyboard_target
+                        } else {
+                            // In this case, the pointer has moved to a new window (neither original, nor scheduled)
+                            // so we should preserve the original window for the focus state
+                            self.common
+                                .pointer_focus_state
+                                .as_ref()
+                                .unwrap()
+                                .originally_focused_window
+                                .clone()
+                        };
+
+                        self.common.pointer_focus_state = Some(PointerFocusState {
+                            originally_focused_window,
+                            scheduled_focused_window: new_keyboard_target,
+                            token: token.unwrap(),
+                        });
+                    }
+                }
+            }
+        }
+
+        let output_geometry = output.geometry();
+
+        position.x = position.x.clamp(
+            output_geometry.loc.x as f64,
+            ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+        );
+        position.y = position.y.clamp(
+            output_geometry.loc.y as f64,
+            ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+        );
+
+        // If confined, don't move pointer if it would go outside surface or region
+        if pointer_confined {
+            if let Some((surface, surface_loc)) = &under {
+                if new_under.as_ref().and_then(|(under, _)| under.wl_surface())
+                    != surface.wl_surface()
+                {
+                    ptr.frame(self);
+                    return;
+                }
+                if let PointerFocusTarget::WlSurface { surface, .. } = surface {
+                    if under_from_surface_tree(
+                        surface,
+                        position.as_logical() - surface_loc.to_f64(),
+                        (0, 0),
+                        WindowSurfaceType::ALL,
+                    )
+                    .is_none()
+                    {
+                        ptr.frame(self);
+                        return;
+                    }
+                }
+                if let Some(region) = confine_region {
+                    if !region.contains((position.as_logical() - *surface_loc).to_i32_round()) {
+                        ptr.frame(self);
+                        return;
+                    }
+                }
+            }
+        }
+
+        let serial = SERIAL_COUNTER.next_serial();
+
+        ptr.motion(
+            self,
+            under,
+            &MotionEvent {
+                location: position.as_logical(),
+                serial,
+                time: (time_usec / 1000) as u32, //: event.time_msec(),
+            },
+        );
+        ptr.frame(self);
+
+        // If pointer is now in a constraint region, activate it
+        if let Some((under, surface_location)) =
+            new_under.and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), loc)))
+        {
+            with_pointer_constraint(&under, &ptr, |constraint| match constraint {
+                Some(constraint) if !constraint.is_active() => {
+                    let region = match &*constraint {
+                        PointerConstraint::Locked(locked) => locked.region(),
+                        PointerConstraint::Confined(confined) => confined.region(),
+                    };
+                    let point = (ptr.current_location() - surface_location).to_i32_round();
+                    if region.map_or(true, |region| region.contains(point)) {
+                        constraint.activate();
+                    }
+                }
+                _ => {}
+            });
+        }
+
+        let mut shell = self.common.shell.write().unwrap();
+        shell.update_pointer_position(position.to_local(&output), &output);
+
+        if output != current_output {
+            for session in cursor_sessions_for_output(&*shell, &current_output) {
+                session.set_cursor_pos(None);
+            }
+            seat.set_active_output(&output);
+        }
+
+        for session in cursor_sessions_for_output(&shell, &output) {
+            if let Some((geometry, offset)) = seat.cursor_geometry(
+                position.as_logical().to_buffer(
+                    output.current_scale().fractional_scale(),
+                    output.current_transform(),
+                    &output_geometry.size.to_f64().as_logical(),
+                ),
+                self.common.clock.now(),
+            ) {
+                if session
+                    .current_constraints()
+                    .map(|constraint| constraint.size != geometry.size)
+                    .unwrap_or(true)
+                {
+                    session.update_constraints(BufferConstraints {
+                        size: geometry.size,
+                        shm: vec![ShmFormat::Argb8888],
+                        dma: None,
+                    });
+                }
+                session.set_cursor_hotspot(offset);
+                session.set_cursor_pos(Some(geometry.loc));
+            }
+        }
+    }
+
+    /// Process a button press.
+    fn process_pointer_button(
+        &mut self,
+        seat: &Seat<Self>,
+        button: u32,
+        button_state: smithay::backend::input::ButtonState,
+        mouse_button: Option<MouseButton>,
+        time: u32,
+    ) {
+        use smithay::backend::input::ButtonState;
+
+        let current_focus = seat.get_keyboard().unwrap().current_focus();
+        let shortcuts_inhibited = current_focus.is_some_and(|f| {
+            f.wl_surface()
+                .and_then(|surface| {
+                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                        .map(|inhibitor| inhibitor.is_active())
+                })
+                .unwrap_or(false)
+        });
+
+        let serial = SERIAL_COUNTER.next_serial();
+        let mut pass_event = !seat.supressed_buttons().remove(button);
+        if button_state == ButtonState::Pressed {
+            // change the keyboard focus unless the pointer is grabbed
+            // We test for any matching surface type here but always use the root
+            // (in case of a window the toplevel) surface for the focus.
+            // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
+            if !seat.get_pointer().unwrap().is_grabbed() {
+                let output = seat.active_output();
+
+                let global_position = seat.get_pointer().unwrap().current_location().as_global();
+                let under = {
+                    let shell = self.common.shell.read().unwrap();
+                    State::element_under(global_position, &output, &shell)
+                };
+                if let Some(target) = under {
+                    if let Some(surface) = target.toplevel().map(Cow::into_owned) {
+                        if seat.get_keyboard().unwrap().modifier_state().logo
+                            && !shortcuts_inhibited
+                        {
+                            let seat_clone = seat.clone();
+                            let mut supress_button = || {
+                                // If the logo is held then the pointer event is
+                                // aimed at the compositor and shouldn't be passed
+                                // to the application.
+                                pass_event = false;
+                                seat.supressed_buttons().add(button);
+                            };
+
+                            fn dispatch_grab<G: PointerGrab<State> + 'static>(
+                                grab: Option<(G, smithay::input::pointer::Focus)>,
+                                seat: Seat<State>,
+                                serial: Serial,
+                                state: &mut State,
+                            ) {
+                                if let Some((target, focus)) = grab {
+                                    seat.modifiers_shortcut_queue().clear();
+
+                                    seat.get_pointer()
+                                        .unwrap()
+                                        .set_grab(state, target, serial, focus);
+                                }
+                            }
+
+                            if let Some(mouse_button) = mouse_button {
+                                match mouse_button {
+                                    smithay::backend::input::MouseButton::Left => {
+                                        supress_button();
+                                        self.common.event_loop_handle.insert_idle(move |state| {
+                                            let mut shell = state.common.shell.write().unwrap();
+                                            let res = shell.move_request(
+                                                &surface,
+                                                &seat_clone,
+                                                serial,
+                                                ReleaseMode::NoMouseButtons,
+                                                false,
+                                                &state.common.config,
+                                                &state.common.event_loop_handle,
+                                                &state.common.xdg_activation_state,
+                                                false,
+                                            );
+                                            drop(shell);
+                                            dispatch_grab(res, seat_clone, serial, state);
+                                        });
+                                    }
+                                    smithay::backend::input::MouseButton::Right => {
+                                        supress_button();
+                                        self.common.event_loop_handle.insert_idle(move |state| {
+                                            let mut shell = state.common.shell.write().unwrap();
+                                            let Some(target_elem) =
+                                                shell.element_for_surface(&surface)
+                                            else {
+                                                return;
+                                            };
+                                            let Some(geom) = shell
+                                                .space_for(target_elem)
+                                                .and_then(|f| f.element_geometry(target_elem))
+                                            else {
+                                                return;
+                                            };
+                                            let geom = geom.to_f64();
+                                            let center = geom.loc + geom.size.downscale(2.0);
+                                            let offset =
+                                                center.to_global(&output) - global_position;
+                                            let edge = match (offset.x > 0.0, offset.y > 0.0) {
+                                                (true, true) => ResizeEdge::TOP_LEFT,
+                                                (false, true) => ResizeEdge::TOP_RIGHT,
+                                                (true, false) => ResizeEdge::BOTTOM_LEFT,
+                                                (false, false) => ResizeEdge::BOTTOM_RIGHT,
+                                            };
+                                            let res = shell.resize_request(
+                                                &surface,
+                                                &seat_clone,
+                                                serial,
+                                                edge,
+                                                false,
+                                            );
+                                            drop(shell);
+                                            dispatch_grab(res, seat_clone, serial, state);
+                                        });
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
+                }
+            }
+        } else {
+            let mut shell = self.common.shell.write().unwrap();
+            if let Some(Trigger::Pointer(action_button)) = shell.overview_mode().0.active_trigger()
+            {
+                if *action_button == button {
+                    shell.set_overview_mode(None, self.common.event_loop_handle.clone());
+                }
+            }
+            std::mem::drop(shell);
+        };
+
+        let ptr = seat.get_pointer().unwrap();
+        if pass_event {
+            ptr.button(
+                self,
+                &ButtonEvent {
+                    button,
+                    state: button_state,
+                    serial,
+                    time,
+                },
+            );
+            ptr.frame(self);
+        } else if button_state == ButtonState::Released {
+            ptr.unset_grab(self, serial, time)
+        }
+    }
+
+    /// Check if there's an active DragEnd swipe, and if so, cancel its token
+    /// and trigger the DragEnd action immediately.
+    fn check_end_drag(&mut self, seat: &Seat<State>, event_time_msec: u32) {
+        let Some(GestureState {
+            action: Some(SwipeAction::DragEnd(ref token)),
+            ..
+        }) = self.common.gesture_state
+        else {
+            return;
+        };
+
+        self.common.event_loop_handle.remove(*token);
+        self.common.gesture_state = None;
+        self.end_drag(seat, event_time_msec);
+    }
+
+    /// End the drag event.
+    fn end_drag(&mut self, seat: &Seat<State>, event_time_msec: u32) {
+        use smithay::backend::input::ButtonState;
+
+        let left_handed = self
+            .common
+            .config
+            .cosmic_conf
+            .input_touchpad
+            .left_handed
+            .unwrap_or(false);
+        let (button, mouse_button) = if left_handed {
+            (BTN_RIGHT, MouseButton::Right)
+        } else {
+            (BTN_LEFT, MouseButton::Left)
+        };
+        self.process_pointer_button(
+            seat,
+            button,
+            ButtonState::Released,
+            Some(mouse_button),
+            event_time_msec,
+        );
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
