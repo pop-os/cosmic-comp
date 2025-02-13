@@ -842,40 +842,12 @@ impl State {
                             .or_else(|| event.amount(Axis::Vertical))
                             .map(|val| val * scroll_factor)
                         {
-                            let mut shell = self.common.shell.write().unwrap();
-                            let (zoom_seat, current_level) = shell
-                                .zoom_level(None)
-                                .map(|(s, _, l)| (s, l))
-                                .unwrap_or_else(|| (seat.clone(), 1.0));
-
-                            if current_level == 1. && percentage.is_sign_positive() {
-                                return;
-                            }
                             if event.source() == AxisSource::Wheel {
                                 percentage *= 5.;
                             }
 
-                            let new_level = (current_level - percentage as f64 / 100.).max(1.0);
-                            if zoom_seat == seat {
-                                shell.trigger_zoom(
-                                    &seat,
-                                    new_level,
-                                    self.common.config.cosmic_conf.accessibility_zoom.view_moves,
-                                    event.source() == AxisSource::Wheel,
-                                );
-
-                                if new_level > 1.
-                                    && self
-                                        .common
-                                        .config
-                                        .cosmic_conf
-                                        .accessibility_zoom
-                                        .start_on_login
-                                {
-                                    self.common.config.dynamic_conf.zoom_state_mut().last_level =
-                                        new_level;
-                                }
-                            }
+                            let change = -(percentage as f64 / 100.);
+                            self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
                         }
                     } else {
                         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
