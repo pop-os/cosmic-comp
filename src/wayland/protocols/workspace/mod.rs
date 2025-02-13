@@ -13,7 +13,7 @@ use smithay::{
         wayland_server::{
             backend::{ClientData, GlobalId, ObjectId},
             protocol::wl_output::WlOutput,
-            Client, Dispatch, DisplayHandle, GlobalDispatch, Resource,
+            Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak,
         },
     },
 };
@@ -84,8 +84,11 @@ crate::utils::id_gen!(next_workspace_id, WORKSPACE_ID, WORKSPACE_IDS);
 #[derive(Debug)]
 pub struct WorkspaceGroup {
     id: usize,
-    instances: Vec<ZcosmicWorkspaceGroupHandleV1>,
-    ext_instances: Vec<ExtWorkspaceGroupHandleV1>,
+    instances: Vec<(
+        Weak<ZcosmicWorkspaceManagerV1>,
+        ZcosmicWorkspaceGroupHandleV1,
+    )>,
+    ext_instances: Vec<(Weak<ExtWorkspaceManagerV1>, ExtWorkspaceGroupHandleV1)>,
     workspaces: Vec<Workspace>,
 
     outputs: Vec<Output>,
@@ -134,8 +137,8 @@ pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
 #[derive(Debug)]
 pub struct Workspace {
     id: usize,
-    instances: Vec<ZcosmicWorkspaceHandleV1>,
-    ext_instances: Vec<ExtWorkspaceHandleV1>,
+    instances: Vec<(Weak<ZcosmicWorkspaceManagerV1>, ZcosmicWorkspaceHandleV1)>,
+    ext_instances: Vec<(Weak<ExtWorkspaceManagerV1>, ExtWorkspaceHandleV1)>,
 
     name: String,
     capabilities: WorkspaceCapabilities,
@@ -357,7 +360,7 @@ where
     ) -> Option<WorkspaceGroupHandle> {
         self.groups
             .iter()
-            .find(|g| g.instances.contains(group))
+            .find(|g| g.instances.iter().any(|(_, i)| i == group))
             .map(|g| WorkspaceGroupHandle { id: g.id })
     }
     pub fn workspace_handle(
@@ -369,32 +372,35 @@ where
             .find_map(|g| {
                 g.workspaces
                     .iter()
-                    .find(|w| w.instances.contains(workspace))
+                    .find(|w| w.instances.iter().any(|(_, i)| i == workspace))
             })
             .map(|w| WorkspaceHandle { id: w.id })
     }
 
-    pub fn raw_group_handle(
-        &self,
-        group: &WorkspaceGroupHandle,
-        client: &ObjectId,
-    ) -> Option<ZcosmicWorkspaceGroupHandleV1> {
+    pub fn raw_group_handles<'a>(
+        &'a self,
+        group: &'a WorkspaceGroupHandle,
+        client: &'a ObjectId,
+    ) -> impl Iterator<Item = &ZcosmicWorkspaceGroupHandleV1> + 'a {
         self.groups
             .iter()
-            .find(|g| g.id == group.id)
-            .and_then(|g| g.instances.iter().find(|i| i.id().same_client_as(client)))
-            .cloned()
+            .filter(|g| g.id == group.id)
+            .flat_map(|g| &g.instances)
+            .map(|(_, i)| i)
+            .filter(|i| i.id().same_client_as(client))
     }
-    pub fn raw_workspace_handle(
-        &self,
-        workspace: &WorkspaceHandle,
-        client: &ObjectId,
-    ) -> Option<ZcosmicWorkspaceHandleV1> {
+    pub fn raw_workspace_handles<'a>(
+        &'a self,
+        workspace: &'a WorkspaceHandle,
+        client: &'a ObjectId,
+    ) -> impl Iterator<Item = &ZcosmicWorkspaceHandleV1> + 'a {
         self.groups
             .iter()
             .find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id))
-            .and_then(|w| w.instances.iter().find(|i| i.id().same_client_as(client)))
-            .cloned()
+            .into_iter()
+            .flat_map(|w| &w.instances)
+            .map(|(_, i)| i)
+            .filter(|i| i.id().same_client_as(client))
     }
 
     pub fn update(&mut self) -> WorkspaceUpdateGuard<'_, D> {
@@ -433,7 +439,11 @@ where
     ) -> Option<WorkspaceHandle> {
         self.groups
             .iter()
-            .find_map(|g| g.workspaces.iter().find(|w| w.instances.contains(handle)))
+            .find_map(|g| {
+                g.workspaces
+                    .iter()
+                    .find(|w| w.instances.iter().any(|(_, i)| i == handle))
+            })
             .map(|w| WorkspaceHandle { id: w.id })
     }
 
@@ -446,7 +456,7 @@ where
             .find_map(|g| {
                 g.workspaces
                     .iter()
-                    .find(|w| w.ext_instances.contains(handle))
+                    .find(|w| w.ext_instances.iter().any(|(_, i)| i == handle))
             })
             .map(|w| WorkspaceHandle { id: w.id })
     }
@@ -524,10 +534,10 @@ where
         }
 
         if let Some(group) = self.0.groups.iter().find(|g| g.id == group.id) {
-            for instance in &group.instances {
+            for (_, instance) in &group.instances {
                 instance.remove();
             }
-            for instance in &group.ext_instances {
+            for (_, instance) in &group.ext_instances {
                 instance.removed();
             }
         }
@@ -538,13 +548,14 @@ where
     pub fn remove_workspace(&mut self, workspace: WorkspaceHandle) {
         for group in &mut self.0.groups {
             if let Some(workspace) = group.workspaces.iter().find(|w| w.id == workspace.id) {
-                for instance in &workspace.instances {
+                for (_, instance) in &workspace.instances {
                     instance.remove();
                 }
-                for instance in &workspace.ext_instances {
-                    // TODO remove only if it matches the group
-                    for group_instance in &group.ext_instances {
-                        group_instance.workspace_leave(instance);
+                for (manager, instance) in &workspace.ext_instances {
+                    for (group_manager, group_instance) in &group.ext_instances {
+                        if manager == group_manager {
+                            group_instance.workspace_leave(instance);
+                        }
                     }
                     instance.removed();
                 }

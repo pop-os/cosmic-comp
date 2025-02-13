@@ -125,7 +125,7 @@ where
                     .workspace_state()
                     .groups
                     .iter()
-                    .find(|g| g.ext_instances.contains(obj))
+                    .find(|g| g.ext_instances.iter().any(|(_, i)| i == obj))
                     .map(|g| g.id)
                 {
                     let mut state = client
@@ -142,7 +142,7 @@ where
             }
             ext_workspace_group_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
-                    group.ext_instances.retain(|i| i != obj)
+                    group.ext_instances.retain(|(_, i)| i != obj)
                 }
             }
             _ => {}
@@ -156,7 +156,7 @@ where
         _data: &WorkspaceGroupData,
     ) {
         for group in &mut state.workspace_state_mut().groups {
-            group.ext_instances.retain(|i| i != resource)
+            group.ext_instances.retain(|(_, i)| i != resource)
         }
     }
 }
@@ -228,7 +228,7 @@ where
                         .workspace_state()
                         .groups
                         .iter()
-                        .find(|g| g.ext_instances.contains(&workspace_group))
+                        .find(|g| g.ext_instances.iter().any(|(_, i)| *i == workspace_group))
                         .map(|g| g.id)
                     {
                         let mut state = client
@@ -247,7 +247,7 @@ where
             ext_workspace_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
                     for workspace in &mut group.workspaces {
-                        workspace.ext_instances.retain(|i| i != obj)
+                        workspace.ext_instances.retain(|(_, i)| i != obj)
                     }
                 }
             }
@@ -263,7 +263,7 @@ where
     ) {
         for group in &mut state.workspace_state_mut().groups {
             for workspace in &mut group.workspaces {
-                workspace.ext_instances.retain(|i| i != resource)
+                workspace.ext_instances.retain(|(_, i)| i != resource)
             }
         }
     }
@@ -283,11 +283,7 @@ where
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
-    let instance = match group
-        .ext_instances
-        .iter_mut()
-        .find(|i| i.id().same_client_as(&mngr.id()))
-    {
+    let (_, instance) = match group.ext_instances.iter_mut().find(|(m, _)| m == mngr) {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.id()) {
@@ -297,7 +293,7 @@ where
                     WorkspaceGroupData::default(),
                 ) {
                     mngr.workspace_group(&handle);
-                    group.ext_instances.push(handle);
+                    group.ext_instances.push((mngr.downgrade(), handle));
                     group.ext_instances.last_mut().unwrap()
                 } else {
                     return false;
@@ -372,11 +368,7 @@ where
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
-    let instance = match workspace
-        .ext_instances
-        .iter_mut()
-        .find(|i| Resource::id(*i).same_client_as(&mngr.id()))
-    {
+    let (_, instance) = match workspace.ext_instances.iter_mut().find(|(m, _)| m == mngr) {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.id()) {
@@ -390,7 +382,7 @@ where
                     if let Some(id) = workspace.ext_id.clone() {
                         handle.id(id);
                     }
-                    workspace.ext_instances.push(handle);
+                    workspace.ext_instances.push((mngr.downgrade(), handle));
                     workspace.ext_instances.last_mut().unwrap()
                 } else {
                     return false;
