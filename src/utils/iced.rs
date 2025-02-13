@@ -107,8 +107,9 @@ pub trait Program {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<crate::state::State>, Serial)>,
     ) -> Task<Self::Message> {
-        let _ = (message, loop_handle);
+        let _ = (message, loop_handle, last_seat);
         Task::none()
     }
     fn view(&self) -> cosmic::Element<'_, Self::Message>;
@@ -128,18 +129,24 @@ pub trait Program {
     }
 }
 
-struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::State>);
+struct ProgramWrapper<P: Program> {
+    program: P,
+    evlh: LoopHandle<'static, crate::state::State>,
+    last_seat: Arc<Mutex<Option<(Seat<crate::state::State>, Serial)>>>,
+}
+
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
     type Renderer = cosmic::Renderer;
     type Theme = cosmic::Theme;
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
-        self.0.update(message, &self.1)
+        let last_seat = self.last_seat.lock().unwrap();
+        self.program.update(message, &self.evlh, last_seat.as_ref())
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        self.0.view()
+        self.program.view()
     }
 }
 
@@ -151,6 +158,7 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
 
     // state
     size: Size<i32, Logical>,
+    last_seat: Arc<Mutex<Option<(Seat<crate::state::State>, Serial)>>>,
     cursor_pos: Option<Point<f64, Logical>>,
     touch_map: HashMap<Finger, IcedPoint>,
 
@@ -185,7 +193,11 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         let mut debug = Debug::new();
         let state = State::new(
             ID.clone(),
-            ProgramWrapper(self.state.program().0.clone(), handle.clone()),
+            ProgramWrapper {
+                program: self.state.program().program.clone(),
+                evlh: handle.clone(),
+                last_seat: self.last_seat.clone(),
+            },
             IcedSize::new(self.size.w as f32, self.size.h as f32),
             &mut renderer,
             &mut debug,
@@ -196,6 +208,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             buffers: self.buffers.clone(),
             pending_update: self.pending_update.clone(),
             size: self.size.clone(),
+            last_seat: self.last_seat.clone(),
             cursor_pos: self.cursor_pos.clone(),
             touch_map: self.touch_map.clone(),
             theme: self.theme.clone(),
@@ -243,12 +256,17 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
+        let last_seat = Arc::new(Mutex::new(None));
         let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
         let mut debug = Debug::new();
 
         let state = State::new(
             ID.clone(),
-            ProgramWrapper(program, handle.clone()),
+            ProgramWrapper {
+                program,
+                evlh: handle.clone(),
+                last_seat: last_seat.clone(),
+            },
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
             &mut debug,
@@ -268,6 +286,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             pending_update: None,
             size,
             cursor_pos: None,
+            last_seat,
             touch_map: HashMap::new(),
             theme,
             renderer,
@@ -285,12 +304,12 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn with_program<R>(&self, func: impl FnOnce(&P) -> R) -> R {
         let internal = self.0.lock().unwrap();
-        func(&internal.state.program().0)
+        func(&internal.state.program().program)
     }
 
     pub fn minimum_size(&self) -> Size<i32, Logical> {
         let internal = self.0.lock().unwrap();
-        let element = internal.state.program().0.view();
+        let element = internal.state.program().program.view();
         let node = element
             .as_widget()
             .layout(
@@ -348,6 +367,14 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             *old_primitives = None;
         }
         internal.update(true);
+    }
+
+    pub fn current_size(&self) -> Size<i32, Logical> {
+        self.0.lock().unwrap().size
+    }
+
+    pub fn queue_message(&self, msg: P::Message) {
+        self.0.lock().unwrap().state.queue_message(msg);
     }
 }
 
@@ -411,7 +438,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
 impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedElement<P> {
     fn enter(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &MotionEvent,
     ) {
@@ -425,12 +452,13 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         // TODO: Update iced widgets to handle touch using event position, not cursor_pos
         internal.cursor_pos = Some(event.location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
         let _ = internal.update(true);
     }
 
     fn motion(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &MotionEvent,
     ) {
@@ -440,6 +468,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         internal.cursor_pos = Some(event.location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
         let _ = internal.update(true);
     }
 
@@ -453,7 +482,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
 
     fn button(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &ButtonEvent,
     ) {
@@ -468,6 +497,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             ButtonState::Pressed => MouseEvent::ButtonPressed(button),
             ButtonState::Released => MouseEvent::ButtonReleased(button),
         }));
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
         let _ = internal.update(true);
     }
 
@@ -573,10 +603,10 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
 impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedElement<P> {
     fn down(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &DownEvent,
-        _seq: Serial,
+        seq: Serial,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
@@ -586,19 +616,21 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
             .queue_event(Event::Touch(TouchEvent::FingerPressed { id, position }));
         internal.touch_map.insert(id, position);
         internal.cursor_pos = Some(event.location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
         let _ = internal.update(true);
     }
 
     fn up(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &UpEvent,
-        _seq: Serial,
+        seq: Serial,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
         if let Some(position) = internal.touch_map.remove(&id) {
+            *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
             internal
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
@@ -608,14 +640,15 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
 
     fn motion(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &TouchMotionEvent,
-        _seq: Serial,
+        seq: Serial,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
         let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
         internal
             .state
             .queue_event(Event::Touch(TouchEvent::FingerMoved { id, position }));
@@ -872,7 +905,7 @@ where
                         tiny_skia::PixmapMut::from_bytes(buf, size.w as u32, size.h as u32)
                             .expect("Failed to create pixel map");
 
-                    let background_color = state_ref.program().0.background_color(theme);
+                    let background_color = state_ref.program().program.background_color(theme);
                     let bounds = IcedSize::new(size.w as u32, size.h as u32);
                     let viewport = Viewport::with_physical_size(bounds, scale.x);
                     let scale_x = scale.x as f32;
@@ -934,10 +967,12 @@ where
                             )
                         })
                         .collect::<Vec<_>>();
-                    state_ref
-                        .program()
-                        .0
-                        .foreground(&mut pixels, &damage, scale.x as f32, theme);
+                    state_ref.program().program.foreground(
+                        &mut pixels,
+                        &damage,
+                        scale.x as f32,
+                        theme,
+                    );
 
                     Result::<_, ()>::Ok(damage)
                 });
