@@ -3,6 +3,7 @@ use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
 use smithay::{
     backend::renderer::{
         element::{
+            memory::MemoryRenderBufferRenderElement,
             surface::WaylandSurfaceRenderElement,
             texture::TextureRenderElement,
             utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
@@ -36,6 +37,7 @@ where
             RelocateRenderElement<RescaleRenderElement<TextureRenderElement<GlesTexture>>>,
         >,
     ),
+    Zoom(MemoryRenderBufferRenderElement<R>),
     #[cfg(feature = "debug")]
     Egui(TextureRenderElement<GlesTexture>),
 }
@@ -54,6 +56,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.id(),
             CosmicElement::AdditionalDamage(elem) => elem.id(),
             CosmicElement::Mirror(elem) => elem.id(),
+            CosmicElement::Zoom(elem) => elem.id(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.id(),
         }
@@ -67,6 +70,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.current_commit(),
             CosmicElement::AdditionalDamage(elem) => elem.current_commit(),
             CosmicElement::Mirror(elem) => elem.current_commit(),
+            CosmicElement::Zoom(elem) => elem.current_commit(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.current_commit(),
         }
@@ -80,6 +84,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.src(),
             CosmicElement::AdditionalDamage(elem) => elem.src(),
             CosmicElement::Mirror(elem) => elem.src(),
+            CosmicElement::Zoom(elem) => elem.src(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.src(),
         }
@@ -93,6 +98,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.geometry(scale),
             CosmicElement::AdditionalDamage(elem) => elem.geometry(scale),
             CosmicElement::Mirror(elem) => elem.geometry(scale),
+            CosmicElement::Zoom(elem) => elem.geometry(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.geometry(scale),
         }
@@ -106,6 +112,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.location(scale),
             CosmicElement::AdditionalDamage(elem) => elem.location(scale),
             CosmicElement::Mirror(elem) => elem.location(scale),
+            CosmicElement::Zoom(elem) => elem.location(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.location(scale),
         }
@@ -119,6 +126,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.transform(),
             CosmicElement::AdditionalDamage(elem) => elem.transform(),
             CosmicElement::Mirror(elem) => elem.transform(),
+            CosmicElement::Zoom(elem) => elem.transform(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.transform(),
         }
@@ -136,6 +144,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.damage_since(scale, commit),
             CosmicElement::AdditionalDamage(elem) => elem.damage_since(scale, commit),
             CosmicElement::Mirror(elem) => elem.damage_since(scale, commit),
+            CosmicElement::Zoom(elem) => elem.damage_since(scale, commit),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.damage_since(scale, commit),
         }
@@ -149,6 +158,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.opaque_regions(scale),
             CosmicElement::AdditionalDamage(elem) => elem.opaque_regions(scale),
             CosmicElement::Mirror(elem) => elem.opaque_regions(scale),
+            CosmicElement::Zoom(elem) => elem.opaque_regions(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.opaque_regions(scale),
         }
@@ -162,6 +172,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.alpha(),
             CosmicElement::AdditionalDamage(elem) => elem.alpha(),
             CosmicElement::Mirror(elem) => elem.alpha(),
+            CosmicElement::Zoom(elem) => elem.alpha(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.alpha(),
         }
@@ -175,6 +186,7 @@ where
             CosmicElement::MoveGrab(elem) => elem.kind(),
             CosmicElement::AdditionalDamage(elem) => elem.kind(),
             CosmicElement::Mirror(elem) => elem.kind(),
+            CosmicElement::Zoom(elem) => elem.kind(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.kind(),
         }
@@ -219,6 +231,7 @@ where
                 };
                 elem
             }
+            CosmicElement::Zoom(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
                 let elem = {
@@ -254,6 +267,7 @@ where
                     _ => None,
                 }
             }
+            CosmicElement::Zoom(elem) => elem.underlying_storage(renderer),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
@@ -292,6 +306,17 @@ where
 {
     fn from(elem: DamageElement) -> Self {
         Self::AdditionalDamage(elem)
+    }
+}
+
+impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicElement<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    <R as Renderer>::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
+        Self::Zoom(value)
     }
 }
 

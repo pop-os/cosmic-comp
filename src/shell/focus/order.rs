@@ -21,6 +21,7 @@ use crate::{
 };
 
 pub enum Stage<'a> {
+    ZoomUI,
     SessionLock(Option<&'a LockSurface>),
     LayerPopup {
         layer: LayerSurface,
@@ -69,6 +70,10 @@ fn render_input_order_internal<R: 'static>(
     element_filter: ElementFilter,
     mut callback: impl FnMut(Stage) -> ControlFlow<Result<R, OutputNoMode>, ()>,
 ) -> ControlFlow<Result<R, OutputNoMode>, ()> {
+    if shell.zoom_state.is_some() {
+        callback(Stage::ZoomUI)?;
+    }
+
     // Session Lock
     if let Some(session_lock) = &shell.session_lock {
         return callback(Stage::SessionLock(session_lock.surfaces.get(output)));
