@@ -909,31 +909,8 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "accessibility_zoom" => {
                 let new = get_config::<ZoomConfig>(&config, "accessibility_zoom");
                 if new != state.common.config.cosmic_conf.accessibility_zoom {
-                    if new.start_on_login
-                        && !state
-                            .common
-                            .config
-                            .cosmic_conf
-                            .accessibility_zoom
-                            .start_on_login
-                    {
-                        let level = state
-                            .common
-                            .shell
-                            .read()
-                            .unwrap()
-                            .zoom_level(None)
-                            .map_or(1., |(_, _, level)| level);
-                        state.common.config.dynamic_conf.zoom_state_mut().last_level = if level
-                            != 1.
-                        {
-                            level
-                        } else {
-                            1. + state.common.config.cosmic_conf.accessibility_zoom.increment as f64
-                                / 100.
-                        };
-                    }
                     state.common.config.cosmic_conf.accessibility_zoom = new;
+                    state.common.update_config();
                 }
             }
             _ => {}

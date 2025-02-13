@@ -16,7 +16,7 @@ use crate::{
 };
 use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
-    TileBehavior, ZoomMovement,
+    TileBehavior, ZoomConfig, ZoomMovement,
 };
 use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
@@ -1317,10 +1317,24 @@ impl Common {
 
     pub fn update_config(&mut self) {
         let mut shell = self.shell.write().unwrap();
-        shell.active_hint = self.config.cosmic_conf.active_hint;
+        let shell_ref = &mut *shell;
+        shell_ref.active_hint = self.config.cosmic_conf.active_hint;
+        if let Some(zoom_state) = shell_ref.zoom_state.as_mut() {
+            zoom_state.increment = self.config.cosmic_conf.accessibility_zoom.increment;
+            zoom_state.movement = self.config.cosmic_conf.accessibility_zoom.view_moves;
+
+            for output in shell_ref.workspaces.sets.keys() {
+                let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+                output_state.lock().unwrap().update(
+                    zoom_state.level,
+                    zoom_state.movement,
+                    zoom_state.increment,
+                );
+            }
+        }
 
         let mut workspace_state = self.workspace_state.update();
-        shell.workspaces.update_config(
+        shell_ref.workspaces.update_config(
             &self.config,
             &mut workspace_state,
             &self.xdg_activation_state,
