@@ -102,7 +102,6 @@ pub struct CosmicStackInternal {
     reenter: Arc<AtomicBool>,
     potential_drag: Arc<Mutex<Option<usize>>>,
     override_alive: Arc<AtomicBool>,
-    last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
     geometry: Arc<Mutex<Option<Rectangle<i32, Global>>>>,
     mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
 }
@@ -155,7 +154,6 @@ impl CosmicStack {
                 reenter: Arc::new(AtomicBool::new(false)),
                 potential_drag: Arc::new(Mutex::new(None)),
                 override_alive: Arc::new(AtomicBool::new(true)),
-                last_seat: Arc::new(Mutex::new(None)),
                 geometry: Arc::new(Mutex::new(None)),
                 mask: Arc::new(Mutex::new(None)),
             },
@@ -768,10 +766,11 @@ impl Program for CosmicStackInternal {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<State>, Serial)>,
     ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     let active = self.active.load(Ordering::SeqCst);
                     if let Some(surface) = self.windows.lock().unwrap()[active]
                         .wl_surface()
@@ -831,7 +830,7 @@ impl Program for CosmicStackInternal {
                 self.scroll_to_focus.store(false, Ordering::SeqCst);
             }
             Message::Menu => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     let active = self.active.load(Ordering::SeqCst);
                     if let Some(surface) = self.windows.lock().unwrap()[active]
                         .wl_surface()
@@ -886,7 +885,7 @@ impl Program for CosmicStackInternal {
                 }
             }
             Message::TabMenu(idx) => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     if let Some(surface) = self.windows.lock().unwrap()[idx]
                         .wl_surface()
                         .map(Cow::into_owned)
@@ -1338,12 +1337,7 @@ impl PointerTarget<State> for CosmicStack {
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self.0.with_program(|p| p.current_focus()) {
-            Some(Focus::Header) => {
-                self.0.with_program(|p| {
-                    *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-                });
-                PointerTarget::button(&self.0, seat, data, event)
-            }
+            Some(Focus::Header) => PointerTarget::button(&self.0, seat, data, event),
             Some(x) => {
                 let serial = event.serial;
                 let seat = seat.clone();
@@ -1523,7 +1517,6 @@ impl TouchTarget<State> for CosmicStack {
     fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
         let mut event = event.clone();
         let active_window_geo = self.0.with_program(|p| {
-            *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         });
         event.location -= active_window_geo.loc.to_f64();

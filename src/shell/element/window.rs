@@ -77,7 +77,6 @@ pub struct CosmicWindowInternal {
     activated: Arc<AtomicBool>,
     /// TODO: This needs to be per seat
     pointer_entered: Arc<AtomicU8>,
-    last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
     last_title: Arc<Mutex<String>>,
 }
 
@@ -88,7 +87,6 @@ impl fmt::Debug for CosmicWindowInternal {
             .field("activated", &self.activated.load(Ordering::SeqCst))
             .field("pointer_entered", &self.pointer_entered)
             // skip seat to avoid loop
-            .field("last_seat", &"...")
             .finish()
     }
 }
@@ -189,7 +187,6 @@ impl CosmicWindow {
                 window,
                 activated: Arc::new(AtomicBool::new(false)),
                 pointer_entered: Arc::new(AtomicU8::new(0)),
-                last_seat: Arc::new(Mutex::new(None)),
                 last_title: Arc::new(Mutex::new(last_title)),
             },
             (width, SSD_HEIGHT),
@@ -427,10 +424,11 @@ impl Program for CosmicWindowInternal {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<State>, Serial)>,
     ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                         loop_handle.insert_idle(move |state| {
                             let res = state.common.shell.write().unwrap().move_request(
@@ -480,7 +478,7 @@ impl Program for CosmicWindowInternal {
             }
             Message::Close => self.window.close(),
             Message::Menu => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                         loop_handle.insert_idle(move |state| {
                             let shell = state.common.shell.read().unwrap();
@@ -731,12 +729,7 @@ impl PointerTarget<State> for CosmicWindow {
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self.0.with_program(|p| p.current_focus()) {
-            Some(Focus::Header) => {
-                self.0.with_program(|p| {
-                    *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-                });
-                PointerTarget::button(&self.0, seat, data, event)
-            }
+            Some(Focus::Header) => PointerTarget::button(&self.0, seat, data, event),
             Some(x) => {
                 let serial = event.serial;
                 let seat = seat.clone();
@@ -871,7 +864,6 @@ impl TouchTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             event.location -= p.window.geometry().loc.to_f64();
-            *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
         });
         TouchTarget::down(&self.0, seat, data, &event, seq)
     }
