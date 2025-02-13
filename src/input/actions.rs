@@ -1027,46 +1027,17 @@ impl State {
             Action::Spawn(command) => self.spawn_command(command),
 
             x @ Action::ZoomIn | x @ Action::ZoomOut => {
-                let mut shell = self.common.shell.write().unwrap();
-                let (zoom_seat, current_level) = shell
-                    .zoom_level(None)
-                    .map(|(s, _, l)| (s, l))
-                    .unwrap_or_else(|| (seat.clone(), 1.0));
-
-                if current_level == 1. && matches!(x, Action::ZoomOut) {
-                    return;
-                }
-                let new_level = if current_level == 1. && matches!(x, Action::ZoomIn) {
-                    self.common.config.dynamic_conf.zoom_state().last_level
-                } else {
+                let change = {
                     let increment =
                         self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
                     match x {
-                        Action::ZoomIn => current_level + increment,
-                        Action::ZoomOut => (current_level - increment).max(1.0),
+                        Action::ZoomIn => increment,
+                        Action::ZoomOut => -increment,
                         _ => unreachable!(),
                     }
                 };
 
-                if &zoom_seat == seat {
-                    shell.trigger_zoom(
-                        seat,
-                        new_level,
-                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
-                        true,
-                    );
-
-                    if new_level > 1.
-                        && self
-                            .common
-                            .config
-                            .cosmic_conf
-                            .accessibility_zoom
-                            .start_on_login
-                    {
-                        self.common.config.dynamic_conf.zoom_state_mut().last_level = new_level;
-                    }
-                }
+                self.update_zoom(seat, change, true);
             }
 
             // Do nothing
@@ -1115,6 +1086,48 @@ impl State {
                 tracing::warn!(?err, "Failed to spawn \"{}\"", command);
             }
         });
+    }
+
+    pub fn update_zoom(&mut self, seat: &Seat<State>, change: f64, animate: bool) {
+        let mut shell = self.common.shell.write().unwrap();
+        let (zoom_seat, current_level) = shell
+            .zoom_state()
+            .map(|state| (state.current_seat(), state.current_level()))
+            .unwrap_or_else(|| (seat.clone(), 1.0));
+        let change = if current_level == 1.0 && animate {
+            self.common.config.dynamic_conf.zoom_state().last_level
+        } else {
+            change
+        };
+
+        if current_level == 1. && change <= 0. {
+            return;
+        }
+
+        if zoom_seat == *seat {
+            let new_level = (current_level + change).max(1.0);
+            shell.trigger_zoom(
+                &seat,
+                new_level,
+                &self.common.config.cosmic_conf.accessibility_zoom,
+                animate,
+                &self.common.event_loop_handle,
+            );
+
+            /*  TODO: debounce
+            if new_level > 1.
+                && self
+                    .common
+                    .config
+                    .cosmic_conf
+                    .accessibility_zoom
+                    .start_on_login
+            {
+                self.common.config.dynamic_conf.zoom_state_mut().last_level =
+                    new_level;
+            }
+            */
+        }
     }
 }
 
