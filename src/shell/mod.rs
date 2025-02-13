@@ -1,6 +1,6 @@
 use calloop::LoopHandle;
 use focus::target::WindowGroup;
-use grabs::SeatMoveGrabState;
+use grabs::{MenuAlignment, SeatMoveGrabState};
 use indexmap::IndexMap;
 use layout::TilingExceptions;
 use std::{
@@ -2900,9 +2900,9 @@ impl Shell {
     ) -> Option<(MenuGrab, Focus)> {
         let serial = serial.into();
         let Some(GrabStartData::Pointer(start_data)) =
-            check_grab_preconditions(&seat, surface, serial, true)
+            check_grab_preconditions(&seat, serial, Some(surface))
         else {
-            return None;
+            return None; // TODO: an application can send a menu request for a touch event
         };
 
         let mapped = self.element_for_surface(surface).cloned()?;
@@ -2966,7 +2966,7 @@ impl Shell {
             };
 
         let grab = MenuGrab::new(
-            start_data,
+            GrabStartData::Pointer(start_data),
             seat,
             if target_stack || !is_stacked {
                 Box::new(window_items(
@@ -2987,6 +2987,8 @@ impl Shell {
                     as Box<dyn Iterator<Item = Item>>
             },
             global_position,
+            MenuAlignment::CORNER,
+            false,
             evlh.clone(),
             self.theme.clone(),
         );
@@ -3008,7 +3010,8 @@ impl Shell {
     ) -> Option<(MoveGrab, Focus)> {
         let serial = serial.into();
 
-        let mut start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
+        let mut start_data =
+            check_grab_preconditions(&seat, serial, client_initiated.then_some(surface))?;
         let old_mapped = self.element_for_surface(surface).cloned()?;
         if old_mapped.is_minimized() {
             return None;
@@ -3453,13 +3456,11 @@ impl Shell {
         ),
         (ResizeGrab, Focus),
     )> {
-        let active_window = mapped.active_window();
-        let surface = active_window.wl_surface()?;
         if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             return None;
         }
 
-        let mut start_data = check_grab_preconditions(&seat, &surface, None, false)?;
+        let mut start_data = check_grab_preconditions(&seat, None, None)?;
 
         let (floating_layer, geometry) = if let Some(set) = self
             .workspaces
@@ -3693,7 +3694,8 @@ impl Shell {
         client_initiated: bool,
     ) -> Option<(ResizeGrab, Focus)> {
         let serial = serial.into();
-        let start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
+        let start_data =
+            check_grab_preconditions(&seat, serial, client_initiated.then_some(surface))?;
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_fullscreen(true) || mapped.is_maximized(true) {
             return None;
@@ -4119,9 +4121,8 @@ fn workspace_set_idx(
 
 pub fn check_grab_preconditions(
     seat: &Seat<State>,
-    surface: &WlSurface,
     serial: Option<Serial>,
-    client_initiated: bool,
+    client_initiated: Option<&WlSurface>,
 ) -> Option<GrabStartData> {
     use smithay::reexports::wayland_server::Resource;
 
@@ -4141,7 +4142,7 @@ pub fn check_grab_preconditions(
             }))
         };
 
-    if client_initiated {
+    if let Some(surface) = client_initiated {
         // Check that this surface has a click or touch down grab.
         if !match serial {
             Some(serial) => pointer.has_grab(serial) || touch.has_grab(serial),
