@@ -60,6 +60,7 @@ pub use self::default::*;
 pub struct MenuGrabState {
     elements: Arc<Mutex<Vec<Element>>>,
     screen_space_relative: Option<Output>,
+    scale: Arc<Mutex<f64>>,
 }
 pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
@@ -338,6 +339,7 @@ impl Program for ContextMenu {
                                 .unwrap()
                                 .loc;
                                 element.output_enter(&output, element.bbox());
+                                element.set_additional_scale(*grab_state.scale.lock().unwrap());
 
                                 elements.push(Element {
                                     iced: element,
@@ -505,6 +507,7 @@ pub struct MenuGrab {
     start_data: GrabStartData,
     seat: Seat<State>,
     screen_space_relative: Option<Output>,
+    scale: Arc<Mutex<f64>>,
 }
 
 impl PointerGrab<State> for MenuGrab {
@@ -853,14 +856,19 @@ pub struct MenuAlignment {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisAlignment {
-    Corner,
+    Corner(u32),
     Centered,
+    PreferCentered,
 }
 
 impl MenuAlignment {
     pub const CORNER: Self = MenuAlignment {
-        x: AxisAlignment::Corner,
-        y: AxisAlignment::Corner,
+        x: AxisAlignment::Corner(0),
+        y: AxisAlignment::Corner(0),
+    };
+    pub const PREFER_CENTERED: Self = MenuAlignment {
+        x: AxisAlignment::PreferCentered,
+        y: AxisAlignment::PreferCentered,
     };
     pub const CENTERED: Self = MenuAlignment {
         x: AxisAlignment::Centered,
@@ -868,46 +876,140 @@ impl MenuAlignment {
     };
     pub const HORIZONTALLY_CENTERED: Self = MenuAlignment {
         x: AxisAlignment::Centered,
-        y: AxisAlignment::Corner,
+        y: AxisAlignment::Corner(0),
     };
     pub const VERTICALLY_CENTERED: Self = MenuAlignment {
-        x: AxisAlignment::Corner,
+        x: AxisAlignment::Corner(0),
         y: AxisAlignment::Centered,
     };
+
+    pub fn horizontally_centered(offset: u32, fixed: bool) -> MenuAlignment {
+        MenuAlignment {
+            x: if fixed {
+                AxisAlignment::Centered
+            } else {
+                AxisAlignment::PreferCentered
+            },
+            y: AxisAlignment::Corner(offset),
+        }
+    }
+
+    pub fn vertically_centered(offset: u32, fixed: bool) -> MenuAlignment {
+        MenuAlignment {
+            x: AxisAlignment::Corner(offset),
+            y: if fixed {
+                AxisAlignment::Centered
+            } else {
+                AxisAlignment::PreferCentered
+            },
+        }
+    }
 
     fn rectangles(
         &self,
         position: Point<i32, Global>,
         size: Size<i32, Global>,
     ) -> Vec<Rectangle<i32, Global>> {
-        match (self.x, self.y) {
-            (AxisAlignment::Corner, AxisAlignment::Corner) => vec![
-                Rectangle::new(position, size),                            // normal
-                Rectangle::new(position - Point::from((size.w, 0)), size), // flipped left
-                Rectangle::new(position - Point::from((0, size.h)), size), // flipped up
-                Rectangle::new(position - size.to_point(), size),          // flipped left & up
-            ],
-            (AxisAlignment::Centered, AxisAlignment::Corner) => {
-                let x = position.x - ((size.w as f64 / 2.).round() as i32);
-                vec![
-                    Rectangle::new(Point::from((x, position.y)), size), // below
-                    Rectangle::new(Point::from((x, position.y - size.h)), size), // above
-                ]
-            }
-            (AxisAlignment::Corner, AxisAlignment::Centered) => {
-                let y = position.y - ((size.h as f64 / 2.).round() as i32);
-                vec![
-                    Rectangle::new(Point::from((position.x, y)), size), // left
-                    Rectangle::new(Point::from((position.x - size.w, y)), size), // right
-                ]
-            }
-            (AxisAlignment::Centered, AxisAlignment::Centered) => {
-                vec![Rectangle::new(
-                    position - size.to_f64().downscale(2.).to_i32_round().to_point(),
+        fn for_alignment(
+            position: Point<i32, Global>,
+            size: Size<i32, Global>,
+            x: AxisAlignment,
+            y: AxisAlignment,
+        ) -> Vec<Rectangle<i32, Global>> {
+            match (x, y) {
+                (AxisAlignment::Corner(x_offset), AxisAlignment::Corner(y_offset)) => {
+                    let offset = Point::from((x_offset as i32, y_offset as i32));
+                    vec![
+                        Rectangle::new(position + offset, size), // normal
+                        Rectangle::new(
+                            position - Point::from((size.w, 0))
+                                + Point::from((-(x_offset as i32), y_offset as i32)),
+                            size,
+                        ), // flipped left
+                        Rectangle::new(
+                            position
+                                - Point::from((0, size.h))
+                                - Point::from((x_offset as i32, -(y_offset as i32))),
+                            size,
+                        ), // flipped up
+                        Rectangle::new(position - size.to_point() - offset, size), // flipped left & up
+                    ]
+                }
+                (AxisAlignment::Centered, AxisAlignment::Corner(offset)) => {
+                    let x = position.x - ((size.w as f64 / 2.).round() as i32);
+                    vec![
+                        Rectangle::new(Point::from((x, position.y + offset as i32)), size), // below
+                        Rectangle::new(Point::from((x, position.y - size.h - offset as i32)), size), // above
+                    ]
+                }
+                (AxisAlignment::Corner(offset), AxisAlignment::Centered) => {
+                    let y = position.y - ((size.h as f64 / 2.).round() as i32);
+                    vec![
+                        Rectangle::new(Point::from((position.x + offset as i32, y)), size), // left
+                        Rectangle::new(Point::from((position.x - size.w - offset as i32, y)), size), // right
+                    ]
+                }
+                (AxisAlignment::Centered, AxisAlignment::Centered) => {
+                    vec![Rectangle::new(
+                        position - size.to_f64().downscale(2.).to_i32_round().to_point(),
+                        size,
+                    )]
+                }
+                (AxisAlignment::PreferCentered, AxisAlignment::PreferCentered) => for_alignment(
+                    position,
                     size,
-                )]
+                    AxisAlignment::Centered,
+                    AxisAlignment::Centered,
+                )
+                .into_iter()
+                .chain(
+                    for_alignment(
+                        position,
+                        size,
+                        AxisAlignment::Centered,
+                        AxisAlignment::Corner(0),
+                    )
+                    .into_iter(),
+                )
+                .chain(
+                    for_alignment(
+                        position,
+                        size,
+                        AxisAlignment::Corner(0),
+                        AxisAlignment::Centered,
+                    )
+                    .into_iter(),
+                )
+                .chain(
+                    for_alignment(
+                        position,
+                        size,
+                        AxisAlignment::Corner(0),
+                        AxisAlignment::Corner(0),
+                    )
+                    .into_iter(),
+                )
+                .collect(),
+                (AxisAlignment::PreferCentered, y) => {
+                    for_alignment(position, size, AxisAlignment::Centered, y)
+                        .into_iter()
+                        .chain(
+                            for_alignment(position, size, AxisAlignment::Corner(0), y).into_iter(),
+                        )
+                        .collect()
+                }
+                (x, AxisAlignment::PreferCentered) => {
+                    for_alignment(position, size, x, AxisAlignment::Centered)
+                        .into_iter()
+                        .chain(
+                            for_alignment(position, size, x, AxisAlignment::Corner(0)).into_iter(),
+                        )
+                        .collect()
+                }
             }
         }
+
+        for_alignment(position, size, self.x, self.y)
     }
 }
 
@@ -918,7 +1020,7 @@ impl MenuGrab {
         items: impl Iterator<Item = Item>,
         position: Point<i32, Global>,
         alignment: MenuAlignment,
-        screen_space_relative: bool,
+        screen_space_relative: Option<f64>,
         handle: LoopHandle<'static, crate::state::State>,
         theme: cosmic::Theme,
     ) -> MenuGrab {
@@ -931,8 +1033,16 @@ impl MenuGrab {
         element.resize(min_size);
 
         let output = seat.active_output();
+        // TODO: This feels a lot like cheap xdg-positioner. Refactor and unify
         let position = alignment
-            .rectangles(position, min_size.as_global())
+            .rectangles(
+                position,
+                min_size
+                    .to_f64()
+                    .upscale(screen_space_relative.unwrap_or(1.))
+                    .to_i32_round()
+                    .as_global(),
+            )
             .iter()
             .rev() // preference of max_by_key is backwards
             .max_by_key(|rect| {
@@ -945,6 +1055,9 @@ impl MenuGrab {
             .loc;
 
         element.output_enter(&output, element.bbox());
+        if let Some(scale) = screen_space_relative {
+            element.set_additional_scale(scale);
+        }
 
         let elements = Arc::new(Mutex::new(vec![Element {
             iced: element,
@@ -953,11 +1066,13 @@ impl MenuGrab {
             touch_entered: None,
         }]));
 
-        let screen_space_relative = screen_space_relative.then_some(output);
+        let scale = Arc::new(Mutex::new(screen_space_relative.unwrap_or(1.)));
+        let screen_space_relative = screen_space_relative.is_some().then_some(output);
 
         let grab_state = MenuGrabState {
             elements: elements.clone(),
             screen_space_relative: screen_space_relative.clone(),
+            scale: scale.clone(),
         };
 
         *seat
@@ -972,6 +1087,14 @@ impl MenuGrab {
             start_data,
             seat: seat.clone(),
             screen_space_relative,
+            scale,
+        }
+    }
+
+    pub fn set_additional_scale(&self, scale: f64) {
+        *self.scale.lock().unwrap() = scale;
+        for element in &*self.elements.lock().unwrap() {
+            element.iced.set_additional_scale(scale);
         }
     }
 
