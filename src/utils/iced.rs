@@ -152,6 +152,7 @@ impl<P: Program> IcedProgram for ProgramWrapper<P> {
 
 pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
+    additional_scale: f64,
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
     pending_update: Option<Instant>,
@@ -204,6 +205,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         );
 
         IcedElementInternal {
+            additional_scale: self.additional_scale,
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
             pending_update: self.pending_update.clone(),
@@ -226,10 +228,17 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
 impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IcedElementInternal")
+            .field("additional_scale", &self.additional_scale)
+            .field(
+                "outputs",
+                &self.outputs.iter().map(|o| o.name()).collect::<Vec<_>>(),
+            )
             .field("buffers", &"...")
             .field("size", &self.size)
             .field("pending_update", &self.pending_update)
+            .field("last_seat", &self.last_seat)
             .field("cursor_pos", &self.cursor_pos)
+            .field("touch_map", &self.touch_map)
             .field("theme", &"...")
             .field("renderer", &"...")
             .field("state", &"...")
@@ -281,6 +290,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             .ok();
 
         let mut internal = IcedElementInternal {
+            additional_scale: 1.0,
             outputs: HashSet::new(),
             buffers: HashMap::new(),
             pending_update: None,
@@ -352,6 +362,19 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         }
     }
 
+    pub fn set_additional_scale(&self, scale: f64) {
+        {
+            let mut internal = self.0.lock().unwrap();
+            let internal_ref = &mut *internal;
+            if internal_ref.additional_scale == scale {
+                return;
+            }
+
+            internal_ref.additional_scale = scale;
+        }
+        self.refresh();
+    }
+
     pub fn force_update(&self) {
         self.0.lock().unwrap().update(true);
     }
@@ -370,7 +393,12 @@ impl<P: Program + Send + 'static> IcedElement<P> {
     }
 
     pub fn current_size(&self) -> Size<i32, Logical> {
-        self.0.lock().unwrap().size
+        let internal = self.0.lock().unwrap();
+        internal
+            .size
+            .to_f64()
+            .upscale(internal.additional_scale)
+            .to_i32_round()
     }
 
     pub fn queue_message(&self, msg: P::Message) {
@@ -405,6 +433,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             .map(|p| IcedPoint::new(p.x as f32, p.y as f32))
             .map(Cursor::Available)
             .unwrap_or(Cursor::Unavailable);
+
         let actions = self
             .state
             .update(
@@ -446,12 +475,13 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorEntered));
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         // TODO: Update iced widgets to handle touch using event position, not cursor_pos
-        internal.cursor_pos = Some(event.location);
+        internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
         let _ = internal.update(true);
     }
@@ -463,11 +493,12 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         event: &MotionEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
-        internal.cursor_pos = Some(event.location);
+        internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
         let _ = internal.update(true);
     }
@@ -610,12 +641,13 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         internal
             .state
             .queue_event(Event::Touch(TouchEvent::FingerPressed { id, position }));
         internal.touch_map.insert(id, position);
-        internal.cursor_pos = Some(event.location);
+        internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
         let _ = internal.update(true);
     }
@@ -647,13 +679,14 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
         internal
             .state
             .queue_event(Event::Touch(TouchEvent::FingerMoved { id, position }));
         internal.touch_map.insert(id, position);
-        internal.cursor_pos = Some(event.location);
+        internal.cursor_pos = Some(event_location);
         let _ = internal.update(true);
     }
 
@@ -767,7 +800,14 @@ impl<P: Program + Send + 'static> IsAlive for IcedElement<P> {
 
 impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn bbox(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_size(self.0.lock().unwrap().size)
+        let internal = self.0.lock().unwrap();
+        Rectangle::from_size(
+            internal
+                .size
+                .to_f64()
+                .upscale(internal.additional_scale)
+                .to_i32_round(),
+        )
     }
 
     fn is_in_input_region(&self, _point: &Point<f64, Logical>) -> bool {
@@ -786,7 +826,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
 
     fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
         let mut internal = self.0.lock().unwrap();
-        let scale = output.current_scale().fractional_scale();
+        let scale = output.current_scale().fractional_scale() * internal.additional_scale;
 
         let internal_size = internal.size;
         internal.buffers.entry(OrderedFloat(scale)).or_insert({
@@ -820,15 +860,16 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         // makes partial borrows easier
         let internal_ref = &mut *internal;
         internal_ref.buffers.retain(|scale, _| {
-            internal_ref
-                .outputs
-                .iter()
-                .any(|o| o.current_scale().fractional_scale() == **scale)
+            internal_ref.outputs.iter().any(|o| {
+                o.current_scale().fractional_scale() * internal_ref.additional_scale == **scale
+            })
         });
         for scale in internal_ref
             .outputs
             .iter()
-            .map(|o| OrderedFloat(o.current_scale().fractional_scale()))
+            .map(|o| {
+                OrderedFloat(o.current_scale().fractional_scale() * internal_ref.additional_scale)
+            })
             .filter(|scale| !internal_ref.buffers.contains_key(scale))
             .collect::<Vec<_>>()
             .into_iter()
@@ -868,7 +909,7 @@ where
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        mut scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<C> {
         let mut internal = self.0.lock().unwrap();
@@ -886,6 +927,8 @@ where
             internal_ref.pending_update = None;
         }
         let _ = internal_ref.update(force);
+
+        scale = scale * internal_ref.additional_scale;
         if let Some((buffer, ref mut old_layers)) =
             internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
         {
@@ -988,7 +1031,13 @@ where
                         .to_logical(1., Transform::Normal)
                         .to_i32_round(),
                 )),
-                Some(internal_ref.size),
+                Some(
+                    internal_ref
+                        .size
+                        .to_f64()
+                        .upscale(internal_ref.additional_scale)
+                        .to_i32_round(),
+                ),
                 Kind::Unspecified,
             ) {
                 return vec![C::from(buffer)];
