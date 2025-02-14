@@ -342,7 +342,7 @@ pub struct MoveGrab {
     window_outputs: HashSet<Output>,
     previous: ManagedLayer,
     release: ReleaseMode,
-    window_snap_threshold: f64,
+    edge_snap_threshold: f64,
     // SAFETY: This is only used on drop which will always be on the main thread
     evlh: NotSend<LoopHandle<'static, State>>,
 }
@@ -396,21 +396,19 @@ impl MoveGrab {
                 let output_loc = output_geom.loc;
                 let output_size = output_geom.size;
 
-                grab_state.location.x = if (loc.x - output_loc.x).abs() < self.window_snap_threshold
-                {
+                grab_state.location.x = if (loc.x - output_loc.x).abs() < self.edge_snap_threshold {
                     output_loc.x - grab_state.window_offset.x as f64
                 } else if ((loc.x + size.w) - (output_loc.x + output_size.w)).abs()
-                    < self.window_snap_threshold
+                    < self.edge_snap_threshold
                 {
                     output_loc.x + output_size.w - grab_state.window_offset.x as f64 - size.w
                 } else {
                     grab_state.location.x
                 };
-                grab_state.location.y = if (loc.y - output_loc.y).abs() < self.window_snap_threshold
-                {
+                grab_state.location.y = if (loc.y - output_loc.y).abs() < self.edge_snap_threshold {
                     output_loc.y - grab_state.window_offset.y as f64
                 } else if ((loc.y + size.h) - (output_loc.y + output_size.h)).abs()
-                    < self.window_snap_threshold
+                    < self.edge_snap_threshold
                 {
                     output_loc.y + output_size.h - grab_state.window_offset.y as f64 - size.h
                 } else {
@@ -716,7 +714,7 @@ impl MoveGrab {
         initial_window_location: Point<i32, Global>,
         cursor_output: Output,
         indicator_thickness: u8,
-        window_snap_threshold: f64,
+        edge_snap_threshold: f64,
         previous_layer: ManagedLayer,
         release: ReleaseMode,
         evlh: LoopHandle<'static, State>,
@@ -760,7 +758,7 @@ impl MoveGrab {
             window_outputs: outputs,
             previous: previous_layer,
             release,
-            window_snap_threshold,
+            edge_snap_threshold,
             evlh: NotSend(evlh),
         }
     }
