@@ -69,7 +69,7 @@ pub struct Config {
 #[derive(Debug)]
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
-    accessibility_zoom: (Option<PathBuf>, ZoomState),
+    pub accessibility_zoom: (Option<PathBuf>, ZoomState),
 }
 
 #[derive(Debug, Deserialize, Serialize)]

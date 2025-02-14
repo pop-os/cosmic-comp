@@ -27,6 +27,7 @@ use crate::{
     xwayland::XWaylandState,
 };
 use anyhow::Context;
+use calloop::RegistrationToken;
 use i18n_embed::{
     fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,
@@ -185,6 +186,7 @@ pub struct Common {
 
     pub popups: PopupManager,
     pub shell: Arc<RwLock<Shell>>,
+    pub zoom_config_debounce: Option<RegistrationToken>,
 
     pub clock: Clock<Monotonic>,
     pub startup_done: Arc<AtomicBool>,
@@ -592,6 +594,7 @@ impl State {
 
                 popups: PopupManager::default(),
                 shell,
+                zoom_config_debounce: None,
 
                 local_offset,
 
