@@ -906,7 +906,7 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-protocols?rev=29ab323#29ab32305c6457fccf0728caaaf79fcac4cca665"
+source = "git+https://github.com/pop-os/cosmic-protocols//?branch=workspace-pin-move#8d46a2a2ffb6187ac82a664bac671079af3116f6"
 dependencies = [
  "bitflags 2.7.0",
  "wayland-backend",
