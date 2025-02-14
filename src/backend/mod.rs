@@ -72,7 +72,17 @@ pub fn init_backend_auto(
             .write()
             .unwrap()
             .seats
-            .add_seat(initial_seat);
+            .add_seat(initial_seat.clone());
+
+        if state
+            .common
+            .config
+            .cosmic_conf
+            .accessibility_zoom
+            .start_on_login
+        {
+            state.update_zoom(&initial_seat, 1.0, true);
+        }
 
         let desired_numlock = state
             .common
