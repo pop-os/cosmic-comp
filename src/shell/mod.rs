@@ -2851,7 +2851,7 @@ impl Shell {
             },
             global_position,
             MenuAlignment::CORNER,
-            false,
+            None,
             evlh.clone(),
             self.theme.clone(),
         );

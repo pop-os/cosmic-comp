@@ -113,7 +113,7 @@ impl OutputZoomState {
         element.set_activate(true);
         element.resize(size);
         element.output_enter(output, Rectangle::new(Point::from((0, 0)), size));
-        element.refresh();
+        element.set_additional_scale(level.min(4.));
 
         OutputZoomState {
             focal_point,
@@ -153,6 +153,7 @@ impl OutputZoomState {
     }
 
     pub fn update(&self, level: f64, movement: ZoomMovement, increment: u32) {
+        self.element.set_additional_scale(level.min(4.));
         self.element.queue_message(ZoomMessage::Update {
             level,
             movement,
@@ -540,8 +541,9 @@ impl Program for ZoomProgram {
                                 ));
                                 let position = Point::<_, Local>::from((
                                     location.x,
-                                    elem_location.y + elem_size.h,
+                                    elem_location.y + elem_size.h / 2.,
                                 ));
+                                std::mem::drop(output_state_ref);
 
                                 let grab = MenuGrab::new(
                                     start_data,
@@ -596,8 +598,11 @@ impl Program for ZoomProgram {
                                     ]
                                     .into_iter(),
                                     position.to_global(&output).to_i32_round(),
-                                    MenuAlignment::HORIZONTALLY_CENTERED,
-                                    true,
+                                    MenuAlignment::horizontally_centered(
+                                        (elem_size.h / 2.).round() as u32,
+                                        false,
+                                    ),
+                                    Some(zoom_state.level.min(4.)),
                                     state.common.event_loop_handle.clone(),
                                     state.common.theme.clone(),
                                 );
@@ -648,8 +653,9 @@ impl Program for ZoomProgram {
                                 ));
                                 let position = Point::<_, Local>::from((
                                     location.x,
-                                    elem_location.y + elem_size.h,
+                                    elem_location.y + (elem_size.h / 2.),
                                 ));
+                                std::mem::drop(output_state_ref);
 
                                 let grab = MenuGrab::new(
                                     start_data,
@@ -669,8 +675,8 @@ impl Program for ZoomProgram {
                                         })
                                     }),
                                     position.to_global(&output).to_i32_round(),
-                                    MenuAlignment::CENTERED,
-                                    true,
+                                    MenuAlignment::PREFER_CENTERED,
+                                    Some(zoom_state.level.min(4.)),
                                     state.common.event_loop_handle.clone(),
                                     state.common.theme.clone(),
                                 );
@@ -690,14 +696,6 @@ impl Program for ZoomProgram {
                         }
                     });
                 }
-
-                /*
-                let new_increment = self.increments[idx];
-                let _ = loop_handle.insert_idle(move |state| {
-                    state.common.config.cosmic_conf.accessibility_zoom.increment = new_increment;
-                    // TODO: Write config
-                });
-                */
             }
             ZoomMessage::Close => {
                 let _ = loop_handle.insert_idle(|state| {
