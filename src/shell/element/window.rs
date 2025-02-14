@@ -759,6 +759,7 @@ impl PointerTarget<State> for CosmicWindow {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
+                        state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
                     );
 

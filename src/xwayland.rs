@@ -556,9 +556,14 @@ impl XwmHandler for State {
         if let Some(wl_surface) = window.wl_surface() {
             let mut shell = self.common.shell.write().unwrap();
             let seat = shell.seats.last_active().clone();
-            if let Some((grab, focus)) =
-                shell.resize_request(&wl_surface, &seat, None, resize_edge.into(), true)
-            {
+            if let Some((grab, focus)) = shell.resize_request(
+                &wl_surface,
+                &seat,
+                None,
+                resize_edge.into(),
+                self.common.config.cosmic_conf.edge_snap_threshold,
+                true,
+            ) {
                 std::mem::drop(shell);
                 if grab.is_touch_grab() {
                     seat.get_touch()

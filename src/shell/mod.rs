@@ -2896,6 +2896,7 @@ impl Shell {
             initial_window_location,
             cursor_output,
             active_hint,
+            config.cosmic_conf.edge_snap_threshold as f64,
             layer,
             release,
             evlh.clone(),
@@ -3150,6 +3151,7 @@ impl Shell {
         mapped: &CosmicMapped,
         seat: &Seat<State>,
         edge: ResizeEdge,
+        edge_snap_threshold: u32,
     ) -> Option<(
         (
             Option<(PointerFocusTarget, Point<f64, Logical>)>,
@@ -3217,6 +3219,7 @@ impl Shell {
             seat,
             start_data.clone(),
             edge,
+            edge_snap_threshold,
             ReleaseMode::Click,
         ) {
             grab.into()
@@ -3392,6 +3395,7 @@ impl Shell {
         seat: &Seat<State>,
         serial: impl Into<Option<Serial>>,
         edges: ResizeEdge,
+        edge_snap_threshold: u32,
         client_initiated: bool,
     ) -> Option<(ResizeGrab, Focus)> {
         let serial = serial.into();
@@ -3419,6 +3423,7 @@ impl Shell {
             seat,
             start_data.clone(),
             edges,
+            edge_snap_threshold,
             ReleaseMode::NoMouseButtons,
         ) {
             grab.into()

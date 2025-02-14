@@ -888,6 +888,7 @@ impl FloatingLayout {
         seat: &Seat<State>,
         start_data: GrabStartData,
         edges: ResizeEdge,
+        edge_snap_threshold: u32,
         release: ReleaseMode,
     ) -> Option<ResizeSurfaceGrab> {
         if seat.get_pointer().is_some() {
@@ -900,6 +901,7 @@ impl FloatingLayout {
                 mapped.clone(),
                 edges,
                 self.space.outputs().next().cloned().unwrap(),
+                edge_snap_threshold,
                 location,
                 size,
                 seat,

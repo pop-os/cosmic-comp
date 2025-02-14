@@ -1369,6 +1369,7 @@ impl PointerTarget<State> for CosmicStack {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
+                        state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
                     );
                     if let Some((grab, focus)) = res {

@@ -846,6 +846,12 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
                 }
             }
+            "edge_snap_threshold" => {
+                let new = get_config::<u32>(&config, "edge_snap_threshold");
+                if new != state.common.config.cosmic_conf.edge_snap_threshold {
+                    state.common.config.cosmic_conf.edge_snap_threshold = new;
+                }
+            }
             _ => {}
         }
     }

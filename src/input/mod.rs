@@ -760,6 +760,11 @@ impl State {
                                                             &seat_clone,
                                                             serial,
                                                             edge,
+                                                            state
+                                                                .common
+                                                                .config
+                                                                .cosmic_conf
+                                                                .edge_snap_threshold,
                                                             false,
                                                         );
                                                         drop(shell);
