@@ -138,8 +138,8 @@ impl Default for ZoomConfig {
     fn default() -> Self {
         ZoomConfig {
             start_on_login: false,
-            increment: 100,
-            view_moves: ZoomMovement::OnEdge,
+            increment: 50,
+            view_moves: ZoomMovement::Continuously,
         }
     }
 }
