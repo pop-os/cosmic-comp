@@ -1355,7 +1355,6 @@ impl PointerTarget<State> for CosmicStack {
                 };
                 self.0.loop_handle().insert_idle(move |state| {
                     let res = state.common.shell.write().unwrap().resize_request(
-                        &state.common.config,
                         &surface,
                         &seat,
                         serial,
@@ -1370,6 +1369,7 @@ impl PointerTarget<State> for CosmicStack {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
+                        state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
                     );
                     if let Some((grab, focus)) = res {

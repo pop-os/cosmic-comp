@@ -198,11 +198,11 @@ impl XdgShellHandler for State {
         let seat = Seat::from_resource(&seat).unwrap();
         let mut shell = self.common.shell.write().unwrap();
         if let Some((grab, focus)) = shell.resize_request(
-            &self.common.config,
             surface.wl_surface(),
             &seat,
             serial,
             edges.into(),
+            self.common.config.cosmic_conf.edge_snap_threshold,
             true,
         ) {
             std::mem::drop(shell);

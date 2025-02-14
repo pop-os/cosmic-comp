@@ -289,10 +289,10 @@ pub fn window_items(
                         let mut shell = state.common.shell.write().unwrap();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
-                            &state.common.config,
                             &resize_clone,
                             &seat,
                             ResizeEdge::TOP,
+                            state.common.config.cosmic_conf.edge_snap_threshold,
                         );
 
                         std::mem::drop(shell);
@@ -324,10 +324,10 @@ pub fn window_items(
                         let mut shell = state.common.shell.write().unwrap();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
-                            &state.common.config,
                             &resize_clone,
                             &seat,
                             ResizeEdge::LEFT,
+                            state.common.config.cosmic_conf.edge_snap_threshold,
                         );
 
                         std::mem::drop(shell);
@@ -359,10 +359,10 @@ pub fn window_items(
                         let mut shell = state.common.shell.write().unwrap();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
-                            &state.common.config,
                             &resize_clone,
                             &seat,
                             ResizeEdge::RIGHT,
+                            state.common.config.cosmic_conf.edge_snap_threshold,
                         );
 
                         std::mem::drop(shell);
@@ -394,10 +394,10 @@ pub fn window_items(
                         let mut shell = state.common.shell.write().unwrap();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
-                            &state.common.config,
                             &resize_clone,
                             &seat,
                             ResizeEdge::BOTTOM,
+                            state.common.config.cosmic_conf.edge_snap_threshold,
                         );
 
                         std::mem::drop(shell);

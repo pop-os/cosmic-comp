@@ -557,11 +557,11 @@ impl XwmHandler for State {
             let mut shell = self.common.shell.write().unwrap();
             let seat = shell.seats.last_active().clone();
             if let Some((grab, focus)) = shell.resize_request(
-                &self.common.config,
                 &wl_surface,
                 &seat,
                 None,
                 resize_edge.into(),
+                self.common.config.cosmic_conf.edge_snap_threshold,
                 true,
             ) {
                 std::mem::drop(shell);

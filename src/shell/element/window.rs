@@ -745,7 +745,6 @@ impl PointerTarget<State> for CosmicWindow {
                 };
                 self.0.loop_handle().insert_idle(move |state| {
                     let res = state.common.shell.write().unwrap().resize_request(
-                        &state.common.config,
                         &surface,
                         &seat,
                         serial,
@@ -760,6 +759,7 @@ impl PointerTarget<State> for CosmicWindow {
                             Focus::ResizeRight => ResizeEdge::RIGHT,
                             Focus::Header => unreachable!(),
                         },
+                        state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
                     );
 

@@ -756,11 +756,15 @@ impl State {
                                                             }
                                                         };
                                                         let res = shell.resize_request(
-                                                            &state.common.config,
                                                             &surface,
                                                             &seat_clone,
                                                             serial,
                                                             edge,
+                                                            state
+                                                                .common
+                                                                .config
+                                                                .cosmic_conf
+                                                                .edge_snap_threshold,
                                                             false,
                                                         );
                                                         drop(shell);

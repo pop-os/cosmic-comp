@@ -25,7 +25,6 @@ use smithay::{
 
 use crate::{
     backend::render::{element::AsGlowRenderer, IndicatorShader, Key, Usage},
-    config::Config,
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
@@ -885,11 +884,11 @@ impl FloatingLayout {
 
     pub fn resize_request(
         &mut self,
-        config: &Config,
         mapped: &CosmicMapped,
         seat: &Seat<State>,
         start_data: GrabStartData,
         edges: ResizeEdge,
+        edge_snap_threshold: u32,
         release: ReleaseMode,
     ) -> Option<ResizeSurfaceGrab> {
         if seat.get_pointer().is_some() {
@@ -902,7 +901,7 @@ impl FloatingLayout {
                 mapped.clone(),
                 edges,
                 self.space.outputs().next().cloned().unwrap(),
-                config.cosmic_conf.window_snap_threshold as i32,
+                edge_snap_threshold,
                 location,
                 size,
                 seat,
