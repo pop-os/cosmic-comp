@@ -70,7 +70,11 @@ fn render_input_order_internal<R: 'static>(
     element_filter: ElementFilter,
     mut callback: impl FnMut(Stage) -> ControlFlow<Result<R, OutputNoMode>, ()>,
 ) -> ControlFlow<Result<R, OutputNoMode>, ()> {
-    if shell.zoom_state.is_some() {
+    if shell
+        .zoom_state
+        .as_ref()
+        .is_some_and(|state| state.current_level() != 1.0)
+    {
         callback(Stage::ZoomUI)?;
     }
 
