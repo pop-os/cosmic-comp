@@ -8,6 +8,7 @@ use cosmic::{
     Apply,
 };
 use cosmic_comp_config::ZoomMovement;
+use cosmic_config::ConfigSet;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::renderer::{element::AsRenderElements, ImportMem, Renderer},
@@ -28,6 +29,7 @@ use smithay::{
     output::Output,
     utils::{IsAlive, Point, Rectangle, Serial, Size},
 };
+use tracing::error;
 
 use crate::{
     state::State,
@@ -549,21 +551,38 @@ impl Program for ZoomProgram {
                                     start_data,
                                     &seat,
                                     vec![
-                                        Item::new("View moves with pointer", move |handle| {
-                                            let _ = handle.insert_idle(move |state| {
-                                                state
-                                                    .common
-                                                    .config
-                                                    .cosmic_conf
-                                                    .accessibility_zoom
-                                                    .view_moves = ZoomMovement::Continuously;
-                                                state.common.update_config();
-                                                // TODO: Write config
-                                            });
-                                        })
+                                        Item::new(
+                                            crate::fl!("a11y-zoom-move-continuously"),
+                                            move |handle| {
+                                                let _ = handle.insert_idle(move |state| {
+                                                    state
+                                                        .common
+                                                        .config
+                                                        .cosmic_conf
+                                                        .accessibility_zoom
+                                                        .view_moves = ZoomMovement::Continuously;
+                                                    if let Err(err) =
+                                                        state.common.config.cosmic_helper.set(
+                                                            "accessibility_zoom",
+                                                            state
+                                                                .common
+                                                                .config
+                                                                .cosmic_conf
+                                                                .accessibility_zoom,
+                                                        )
+                                                    {
+                                                        error!(
+                                                            ?err,
+                                                            "Failed to update zoom config"
+                                                        );
+                                                        state.common.update_config();
+                                                    }
+                                                });
+                                            },
+                                        )
                                         .toggled(movement == ZoomMovement::Continuously),
                                         Item::new(
-                                            "View moves when pointer reaches edge",
+                                            crate::fl!("a11y-zoom-move-onedge"),
                                             move |handle| {
                                                 let _ = handle.insert_idle(move |state| {
                                                     state
@@ -572,14 +591,28 @@ impl Program for ZoomProgram {
                                                         .cosmic_conf
                                                         .accessibility_zoom
                                                         .view_moves = ZoomMovement::OnEdge;
-                                                    state.common.update_config();
-                                                    // TODO: Write config
+                                                    if let Err(err) =
+                                                        state.common.config.cosmic_helper.set(
+                                                            "accessibility_zoom",
+                                                            state
+                                                                .common
+                                                                .config
+                                                                .cosmic_conf
+                                                                .accessibility_zoom,
+                                                        )
+                                                    {
+                                                        error!(
+                                                            ?err,
+                                                            "Failed to update zoom config"
+                                                        );
+                                                        state.common.update_config();
+                                                    }
                                                 });
                                             },
                                         )
                                         .toggled(movement == ZoomMovement::OnEdge),
                                         Item::new(
-                                            "View moves to keep pointer centered",
+                                            crate::fl!("a11y-zoom-move-centered"),
                                             move |handle| {
                                                 let _ = handle.insert_idle(move |state| {
                                                     state
@@ -588,13 +621,33 @@ impl Program for ZoomProgram {
                                                         .cosmic_conf
                                                         .accessibility_zoom
                                                         .view_moves = ZoomMovement::Centered;
-                                                    state.common.update_config();
-                                                    // TODO: Write config
+                                                    if let Err(err) =
+                                                        state.common.config.cosmic_helper.set(
+                                                            "accessibility_zoom",
+                                                            state
+                                                                .common
+                                                                .config
+                                                                .cosmic_conf
+                                                                .accessibility_zoom,
+                                                        )
+                                                    {
+                                                        error!(
+                                                            ?err,
+                                                            "Failed to update zoom config"
+                                                        );
+                                                        state.common.update_config();
+                                                    }
                                                 });
                                             },
                                         )
                                         .toggled(movement == ZoomMovement::Centered),
-                                        Item::new("Magnifier settings...", |_| { /* TODO */ }),
+                                        Item::new(crate::fl!("a11y-zoom-settings"), |handle| {
+                                            let _ = handle.insert_idle(move |state| {
+                                                state.spawn_command(
+                                                    "cosmic-settings page-accessibility".into(),
+                                                );
+                                            });
+                                        }),
                                     ]
                                     .into_iter(),
                                     position.to_global(&output).to_i32_round(),

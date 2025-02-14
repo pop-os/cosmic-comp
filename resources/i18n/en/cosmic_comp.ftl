@@ -1,3 +1,7 @@
+a11y-zoom-move-continuously = View moves continuously with pointer
+a11y-zoom-move-onedge = View moves when pointer reaches edge
+a11y-zoom-move-centered = View moves to keep pointer centered
+a11y-zoom-settings = Magnifier settings...
 grow-window = Grow
 shrink-window = Shrink
 swap-windows = Swap Windows
