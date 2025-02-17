@@ -666,6 +666,7 @@ impl Program for ZoomProgram {
                                             },
                                         )
                                         .toggled(movement == ZoomMovement::Centered),
+                                        Item::Separator,
                                         Item::new(crate::fl!("a11y-zoom-settings"), |handle| {
                                             let _ = handle.insert_idle(move |state| {
                                                 state.spawn_command(
