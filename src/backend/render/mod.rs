@@ -421,7 +421,7 @@ where
     let (focal_point, zoom_scale) = zoom_state
         .map(|state| {
             (
-                state.focal_point(Some(&output)).to_local(&output),
+                state.animating_focal_point(Some(&output)).to_local(&output),
                 state.animating_level(),
             )
         })
@@ -729,7 +729,7 @@ where
     let (focal_point, zoom_scale) = zoom_level
         .map(|state| {
             (
-                state.focal_point(Some(&output)).to_local(&output),
+                state.animating_focal_point(Some(&output)).to_local(&output),
                 state.animating_level(),
             )
         })

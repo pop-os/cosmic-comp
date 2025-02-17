@@ -124,7 +124,7 @@ impl OutputZoomState {
         }
     }
 
-    pub fn focal_point(&mut self) -> Point<f64, Local> {
+    pub fn animating_focal_point(&mut self) -> Point<f64, Local> {
         if let Some((old_point, start)) = self.previous_point.as_ref() {
             let duration_since = Instant::now().duration_since(*start);
             if duration_since > ANIMATION_DURATION {
@@ -144,6 +144,10 @@ impl OutputZoomState {
         } else {
             self.focal_point
         }
+    }
+
+    pub fn current_focal_point(&mut self) -> Point<f64, Local> {
+        self.focal_point
     }
 
     pub fn is_animating(&self) -> bool {
@@ -204,11 +208,27 @@ impl ZoomState {
         self.seat.clone()
     }
 
-    pub fn focal_point(&self, output: Option<&Output>) -> Point<f64, Global> {
+    pub fn animating_focal_point(&self, output: Option<&Output>) -> Point<f64, Global> {
         let active_output = self.seat.active_output();
         let output = output.unwrap_or(&active_output);
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
-        let res = output_state.lock().unwrap().focal_point().to_global(output);
+        let res = output_state
+            .lock()
+            .unwrap()
+            .animating_focal_point()
+            .to_global(output);
+        res
+    }
+
+    pub fn current_focal_point(&self, output: Option<&Output>) -> Point<f64, Global> {
+        let active_output = self.seat.active_output();
+        let output = output.unwrap_or(&active_output);
+        let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+        let res = output_state
+            .lock()
+            .unwrap()
+            .current_focal_point()
+            .to_global(output);
         res
     }
 
