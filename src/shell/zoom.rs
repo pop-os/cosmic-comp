@@ -575,8 +575,8 @@ impl Program for ZoomProgram {
                                                             ?err,
                                                             "Failed to update zoom config"
                                                         );
-                                                        state.common.update_config();
                                                     }
+                                                    state.common.update_config();
                                                 });
                                             },
                                         )
@@ -605,8 +605,8 @@ impl Program for ZoomProgram {
                                                             ?err,
                                                             "Failed to update zoom config"
                                                         );
-                                                        state.common.update_config();
                                                     }
+                                                    state.common.update_config();
                                                 });
                                             },
                                         )
@@ -635,8 +635,8 @@ impl Program for ZoomProgram {
                                                             ?err,
                                                             "Failed to update zoom config"
                                                         );
-                                                        state.common.update_config();
                                                     }
+                                                    state.common.update_config();
                                                 });
                                             },
                                         )
