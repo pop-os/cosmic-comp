@@ -2034,6 +2034,14 @@ impl Shell {
             1.
         };
 
+        let toggled = previous_level != level && (previous_level == 1.0 || level == 1.0);
+        if toggled {
+            let value = previous_level == 1.0;
+            let _ = loop_handle.insert_idle(move |state| {
+                state.common.a11y_state.set_screen_magnifier(value);
+            });
+        }
+
         self.zoom_state = Some(ZoomState {
             seat: seat.clone(),
             level,

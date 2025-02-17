@@ -11,18 +11,21 @@ use crate::{
     input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
-    wayland::handlers::screencopy::SessionHolder,
-    wayland::protocols::{
-        atspi::AtspiState,
-        drm::WlDrmState,
-        image_source::ImageSourceState,
-        output_configuration::OutputConfigurationState,
-        output_power::OutputPowerState,
-        overlap_notify::OverlapNotifyState,
-        screencopy::ScreencopyState,
-        toplevel_info::ToplevelInfoState,
-        toplevel_management::{ManagementCapabilities, ToplevelManagementState},
-        workspace::{WorkspaceClientState, WorkspaceState, WorkspaceUpdateGuard},
+    wayland::{
+        handlers::screencopy::SessionHolder,
+        protocols::{
+            a11y::A11yState,
+            atspi::AtspiState,
+            drm::WlDrmState,
+            image_source::ImageSourceState,
+            output_configuration::OutputConfigurationState,
+            output_power::OutputPowerState,
+            overlap_notify::OverlapNotifyState,
+            screencopy::ScreencopyState,
+            toplevel_info::ToplevelInfoState,
+            toplevel_management::{ManagementCapabilities, ToplevelManagementState},
+            workspace::{WorkspaceClientState, WorkspaceState, WorkspaceUpdateGuard},
+        },
     },
     xwayland::XWaylandState,
 };
@@ -223,6 +226,7 @@ pub struct Common {
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
     pub overlap_notify_state: OverlapNotifyState,
+    pub a11y_state: A11yState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -581,8 +585,10 @@ impl State {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
 
+        let a11y_state = A11yState::new::<State, _>(dh, client_is_privileged);
+
         // TODO: Restrict to only specific client?
-        let atspi_state = AtspiState::new::<State, _>(dh, client_is_privileged);
+        let atspi_state = AtspiState::new::<State, _>(dh, |_| true);
 
         State {
             common: Common {
@@ -638,6 +644,7 @@ impl State {
                 xdg_activation_state,
                 xdg_foreign_state,
                 workspace_state,
+                a11y_state,
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
