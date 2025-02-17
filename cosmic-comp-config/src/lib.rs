@@ -13,7 +13,7 @@ pub struct KeyboardConfig {
     pub numlock_state: NumlockState,
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumlockState {
     BootOn,
     #[default]
