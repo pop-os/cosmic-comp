@@ -3,9 +3,7 @@
 use crate::state::State;
 use anyhow::{anyhow, Context, Result};
 use cosmic_comp_config::NumlockState;
-use smithay::backend::input::{self as smithay_input};
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
-use smithay::utils::SERIAL_COUNTER;
 use tracing::{info, warn};
 
 pub mod render;
