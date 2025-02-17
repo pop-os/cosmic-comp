@@ -63,7 +63,7 @@ impl OutputExt for Output {
         let output_state = self.user_data().get::<Mutex<OutputZoomState>>()?;
         let mut output_state_ref = output_state.lock().unwrap();
 
-        let focal_point = output_state_ref.focal_point().to_global(self);
+        let focal_point = output_state_ref.current_focal_point().to_global(self);
         let mut zoomed_output_geo = output_geometry.to_f64();
         zoomed_output_geo.loc -= focal_point;
         zoomed_output_geo = zoomed_output_geo.downscale(level);
