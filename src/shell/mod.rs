@@ -840,15 +840,16 @@ impl Workspaces {
         xdg_activation_state: &XdgActivationState,
         after: bool,
     ) {
-        let Some((old_group, mut workspace)) = self.sets.values_mut().find_map(|set| {
+        let Some((old_group, mut workspace, was_active)) = self.sets.values_mut().find_map(|set| {
             set.workspaces
                 .iter()
                 .position(|w| w.handle == *handle)
                 .map(|idx| {
                     if idx < set.active {
+                        // Decrement `active` so same workspace remains active
                         set.active -= 1;
                     }
-                    (set.group, set.workspaces.remove(idx))
+                    (set.group, set.workspaces.remove(idx), set.active == idx)
                 })
         }) else {
             return;
@@ -866,7 +867,12 @@ impl Workspaces {
                     workspace.refresh(xdg_activation_state);
                 }
                 let insert_idx = if after { idx + 1 } else { idx };
-                if insert_idx <= set.active {
+                if set.group == old_group && was_active {
+                    // Moving active workspace to different position in same group.
+                    // Set `active` to new position of this workspace.
+                    set.active = insert_idx;
+                } else if insert_idx <= set.active {
+                    // Otherwise, make sure active workspace is unchanged.
                     set.active += 1;
                 }
                 set.workspaces.insert(insert_idx, workspace);
