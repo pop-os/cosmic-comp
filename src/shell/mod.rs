@@ -15,7 +15,7 @@ use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
     TileBehavior, ZoomConfig, ZoomMovement,
 };
-use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::TilingState;
+use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
 use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use keyframe::{ease, functions::EaseInOutCubic};

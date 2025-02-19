@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1::{self},
+    reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1,
     reexports::wayland_server::{
         backend::{ClientData, ClientId},
-        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, WEnum,
     },
 };
 
@@ -14,10 +14,13 @@ use super::{
     WorkspaceHandler, WorkspaceState,
 };
 
-use cosmic_protocols::workspace::v1::server::{
-    zcosmic_workspace_group_handle_v1::{self, ZcosmicWorkspaceGroupHandleV1},
-    zcosmic_workspace_handle_v1::{self, ZcosmicWorkspaceHandleV1},
-    zcosmic_workspace_manager_v1::{self, ZcosmicWorkspaceManagerV1},
+use cosmic_protocols::workspace::{
+    v1::server::{
+        zcosmic_workspace_group_handle_v1::{self, ZcosmicWorkspaceGroupHandleV1},
+        zcosmic_workspace_handle_v1::{self, ZcosmicWorkspaceHandleV1},
+        zcosmic_workspace_manager_v1::{self, ZcosmicWorkspaceManagerV1},
+    },
+    v2::server::zcosmic_workspace_handle_v2,
 };
 
 impl<D> GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
@@ -243,6 +246,17 @@ where
                         .workspace_state()
                         .lock()
                         .unwrap();
+                    let tiling_state = match tiling_state {
+                        WEnum::Value(zcosmic_workspace_handle_v1::TilingState::FloatingOnly) => {
+                            WEnum::Value(zcosmic_workspace_handle_v2::TilingState::FloatingOnly)
+                        }
+                        WEnum::Value(zcosmic_workspace_handle_v1::TilingState::TilingEnabled) => {
+                            WEnum::Value(zcosmic_workspace_handle_v2::TilingState::TilingEnabled)
+                        }
+                        // Won't be adding more variants to v1, at least
+                        WEnum::Value(_) => unreachable!(),
+                        WEnum::Unknown(value) => WEnum::Unknown(value),
+                    };
                     state.requests.push(Request::SetTilingState {
                         workspace: workspace_handle,
                         state: tiling_state,
@@ -477,7 +491,21 @@ where
             .map(|state| state != workspace.tiling)
             .unwrap_or(true)
         {
-            instance.tiling_state(workspace.tiling);
+            let tiling_state = match workspace.tiling {
+                zcosmic_workspace_handle_v2::TilingState::FloatingOnly => {
+                    zcosmic_workspace_handle_v1::TilingState::FloatingOnly
+                }
+                zcosmic_workspace_handle_v2::TilingState::TilingEnabled => {
+                    zcosmic_workspace_handle_v1::TilingState::TilingEnabled
+                }
+                _ => {
+                    // Not clear what to do if state doesn't match. Which
+                    // shouldn't happen (or protocol will be irrelevant by
+                    // then).
+                    zcosmic_workspace_handle_v1::TilingState::TilingEnabled
+                }
+            };
+            instance.tiling_state(tiling_state);
             handle_state.tiling = Some(workspace.tiling);
             changed = true;
         }
