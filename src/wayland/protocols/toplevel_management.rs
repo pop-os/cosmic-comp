@@ -116,7 +116,7 @@ impl ToplevelManagementState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelManagerV1, _>(
-            3,
+            4,
             ToplevelManagerGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -257,6 +257,20 @@ where
                 let window = window_from_handle(toplevel).unwrap();
                 if let Some(workspace_handle) =
                     state.workspace_state().get_workspace_handle(&workspace)
+                {
+                    if let Some(output) = Output::from_resource(&output) {
+                        state.move_to_workspace(dh, &window, workspace_handle, output);
+                    }
+                }
+            }
+            zcosmic_toplevel_manager_v1::Request::MoveToExtWorkspace {
+                toplevel,
+                workspace,
+                output,
+            } => {
+                let window = window_from_handle(toplevel).unwrap();
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
                 {
                     if let Some(output) = Output::from_resource(&output) {
                         state.move_to_workspace(dh, &window, workspace_handle, output);
