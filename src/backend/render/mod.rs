@@ -5,7 +5,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     ops::ControlFlow,
-    sync::{Arc, RwLock, Weak},
+    sync::{Arc, Mutex, RwLock, Weak},
     time::Instant,
 };
 
@@ -46,8 +46,8 @@ use smithay::{
                 AsRenderElements, Element, Id, Kind, RenderElement,
             },
             gles::{
-                element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
-                UniformName, UniformType,
+                element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer,
+                GlesTexProgram, Uniform, UniformName, UniformType,
             },
             glow::GlowRenderer,
             multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
@@ -65,6 +65,7 @@ use smithay::{
         shm::{shm_format_to_fourcc, with_buffer_contents},
     },
 };
+use tracing::error;
 
 #[cfg(feature = "debug")]
 use smithay_egui::EguiState;
@@ -391,6 +392,30 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
         .insert_if_missing(|| BackdropShader(rectangle_shader));
 
     Ok(())
+}
+
+pub struct PostprocessShader(pub Mutex<Option<GlesTexProgram>>);
+
+pub fn update_postprocess_shader(renderer: &mut GlesRenderer, shader_text: Option<&str>) {
+    let shader = if let Some(shader_text) = shader_text {
+        match renderer.compile_custom_texture_shader(shader_text, &[]) {
+            Ok(shader) => Some(shader),
+            Err(err) => {
+                error!("failed to compile postprocess shader: {}", err);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let egl_context = renderer.egl_context();
+    *egl_context
+        .user_data()
+        .get_or_insert(|| PostprocessShader(Mutex::new(None)))
+        .0
+        .lock()
+        .unwrap() = shader;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

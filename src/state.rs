@@ -441,6 +441,16 @@ impl BackendData {
             _ => unreachable!("No backend set when getting offscreen renderer"),
         }
     }
+
+    /// Set the GLES texture shader used for postprocessing
+    pub fn update_postprocess_shader(&mut self, shader: Option<&str>) {
+        match self {
+            BackendData::Kms(kms) => kms.update_postprocess_shader(shader),
+            BackendData::Winit(winit) => winit.update_postprocess_shader(shader),
+            BackendData::X11(x11) => x11.update_postprocess_shader(shader),
+            _ => unreachable!("No backend was initialized"),
+        }
+    }
 }
 
 pub struct KmsNodes {

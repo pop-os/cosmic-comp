@@ -2,7 +2,7 @@
 
 use cosmic_config::{cosmic_config_derive::CosmicConfigEntry, CosmicConfigEntry};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 
 pub mod input;
 pub mod workspace;
@@ -48,6 +48,8 @@ pub struct CosmicCompConfig {
     pub descale_xwayland: bool,
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
+    /// Path to postprocess shader applied to whole screen
+    pub postprocess_shader_path: Option<PathBuf>,
 }
 
 impl Default for CosmicCompConfig {
@@ -79,6 +81,7 @@ impl Default for CosmicCompConfig {
             focus_follows_cursor_delay: 250,
             descale_xwayland: false,
             edge_snap_threshold: 0,
+            postprocess_shader_path: None,
         }
     }
 }
