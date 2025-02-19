@@ -392,6 +392,7 @@ where
             }
         }
     };
+    let instance = instance.clone();
 
     let mut handle_state = instance.data::<WorkspaceData>().unwrap().lock().unwrap();
     let mut changed = false;
@@ -441,6 +442,14 @@ where
         changed = true;
     }
     // TODO ext_workspace_handle_v1::id
+
+    if let Some(cosmic_v2_handle) = handle_state
+        .cosmic_v2_handle
+        .as_ref()
+        .and_then(|x| x.upgrade().ok())
+    {
+        changed |= super::cosmic_v2::send_workspace_to_client(&cosmic_v2_handle, workspace);
+    }
 
     changed
 }

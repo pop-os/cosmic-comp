@@ -4,6 +4,9 @@ use super::{
 };
 use crate::shell::CosmicSurface;
 use cosmic_protocols::image_source::v1::server::{
+    zcosmic_ext_workspace_image_source_manager_v1::{
+        Request as ExtWorkspaceSourceRequest, ZcosmicExtWorkspaceImageSourceManagerV1,
+    },
     zcosmic_image_source_v1::ZcosmicImageSourceV1,
     zcosmic_output_image_source_manager_v1::{
         Request as OutputSourceRequest, ZcosmicOutputImageSourceManagerV1,
@@ -27,6 +30,7 @@ use wayland_backend::server::GlobalId;
 pub struct ImageSourceState {
     output_source_global: GlobalId,
     workspace_source_global: GlobalId,
+    ext_workspace_source_global: GlobalId,
     toplevel_source_global: GlobalId,
 }
 
@@ -58,6 +62,10 @@ impl ImageSourceState {
                 WorkspaceImageSourceManagerGlobalData,
             > + Dispatch<ZcosmicWorkspaceImageSourceManagerV1, ()>
             + GlobalDispatch<
+                ZcosmicExtWorkspaceImageSourceManagerV1,
+                WorkspaceImageSourceManagerGlobalData,
+            > + Dispatch<ZcosmicExtWorkspaceImageSourceManagerV1, ()>
+            + GlobalDispatch<
                 ZcosmicToplevelImageSourceManagerV1,
                 ToplevelImageSourceManagerGlobalData,
             > + Dispatch<ZcosmicToplevelImageSourceManagerV1, ()>
@@ -80,6 +88,13 @@ impl ImageSourceState {
                         filter: Box::new(client_filter.clone()),
                     },
                 ),
+            ext_workspace_source_global: display
+                .create_global::<D, ZcosmicExtWorkspaceImageSourceManagerV1, _>(
+                    1,
+                    WorkspaceImageSourceManagerGlobalData {
+                        filter: Box::new(client_filter.clone()),
+                    },
+                ),
             toplevel_source_global: display
                 .create_global::<D, ZcosmicToplevelImageSourceManagerV1, _>(
                     1,
@@ -96,6 +111,10 @@ impl ImageSourceState {
 
     pub fn workspace_source_id(&self) -> &GlobalId {
         &self.workspace_source_global
+    }
+
+    pub fn ext_workspace_source_id(&self) -> &GlobalId {
+        &self.ext_workspace_source_global
     }
 
     pub fn toplevel_source_id(&self) -> &GlobalId {
@@ -141,6 +160,36 @@ where
         _handle: &DisplayHandle,
         _client: &Client,
         resource: New<ZcosmicWorkspaceImageSourceManagerV1>,
+        _global_data: &WorkspaceImageSourceManagerGlobalData,
+        data_init: &mut DataInit<'_, D>,
+    ) {
+        data_init.init(resource, ());
+    }
+
+    fn can_view(client: Client, global_data: &WorkspaceImageSourceManagerGlobalData) -> bool {
+        (global_data.filter)(&client)
+    }
+}
+
+impl<D>
+    GlobalDispatch<
+        ZcosmicExtWorkspaceImageSourceManagerV1,
+        WorkspaceImageSourceManagerGlobalData,
+        D,
+    > for ImageSourceState
+where
+    D: GlobalDispatch<
+            ZcosmicExtWorkspaceImageSourceManagerV1,
+            WorkspaceImageSourceManagerGlobalData,
+        > + Dispatch<ZcosmicExtWorkspaceImageSourceManagerV1, ()>
+        + Dispatch<ZcosmicImageSourceV1, ImageSourceData>
+        + 'static,
+{
+    fn bind(
+        _state: &mut D,
+        _handle: &DisplayHandle,
+        _client: &Client,
+        resource: New<ZcosmicExtWorkspaceImageSourceManagerV1>,
         _global_data: &WorkspaceImageSourceManagerGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
@@ -249,6 +298,43 @@ where
     }
 }
 
+impl<D> Dispatch<ZcosmicExtWorkspaceImageSourceManagerV1, (), D> for ImageSourceState
+where
+    D: Dispatch<ZcosmicExtWorkspaceImageSourceManagerV1, ()>
+        + Dispatch<ZcosmicImageSourceV1, ImageSourceData>
+        + WorkspaceHandler
+        + 'static,
+{
+    fn request(
+        state: &mut D,
+        _client: &Client,
+        _resource: &ZcosmicExtWorkspaceImageSourceManagerV1,
+        request: <ZcosmicExtWorkspaceImageSourceManagerV1 as Resource>::Request,
+        _data: &(),
+        _dhandle: &DisplayHandle,
+        data_init: &mut DataInit<'_, D>,
+    ) {
+        match request {
+            ExtWorkspaceSourceRequest::CreateSource { source, output } => {
+                let data = match state.workspace_state().get_ext_workspace_handle(&output) {
+                    Some(workspace) => ImageSourceData::Workspace(workspace),
+                    None => ImageSourceData::Destroyed,
+                };
+                data_init.init(source, data);
+            }
+            _ => {}
+        }
+    }
+
+    fn destroyed(
+        _state: &mut D,
+        _client: wayland_backend::server::ClientId,
+        _resource: &ZcosmicExtWorkspaceImageSourceManagerV1,
+        _data: &(),
+    ) {
+    }
+}
+
 impl<D> Dispatch<ZcosmicToplevelImageSourceManagerV1, (), D> for ImageSourceState
 where
     D: Dispatch<ZcosmicToplevelImageSourceManagerV1, ()>
@@ -328,6 +414,12 @@ macro_rules! delegate_image_source {
         ] => $crate::wayland::protocols::image_source::ImageSourceState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             cosmic_protocols::image_source::v1::server::zcosmic_workspace_image_source_manager_v1::ZcosmicWorkspaceImageSourceManagerV1: ()
+        ] => $crate::wayland::protocols::image_source::ImageSourceState);
+        smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::image_source::v1::server::zcosmic_ext_workspace_image_source_manager_v1::ZcosmicExtWorkspaceImageSourceManagerV1: $crate::wayland::protocols::image_source::WorkspaceImageSourceManagerGlobalData
+        ] => $crate::wayland::protocols::image_source::ImageSourceState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::image_source::v1::server::zcosmic_ext_workspace_image_source_manager_v1::ZcosmicExtWorkspaceImageSourceManagerV1: ()
         ] => $crate::wayland::protocols::image_source::ImageSourceState);
         smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             cosmic_protocols::image_source::v1::server::zcosmic_toplevel_image_source_manager_v1::ZcosmicToplevelImageSourceManagerV1: $crate::wayland::protocols::image_source::ToplevelImageSourceManagerGlobalData
