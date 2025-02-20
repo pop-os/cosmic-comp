@@ -10,7 +10,10 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
-use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
+use crate::wayland::{
+    handlers::data_device::{self, get_dnd_icon},
+    protocols::workspace::WorkspaceCapabilities,
+};
 use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
     TileBehavior,
@@ -1608,13 +1611,59 @@ impl Shell {
         }
     }
 
-    pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
+    pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<Output> {
         if let Some(session_lock) = &self.session_lock {
             return session_lock
                 .surfaces
                 .iter()
                 .find(|(_, v)| v.wl_surface() == surface)
-                .map(|(k, _)| k);
+                .map(|(k, _)| k.clone());
+        }
+
+        if let Some(output) = self.seats.iter().find_map(|seat| {
+            let cursor_status = seat
+                .user_data()
+                .get::<Mutex<CursorImageStatus>>()
+                .map(|lock| {
+                    let mut cursor_status = lock.lock().unwrap();
+                    if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+                        if !surface.alive() {
+                            *cursor_status = CursorImageStatus::default_named();
+                        }
+                    }
+                    cursor_status.clone()
+                })
+                .unwrap_or(CursorImageStatus::default_named());
+
+            // cursor
+            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+                if &wl_surface == surface {
+                    return Some(seat.active_output());
+                }
+            }
+
+            //dnd
+            if let Some(dnd_icon) = get_dnd_icon(seat) {
+                if &dnd_icon.surface == surface {
+                    return Some(seat.active_output());
+                }
+            }
+
+            // grabs
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                    if grab_state
+                        .element()
+                        .has_surface(surface, WindowSurfaceType::ALL)
+                    {
+                        return Some(seat.active_output());
+                    }
+                }
+            }
+
+            None
+        }) {
+            return Some(output);
         }
 
         self.outputs()
@@ -1669,6 +1718,7 @@ impl Shell {
                         .any(|e| e.has_surface(surface, WindowSurfaceType::ALL))
                 })
             })
+            .cloned()
     }
 
     pub fn workspace_for_surface(&self, surface: &WlSurface) -> Option<(WorkspaceHandle, Output)> {

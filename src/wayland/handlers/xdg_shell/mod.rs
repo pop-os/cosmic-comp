@@ -417,9 +417,7 @@ impl XdgShellHandler for State {
                 &mut self.common.toplevel_info_state,
             );
 
-            let output = shell
-                .visible_output_for_surface(surface.wl_surface())
-                .cloned();
+            let output = shell.visible_output_for_surface(surface.wl_surface());
             if let Some(output) = output.as_ref() {
                 shell.refresh_active_space(output, &self.common.xdg_activation_state);
             }

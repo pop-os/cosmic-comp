@@ -11,18 +11,20 @@ use crate::{
     input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
-    wayland::handlers::screencopy::SessionHolder,
-    wayland::protocols::{
-        atspi::AtspiState,
-        drm::WlDrmState,
-        image_source::ImageSourceState,
-        output_configuration::OutputConfigurationState,
-        output_power::OutputPowerState,
-        overlap_notify::OverlapNotifyState,
-        screencopy::ScreencopyState,
-        toplevel_info::ToplevelInfoState,
-        toplevel_management::{ManagementCapabilities, ToplevelManagementState},
-        workspace::{WorkspaceClientState, WorkspaceState, WorkspaceUpdateGuard},
+    wayland::{
+        handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
+        protocols::{
+            atspi::AtspiState,
+            drm::WlDrmState,
+            image_source::ImageSourceState,
+            output_configuration::OutputConfigurationState,
+            output_power::OutputPowerState,
+            overlap_notify::OverlapNotifyState,
+            screencopy::ScreencopyState,
+            toplevel_info::ToplevelInfoState,
+            toplevel_management::{ManagementCapabilities, ToplevelManagementState},
+            workspace::{WorkspaceClientState, WorkspaceState, WorkspaceUpdateGuard},
+        },
     },
     xwayland::XWaylandState,
 };
@@ -729,6 +731,11 @@ impl Common {
                 with_surfaces_surface_tree(&wl_surface, processor);
             }
 
+            //dnd
+            if let Some(dnd_icon) = get_dnd_icon(seat) {
+                with_surfaces_surface_tree(&dnd_icon.surface, processor);
+            }
+
             // grabs
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
                 if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
@@ -814,6 +821,64 @@ impl Common {
             .iter()
             .filter(|seat| &seat.active_output() == output)
         {
+            let cursor_status = seat
+                .user_data()
+                .get::<Mutex<CursorImageStatus>>()
+                .map(|lock| {
+                    let mut cursor_status = lock.lock().unwrap();
+                    if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+                        if !surface.alive() {
+                            *cursor_status = CursorImageStatus::default_named();
+                        }
+                    }
+                    cursor_status.clone()
+                })
+                .unwrap_or(CursorImageStatus::default_named());
+
+            // cursor ...
+            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+                if let Some(feedback) =
+                    advertised_node_for_surface(&wl_surface, &self.display_handle)
+                        .and_then(|source| dmabuf_feedback(source))
+                {
+                    send_dmabuf_feedback_surface_tree(
+                        &wl_surface,
+                        output,
+                        surface_primary_scanout_output,
+                        |surface, _| {
+                            select_dmabuf_feedback(
+                                surface,
+                                render_element_states,
+                                &feedback.render_feedback,
+                                &feedback.scanout_feedback,
+                            )
+                        },
+                    );
+                }
+            }
+
+            //dnd
+            if let Some(dnd_icon) = get_dnd_icon(seat) {
+                if let Some(feedback) =
+                    advertised_node_for_surface(&dnd_icon.surface, &self.display_handle)
+                        .and_then(|source| dmabuf_feedback(source))
+                {
+                    send_dmabuf_feedback_surface_tree(
+                        &dnd_icon.surface,
+                        output,
+                        surface_primary_scanout_output,
+                        |surface, _| {
+                            select_dmabuf_feedback(
+                                surface,
+                                render_element_states,
+                                &feedback.render_feedback,
+                                &feedback.scanout_feedback,
+                            )
+                        },
+                    )
+                }
+            }
+
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
                 if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
                     for (window, _) in grab_state.element().windows() {
@@ -1013,6 +1078,16 @@ impl Common {
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
                 send_frames_surface_tree(
                     &wl_surface,
+                    output,
+                    time,
+                    Some(Duration::ZERO),
+                    should_send,
+                )
+            }
+
+            if let Some(dnd_icon) = get_dnd_icon(seat) {
+                send_frames_surface_tree(
+                    &dnd_icon.surface,
                     output,
                     time,
                     Some(Duration::ZERO),
