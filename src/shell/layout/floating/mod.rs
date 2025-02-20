@@ -1548,20 +1548,20 @@ impl FloatingLayout {
 
                     resize.resize(resize_geometry.size.as_logical());
                     resize.output_enter(output, Rectangle::default() /* unused */);
-                    window_elements.extend(
-                        resize
-                            .render_elements::<CosmicWindowRenderElement<R>>(
-                                renderer,
-                                resize_geometry
-                                    .loc
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                output_scale.into(),
-                                alpha * mode.alpha().unwrap_or(1.0),
-                            )
-                            .into_iter()
-                            .map(CosmicMappedRenderElement::Window),
-                    );
+                    window_elements = resize
+                        .render_elements::<CosmicWindowRenderElement<R>>(
+                            renderer,
+                            resize_geometry
+                                .loc
+                                .as_logical()
+                                .to_physical_precise_round(output_scale),
+                            output_scale.into(),
+                            alpha * mode.alpha().unwrap_or(1.0),
+                        )
+                        .into_iter()
+                        .map(CosmicMappedRenderElement::Window)
+                        .chain(window_elements.into_iter())
+                        .collect();
                 }
 
                 let active_window_hint = crate::theme::active_window_hint(theme);
