@@ -82,8 +82,7 @@ impl OutputZoomState {
                     cursor_position.to_local(&output)
                 }
                 ZoomMovement::Centered => {
-                    let mut zoomed_output_geometry =
-                        output.zoomed_geometry(level).unwrap().to_f64();
+                    let mut zoomed_output_geometry = output.geometry().to_f64().downscale(level);
                     zoomed_output_geometry.loc =
                         cursor_position - zoomed_output_geometry.size.downscale(2.).to_point();
 
@@ -307,8 +306,11 @@ impl ZoomState {
                     .loc
                     .to_local(&output)
                     .upscale(
-                        output_geometry.size.w
-                            / (output_geometry.size.w - zoomed_output_geometry.size.w),
+                        output_geometry
+                            .size
+                            .w
+                            .checked_div(output_geometry.size.w - zoomed_output_geometry.size.w)
+                            .unwrap_or(1),
                     )
                     .to_global(&output);
                 focal_point.x = focal_point.x.clamp(
