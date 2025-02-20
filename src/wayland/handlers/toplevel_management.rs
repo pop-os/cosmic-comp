@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::ZcosmicWorkspaceHandleV1;
 use smithay::{
     desktop::{layer_map_for_output, WindowSurfaceType},
     input::{pointer::MotionEvent, Seat},
@@ -18,6 +17,7 @@ use crate::{
             delegate_toplevel_management, toplevel_rectangle_for, ManagementWindow,
             ToplevelManagementHandler, ToplevelManagementState,
         },
+        workspace::WorkspaceHandle,
     },
 };
 
@@ -101,13 +101,9 @@ impl ToplevelManagementHandler for State {
         &mut self,
         _dh: &DisplayHandle,
         window: &<Self as ToplevelInfoHandler>::Window,
-        workspace: ZcosmicWorkspaceHandleV1,
+        to_handle: WorkspaceHandle,
         _output: Output,
     ) {
-        let Some(to_handle) = self.common.workspace_state.get_workspace_handle(&workspace) else {
-            return;
-        };
-
         let mut shell = self.common.shell.write().unwrap();
         if let Some(mut mapped) = shell.element_for_surface(window).cloned() {
             if let Some(from_workspace) = shell.space_for_mut(&mapped) {
