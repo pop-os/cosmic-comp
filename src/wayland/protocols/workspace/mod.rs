@@ -114,22 +114,12 @@ pub struct WorkspaceGroupHandle {
     id: usize,
 }
 
+#[derive(Default)]
 pub struct WorkspaceGroupDataInner {
     outputs: Vec<Output>,
     wl_outputs: HashSet<WlOutput>,
-    capabilities: GroupCapabilities,
+    capabilities: Option<GroupCapabilities>,
     workspace_count: usize,
-}
-
-impl Default for WorkspaceGroupDataInner {
-    fn default() -> Self {
-        Self {
-            outputs: Vec::new(),
-            wl_outputs: HashSet::new(),
-            capabilities: GroupCapabilities::empty(),
-            workspace_count: 0,
-        }
-    }
 }
 
 pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
@@ -153,24 +143,13 @@ pub struct WorkspaceHandle {
     id: usize,
 }
 
+#[derive(Default)]
 pub struct WorkspaceDataInner {
     name: String,
-    capabilities: WorkspaceCapabilities,
+    capabilities: Option<WorkspaceCapabilities>,
     coordinates: Vec<u32>,
-    states: ext_workspace_handle_v1::State,
+    states: Option<ext_workspace_handle_v1::State>,
     tiling: Option<zcosmic_workspace_handle_v1::TilingState>,
-}
-
-impl Default for WorkspaceDataInner {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            capabilities: WorkspaceCapabilities::empty(),
-            coordinates: Vec::new(),
-            states: ext_workspace_handle_v1::State::empty(),
-            tiling: None,
-        }
-    }
 }
 
 pub type WorkspaceData = Mutex<WorkspaceDataInner>;
