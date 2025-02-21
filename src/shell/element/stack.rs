@@ -433,7 +433,7 @@ impl CosmicStack {
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
                         && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                    || (point_i32.y - geo.loc.y >= geo.size.h
+                    || (point_i32.y - geo.loc.y >= geo.size.h + TAB_HEIGHT
                         && point_i32.y - geo.loc.y < geo.size.h + TAB_HEIGHT + RESIZE_BORDER)
                 {
                     stack_ui = Some((
