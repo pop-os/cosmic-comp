@@ -1,3 +1,7 @@
+a11y-zoom-move-continuously = Widok podąża za wskaźnikiem
+a11y-zoom-move-onedge = Widok przesuwa się gdy wskaźnik osiąga krawędź
+a11y-zoom-move-centered = Widok przesuwa się tak, aby wskaźnik znajdował się w środku
+a11y-zoom-settings = Ustawienia lupy…
 grow-window = Powiększ
 shrink-window = Zmniejsz
 swap-windows = Zamień Okna
