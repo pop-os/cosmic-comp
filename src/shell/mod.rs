@@ -361,7 +361,10 @@ fn create_workspace(
     if active {
         state.add_workspace_state(&workspace_handle, WState::Active);
     }
-    state.set_workspace_capabilities(&workspace_handle, WorkspaceCapabilities::Activate);
+    state.set_workspace_capabilities(
+        &workspace_handle,
+        WorkspaceCapabilities::Activate | WorkspaceCapabilities::SetTilingState,
+    );
     Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
 }
 
@@ -383,7 +386,10 @@ fn move_workspace_to_group(
             None,
         )
         .unwrap();
-    workspace_state.set_workspace_capabilities(&workspace.handle, WorkspaceCapabilities::Activate);
+    workspace_state.set_workspace_capabilities(
+        &workspace.handle,
+        WorkspaceCapabilities::Activate | WorkspaceCapabilities::SetTilingState,
+    );
     for window in workspace.mapped() {
         for (surface, _) in window.windows() {
             toplevel_leave_workspace(&surface, &old_workspace_handle);
