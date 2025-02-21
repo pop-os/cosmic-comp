@@ -17,7 +17,7 @@ bytemuck = "1.12"
 calloop = {version = "0.14.1", features = ["executor"]}
 cosmic-comp-config = {path = "cosmic-comp-config"}
 cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
-cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", rev = "ed2a481", default-features = false, features = ["server"]}
+cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", rev = "e706814", default-features = false, features = ["server"]}
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
 libdisplay-info = "0.2.0"
 egui = {version = "0.30.0", optional = true}
@@ -118,5 +118,5 @@ lto = "fat"
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "f93476c" }
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "ed2a481" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "ed2a481" }
+cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "e706814" }
+cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "e706814" }
