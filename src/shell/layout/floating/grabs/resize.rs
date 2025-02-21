@@ -67,7 +67,7 @@ pub struct ResizeSurfaceGrab {
 
 impl ResizeSurfaceGrab {
     // Returns `true` if grab should be unset
-    fn update_location(&mut self, location: Point<f64, Logical>) -> bool {
+    fn update_location(&mut self, location: Point<f64, Global>) -> bool {
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
         if !self.window.alive() {
             self.seat
@@ -79,7 +79,7 @@ impl ResizeSurfaceGrab {
             return true;
         }
 
-        let (mut dx, mut dy) = (location - self.start_data.location()).into();
+        let (mut dx, mut dy) = (location - self.start_data.location().as_global()).into();
 
         let mut new_window_width = self.initial_window_size.w;
         let mut new_window_height = self.initial_window_size.h;
@@ -87,8 +87,11 @@ impl ResizeSurfaceGrab {
         let left_right = ResizeEdge::LEFT | ResizeEdge::RIGHT;
         let top_bottom = ResizeEdge::TOP | ResizeEdge::BOTTOM;
 
+        let mut location_diff = Point::default();
+
         if self.edges.intersects(left_right) {
             if self.edges.intersects(ResizeEdge::LEFT) {
+                location_diff.x += dx;
                 dx = -dx;
             }
 
@@ -118,6 +121,7 @@ impl ResizeSurfaceGrab {
 
         if self.edges.intersects(top_bottom) {
             if self.edges.intersects(ResizeEdge::TOP) {
+                location_diff.y += dy;
                 dy = -dy;
             }
 
@@ -157,8 +161,8 @@ impl ResizeSurfaceGrab {
 
         self.last_window_size = (new_window_width, new_window_height).into();
 
-        let mut win_loc = location.as_local().to_global(&self.output).to_i32_round();
-        win_loc.y += self.window.ssd_height(false).unwrap_or(0);
+        let win_loc =
+            (self.initial_window_location + location_diff.to_i32_round()).to_global(&self.output);
         self.window.set_resizing(true);
         self.window
             .set_geometry(Rectangle::new(win_loc, self.last_window_size.as_global()));
@@ -188,7 +192,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
 
-        if self.update_location(event.location) {
+        if self.update_location(event.location.as_global()) {
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
@@ -357,7 +361,7 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
-            if self.update_location(event.location) {
+            if self.update_location(event.location.as_global()) {
                 handle.unset_grab(self, data);
             }
         }
