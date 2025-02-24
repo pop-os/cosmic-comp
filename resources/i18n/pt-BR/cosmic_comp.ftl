@@ -1,3 +1,7 @@
+a11y-zoom-move-continuously = A visualização se move continuamente com o ponteiro
+a11y-zoom-move-onedge = A visualização se move quando o ponteiro atinge a borda
+a11y-zoom-move-centered = A visualização se move para manter o ponteiro centralizado
+a11y-zoom-settings = Configurações do ampliador...
 grow-window = Aumentar
 shrink-window = Diminuir
 swap-windows = Trocar janelas
