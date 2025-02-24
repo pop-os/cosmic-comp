@@ -3170,7 +3170,7 @@ impl Shell {
             return FocusResult::None;
         };
 
-        if focused.handle_focus(direction, None) {
+        if focused.handle_focus(seat, direction, None) {
             return FocusResult::Handled;
         }
 
