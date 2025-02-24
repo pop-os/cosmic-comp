@@ -1826,16 +1826,6 @@ impl TilingLayout {
 
         let (last_node_id, data) = focused;
 
-        // stacks may handle focus internally
-        if let FocusedNodeData::Window(window) = data.clone() {
-            if window.handle_focus(
-                direction,
-                swap_desc.clone().filter(|desc| desc.node == last_node_id),
-            ) {
-                return FocusResult::Handled;
-            }
-        }
-
         if direction == FocusDirection::In {
             if swap_desc
                 .as_ref()
