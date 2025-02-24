@@ -319,9 +319,14 @@ impl CosmicMapped {
         }
     }
 
-    pub fn handle_focus(&self, direction: FocusDirection, swap: Option<NodeDesc>) -> bool {
+    pub fn handle_focus(
+        &self,
+        seat: &Seat<State>,
+        direction: FocusDirection,
+        swap: Option<NodeDesc>,
+    ) -> bool {
         if let CosmicMappedInternal::Stack(stack) = &self.element {
-            stack.handle_focus(direction, swap)
+            stack.handle_focus(seat, direction, swap)
         } else {
             false
         }
