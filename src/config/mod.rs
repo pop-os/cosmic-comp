@@ -192,7 +192,6 @@ impl Config {
             })
             .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new().ok();
-        let workspace = get_config::<WorkspaceConfig>(&config, "workspaces");
 
         let cosmic_comp_config =
             CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
@@ -241,10 +240,7 @@ impl Config {
         // Source key bindings from com.system76.CosmicSettings.Shortcuts
         let settings_context = shortcuts::context().expect("Failed to load shortcuts config");
         let system_actions = shortcuts::system_actions(&settings_context);
-        let mut shortcuts = shortcuts::shortcuts(&settings_context);
-
-        // Add any missing default shortcuts recommended by the compositor.
-        key_bindings::add_default_bindings(&mut shortcuts, workspace.workspace_layout);
+        let shortcuts = shortcuts::shortcuts(&settings_context);
 
         // Listen for updates to the keybindings config.
         match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
@@ -254,11 +250,7 @@ impl Config {
                         match key.as_str() {
                             // Reload the keyboard shortcuts config.
                             "custom" | "defaults" => {
-                                let mut shortcuts = shortcuts::shortcuts(&config);
-                                let layout = get_config::<WorkspaceConfig>(&config, "workspaces")
-                                    .workspace_layout;
-                                key_bindings::add_default_bindings(&mut shortcuts, layout);
-                                state.common.config.shortcuts = shortcuts;
+                                state.common.config.shortcuts = shortcuts::shortcuts(&config);
                             }
 
                             "system_actions" => {
