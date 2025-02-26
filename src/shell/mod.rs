@@ -2349,7 +2349,7 @@ impl Shell {
             if (focused.is_stack() && !is_dialog && !should_be_fullscreen && !should_be_maximized)
                 && !(workspace.is_tiled(&focused) && floating_exception)
             {
-                focused.stack_ref().unwrap().add_window(window, None);
+                focused.stack_ref().unwrap().add_window(window, None, None);
                 if was_activated {
                     workspace_state.add_workspace_state(&workspace_handle, WState::Urgent);
                 }
