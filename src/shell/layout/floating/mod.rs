@@ -714,7 +714,7 @@ impl FloatingLayout {
         if let Some((mapped, geo)) = self.hovered_stack.take() {
             let stack = mapped.stack_ref().unwrap();
             for surface in window.windows().map(|s| s.0) {
-                stack.add_window(surface, None);
+                stack.add_window(surface, None, None);
             }
             (mapped, geo.loc)
         } else {
