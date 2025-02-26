@@ -28,6 +28,13 @@ use std::{os::unix::process::CommandExt, thread, time::Duration};
 
 use super::gestures;
 
+fn propagate_by_default(action: &shortcuts::Action) -> bool {
+    match action {
+        shortcuts::Action::Focus(_) | shortcuts::Action::Move(_) => true,
+        _ => false,
+    }
+}
+
 impl State {
     pub fn handle_action(
         &mut self,
@@ -37,7 +44,6 @@ impl State {
         time: u32,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
-        propagate: bool,
     ) {
         // TODO: Detect if started from login manager or tty, and only allow
         // `Terminate` if it will return to login manager.
@@ -52,9 +58,12 @@ impl State {
         }
 
         match action {
-            Action::Shortcut(action) => self
-                .handle_shortcut_action(action, seat, serial, time, pattern, direction, propagate),
-
+            Action::Shortcut(action) => {
+                let propagate = propagate_by_default(&action);
+                self.handle_shortcut_action(
+                    action, seat, serial, time, pattern, direction, propagate,
+                )
+            }
             Action::Private(PrivateAction::Escape) => {
                 {
                     let mut shell = self.common.shell.write().unwrap();
@@ -184,47 +193,21 @@ impl State {
             }
 
             Action::NextWorkspace => {
-                let next = to_next_workspace(
+                let _ = to_next_workspace(
                     &mut *self.common.shell.write().unwrap(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
                 );
-                if next.is_err() && propagate {
-                    if let Some(inferred) = pattern.inferred_direction() {
-                        self.handle_shortcut_action(
-                            Action::SwitchOutput(inferred),
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            direction,
-                            false,
-                        )
-                    };
-                }
             }
 
             Action::PreviousWorkspace => {
-                let previous = to_previous_workspace(
+                let _ = to_previous_workspace(
                     &mut *self.common.shell.write().unwrap(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
                 );
-                if previous.is_err() && propagate {
-                    if let Some(inferred) = pattern.inferred_direction() {
-                        self.handle_shortcut_action(
-                            Action::SwitchOutput(inferred),
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            direction,
-                            false,
-                        )
-                    };
-                }
             }
 
             x @ Action::MoveToWorkspace(_) | x @ Action::SendToWorkspace(_) => {
@@ -315,6 +298,7 @@ impl State {
                             matches!(x, Action::MoveToNextWorkspace),
                         );
                     }
+                    Ok(None) => {}
                     Err(_) if propagate => {
                         if let Some(inferred) = pattern.inferred_direction() {
                             self.handle_shortcut_action(
@@ -332,7 +316,22 @@ impl State {
                             )
                         }
                     }
-                    _ => {}
+                    Err(_) => {
+                        // cycle through
+                        self.handle_shortcut_action(
+                            if matches!(x, Action::MoveToPreviousWorkspace) {
+                                Action::MoveToWorkspace(0)
+                            } else {
+                                Action::SendToWorkspace(0)
+                            },
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            direction,
+                            false,
+                        )
+                    }
                 }
             }
 
@@ -347,7 +346,6 @@ impl State {
                         .active_num(&focused_output)
                         .1
                         .saturating_sub(1);
-                    // TODO: Possibly move to prev output, if idx < 0
                     shell.move_current_window(
                         seat,
                         &focused_output,
@@ -368,6 +366,7 @@ impl State {
                             matches!(x, Action::MoveToPreviousWorkspace),
                         );
                     }
+                    Ok(None) => {}
                     Err(_) if propagate => {
                         if let Some(inferred) = pattern.inferred_direction() {
                             self.handle_shortcut_action(
@@ -385,7 +384,22 @@ impl State {
                             )
                         }
                     }
-                    _ => {}
+                    Err(_) => {
+                        // cycle through
+                        self.handle_shortcut_action(
+                            if matches!(x, Action::MoveToPreviousWorkspace) {
+                                Action::MoveToLastWorkspace
+                            } else {
+                                Action::SendToLastWorkspace
+                            },
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            direction,
+                            false,
+                        )
+                    }
                 }
             }
 
@@ -440,35 +454,6 @@ impl State {
                             }
                             ptr.frame(self);
                         }
-                    }
-                } else if propagate {
-                    std::mem::drop(shell);
-
-                    let action = match (
-                        direction,
-                        self.common.config.cosmic_conf.workspaces.workspace_layout,
-                    ) {
-                        (Direction::Left, WorkspaceLayout::Horizontal)
-                        | (Direction::Up, WorkspaceLayout::Vertical) => {
-                            Some(Action::PreviousWorkspace)
-                        }
-                        (Direction::Right, WorkspaceLayout::Horizontal)
-                        | (Direction::Down, WorkspaceLayout::Vertical) => {
-                            Some(Action::NextWorkspace)
-                        }
-                        _ => None,
-                    };
-
-                    if let Some(action) = action {
-                        self.handle_shortcut_action(
-                            action,
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            Some(direction),
-                            false,
-                        )
                     }
                 }
             }
@@ -630,37 +615,6 @@ impl State {
                             );
                             ptr.frame(self);
                         }
-                    }
-                } else if propagate {
-                    std::mem::drop(shell);
-                    match (
-                        direction,
-                        self.common.config.cosmic_conf.workspaces.workspace_layout,
-                    ) {
-                        (Direction::Left, WorkspaceLayout::Horizontal)
-                        | (Direction::Up, WorkspaceLayout::Vertical) => self
-                            .handle_shortcut_action(
-                                Action::MoveToPreviousWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                false,
-                            ),
-                        (Direction::Right, WorkspaceLayout::Horizontal)
-                        | (Direction::Down, WorkspaceLayout::Vertical) => self
-                            .handle_shortcut_action(
-                                Action::MoveToNextWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                false,
-                            ),
-
-                        _ => {}
                     }
                 }
             }
@@ -828,8 +782,23 @@ impl State {
                         };
 
                         if let Some(direction) = dir {
+                            let action = match (
+                                direction,
+                                self.common.config.cosmic_conf.workspaces.workspace_layout,
+                            ) {
+                                (Direction::Left, WorkspaceLayout::Horizontal)
+                                | (Direction::Up, WorkspaceLayout::Vertical) => {
+                                    Action::PreviousWorkspace
+                                }
+                                (Direction::Right, WorkspaceLayout::Horizontal)
+                                | (Direction::Down, WorkspaceLayout::Vertical) => {
+                                    Action::NextWorkspace
+                                }
+                                _ => Action::SwitchOutput(direction),
+                            };
+
                             self.handle_shortcut_action(
-                                Action::SwitchOutput(direction),
+                                action,
                                 seat,
                                 serial,
                                 time,
@@ -854,15 +823,32 @@ impl State {
                     .unwrap()
                     .move_current_element(direction, seat);
                 match res {
-                    MoveResult::MoveFurther(_move_further) => self.handle_shortcut_action(
-                        Action::MoveToOutput(direction),
-                        seat,
-                        serial,
-                        time,
-                        pattern,
-                        Some(direction),
-                        true,
-                    ),
+                    MoveResult::MoveFurther(_move_further) => {
+                        let action = match (
+                            direction,
+                            self.common.config.cosmic_conf.workspaces.workspace_layout,
+                        ) {
+                            (Direction::Left, WorkspaceLayout::Horizontal)
+                            | (Direction::Up, WorkspaceLayout::Vertical) => {
+                                Action::MoveToPreviousWorkspace
+                            }
+                            (Direction::Right, WorkspaceLayout::Horizontal)
+                            | (Direction::Down, WorkspaceLayout::Vertical) => {
+                                Action::MoveToNextWorkspace
+                            }
+                            _ => Action::MoveToOutput(direction),
+                        };
+
+                        self.handle_shortcut_action(
+                            action,
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            Some(direction),
+                            true,
+                        )
+                    }
                     MoveResult::ShiftFocus(shift) => {
                         Shell::set_focus(self, Some(&shift), seat, None, true);
                     }
