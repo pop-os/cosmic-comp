@@ -165,11 +165,22 @@ impl CosmicStack {
         ))
     }
 
-    pub fn add_window(&self, window: impl Into<CosmicSurface>, idx: Option<usize>) {
+    pub fn add_window(
+        &self,
+        window: impl Into<CosmicSurface>,
+        idx: Option<usize>,
+        moved_into: Option<&Seat<State>>,
+    ) {
         let window = window.into();
         window.try_force_undecorated(true);
         window.set_tiled(true);
         self.0.with_program(|p| {
+            let last_mod_serial = moved_into.and_then(|seat| seat.last_modifier_change());
+            let mut prev_idx = p.previous_index.lock().unwrap();
+            if !prev_idx.is_some_and(|(serial, _)| Some(serial) == last_mod_serial) {
+                *prev_idx = last_mod_serial.map(|s| (s, p.active.load(Ordering::SeqCst)));
+            }
+
             if let Some(mut geo) = p.geometry.lock().unwrap().clone() {
                 geo.loc.y += TAB_HEIGHT;
                 geo.size.h -= TAB_HEIGHT;
@@ -362,7 +373,7 @@ impl CosmicStack {
                     } else {
                         (false, false)
                     }
-                },
+                }
                 _ => (false, false),
             }
         });
@@ -379,6 +390,8 @@ impl CosmicStack {
     pub fn handle_move(&self, direction: Direction) -> MoveResult {
         let loop_handle = self.0.loop_handle();
         let result = self.0.with_program(|p| {
+            let prev_idx = p.previous_index.lock().unwrap();
+
             if p.group_focused.load(Ordering::SeqCst) {
                 return MoveResult::Default;
             }
@@ -403,7 +416,13 @@ impl CosmicStack {
                     return MoveResult::Default;
                 }
                 let window = windows.remove(active);
-                if active == windows.len() {
+                if let Some(prev_idx) = prev_idx
+                    .map(|(_, idx)| idx)
+                    .filter(|idx| *idx < windows.len())
+                {
+                    p.active.store(prev_idx, Ordering::SeqCst);
+                    p.scroll_to_focus.store(true, Ordering::SeqCst);
+                } else if active == windows.len() {
                     p.active.store(active - 1, Ordering::SeqCst);
                     p.scroll_to_focus.store(true, Ordering::SeqCst);
                 }
