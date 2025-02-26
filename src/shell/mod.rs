@@ -2653,9 +2653,25 @@ impl Shell {
     ) -> Result<Option<(KeyboardFocusTarget, Point<i32, Global>)>, InvalidWorkspaceIndex> {
         let (to_output, to_idx) = to;
         let to_idx = to_idx.unwrap_or(self.workspaces.active_num(to_output).1);
+        let from_idx = self.workspaces.active_num(from_output).1;
 
         if from_output == to_output && to_idx == self.workspaces.active_num(from_output).1 {
             return Ok(None);
+        }
+
+        if from_output == to_output
+            && to_idx.checked_sub(1).is_some_and(|idx| idx == from_idx)
+            && to_idx == self.workspaces.len(to_output) - 1
+            && self
+                .workspaces
+                .get(from_idx, from_output)
+                .is_some_and(|w| w.mapped().count() == 1)
+            && self
+                .workspaces
+                .get(to_idx, to_output)
+                .is_some_and(|w| w.is_empty())
+        {
+            return Err(InvalidWorkspaceIndex);
         }
 
         let to = self
