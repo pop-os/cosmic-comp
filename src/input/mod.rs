@@ -250,7 +250,7 @@ impl State {
                                 FilterResult::<()>::Forward
                             });
                         }
-                        self.handle_action(action, &seat, serial, time, pattern, None, true)
+                        self.handle_action(action, &seat, serial, time, pattern, None)
                     }
 
                     // If we want to track numlock state so it can be reused on the next boot...
@@ -1639,7 +1639,6 @@ impl State {
                                     time.overflowing_add(duration as u32).0,
                                     key_pattern_clone.clone(),
                                     None,
-                                    true,
                                 );
                                 calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
                             },
