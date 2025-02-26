@@ -828,15 +828,41 @@ impl State {
                         };
 
                         if let Some(direction) = dir {
-                            self.handle_shortcut_action(
-                                Action::SwitchOutput(direction),
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                true,
-                            )
+                            match direction {
+                                Direction::Left => {
+                                    self.handle_shortcut_action(
+                                        Action::PreviousWorkspace,
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        Some(direction),
+                                        true,
+                                    );
+                                }
+                                Direction::Right => {
+                                    self.handle_shortcut_action(
+                                        Action::NextWorkspace,
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        Some(direction),
+                                        true,
+                                    );
+                                }
+                                _ => {
+                                    self.handle_shortcut_action(
+                                        Action::SwitchOutput(direction),
+                                        seat,
+                                        serial,
+                                        time,
+                                        pattern,
+                                        Some(direction),
+                                        true,
+                                    );
+                                }
+                            }
                         }
                     }
                     FocusResult::Handled => {}
@@ -1180,11 +1206,13 @@ fn to_previous_workspace(
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
 ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
-    let workspace = shell
-        .workspaces
-        .active_num(&current_output)
-        .1
-        .saturating_sub(1);
+    let workspace = shell.workspaces.active_num(&current_output).1;
+
+    if workspace == 0 {
+        return Err(InvalidWorkspaceIndex);
+    }
+
+    let workspace = workspace.saturating_sub(1);
 
     shell.activate(
         &current_output,
