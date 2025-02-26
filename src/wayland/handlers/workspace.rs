@@ -9,7 +9,7 @@ use crate::{
         WorkspaceHandler, WorkspaceState,
     },
 };
-use cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::TilingState;
+use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
 use smithay::reexports::wayland_server::DisplayHandle;
 
 impl WorkspaceClientHandler for ClientState {

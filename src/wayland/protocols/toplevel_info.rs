@@ -309,7 +309,7 @@ where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + Clone + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelInfoV1, _>(
-            2,
+            3,
             ToplevelInfoGlobalData {
                 filter: Box::new(client_filter.clone()),
             },
@@ -594,6 +594,10 @@ where
             instance.workspace_enter(&handle);
             changed = true;
         }
+        for handle in workspace_state.raw_ext_workspace_handles(&new_workspace, &instance.id()) {
+            instance.ext_workspace_enter(&handle);
+            changed = true;
+        }
     }
     for old_workspace in handle_state
         .workspaces
@@ -602,6 +606,10 @@ where
     {
         for handle in workspace_state.raw_workspace_handles(&old_workspace, &instance.id()) {
             instance.workspace_leave(&handle);
+            changed = true;
+        }
+        for handle in workspace_state.raw_ext_workspace_handles(&old_workspace, &instance.id()) {
+            instance.ext_workspace_leave(&handle);
             changed = true;
         }
     }

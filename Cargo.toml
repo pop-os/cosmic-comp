@@ -118,5 +118,5 @@ lto = "fat"
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "f93476c" }
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "ed2a481" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "ed2a481" }
+cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "workspaces-v2" }
+cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "workspaces-v2" }
