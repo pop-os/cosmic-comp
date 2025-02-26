@@ -153,7 +153,9 @@ fn unconstrain_xdg_popup(
 
 fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surface: &LayerSurface) {
     let map = layer_map_for_output(output);
-    let layer_geo = map.layer_geometry(layer_surface).unwrap();
+    let Some(layer_geo) = map.layer_geometry(layer_surface) else {
+        return;
+    };
 
     // the output_rect represented relative to the parents coordinate system
     let mut relative = Rectangle::from_size(output.geometry().size).as_logical();

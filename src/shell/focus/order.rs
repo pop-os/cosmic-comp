@@ -367,7 +367,7 @@ fn layer_surfaces<'a>(
         layer_map
             .layers_on(layer)
             .rev()
-            .map(|s| (s.clone(), layer_map.layer_geometry(s).unwrap()))
+            .filter_map(|s| layer_map.layer_geometry(s).map(|l_geo| (s.clone(), l_geo)))
             .collect::<Vec<_>>()
     };
 

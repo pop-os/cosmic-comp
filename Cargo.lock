@@ -4671,7 +4671,6 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smithay"
 version = "0.3.0"
-source = "git+https://github.com/wash2/smithay?branch=layer-arrange#152d1b2fed154b71844e3b6b913124599d1ba53b"
 dependencies = [
  "appendlist",
  "ash",
