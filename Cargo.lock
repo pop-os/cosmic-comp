@@ -836,7 +836,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "smithay",
+ "smithay 0.3.0",
  "smithay-egui",
  "thiserror 1.0.69",
  "time",
@@ -2933,9 +2933,9 @@ dependencies = [
 
 [[package]]
 name = "libseat"
-version = "0.2.1"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54a0adf8d8607a73a5b74cbe4132f57cb349e4bf860103cd089461bbcbc9907e"
+checksum = "c23a245bbd5790c690791c4fe6eefafe4c75851226288a71cb657601135aa00c"
 dependencies = [
  "errno",
  "libseat-sys",
@@ -2944,9 +2944,9 @@ dependencies = [
 
 [[package]]
 name = "libseat-sys"
-version = "0.1.7"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3671cb5e03871f1d6bf0b3b5daa9275549e348fa6359e0f9adb910ca163d4c34"
+checksum = "134621e50557e8698a96ccff3eadbc6f4b449d5d12f8aa48fcef8d40b4b02725"
 dependencies = [
  "pkg-config",
 ]
@@ -4670,8 +4670,8 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "smithay"
-version = "0.4.0"
-source = "git+https://github.com/smithay/smithay.git?rev=f93476c#f93476cebab3d47f6729354805b3e184f6878ef2"
+version = "0.3.0"
+source = "git+https://github.com/wash2/smithay?branch=layer-arrange#152d1b2fed154b71844e3b6b913124599d1ba53b"
 dependencies = [
  "appendlist",
  "ash",
@@ -4714,6 +4714,39 @@ dependencies = [
  "wayland-server",
  "winit",
  "x11rb",
+ "xkbcommon 0.8.0",
+]
+
+[[package]]
+name = "smithay"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0414bb05809bb87ff2984b6f6eaefd2c4e5deb9eed599280e9a5e0202e6a359"
+dependencies = [
+ "appendlist",
+ "bitflags 2.7.0",
+ "calloop 0.14.2",
+ "cgmath",
+ "cursor-icon",
+ "downcast-rs",
+ "drm-fourcc",
+ "errno",
+ "gl_generator",
+ "glow 0.16.0",
+ "indexmap 2.7.0",
+ "libc",
+ "libloading",
+ "profiling",
+ "rand",
+ "rustix",
+ "smallvec",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "wayland-protocols",
+ "wayland-protocols-misc",
+ "wayland-protocols-wlr",
+ "wayland-server",
  "xkbcommon 0.8.0",
 ]
 
@@ -4768,7 +4801,7 @@ dependencies = [
  "image",
  "log",
  "memoffset",
- "smithay",
+ "smithay 0.4.4",
  "xkbcommon 0.8.0",
 ]
 

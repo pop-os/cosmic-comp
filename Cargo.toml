@@ -6,48 +6,64 @@ name = "cosmic-comp"
 version = "0.1.0"
 
 [workspace]
-members = [
-  "cosmic-comp-config",
-]
+members = ["cosmic-comp-config"]
 
 [dependencies]
-anyhow = {version = "1.0.51", features = ["backtrace"]}
+anyhow = { version = "1.0.51", features = ["backtrace"] }
 bitflags = "2.4"
 bytemuck = "1.12"
-calloop = {version = "0.14.1", features = ["executor"]}
-cosmic-comp-config = {path = "cosmic-comp-config"}
-cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
-cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", rev = "ed2a481", default-features = false, features = ["server"]}
+calloop = { version = "0.14.1", features = ["executor"] }
+cosmic-comp-config = { path = "cosmic-comp-config" }
+cosmic-config = { git = "https://github.com/pop-os/libcosmic/", features = [
+  "calloop",
+  "macro",
+] }
+cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "ed2a481", default-features = false, features = [
+  "server",
+] }
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
 libdisplay-info = "0.2.0"
-egui = {version = "0.30.0", optional = true}
-egui_plot = {version = "0.30.0", optional = true}
-i18n-embed = {version = "0.14", features = ["fluent-system", "desktop-requester"]}
+egui = { version = "0.30.0", optional = true }
+egui_plot = { version = "0.30.0", optional = true }
+i18n-embed = { version = "0.14", features = [
+  "fluent-system",
+  "desktop-requester",
+] }
 i18n-embed-fl = "0.8"
-iced_tiny_skia = {git = "https://github.com/pop-os/libcosmic/"}
+iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/" }
 indexmap = "2.0"
 keyframe = "1.1.1"
 lazy_static = "1.4.0"
 libc = "0.2.149"
-libcosmic = {git = "https://github.com/pop-os/libcosmic/", default-features = false}
-libsystemd = {version = "0.7", optional = true}
-log-panics = {version = "2", features = ["with-backtrace"]}
+libcosmic = { git = "https://github.com/pop-os/libcosmic/", default-features = false }
+libsystemd = { version = "0.7", optional = true }
+log-panics = { version = "2", features = ["with-backtrace"] }
 once_cell = "1.18.0"
 ordered-float = "4.0"
 png = "0.17.5"
 regex = "1"
 ron = "0.9.0-alpha.0"
-rust-embed = {version = "8.0", features = ["debug-embed"]}
+rust-embed = { version = "8.0", features = ["debug-embed"] }
 sanitize-filename = "0.5.0"
 sendfd = "0.4.1"
-serde = {version = "1", features = ["derive"]}
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1.0.26"
-time = {version = "0.3.30", features = ["macros", "formatting", "local-offset"]}
+time = { version = "0.3.30", features = [
+  "macros",
+  "formatting",
+  "local-offset",
+] }
 tiny-skia = "0.11"
-tracing = { version = "0.1.37", features = ["max_level_debug", "release_max_level_info"] }
+tracing = { version = "0.1.37", features = [
+  "max_level_debug",
+  "release_max_level_info",
+] }
 tracing-journald = "0.3.0"
-tracing-subscriber = {version = "0.3.16", features = ["env-filter", "tracing-log"]}
+tracing-subscriber = { version = "0.3.16", features = [
+  "env-filter",
+  "tracing-log",
+] }
 wayland-backend = "0.3.3"
 wayland-scanner = "0.31.1"
 xcursor = "0.3.3"
@@ -84,7 +100,10 @@ features = [
   "wayland_frontend",
   "xwayland",
 ]
-version = "0.4"
+git = "https://github.com/wash2/smithay"
+branch = "layer-arrange"
+# path = "../smithay/"
+# version = "0.4"
 
 [dependencies.smithay-egui]
 features = ["svg"]
@@ -112,11 +131,10 @@ debug = true
 inherits = "release"
 
 [profile.release]
-lto = "fat"
+opt-level = 2
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "f93476c" }
-
+# smithay = { git = "https://github.com/smithay/smithay.git", rev = "f93476c" }
 [patch."https://github.com/pop-os/cosmic-protocols"]
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "ed2a481" }
 cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "ed2a481" }
