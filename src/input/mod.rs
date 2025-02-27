@@ -22,7 +22,7 @@ use crate::{
             tiling::{NodeDesc, SwapWindowGrab, TilingLayout},
         },
         zoom::ZoomState,
-        SeatExt, Trigger,
+        LastModifierChange, SeatExt, Trigger,
     },
     utils::{float::NextDown, prelude::*, quirks::workspace_overview_is_open},
     wayland::{
@@ -219,6 +219,7 @@ impl State {
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time_msec(&event);
                     let keyboard = seat.get_keyboard().unwrap();
+                    let previous_modifiers = keyboard.modifier_state();
                     if let Some((action, pattern)) = keyboard
                         .input(
                             self,
@@ -227,6 +228,15 @@ impl State {
                             serial,
                             time,
                             |data, modifiers, handle| {
+                                if previous_modifiers != *modifiers {
+                                    *seat
+                                        .user_data()
+                                        .get::<LastModifierChange>()
+                                        .unwrap()
+                                        .0
+                                        .lock()
+                                        .unwrap() = Some(serial);
+                                }
                                 Self::filter_keyboard_input(
                                     data, &event, &seat, modifiers, handle, serial,
                                 )
@@ -240,7 +250,7 @@ impl State {
                                 FilterResult::<()>::Forward
                             });
                         }
-                        self.handle_action(action, &seat, serial, time, pattern, None, true)
+                        self.handle_action(action, &seat, serial, time, pattern, None)
                     }
 
                     // If we want to track numlock state so it can be reused on the next boot...
@@ -1629,7 +1639,6 @@ impl State {
                                     time.overflowing_add(duration as u32).0,
                                     key_pattern_clone.clone(),
                                     None,
-                                    true,
                                 );
                                 calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
                             },

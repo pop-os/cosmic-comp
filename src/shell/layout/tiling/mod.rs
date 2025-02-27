@@ -1051,7 +1051,7 @@ impl TilingLayout {
                         toplevel_leave_workspace(&surface, &other_desc.handle);
                         toplevel_enter_workspace(&surface, &this_desc.handle);
                     }
-                    this_stack.add_window(surface, Some(this_idx + i));
+                    this_stack.add_window(surface, Some(this_idx + i), None);
                 }
                 if this.output != other_output {
                     this_surface.output_leave(&this.output);
@@ -1138,7 +1138,7 @@ impl TilingLayout {
                         toplevel_leave_workspace(&surface, &this_desc.handle);
                         toplevel_enter_workspace(&surface, &other_desc.handle);
                     }
-                    other_stack.add_window(surface, Some(other_idx + i));
+                    other_stack.add_window(surface, Some(other_idx + i), None);
                 }
                 if this.output != other_output {
                     other_surface.output_leave(&other_output);
@@ -1209,9 +1209,9 @@ impl TilingLayout {
                     .unwrap();
                 let this_was_active = &this_stack.active() == this_surface;
                 let other_was_active = &other_stack.active() == other_surface;
-                this_stack.add_window(other_surface.clone(), Some(this_idx));
+                this_stack.add_window(other_surface.clone(), Some(this_idx), None);
                 this_stack.remove_window(&this_surface);
-                other_stack.add_window(this_surface.clone(), Some(other_idx));
+                other_stack.add_window(this_surface.clone(), Some(other_idx), None);
 
                 if this.output != other_output {
                     toplevel_leave_output(this_surface, &this.output);
@@ -1681,6 +1681,7 @@ impl TilingLayout {
                             Direction::Right => Some(0),
                             _ => None,
                         },
+                        Some(seat),
                     );
                     tree.get_mut(&og_parent)
                         .unwrap()
@@ -1825,16 +1826,6 @@ impl TilingLayout {
         };
 
         let (last_node_id, data) = focused;
-
-        // stacks may handle focus internally
-        if let FocusedNodeData::Window(window) = data.clone() {
-            if window.handle_focus(
-                direction,
-                swap_desc.clone().filter(|desc| desc.node == last_node_id),
-            ) {
-                return FocusResult::Handled;
-            }
-        }
 
         if direction == FocusDirection::In {
             if swap_desc
@@ -2748,7 +2739,7 @@ impl TilingLayout {
                             unreachable!()
                         };
                         for surface in window.windows().map(|s| s.0) {
-                            stack.add_window(surface, None);
+                            stack.add_window(surface, None, None);
                         }
                         mapped.clone()
                     }
