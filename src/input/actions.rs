@@ -221,7 +221,7 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
-                                false,
+                                true,
                             )
                         };
                     } else {
@@ -267,7 +267,7 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
-                                false,
+                                true,
                             )
                         };
                     } else {
@@ -401,7 +401,7 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
-                                false,
+                                true,
                             )
                         }
                     }
@@ -484,7 +484,7 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
-                                false,
+                                true,
                             )
                         }
                     }
@@ -514,14 +514,35 @@ impl State {
                 let next_output = shell.next_output(&current_output, direction).cloned();
 
                 if let Some(next_output) = next_output {
-                    let idx = shell.workspaces.active_num(&next_output).1;
-                    let res = shell.activate(
-                        &next_output,
-                        idx,
-                        WorkspaceDelta::new_shortcut(),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    seat.set_active_output(&next_output);
+                    let res = {
+                        let mut workspace_guard = self.common.workspace_state.update();
+                        if propagate {
+                            if let Some((serial, prev_output, prev_idx)) =
+                                shell.previous_workspace_idx.take()
+                            {
+                                if seat.last_modifier_change().is_some_and(|s| s == serial)
+                                    && prev_output == current_output
+                                {
+                                    let _ = shell.activate(
+                                        &current_output,
+                                        prev_idx,
+                                        WorkspaceDelta::new_shortcut(),
+                                        &mut workspace_guard,
+                                    );
+                                }
+                            }
+                        }
+
+                        let idx = shell.workspaces.active_num(&next_output).1;
+                        let res = shell.activate(
+                            &next_output,
+                            idx,
+                            WorkspaceDelta::new_shortcut(),
+                            &mut workspace_guard,
+                        );
+                        seat.set_active_output(&next_output);
+                        res
+                    };
 
                     if let Ok(Some(new_pos)) = res {
                         let new_target = shell
@@ -585,14 +606,34 @@ impl State {
                 let next_output = shell.next_output(&focused_output, direction).cloned();
 
                 if let Some(next_output) = next_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &focused_output,
-                        (&next_output, None),
-                        is_move_action,
-                        Some(direction),
-                        &mut self.common.workspace_state.update(),
-                    );
+                    let res = {
+                        let mut workspace_guard = self.common.workspace_state.update();
+                        let res = shell.move_current_window(
+                            seat,
+                            &focused_output,
+                            (&next_output, None),
+                            is_move_action,
+                            Some(direction),
+                            &mut workspace_guard,
+                        );
+
+                        if is_move_action && propagate {
+                            if let Some((_, prev_output, prev_idx)) =
+                                shell.previous_workspace_idx.take()
+                            {
+                                if prev_output == focused_output {
+                                    let _ = shell.activate(
+                                        &focused_output,
+                                        prev_idx,
+                                        WorkspaceDelta::new_shortcut(),
+                                        &mut workspace_guard,
+                                    );
+                                }
+                            }
+                        }
+                        res
+                    };
+
                     if let Ok(Some((target, new_pos))) = res {
                         std::mem::drop(shell);
                         Shell::set_focus(self, Some(&target), seat, None, is_move_action);
@@ -659,6 +700,24 @@ impl State {
                         };
 
                         if let Some(direction) = dir {
+                            if let Some(last_mod_serial) = seat.last_modifier_change() {
+                                let mut shell = self.common.shell.write().unwrap();
+                                if !shell
+                                    .previous_workspace_idx
+                                    .as_ref()
+                                    .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
+                                {
+                                    let current_output = seat.active_output();
+                                    let workspace_idx =
+                                        shell.workspaces.active_num(&current_output).1;
+                                    shell.previous_workspace_idx = Some((
+                                        last_mod_serial,
+                                        current_output.downgrade(),
+                                        workspace_idx,
+                                    ));
+                                }
+                            }
+
                             let action = match (
                                 direction,
                                 self.common.config.cosmic_conf.workspaces.workspace_layout,
@@ -701,6 +760,23 @@ impl State {
                     .move_current_element(direction, seat);
                 match res {
                     MoveResult::MoveFurther(_move_further) => {
+                        if let Some(last_mod_serial) = seat.last_modifier_change() {
+                            let mut shell = self.common.shell.write().unwrap();
+                            if !shell
+                                .previous_workspace_idx
+                                .as_ref()
+                                .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
+                            {
+                                let current_output = seat.active_output();
+                                let workspace_idx = shell.workspaces.active_num(&current_output).1;
+                                shell.previous_workspace_idx = Some((
+                                    last_mod_serial,
+                                    current_output.downgrade(),
+                                    workspace_idx,
+                                ));
+                            }
+                        }
+
                         let action = match (
                             direction,
                             self.common.config.cosmic_conf.workspaces.workspace_layout,
