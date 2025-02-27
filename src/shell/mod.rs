@@ -36,7 +36,7 @@ use smithay::{
         },
         Seat,
     },
-    output::Output,
+    output::{Output, WeakOutput},
     reexports::{
         wayland_protocols::ext::{
             session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
@@ -257,6 +257,7 @@ pub struct Shell {
     pub override_redirect_windows: Vec<X11Surface>,
     pub session_lock: Option<SessionLock>,
     pub seats: Seats,
+    pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,
 
     theme: cosmic::Theme,
     pub active_hint: bool,
@@ -1344,6 +1345,7 @@ impl Shell {
             pending_activations: HashMap::new(),
             override_redirect_windows: Vec::new(),
             session_lock: None,
+            previous_workspace_idx: None,
 
             theme,
             active_hint: config.cosmic_conf.active_hint,
