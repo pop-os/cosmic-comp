@@ -6,7 +6,7 @@ use smithay::reexports::wayland_server::{
 };
 
 use super::{
-    Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceData,
+    Request, State, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceData,
     WorkspaceGlobalData, WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle,
     WorkspaceHandler, WorkspaceState,
 };
@@ -436,7 +436,17 @@ where
         changed = true;
     }
     if handle_state.states != workspace.states {
-        instance.state(workspace.states);
+        let states = workspace
+            .states
+            .iter()
+            .filter_map(|state| match state {
+                State::Active => Some(ext_workspace_handle_v1::State::Active),
+                State::Urgent => Some(ext_workspace_handle_v1::State::Urgent),
+                State::Hidden => Some(ext_workspace_handle_v1::State::Hidden),
+                _ => None,
+            })
+            .collect();
+        instance.state(states);
         handle_state.states = workspace.states.clone();
         changed = true;
     }
