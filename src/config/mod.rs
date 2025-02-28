@@ -29,7 +29,7 @@ pub use smithay::{
 };
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs::OpenOptions,
     io::Write,
     path::PathBuf,
@@ -73,7 +73,7 @@ pub struct DynamicConfig {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OutputsConfig {
-    pub config: HashMap<Vec<OutputInfo>, Vec<OutputConfig>>,
+    pub config: HashMap<BTreeSet<OutputInfo>, Vec<OutputConfig>>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -459,12 +459,11 @@ impl Config {
         clock: &Clock<Monotonic>,
     ) {
         let outputs = output_state.outputs().collect::<Vec<_>>();
-        let mut infos = outputs
+        let infos = outputs
             .iter()
             .cloned()
             .map(Into::<crate::config::OutputInfo>::into)
-            .collect::<Vec<_>>();
-        infos.sort();
+            .collect::<BTreeSet<_>>();
         if let Some(configs) = self.dynamic_conf.outputs().config.get(&infos).cloned() {
             let known_good_configs = outputs
                 .iter()
