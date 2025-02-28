@@ -76,20 +76,101 @@ pub struct OutputsConfig {
     pub config: HashMap<BTreeSet<OutputInfo>, Vec<OutputConfig>>,
 }
 
+impl OutputsConfig {
+    fn match_configs(&self, infos: &BTreeSet<OutputInfo>) -> Option<&Vec<OutputConfig>> {
+        if let Some(exact_match) = self.config.get(infos) {
+            return Some(exact_match);
+        }
+        // TODO: disambiguate multiple matches by connector?
+        for (config_infos, configs) in &self.config {
+            if config_infos.len() == infos.len()
+                && config_infos
+                    .iter()
+                    .zip(infos)
+                    .all(|(config_info, info)| config_info.matches_info(info))
+            {
+                return Some(configs);
+            }
+        }
+        None
+    }
+}
+
+// Fields are ordered so derived order will prioritize edid, and consider connector last.
+// TODO: custom eq/ord?
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutputInfo {
-    pub connector: String,
+    pub edid: Option<EdidProduct>,
     pub make: String,
     pub model: String,
+    pub connector: String,
+}
+
+impl OutputInfo {
+    /// An output matches this if it has the exact same edid manufacturer/product
+    /// information, or it has no edid information but has the same connector name
+    /// as the output's name.
+    fn matches_output(&self, output: &Output) -> bool {
+        let output_edid = output.edid();
+        self.edid == output_edid && (self.edid.is_some() || self.connector == output.name())
+    }
+
+    fn matches_info(&self, other_info: &Self) -> bool {
+        self.edid == other_info.edid
+            && (self.edid.is_some() || self.connector == other_info.connector)
+    }
+
+    fn find_output_match<'a>(&self, outputs: &'a [Output]) -> Option<&'a Output> {
+        let matches: Vec<&Output> = outputs
+            .into_iter()
+            .filter(|o| self.matches_output(o))
+            .collect();
+        if matches.len() > 1 {
+            // If there are multiple edid matches, favor output with the same
+            // connector.
+            //
+            // Even identical monitors *should* differ by serial number, but
+            // implementations vary.
+            if let Some(output) = matches.iter().find(|o| o.name() == self.connector) {
+                return Some(*output);
+            }
+        }
+        matches.into_iter().next()
+    }
 }
 
 impl From<Output> for OutputInfo {
     fn from(o: Output) -> OutputInfo {
         let physical = o.physical_properties();
+        let edid = o.edid();
         OutputInfo {
             connector: o.name(),
             make: physical.make,
             model: physical.model,
+            edid,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EdidProduct {
+    pub manufacturer: [char; 3],
+    pub product: u16,
+    pub serial: Option<u32>,
+    pub manufacture_week: i32,
+    pub manufacture_year: i32,
+    pub model_year: Option<i32>,
+}
+
+impl From<libdisplay_info::edid::VendorProduct> for EdidProduct {
+    fn from(vp: libdisplay_info::edid::VendorProduct) -> Self {
+        Self {
+            manufacturer: vp.manufacturer,
+            product: vp.product,
+            serial: vp.serial,
+            manufacture_week: vp.manufacture_week,
+            manufacture_year: vp.manufacture_year,
+            model_year: vp.model_year,
         }
     }
 }
@@ -106,6 +187,7 @@ pub enum OutputState {
     Enabled,
     #[serde(rename = "false")]
     Disabled,
+    // TODO store edid info, for better matching?
     Mirroring(String),
 }
 
@@ -464,7 +546,8 @@ impl Config {
             .cloned()
             .map(Into::<crate::config::OutputInfo>::into)
             .collect::<BTreeSet<_>>();
-        if let Some(configs) = self.dynamic_conf.outputs().config.get(&infos).cloned() {
+        // XXX only matches exact config? as `Vec<OutputInfo>`
+        if let Some(configs) = self.dynamic_conf.outputs().match_configs(&infos).cloned() {
             let known_good_configs = outputs
                 .iter()
                 .map(|output| {

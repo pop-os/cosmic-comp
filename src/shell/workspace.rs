@@ -84,6 +84,7 @@ pub struct Workspace {
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
     pub screencopy: ScreencopySessions,
+    // TODO edid info
     pub output_stack: VecDeque<String>,
     pub pending_tokens: HashSet<XdgActivationToken>,
     pub(super) backdrop_id: Id,
