@@ -75,6 +75,7 @@
 
     (modifiers: [Super], key: "b"): System(WebBrowser),
     (modifiers: [Super], key: "f"): System(HomeFolder),
+    (modifiers: [Super], key: "space"): System(InputSourceSwitch),
     (modifiers: [Super], key: "t"): System(Terminal),
 
     (modifiers: [Super], key: "a"): System(AppLibrary),
