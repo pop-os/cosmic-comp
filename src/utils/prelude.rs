@@ -9,7 +9,7 @@ pub use crate::shell::{SeatExt, Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
 use crate::{
-    config::{AdaptiveSync, OutputConfig, OutputState},
+    config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState},
     shell::zoom::OutputZoomState,
 };
 
@@ -35,6 +35,8 @@ pub trait OutputExt {
     fn is_enabled(&self) -> bool;
     fn config(&self) -> Ref<'_, OutputConfig>;
     fn config_mut(&self) -> RefMut<'_, OutputConfig>;
+
+    fn edid(&self) -> Option<EdidProduct>;
 }
 
 struct Vrr(AtomicU8);
@@ -157,5 +159,9 @@ impl OutputExt for Output {
             .get::<RefCell<OutputConfig>>()
             .unwrap()
             .borrow_mut()
+    }
+
+    fn edid(&self) -> Option<EdidProduct> {
+        self.user_data().get().copied()
     }
 }
