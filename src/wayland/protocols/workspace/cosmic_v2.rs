@@ -109,6 +109,7 @@ where
                     }
                 }
             }
+            zcosmic_workspace_manager_v2::Request::Destroy => {}
             _ => unreachable!(),
         }
     }
@@ -170,6 +171,7 @@ where
                     });
                 }
             }
+            zcosmic_workspace_handle_v2::Request::Destroy => {}
             _ => unreachable!(),
         }
     }
