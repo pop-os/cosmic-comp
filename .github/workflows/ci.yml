@@ -21,7 +21,7 @@ jobs:
           components: rustfmt
           default: true
       - name: Cargo cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -45,7 +45,7 @@ jobs:
           default: true
           profile: minimal
       - name: Cargo cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -54,7 +54,7 @@ jobs:
       - name: System dependencies
         run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libsystemd-dev libdbus-1-dev libdisplay-info-dev libpixman-1-dev
       - name: Build cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: target
           key: ${{ runner.os }}-build-rust_stable-smithay-feature_${{ matrix.features }}-${{ hashFiles('**/Cargo.toml') }}
