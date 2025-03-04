@@ -25,7 +25,7 @@ use crate::{
         OutputExt, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt, SeatExt,
     },
     wayland::protocols::{
-        image_source::ImageSourceData,
+        image_capture_source::ImageCaptureSourceData,
         screencopy::{
             delegate_screencopy, BufferConstraints, CursorSession, DmabufConstraints, Frame,
             ScreencopyHandler, ScreencopyState, Session,
@@ -44,23 +44,26 @@ impl ScreencopyHandler for State {
         &mut self.common.screencopy_state
     }
 
-    fn capture_source(&mut self, source: &ImageSourceData) -> Option<BufferConstraints> {
+    fn capture_source(&mut self, source: &ImageCaptureSourceData) -> Option<BufferConstraints> {
         match source {
-            ImageSourceData::Output(weak) => weak
+            ImageCaptureSourceData::Output(weak) => weak
                 .upgrade()
                 .and_then(|output| constraints_for_output(&output, &mut self.backend)),
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 let shell = self.common.shell.read().unwrap();
                 let output = shell.workspaces.space_for_handle(&handle)?.output();
                 constraints_for_output(output, &mut self.backend)
             }
-            ImageSourceData::Toplevel(window) => {
+            ImageCaptureSourceData::Toplevel(window) => {
                 constraints_for_toplevel(window, &mut self.backend)
             }
             _ => None,
         }
     }
-    fn capture_cursor_source(&mut self, _source: &ImageSourceData) -> Option<BufferConstraints> {
+    fn capture_cursor_source(
+        &mut self,
+        _source: &ImageCaptureSourceData,
+    ) -> Option<BufferConstraints> {
         let size = if let Some((geometry, _)) = self
             .common
             .shell
@@ -84,7 +87,7 @@ impl ScreencopyHandler for State {
 
     fn new_session(&mut self, session: Session) {
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     session.stop();
                     return;
@@ -98,7 +101,7 @@ impl ScreencopyHandler for State {
 
                 output.add_session(session);
             }
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 let mut shell = self.common.shell.write().unwrap();
                 let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
                     session.stop();
@@ -112,7 +115,7 @@ impl ScreencopyHandler for State {
                 });
                 workspace.add_session(session);
             }
-            ImageSourceData::Toplevel(mut toplevel) => {
+            ImageCaptureSourceData::Toplevel(mut toplevel) => {
                 let size = toplevel.geometry().size.to_physical(1);
                 session.user_data().insert_if_missing_threadsafe(|| {
                     Mutex::new(SessionUserData::new(OutputDamageTracker::new(
@@ -123,7 +126,7 @@ impl ScreencopyHandler for State {
                 });
                 toplevel.add_session(session);
             }
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
     fn new_cursor_session(&mut self, session: CursorSession) {
@@ -160,7 +163,7 @@ impl ScreencopyHandler for State {
         });
 
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     session.stop();
                     return;
@@ -190,7 +193,7 @@ impl ScreencopyHandler for State {
 
                 output.add_cursor_session(session);
             }
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 let mut shell = self.common.shell.write().unwrap();
                 let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
                     session.stop();
@@ -222,7 +225,7 @@ impl ScreencopyHandler for State {
 
                 workspace.add_cursor_session(session);
             }
-            ImageSourceData::Toplevel(mut toplevel) => {
+            ImageCaptureSourceData::Toplevel(mut toplevel) => {
                 let shell = self.common.shell.read().unwrap();
                 if let Some(element) = shell.element_for_surface(&toplevel) {
                     if element.has_active_window(&toplevel) {
@@ -245,13 +248,13 @@ impl ScreencopyHandler for State {
 
                 toplevel.add_cursor_session(session);
             }
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 
     fn frame(&mut self, session: Session, frame: Frame) {
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     session.stop(); // will fail the frame as well
                     return;
@@ -260,13 +263,13 @@ impl ScreencopyHandler for State {
                 output.add_frame(session, frame);
                 self.backend.schedule_render(&output);
             }
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 render_workspace_to_buffer(self, session, frame, handle)
             }
-            ImageSourceData::Toplevel(toplevel) => {
+            ImageCaptureSourceData::Toplevel(toplevel) => {
                 render_window_to_buffer(self, session, frame, &toplevel)
             }
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 
@@ -296,12 +299,12 @@ impl ScreencopyHandler for State {
 
     fn session_destroyed(&mut self, session: Session) {
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
                     output.remove_session(session);
                 }
             }
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 if let Some(workspace) = self
                     .common
                     .shell
@@ -313,19 +316,19 @@ impl ScreencopyHandler for State {
                     workspace.remove_session(session)
                 }
             }
-            ImageSourceData::Toplevel(mut toplevel) => toplevel.remove_session(session),
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Toplevel(mut toplevel) => toplevel.remove_session(session),
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 
     fn cursor_session_destroyed(&mut self, session: CursorSession) {
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
                     output.remove_cursor_session(session);
                 }
             }
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 if let Some(workspace) = self
                     .common
                     .shell
@@ -337,8 +340,10 @@ impl ScreencopyHandler for State {
                     workspace.remove_cursor_session(session)
                 }
             }
-            ImageSourceData::Toplevel(mut toplevel) => toplevel.remove_cursor_session(session),
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Toplevel(mut toplevel) => {
+                toplevel.remove_cursor_session(session)
+            }
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 }

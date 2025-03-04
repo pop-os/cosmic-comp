@@ -3,7 +3,7 @@
 pub mod a11y;
 pub mod atspi;
 pub mod drm;
-pub mod image_source;
+pub mod image_capture_source;
 pub mod output_configuration;
 pub mod output_power;
 pub mod overlap_notify;

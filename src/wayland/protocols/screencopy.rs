@@ -3,12 +3,14 @@ use std::{
     time::Duration,
 };
 
-pub use cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_frame_v2::FailureReason;
-use cosmic_protocols::screencopy::v2::server::{
-    zcosmic_screencopy_cursor_session_v2::{self, ZcosmicScreencopyCursorSessionV2},
-    zcosmic_screencopy_frame_v2::{self, ZcosmicScreencopyFrameV2},
-    zcosmic_screencopy_manager_v2::{self, ZcosmicScreencopyManagerV2},
-    zcosmic_screencopy_session_v2::{self, ZcosmicScreencopySessionV2},
+pub use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
+    ext_image_copy_capture_frame_v1::FailureReason,
+};
+use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
+    ext_image_copy_capture_cursor_session_v1::{self, ExtImageCopyCaptureCursorSessionV1},
+    ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1},
+    ext_image_copy_capture_manager_v1::{self, ExtImageCopyCaptureManagerV1},
+    ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
 };
 use smithay::{
     backend::{
@@ -30,7 +32,7 @@ use smithay::{
 use tracing::debug;
 use wayland_backend::server::GlobalId;
 
-use super::image_source::ImageSourceData;
+use super::image_capture_source::ImageCaptureSourceData;
 
 #[derive(Debug)]
 pub struct ScreencopyState {
@@ -42,18 +44,18 @@ pub struct ScreencopyState {
 impl ScreencopyState {
     pub fn new<D, F>(display: &DisplayHandle, client_filter: F) -> ScreencopyState
     where
-        D: GlobalDispatch<ZcosmicScreencopyManagerV2, ScreencopyGlobalData>
-            + Dispatch<ZcosmicScreencopyManagerV2, ScreencopyData>
-            + Dispatch<ZcosmicScreencopySessionV2, SessionData>
-            + Dispatch<ZcosmicScreencopySessionV2, CursorSessionData>
-            + Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData>
-            + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
+        D: GlobalDispatch<ExtImageCopyCaptureManagerV1, ScreencopyGlobalData>
+            + Dispatch<ExtImageCopyCaptureManagerV1, ScreencopyData>
+            + Dispatch<ExtImageCopyCaptureSessionV1, SessionData>
+            + Dispatch<ExtImageCopyCaptureSessionV1, CursorSessionData>
+            + Dispatch<ExtImageCopyCaptureCursorSessionV1, CursorSessionData>
+            + Dispatch<ExtImageCopyCaptureFrameV1, FrameData>
             + ScreencopyHandler
             + 'static,
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         ScreencopyState {
-            global: display.create_global::<D, ZcosmicScreencopyManagerV2, _>(
+            global: display.create_global::<D, ExtImageCopyCaptureManagerV1, _>(
                 1,
                 ScreencopyGlobalData {
                     filter: Box::new(client_filter),
@@ -84,7 +86,7 @@ pub struct DmabufConstraints {
 
 #[derive(Debug, Clone)]
 pub struct Session {
-    obj: ZcosmicScreencopySessionV2,
+    obj: ExtImageCopyCaptureSessionV1,
     inner: Arc<Mutex<SessionInner>>,
     user_data: Arc<UserDataMap>,
 }
@@ -100,12 +102,12 @@ struct SessionInner {
     stopped: bool,
     constraints: Option<BufferConstraints>,
     draw_cursors: bool,
-    source: ImageSourceData,
+    source: ImageCaptureSourceData,
     active_frames: Vec<Frame>,
 }
 
 impl SessionInner {
-    fn new(source: ImageSourceData, draw_cursors: bool) -> SessionInner {
+    fn new(source: ImageCaptureSourceData, draw_cursors: bool) -> SessionInner {
         SessionInner {
             stopped: false,
             constraints: None,
@@ -133,7 +135,7 @@ impl Session {
         self.obj
             .buffer_size(constraints.size.w as u32, constraints.size.h as u32);
         for fmt in &constraints.shm {
-            self.obj.shm_format(*fmt as u32);
+            self.obj.shm_format(*fmt);
         }
         if let Some(dma) = constraints.dma.as_ref() {
             let node = Vec::from(dma.node.dev_id().to_ne_bytes());
@@ -155,7 +157,7 @@ impl Session {
         self.inner.lock().unwrap().constraints.clone()
     }
 
-    pub fn source(&self) -> ImageSourceData {
+    pub fn source(&self) -> ImageCaptureSourceData {
         self.inner.lock().unwrap().source.clone()
     }
 
@@ -186,7 +188,7 @@ impl Session {
 
 #[derive(Debug, Clone)]
 pub struct CursorSession {
-    obj: ZcosmicScreencopyCursorSessionV2,
+    obj: ExtImageCopyCaptureCursorSessionV1,
     inner: Arc<Mutex<CursorSessionInner>>,
     user_data: Arc<UserDataMap>,
 }
@@ -199,17 +201,17 @@ impl PartialEq for CursorSession {
 
 #[derive(Debug)]
 struct CursorSessionInner {
-    session: Option<ZcosmicScreencopySessionV2>,
+    session: Option<ExtImageCopyCaptureSessionV1>,
     stopped: bool,
     constraints: Option<BufferConstraints>,
-    source: ImageSourceData,
+    source: ImageCaptureSourceData,
     position: Option<Point<i32, BufferCoords>>,
     hotspot: Point<i32, BufferCoords>,
     active_frames: Vec<Frame>,
 }
 
 impl CursorSessionInner {
-    fn new(source: ImageSourceData) -> CursorSessionInner {
+    fn new(source: ImageCaptureSourceData) -> CursorSessionInner {
         CursorSessionInner {
             session: None,
             stopped: false,
@@ -239,7 +241,7 @@ impl CursorSession {
         if let Some(session_obj) = inner.session.as_ref() {
             session_obj.buffer_size(constrains.size.w as u32, constrains.size.h as u32);
             for fmt in &constrains.shm {
-                session_obj.shm_format(*fmt as u32);
+                session_obj.shm_format(*fmt);
             }
             if let Some(dma) = constrains.dma.as_ref() {
                 let node = Vec::from(dma.node.dev_id().to_ne_bytes());
@@ -262,7 +264,7 @@ impl CursorSession {
         self.inner.lock().unwrap().constraints.clone()
     }
 
-    pub fn source(&self) -> ImageSourceData {
+    pub fn source(&self) -> ImageCaptureSourceData {
         self.inner.lock().unwrap().source.clone()
     }
 
@@ -340,7 +342,7 @@ impl CursorSession {
 
 #[derive(Debug)]
 pub struct Frame {
-    obj: ZcosmicScreencopyFrameV2,
+    obj: ExtImageCopyCaptureFrameV1,
     inner: Arc<Mutex<FrameInner>>,
 }
 
@@ -404,7 +406,7 @@ struct FrameInner {
     damage: Vec<Rectangle<i32, BufferCoords>>,
     // `SessionInner` contains a `Vec<Frame>`, so use a weak reference here to
     // avoid a cycle.
-    obj: Weak<ZcosmicScreencopySessionV2>,
+    obj: Weak<ExtImageCopyCaptureSessionV1>,
     capture_requested: bool,
     failed: Option<FailureReason>,
     ready: bool,
@@ -412,7 +414,7 @@ struct FrameInner {
 
 impl FrameInner {
     fn new(
-        obj: ZcosmicScreencopySessionV2,
+        obj: ExtImageCopyCaptureSessionV1,
         constraints: impl Into<Option<BufferConstraints>>,
     ) -> Self {
         FrameInner {
@@ -426,7 +428,7 @@ impl FrameInner {
         }
     }
 
-    fn fail(&mut self, frame: &ZcosmicScreencopyFrameV2, reason: FailureReason) {
+    fn fail(&mut self, frame: &ExtImageCopyCaptureFrameV1, reason: FailureReason) {
         if self.ready || self.failed.is_some() {
             return;
         }
@@ -440,8 +442,11 @@ impl FrameInner {
 pub trait ScreencopyHandler {
     fn screencopy_state(&mut self) -> &mut ScreencopyState;
 
-    fn capture_source(&mut self, source: &ImageSourceData) -> Option<BufferConstraints>;
-    fn capture_cursor_source(&mut self, source: &ImageSourceData) -> Option<BufferConstraints>;
+    fn capture_source(&mut self, source: &ImageCaptureSourceData) -> Option<BufferConstraints>;
+    fn capture_cursor_source(
+        &mut self,
+        source: &ImageCaptureSourceData,
+    ) -> Option<BufferConstraints>;
 
     fn new_session(&mut self, session: Session);
     fn new_cursor_session(&mut self, session: CursorSession);
@@ -475,14 +480,14 @@ pub struct FrameData {
     inner: Arc<Mutex<FrameInner>>,
 }
 
-impl<D> GlobalDispatch<ZcosmicScreencopyManagerV2, ScreencopyGlobalData, D> for ScreencopyState
+impl<D> GlobalDispatch<ExtImageCopyCaptureManagerV1, ScreencopyGlobalData, D> for ScreencopyState
 where
-    D: GlobalDispatch<ZcosmicScreencopyManagerV2, ScreencopyGlobalData>
-        + Dispatch<ZcosmicScreencopyManagerV2, ScreencopyData>
-        + Dispatch<ZcosmicScreencopySessionV2, SessionData>
-        + Dispatch<ZcosmicScreencopySessionV2, CursorSessionData>
-        + Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData>
-        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
+    D: GlobalDispatch<ExtImageCopyCaptureManagerV1, ScreencopyGlobalData>
+        + Dispatch<ExtImageCopyCaptureManagerV1, ScreencopyData>
+        + Dispatch<ExtImageCopyCaptureSessionV1, SessionData>
+        + Dispatch<ExtImageCopyCaptureSessionV1, CursorSessionData>
+        + Dispatch<ExtImageCopyCaptureCursorSessionV1, CursorSessionData>
+        + Dispatch<ExtImageCopyCaptureFrameV1, FrameData>
         + ScreencopyHandler
         + 'static,
 {
@@ -490,7 +495,7 @@ where
         _state: &mut D,
         _handle: &DisplayHandle,
         _client: &Client,
-        resource: New<ZcosmicScreencopyManagerV2>,
+        resource: New<ExtImageCopyCaptureManagerV1>,
         _global_data: &ScreencopyGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
@@ -502,33 +507,33 @@ where
     }
 }
 
-impl<D> Dispatch<ZcosmicScreencopyManagerV2, ScreencopyData, D> for ScreencopyState
+impl<D> Dispatch<ExtImageCopyCaptureManagerV1, ScreencopyData, D> for ScreencopyState
 where
-    D: Dispatch<ZcosmicScreencopyManagerV2, ScreencopyData>
-        + Dispatch<ZcosmicScreencopySessionV2, SessionData>
-        + Dispatch<ZcosmicScreencopySessionV2, CursorSessionData>
-        + Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData>
-        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
+    D: Dispatch<ExtImageCopyCaptureManagerV1, ScreencopyData>
+        + Dispatch<ExtImageCopyCaptureSessionV1, SessionData>
+        + Dispatch<ExtImageCopyCaptureSessionV1, CursorSessionData>
+        + Dispatch<ExtImageCopyCaptureCursorSessionV1, CursorSessionData>
+        + Dispatch<ExtImageCopyCaptureFrameV1, FrameData>
         + ScreencopyHandler
         + 'static,
 {
     fn request(
         state: &mut D,
         _client: &Client,
-        _resource: &ZcosmicScreencopyManagerV2,
-        request: <ZcosmicScreencopyManagerV2 as Resource>::Request,
+        _resource: &ExtImageCopyCaptureManagerV1,
+        request: <ExtImageCopyCaptureManagerV1 as Resource>::Request,
         _data: &ScreencopyData,
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_screencopy_manager_v2::Request::CreateSession {
+            ext_image_copy_capture_manager_v1::Request::CreateSession {
                 session,
                 source,
                 options,
             } => {
-                if let Some(src) = source.data::<ImageSourceData>() {
-                    if *src != ImageSourceData::Destroyed {
+                if let Some(src) = source.data::<ImageCaptureSourceData>() {
+                    if *src != ImageCaptureSourceData::Destroyed {
                         if let Some(buffer_constraints) = state.capture_source(src) {
                             let session_data = Arc::new(Mutex::new(SessionInner::new(
                                 src.clone(),
@@ -558,7 +563,7 @@ where
                 }
 
                 let session_data = Arc::new(Mutex::new(SessionInner::new(
-                    ImageSourceData::Destroyed,
+                    ImageCaptureSourceData::Destroyed,
                     false,
                 )));
                 let obj = data_init.init(
@@ -574,16 +579,15 @@ where
                 };
                 session.stop();
             }
-            zcosmic_screencopy_manager_v2::Request::CreatePointerCursorSession {
+            ext_image_copy_capture_manager_v1::Request::CreatePointerCursorSession {
                 session,
                 source,
                 pointer: _,
-                options: _,
             } => {
                 // TODO: use pointer, but we need new smithay api for that.
 
-                if let Some(src) = source.data::<ImageSourceData>() {
-                    if *src != ImageSourceData::Destroyed {
+                if let Some(src) = source.data::<ImageCaptureSourceData>() {
+                    if *src != ImageCaptureSourceData::Destroyed {
                         if let Some(buffer_constraints) = state.capture_cursor_source(src) {
                             let session_data =
                                 Arc::new(Mutex::new(CursorSessionInner::new(src.clone())));
@@ -611,7 +615,7 @@ where
                 }
 
                 let session_data = Arc::new(Mutex::new(CursorSessionInner::new(
-                    ImageSourceData::Destroyed,
+                    ImageCaptureSourceData::Destroyed,
                 )));
                 let obj = data_init.init(
                     session,
@@ -633,30 +637,30 @@ where
     fn destroyed(
         _state: &mut D,
         _client: wayland_backend::server::ClientId,
-        _resource: &ZcosmicScreencopyManagerV2,
+        _resource: &ExtImageCopyCaptureManagerV1,
         _data: &ScreencopyData,
     ) {
     }
 }
 
-impl<D> Dispatch<ZcosmicScreencopySessionV2, SessionData, D> for ScreencopyState
+impl<D> Dispatch<ExtImageCopyCaptureSessionV1, SessionData, D> for ScreencopyState
 where
-    D: Dispatch<ZcosmicScreencopySessionV2, SessionData>
-        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
+    D: Dispatch<ExtImageCopyCaptureSessionV1, SessionData>
+        + Dispatch<ExtImageCopyCaptureFrameV1, FrameData>
         + ScreencopyHandler
         + 'static,
 {
     fn request(
         _state: &mut D,
         _client: &Client,
-        resource: &ZcosmicScreencopySessionV2,
-        request: <ZcosmicScreencopySessionV2 as Resource>::Request,
+        resource: &ExtImageCopyCaptureSessionV1,
+        request: <ExtImageCopyCaptureSessionV1 as Resource>::Request,
         data: &SessionData,
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_screencopy_session_v2::Request::CreateFrame { frame } => {
+            ext_image_copy_capture_session_v1::Request::CreateFrame { frame } => {
                 let inner = Arc::new(Mutex::new(FrameInner::new(
                     resource.clone(),
                     data.inner.lock().unwrap().constraints.clone(),
@@ -680,7 +684,7 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: &ZcosmicScreencopySessionV2,
+        resource: &ExtImageCopyCaptureSessionV1,
         _data: &SessionData,
     ) {
         let scpy = state.screencopy_state();
@@ -695,25 +699,25 @@ where
     }
 }
 
-impl<D> Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData, D> for ScreencopyState
+impl<D> Dispatch<ExtImageCopyCaptureCursorSessionV1, CursorSessionData, D> for ScreencopyState
 where
-    D: Dispatch<ZcosmicScreencopyCursorSessionV2, CursorSessionData>
-        + Dispatch<ZcosmicScreencopySessionV2, CursorSessionData>
-        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
+    D: Dispatch<ExtImageCopyCaptureCursorSessionV1, CursorSessionData>
+        + Dispatch<ExtImageCopyCaptureSessionV1, CursorSessionData>
+        + Dispatch<ExtImageCopyCaptureFrameV1, FrameData>
         + ScreencopyHandler
         + 'static,
 {
     fn request(
         _state: &mut D,
         _client: &Client,
-        resource: &ZcosmicScreencopyCursorSessionV2,
-        request: <ZcosmicScreencopyCursorSessionV2 as Resource>::Request,
+        resource: &ExtImageCopyCaptureCursorSessionV1,
+        request: <ExtImageCopyCaptureCursorSessionV1 as Resource>::Request,
         data: &CursorSessionData,
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_screencopy_cursor_session_v2::Request::GetScreencopySession { session } => {
+            ext_image_copy_capture_cursor_session_v1::Request::GetCaptureSession { session } => {
                 let new_data = CursorSessionData {
                     inner: data.inner.clone(),
                 };
@@ -722,7 +726,7 @@ where
                 let mut inner = data.inner.lock().unwrap();
                 if inner.session.is_some() {
                     resource.post_error(
-                        zcosmic_screencopy_cursor_session_v2::Error::DuplicateSession,
+                        ext_image_copy_capture_cursor_session_v1::Error::DuplicateSession,
                         "Duplicate session",
                     );
                     return;
@@ -733,7 +737,7 @@ where
                 } else if let Some(constraints) = inner.constraints.as_ref() {
                     session.buffer_size(constraints.size.w as u32, constraints.size.h as u32);
                     for fmt in &constraints.shm {
-                        session.shm_format(*fmt as u32);
+                        session.shm_format(*fmt);
                     }
                     if let Some(dma) = constraints.dma.as_ref() {
                         let node = Vec::from(dma.node.dev_id().to_ne_bytes());
@@ -757,7 +761,7 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: &ZcosmicScreencopyCursorSessionV2,
+        resource: &ExtImageCopyCaptureCursorSessionV1,
         _data: &CursorSessionData,
     ) {
         let scpy = state.screencopy_state();
@@ -772,24 +776,24 @@ where
     }
 }
 
-impl<D> Dispatch<ZcosmicScreencopySessionV2, CursorSessionData, D> for ScreencopyState
+impl<D> Dispatch<ExtImageCopyCaptureSessionV1, CursorSessionData, D> for ScreencopyState
 where
-    D: Dispatch<ZcosmicScreencopySessionV2, SessionData>
-        + Dispatch<ZcosmicScreencopyFrameV2, FrameData>
+    D: Dispatch<ExtImageCopyCaptureSessionV1, SessionData>
+        + Dispatch<ExtImageCopyCaptureFrameV1, FrameData>
         + ScreencopyHandler
         + 'static,
 {
     fn request(
         _state: &mut D,
         _client: &Client,
-        resource: &ZcosmicScreencopySessionV2,
-        request: <ZcosmicScreencopySessionV2 as Resource>::Request,
+        resource: &ExtImageCopyCaptureSessionV1,
+        request: <ExtImageCopyCaptureSessionV1 as Resource>::Request,
         data: &CursorSessionData,
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_screencopy_session_v2::Request::CreateFrame { frame } => {
+            ext_image_copy_capture_session_v1::Request::CreateFrame { frame } => {
                 let inner = Arc::new(Mutex::new(FrameInner::new(
                     resource.clone(),
                     data.inner.lock().unwrap().constraints.clone(),
@@ -813,39 +817,39 @@ where
     fn destroyed(
         _state: &mut D,
         _client: wayland_backend::server::ClientId,
-        _resource: &ZcosmicScreencopySessionV2,
+        _resource: &ExtImageCopyCaptureSessionV1,
         _data: &CursorSessionData,
     ) {
     }
 }
 
-impl<D> Dispatch<ZcosmicScreencopyFrameV2, FrameData, D> for ScreencopyState
+impl<D> Dispatch<ExtImageCopyCaptureFrameV1, FrameData, D> for ScreencopyState
 where
-    D: Dispatch<ZcosmicScreencopyFrameV2, FrameData> + ScreencopyHandler + 'static,
+    D: Dispatch<ExtImageCopyCaptureFrameV1, FrameData> + ScreencopyHandler + 'static,
 {
     fn request(
         state: &mut D,
         _client: &Client,
-        resource: &ZcosmicScreencopyFrameV2,
-        request: <ZcosmicScreencopyFrameV2 as Resource>::Request,
+        resource: &ExtImageCopyCaptureFrameV1,
+        request: <ExtImageCopyCaptureFrameV1 as Resource>::Request,
         data: &FrameData,
         _dhandle: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
-            zcosmic_screencopy_frame_v2::Request::AttachBuffer { buffer } => {
+            ext_image_copy_capture_frame_v1::Request::AttachBuffer { buffer } => {
                 let mut inner = data.inner.lock().unwrap();
 
                 if inner.capture_requested {
                     resource.post_error(
-                        zcosmic_screencopy_frame_v2::Error::AlreadyCaptured,
+                        ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
                         "Frame was captured previously",
                     );
                 }
 
                 inner.buffer = Some(buffer);
             }
-            zcosmic_screencopy_frame_v2::Request::DamageBuffer {
+            ext_image_copy_capture_frame_v1::Request::DamageBuffer {
                 x,
                 y,
                 width,
@@ -855,14 +859,14 @@ where
 
                 if inner.capture_requested {
                     resource.post_error(
-                        zcosmic_screencopy_frame_v2::Error::AlreadyCaptured,
+                        ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
                         "Frame was captured previously",
                     );
                 }
 
                 if x < 0 || y < 0 || width <= 0 || height <= 0 {
                     resource.post_error(
-                        zcosmic_screencopy_frame_v2::Error::InvalidBufferDamage,
+                        ext_image_copy_capture_frame_v1::Error::InvalidBufferDamage,
                         "Coordinates negative or size equal to zero",
                     );
                     return;
@@ -872,19 +876,19 @@ where
                     .damage
                     .push(Rectangle::new((x, y).into(), (width, height).into()));
             }
-            zcosmic_screencopy_frame_v2::Request::Capture => {
+            ext_image_copy_capture_frame_v1::Request::Capture => {
                 let mut inner = data.inner.lock().unwrap();
 
                 if inner.capture_requested {
                     resource.post_error(
-                        zcosmic_screencopy_frame_v2::Error::AlreadyCaptured,
+                        ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
                         "Frame was captured previously",
                     );
                 }
 
                 if inner.buffer.is_none() {
                     resource.post_error(
-                        zcosmic_screencopy_frame_v2::Error::NoBuffer,
+                        ext_image_copy_capture_frame_v1::Error::NoBuffer,
                         "Attempting to capture frame without a buffer",
                     );
                 }
@@ -1031,7 +1035,7 @@ where
     fn destroyed(
         state: &mut D,
         _client: wayland_backend::server::ClientId,
-        resource: &ZcosmicScreencopyFrameV2,
+        resource: &ExtImageCopyCaptureFrameV1,
         data: &FrameData,
     ) {
         {
@@ -1064,22 +1068,22 @@ where
 macro_rules! delegate_screencopy {
     ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
         smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_manager_v2::ZcosmicScreencopyManagerV2: $crate::wayland::protocols::screencopy::ScreencopyGlobalData
+            smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1: $crate::wayland::protocols::screencopy::ScreencopyGlobalData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_manager_v2::ZcosmicScreencopyManagerV2: $crate::wayland::protocols::screencopy::ScreencopyData
+            smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1: $crate::wayland::protocols::screencopy::ScreencopyData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_session_v2::ZcosmicScreencopySessionV2: $crate::wayland::protocols::screencopy::SessionData
+            smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1: $crate::wayland::protocols::screencopy::SessionData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_cursor_session_v2::ZcosmicScreencopyCursorSessionV2: $crate::wayland::protocols::screencopy::CursorSessionData
+            smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::ext_image_copy_capture_cursor_session_v1::ExtImageCopyCaptureCursorSessionV1: $crate::wayland::protocols::screencopy::CursorSessionData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_session_v2::ZcosmicScreencopySessionV2: $crate::wayland::protocols::screencopy::CursorSessionData
+            smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1: $crate::wayland::protocols::screencopy::CursorSessionData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::screencopy::v2::server::zcosmic_screencopy_frame_v2::ZcosmicScreencopyFrameV2: $crate::wayland::protocols::screencopy::FrameData
+            smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1: $crate::wayland::protocols::screencopy::FrameData
         ] => $crate::wayland::protocols::screencopy::ScreencopyState);
     };
 }
