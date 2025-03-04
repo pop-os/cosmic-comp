@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashSet, sync::Mutex};
+use std::{
+    collections::HashSet,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use smithay::{
     output::Output,
@@ -46,6 +50,7 @@ pub struct ToplevelInfoState<D, W: Window> {
     dirty: bool,
     last_dirty: bool,
     pub(in crate::wayland) foreign_toplevel_list: ForeignToplevelListState,
+    refresh_throttle: Instant,
     global: GlobalId,
     _dispatch_data: std::marker::PhantomData<D>,
 }
@@ -324,6 +329,7 @@ where
             last_dirty: false,
             foreign_toplevel_list,
             global,
+            refresh_throttle: std::time::Instant::now(),
             _dispatch_data: std::marker::PhantomData,
         }
     }
@@ -368,44 +374,50 @@ where
     pub fn refresh(&mut self, workspace_state: &WorkspaceState<D>) {
         let mut dirty = std::mem::replace(&mut self.dirty, false);
 
-        self.toplevels.retain(|window| {
-            let mut state = window
-                .user_data()
-                .get::<ToplevelState>()
-                .unwrap()
-                .lock()
-                .unwrap();
-            state
-                .rectangles
-                .retain(|(surface, _)| surface.upgrade().is_ok());
-            if window.alive() {
-                std::mem::drop(state);
-                for instance in &self.instances {
-                    let changed = send_toplevel_to_client::<D, W>(
-                        &self.dh,
-                        workspace_state,
-                        instance,
-                        window,
-                    );
-                    dirty = dirty || changed;
-                }
-                true
-            } else {
-                for (_info, handle) in &state.instances {
-                    // don't send events to stopped instances
-                    if handle.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
-                        && self
-                            .instances
-                            .iter()
-                            .any(|i| i.id().same_client_as(&handle.id()))
-                    {
-                        handle.closed();
+        // Throttle this section to reduce CPU usage
+        if self.refresh_throttle.elapsed() > Duration::from_millis(100) {
+            self.refresh_throttle = Instant::now();
+
+            self.toplevels.retain(|window| {
+                let mut state = window
+                    .user_data()
+                    .get::<ToplevelState>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                state
+                    .rectangles
+                    .retain(|(surface, _)| surface.upgrade().is_ok());
+                if window.alive() {
+                    std::mem::drop(state);
+                    for instance in &self.instances {
+                        let changed = send_toplevel_to_client::<D, W>(
+                            &self.dh,
+                            workspace_state,
+                            instance,
+                            window,
+                        );
+                        dirty = dirty || changed;
                     }
+                    true
+                } else {
+                    for (_info, handle) in &state.instances {
+                        // don't send events to stopped instances
+                        if handle.version()
+                            < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
+                            && self
+                                .instances
+                                .iter()
+                                .any(|i| i.id().same_client_as(&handle.id()))
+                        {
+                            handle.closed();
+                        }
+                    }
+                    dirty = true;
+                    false
                 }
-                dirty = true;
-                false
-            }
-        });
+            });
+        }
 
         if !dirty && self.last_dirty {
             for instance in &self.instances {
