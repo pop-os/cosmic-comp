@@ -96,6 +96,7 @@ pub struct CosmicStackInternal {
     active: Arc<AtomicUsize>,
     activated: Arc<AtomicBool>,
     group_focused: Arc<AtomicBool>,
+    previous_index: Arc<Mutex<Option<(Serial, usize)>>>,
     scroll_to_focus: Arc<AtomicBool>,
     previous_keyboard: Arc<AtomicUsize>,
     pointer_entered: Arc<AtomicU8>,
@@ -148,6 +149,7 @@ impl CosmicStack {
                 active: Arc::new(AtomicUsize::new(0)),
                 activated: Arc::new(AtomicBool::new(false)),
                 group_focused: Arc::new(AtomicBool::new(false)),
+                previous_index: Arc::new(Mutex::new(None)),
                 scroll_to_focus: Arc::new(AtomicBool::new(false)),
                 previous_keyboard: Arc::new(AtomicUsize::new(0)),
                 pointer_entered: Arc::new(AtomicU8::new(0)),
@@ -163,11 +165,22 @@ impl CosmicStack {
         ))
     }
 
-    pub fn add_window(&self, window: impl Into<CosmicSurface>, idx: Option<usize>) {
+    pub fn add_window(
+        &self,
+        window: impl Into<CosmicSurface>,
+        idx: Option<usize>,
+        moved_into: Option<&Seat<State>>,
+    ) {
         let window = window.into();
         window.try_force_undecorated(true);
         window.set_tiled(true);
         self.0.with_program(|p| {
+            let last_mod_serial = moved_into.and_then(|seat| seat.last_modifier_change());
+            let mut prev_idx = p.previous_index.lock().unwrap();
+            if !prev_idx.is_some_and(|(serial, _)| Some(serial) == last_mod_serial) {
+                *prev_idx = last_mod_serial.map(|s| (s, p.active.load(Ordering::SeqCst)));
+            }
+
             if let Some(mut geo) = p.geometry.lock().unwrap().clone() {
                 geo.loc.y += TAB_HEIGHT;
                 geo.size.h -= TAB_HEIGHT;
@@ -255,75 +268,117 @@ impl CosmicStack {
         self.0.with_program(|p| p.windows.lock().unwrap().len())
     }
 
-    pub fn handle_focus(&self, direction: FocusDirection, swap: Option<NodeDesc>) -> bool {
-        let result = self.0.with_program(|p| match direction {
-            FocusDirection::Left => {
-                if !p.group_focused.load(Ordering::SeqCst) {
-                    if let Ok(old) =
-                        p.active
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                val.checked_sub(1)
-                            })
-                    {
-                        p.previous_keyboard.store(old, Ordering::SeqCst);
-                        p.scroll_to_focus.store(true, Ordering::SeqCst);
-                        true
+    pub fn handle_focus(
+        &self,
+        seat: &Seat<State>,
+        direction: FocusDirection,
+        swap: Option<NodeDesc>,
+    ) -> bool {
+        let (result, update) = self.0.with_program(|p| {
+            let last_mod_serial = seat.last_modifier_change();
+            let mut prev_idx = p.previous_index.lock().unwrap();
+            if !prev_idx.is_some_and(|(serial, _)| Some(serial) == last_mod_serial) {
+                *prev_idx = last_mod_serial.map(|s| (s, p.active.load(Ordering::SeqCst)));
+            }
+
+            match direction {
+                FocusDirection::Left => {
+                    if !p.group_focused.load(Ordering::SeqCst) {
+                        if let Ok(old) =
+                            p.active
+                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                    val.checked_sub(1)
+                                })
+                        {
+                            p.previous_keyboard.store(old, Ordering::SeqCst);
+                            p.scroll_to_focus.store(true, Ordering::SeqCst);
+                            (true, true)
+                        } else {
+                            let new = prev_idx.unwrap().1;
+                            let old = p.active.swap(new, Ordering::SeqCst);
+                            if old != new {
+                                p.previous_keyboard.store(old, Ordering::SeqCst);
+                                p.scroll_to_focus.store(true, Ordering::SeqCst);
+                                (false, true)
+                            } else {
+                                (false, false)
+                            }
+                        }
                     } else {
-                        false
+                        (false, false)
                     }
-                } else {
-                    false
                 }
-            }
-            FocusDirection::Right => {
-                if !p.group_focused.load(Ordering::SeqCst) {
-                    let max = p.windows.lock().unwrap().len();
-                    if let Ok(old) =
-                        p.active
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                if val < max - 1 {
-                                    Some(val + 1)
-                                } else {
-                                    None
-                                }
-                            })
-                    {
-                        p.previous_keyboard.store(old, Ordering::SeqCst);
-                        p.scroll_to_focus.store(true, Ordering::SeqCst);
-                        true
+                FocusDirection::Right => {
+                    if !p.group_focused.load(Ordering::SeqCst) {
+                        let max = p.windows.lock().unwrap().len();
+                        if let Ok(old) =
+                            p.active
+                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                    if val < max - 1 {
+                                        Some(val + 1)
+                                    } else {
+                                        None
+                                    }
+                                })
+                        {
+                            p.previous_keyboard.store(old, Ordering::SeqCst);
+                            p.scroll_to_focus.store(true, Ordering::SeqCst);
+                            (true, true)
+                        } else {
+                            let new = prev_idx.unwrap().1;
+                            let old = p.active.swap(new, Ordering::SeqCst);
+                            if old != new {
+                                p.previous_keyboard.store(old, Ordering::SeqCst);
+                                p.scroll_to_focus.store(true, Ordering::SeqCst);
+                                (false, true)
+                            } else {
+                                (false, false)
+                            }
+                        }
                     } else {
-                        false
+                        (false, false)
                     }
-                } else {
-                    false
                 }
-            }
-            FocusDirection::Out if swap.is_none() => {
-                if !p.group_focused.swap(true, Ordering::SeqCst) {
-                    p.windows.lock().unwrap().iter().for_each(|w| {
-                        w.set_activated(false);
-                        w.send_configure();
-                    });
-                    true
-                } else {
-                    false
+                FocusDirection::Out if swap.is_none() => {
+                    if !p.group_focused.swap(true, Ordering::SeqCst) {
+                        p.windows.lock().unwrap().iter().for_each(|w| {
+                            w.set_activated(false);
+                            w.send_configure();
+                        });
+                        (true, true)
+                    } else {
+                        (false, false)
+                    }
                 }
-            }
-            FocusDirection::In if swap.is_none() => {
-                if !p.group_focused.swap(false, Ordering::SeqCst) {
-                    p.windows.lock().unwrap().iter().for_each(|w| {
-                        w.set_activated(true);
-                        w.send_configure();
-                    });
-                    true
-                } else {
-                    false
+                FocusDirection::In if swap.is_none() => {
+                    if !p.group_focused.swap(false, Ordering::SeqCst) {
+                        p.windows.lock().unwrap().iter().for_each(|w| {
+                            w.set_activated(true);
+                            w.send_configure();
+                        });
+                        (true, true)
+                    } else {
+                        (false, false)
+                    }
                 }
+                FocusDirection::Up | FocusDirection::Down => {
+                    if !p.group_focused.load(Ordering::SeqCst) {
+                        let new = prev_idx.unwrap().1;
+                        let old = p.active.swap(new, Ordering::SeqCst);
+                        if old != new {
+                            p.previous_keyboard.store(old, Ordering::SeqCst);
+                            p.scroll_to_focus.store(true, Ordering::SeqCst);
+                        }
+                        (false, true)
+                    } else {
+                        (false, false)
+                    }
+                }
+                _ => (false, false),
             }
-            _ => false,
         });
 
-        if result {
+        if update {
             self.0
                 .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
             self.0.force_update();
@@ -335,6 +390,8 @@ impl CosmicStack {
     pub fn handle_move(&self, direction: Direction) -> MoveResult {
         let loop_handle = self.0.loop_handle();
         let result = self.0.with_program(|p| {
+            let prev_idx = p.previous_index.lock().unwrap();
+
             if p.group_focused.load(Ordering::SeqCst) {
                 return MoveResult::Default;
             }
@@ -359,7 +416,13 @@ impl CosmicStack {
                     return MoveResult::Default;
                 }
                 let window = windows.remove(active);
-                if active == windows.len() {
+                if let Some(prev_idx) = prev_idx
+                    .map(|(_, idx)| idx)
+                    .filter(|idx| *idx < windows.len())
+                {
+                    p.active.store(prev_idx, Ordering::SeqCst);
+                    p.scroll_to_focus.store(true, Ordering::SeqCst);
+                } else if active == windows.len() {
                     p.active.store(active - 1, Ordering::SeqCst);
                     p.scroll_to_focus.store(true, Ordering::SeqCst);
                 }

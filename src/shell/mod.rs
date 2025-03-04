@@ -36,7 +36,7 @@ use smithay::{
         },
         Seat,
     },
-    output::Output,
+    output::{Output, WeakOutput},
     reexports::{
         wayland_protocols::ext::{
             session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
@@ -257,6 +257,7 @@ pub struct Shell {
     pub override_redirect_windows: Vec<X11Surface>,
     pub session_lock: Option<SessionLock>,
     pub seats: Seats,
+    pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,
 
     theme: cosmic::Theme,
     pub active_hint: bool,
@@ -1344,6 +1345,7 @@ impl Shell {
             pending_activations: HashMap::new(),
             override_redirect_windows: Vec::new(),
             session_lock: None,
+            previous_workspace_idx: None,
 
             theme,
             active_hint: config.cosmic_conf.active_hint,
@@ -1784,12 +1786,12 @@ impl Shell {
                 let geo = o.geometry();
                 match direction {
                     Direction::Left | Direction::Right => {
-                        !(geo.loc.y + geo.size.h < current_output_geo.loc.y
-                            || geo.loc.y > current_output_geo.loc.y + current_output_geo.size.h)
+                        geo.loc.y < current_output_geo.loc.y + current_output_geo.size.h
+                            && geo.loc.y + geo.size.h > current_output_geo.loc.y
                     }
                     Direction::Up | Direction::Down => {
-                        !(geo.loc.x + geo.size.w < current_output_geo.loc.x
-                            || geo.loc.x > current_output_geo.loc.x + current_output_geo.size.w)
+                        geo.loc.x < current_output_geo.loc.x + current_output_geo.size.w
+                            && geo.loc.x + geo.size.w > current_output_geo.loc.x
                     }
                 }
             })
@@ -2349,7 +2351,7 @@ impl Shell {
             if (focused.is_stack() && !is_dialog && !should_be_fullscreen && !should_be_maximized)
                 && !(workspace.is_tiled(&focused) && floating_exception)
             {
-                focused.stack_ref().unwrap().add_window(window, None);
+                focused.stack_ref().unwrap().add_window(window, None, None);
                 if was_activated {
                     workspace_state.add_workspace_state(&workspace_handle, WState::Urgent);
                 }
@@ -2653,9 +2655,25 @@ impl Shell {
     ) -> Result<Option<(KeyboardFocusTarget, Point<i32, Global>)>, InvalidWorkspaceIndex> {
         let (to_output, to_idx) = to;
         let to_idx = to_idx.unwrap_or(self.workspaces.active_num(to_output).1);
+        let from_idx = self.workspaces.active_num(from_output).1;
 
         if from_output == to_output && to_idx == self.workspaces.active_num(from_output).1 {
             return Ok(None);
+        }
+
+        if from_output == to_output
+            && to_idx.checked_sub(1).is_some_and(|idx| idx == from_idx)
+            && to_idx == self.workspaces.len(to_output) - 1
+            && self
+                .workspaces
+                .get(from_idx, from_output)
+                .is_some_and(|w| w.mapped().count() == 1)
+            && self
+                .workspaces
+                .get(to_idx, to_output)
+                .is_some_and(|w| w.is_empty())
+        {
+            return Err(InvalidWorkspaceIndex);
         }
 
         let to = self
@@ -3176,7 +3194,7 @@ impl Shell {
             return FocusResult::None;
         };
 
-        if focused.handle_focus(direction, None) {
+        if focused.handle_focus(seat, direction, None) {
             return FocusResult::Handled;
         }
 
