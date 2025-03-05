@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use calloop::timer::{TimeoutAction, Timer};
 use smithay::{
     reexports::{
         calloop::{generic::Generic, EventLoop, Interest, Mode, PostAction},
@@ -9,8 +10,15 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
-use state::State;
-use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc};
+use state::{LastRefresh, State};
+use std::{
+    env,
+    ffi::OsString,
+    os::unix::process::CommandExt,
+    process,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{error, info, warn};
 use wayland::protocols::overlap_notify::OverlapNotifyState;
 
@@ -134,10 +142,8 @@ fn main() -> Result<()> {
                 client_compositor_state(&client).blocker_cleared(state, &dh);
             }
         }
-        state.common.refresh();
-        state::Common::refresh_focus(state);
-        OverlapNotifyState::refresh(state);
-        state.common.update_x11_stacking_order();
+
+        refresh(state);
 
         {
             let shell = state.common.shell.read().unwrap();
@@ -229,4 +235,32 @@ fn init_wayland_display(
         .with_context(|| "Failed to init the wayland event source.")?;
 
     Ok((handle, socket_name))
+}
+
+fn refresh(state: &mut State) {
+    if matches!(state.last_refresh, LastRefresh::Scheduled(_)) {
+        return;
+    }
+
+    if matches!(state.last_refresh, LastRefresh::At(instant) if Instant::now().duration_since(instant) < Duration::from_millis(150))
+    {
+        if let Ok(token) = state.common.event_loop_handle.insert_source(
+            Timer::from_duration(Duration::from_millis(150)),
+            |_, _, state| {
+                state.last_refresh = LastRefresh::None;
+                TimeoutAction::Drop
+            },
+        ) {
+            state.last_refresh = LastRefresh::Scheduled(token);
+            return;
+        } else {
+            warn!("Failed to schedule refresh");
+        }
+    }
+
+    state.common.refresh();
+    state::Common::refresh_focus(state);
+    OverlapNotifyState::refresh(state);
+    state.common.update_x11_stacking_order();
+    state.last_refresh = LastRefresh::At(Instant::now());
 }

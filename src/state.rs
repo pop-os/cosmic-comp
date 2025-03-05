@@ -119,7 +119,7 @@ use std::{
     ffi::OsString,
     process::Child,
     sync::{atomic::AtomicBool, Arc, Mutex, Once, RwLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(RustEmbed)]
@@ -172,10 +172,18 @@ pub fn advertised_node_for_surface(w: &WlSurface, dh: &DisplayHandle) -> Option<
 }
 
 #[derive(Debug)]
+pub enum LastRefresh {
+    None,
+    At(Instant),
+    Scheduled(RegistrationToken),
+}
+
+#[derive(Debug)]
 pub struct State {
     pub backend: BackendData,
     pub common: Common,
     pub ready: Once,
+    pub last_refresh: LastRefresh,
 }
 
 #[derive(Debug)]
@@ -655,6 +663,7 @@ impl State {
             },
             backend: BackendData::Unset,
             ready: Once::new(),
+            last_refresh: LastRefresh::None,
         }
     }
 
