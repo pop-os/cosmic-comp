@@ -1,3 +1,7 @@
+a11y-zoom-move-continuously = De vergroting volgt de muis
+a11y-zoom-move-onedge = De vergroting beweegt als de muis de schermrand bereikt
+a11y-zoom-move-centered = De vergroting houdt het muispijltje steeds in het midden
+a11y-zoom-settings = Instellingen voor vergrootglas...
 grow-window = Vergroten
 shrink-window = Verkleinen
 swap-windows = Vensters omwisselen
