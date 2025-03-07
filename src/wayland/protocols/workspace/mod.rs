@@ -288,7 +288,7 @@ where
         );
 
         let cosmic_v2_global = dh.create_global::<D, ZcosmicWorkspaceManagerV2, _>(
-            1,
+            2,
             WorkspaceGlobalData {
                 filter: Box::new(client_filter.clone()),
             },

@@ -306,14 +306,16 @@ pub fn send_workspace_to_client(
         changed = true;
     }
 
-    if handle_state
-        .tiling
-        .map(|state| state != workspace.tiling)
-        .unwrap_or(true)
-    {
-        instance.tiling_state(workspace.tiling);
-        handle_state.tiling = Some(workspace.tiling);
-        changed = true;
+    if instance.version() >= zcosmic_workspace_handle_v2::EVT_STATE_SINCE {
+        if handle_state
+            .tiling
+            .map(|state| state != workspace.tiling)
+            .unwrap_or(true)
+        {
+            instance.tiling_state(workspace.tiling);
+            handle_state.tiling = Some(workspace.tiling);
+            changed = true;
+        }
     }
 
     changed
