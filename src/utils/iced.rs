@@ -842,6 +842,8 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         });
 
         internal.outputs.insert(output.clone());
+        std::mem::drop(internal);
+        self.refresh();
     }
 
     fn output_leave(&self, output: &Output) {
