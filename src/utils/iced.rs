@@ -3,7 +3,6 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     sync::{mpsc::Receiver, Arc, Mutex},
-    time::{Duration, Instant},
 };
 
 use cosmic::{
@@ -155,7 +154,7 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     additional_scale: f64,
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
-    pending_update: Option<Instant>,
+    pending_update: bool,
 
     // state
     size: Size<i32, Logical>,
@@ -293,7 +292,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             additional_scale: 1.0,
             outputs: HashSet::new(),
             buffers: HashMap::new(),
-            pending_update: None,
+            pending_update: false,
             size,
             cursor_pos: None,
             last_seat,
@@ -346,20 +345,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         }
 
         internal_ref.size = size;
-        for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
-            let buffer_size = internal_ref
-                .size
-                .to_f64()
-                .to_buffer(**scale, Transform::Normal)
-                .to_i32_round();
-            *buffer =
-                MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None);
-            *old_primitives = None;
-        }
-
-        if internal_ref.pending_update.is_none() {
-            internal_ref.pending_update = Some(Instant::now());
-        }
+        internal_ref.pending_update = true;
     }
 
     pub fn set_additional_scale(&self, scale: f64) {
@@ -917,16 +903,17 @@ where
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier
         let internal_ref = &mut *internal;
-        let force = if matches!(
-            internal_ref.pending_update,
-            Some(instant) if Instant::now().duration_since(instant) > Duration::from_millis(25)
-        ) {
-            true
-        } else {
-            false
-        };
+        let force = std::mem::replace(&mut internal_ref.pending_update, false);
         if force {
-            internal_ref.pending_update = None;
+            for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
+                let buffer_size = internal_ref
+                    .size
+                    .to_f64()
+                    .to_buffer(**scale, Transform::Normal)
+                    .to_i32_round();
+                buffer.render().resize(buffer_size);
+                *old_primitives = None;
+            }
         }
         let _ = internal_ref.update(force);
 
@@ -1023,7 +1010,7 @@ where
                 });
             }
 
-            if let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
+            match MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location.to_f64(),
                 &buffer,
@@ -1042,7 +1029,10 @@ where
                 ),
                 Kind::Unspecified,
             ) {
-                return vec![C::from(buffer)];
+                Ok(buffer) => {
+                    return vec![C::from(buffer)];
+                }
+                Err(err) => tracing::warn!("What? {:?}", err),
             }
         }
         Vec::new()
