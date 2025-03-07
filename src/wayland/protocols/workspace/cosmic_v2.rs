@@ -14,7 +14,7 @@ use smithay::reexports::{
 use std::sync::Mutex;
 
 use super::{
-    Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceData,
+    Request, State, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceData,
     WorkspaceGlobalData, WorkspaceHandler, WorkspaceState,
 };
 
@@ -22,6 +22,7 @@ use super::{
 pub struct CosmicWorkspaceDataInner {
     capabilities: Option<WorkspaceCapabilities>,
     tiling: Option<zcosmic_workspace_handle_v2::TilingState>,
+    states: Option<State>,
 }
 
 pub struct CosmicWorkspaceData {
@@ -171,6 +172,88 @@ where
                     });
                 }
             }
+            zcosmic_workspace_handle_v2::Request::Pin => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::SetPin {
+                        workspace: workspace_handle,
+                        pinned: true,
+                    });
+                }
+            }
+            zcosmic_workspace_handle_v2::Request::Unpin => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    let mut state = client
+                        .get_data::<<D as WorkspaceHandler>::Client>()
+                        .unwrap()
+                        .workspace_state()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::SetPin {
+                        workspace: workspace_handle,
+                        pinned: false,
+                    });
+                }
+            }
+            zcosmic_workspace_handle_v2::Request::MoveBefore {
+                other_workspace,
+                axis,
+            } => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    if let Some(other_workspace) = state
+                        .workspace_state()
+                        .get_ext_workspace_handle(&other_workspace)
+                    {
+                        let mut state = client
+                            .get_data::<<D as WorkspaceHandler>::Client>()
+                            .unwrap()
+                            .workspace_state()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::MoveBefore {
+                            workspace: workspace_handle,
+                            other_workspace,
+                            axis,
+                        });
+                    }
+                }
+            }
+            zcosmic_workspace_handle_v2::Request::MoveAfter {
+                other_workspace,
+                axis,
+            } => {
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    if let Some(other_workspace) = state
+                        .workspace_state()
+                        .get_ext_workspace_handle(&other_workspace)
+                    {
+                        let mut state = client
+                            .get_data::<<D as WorkspaceHandler>::Client>()
+                            .unwrap()
+                            .workspace_state()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::MoveAfter {
+                            workspace: workspace_handle,
+                            other_workspace,
+                            axis,
+                        });
+                    }
+                }
+            }
             zcosmic_workspace_handle_v2::Request::Destroy => {}
             _ => unreachable!(),
         }
@@ -209,14 +292,30 @@ pub fn send_workspace_to_client(
         changed = true;
     }
 
-    if handle_state
-        .tiling
-        .map(|state| state != workspace.tiling)
-        .unwrap_or(true)
-    {
-        instance.tiling_state(workspace.tiling);
-        handle_state.tiling = Some(workspace.tiling);
+    if handle_state.states != Some(workspace.states) {
+        let states = workspace
+            .states
+            .iter()
+            .filter_map(|state| match state {
+                State::Pinned => Some(zcosmic_workspace_handle_v2::State::Pinned),
+                _ => None,
+            })
+            .collect::<zcosmic_workspace_handle_v2::State>();
+        instance.state(states);
+        handle_state.states = Some(workspace.states.clone());
         changed = true;
+    }
+
+    if instance.version() >= zcosmic_workspace_handle_v2::EVT_STATE_SINCE {
+        if handle_state
+            .tiling
+            .map(|state| state != workspace.tiling)
+            .unwrap_or(true)
+        {
+            instance.tiling_state(workspace.tiling);
+            handle_state.tiling = Some(workspace.tiling);
+            changed = true;
+        }
     }
 
     changed

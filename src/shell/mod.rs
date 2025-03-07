@@ -10,7 +10,10 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
-use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
+use crate::wayland::{
+    handlers::data_device,
+    protocols::workspace::{State as WState, WorkspaceCapabilities},
+};
 use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
     TileBehavior, ZoomConfig, ZoomMovement,
@@ -38,10 +41,7 @@ use smithay::{
     },
     output::{Output, WeakOutput},
     reexports::{
-        wayland_protocols::ext::{
-            session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
-            workspace::v1::server::ext_workspace_handle_v1::State as WState,
-        },
+        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
         wayland_server::{protocol::wl_surface::WlSurface, Client},
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
@@ -577,7 +577,11 @@ impl WorkspaceSet {
 
     fn ensure_last_empty(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
         // add empty at the end, if necessary
-        if self.workspaces.last().map_or(true, |last| !last.is_empty()) {
+        if self
+            .workspaces
+            .last()
+            .map_or(true, |last| !last.is_empty() || last.pinned)
+        {
             self.add_empty_workspace(state);
         }
 
@@ -595,6 +599,7 @@ impl WorkspaceSet {
                     // and the previous worspace is not both active and empty.
                     i == self.active
                         || (i == len - 1 && !(i == self.active + 1 && previous_is_empty))
+                        || workspace.pinned
                 } else {
                     true
                 };
@@ -830,6 +835,77 @@ impl Workspaces {
             workspace.set_output(to);
             workspace.refresh(xdg_activation_state);
             new_set.workspaces.insert(new_set.active + 1, workspace)
+        }
+    }
+
+    // Move a workspace before/after a different workspace
+    pub fn move_workspace(
+        &mut self,
+        handle: &WorkspaceHandle,
+        other_handle: &WorkspaceHandle,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        xdg_activation_state: &XdgActivationState,
+        after: bool,
+    ) {
+        let Some((old_group, mut workspace, was_active)) = self.sets.values_mut().find_map(|set| {
+            set.workspaces
+                .iter()
+                .position(|w| w.handle == *handle)
+                .map(|idx| {
+                    if idx < set.active {
+                        // Decrement `active` so same workspace remains active
+                        set.active -= 1;
+                    }
+                    (set.group, set.workspaces.remove(idx), set.active == idx)
+                })
+        }) else {
+            return;
+        };
+
+        for (output, set) in self.sets.iter_mut() {
+            if let Some(idx) = set
+                .workspaces
+                .iter()
+                .position(|w| w.handle == *other_handle)
+            {
+                if set.group != old_group {
+                    move_workspace_to_group(&mut workspace, &set.group, workspace_state);
+                    workspace.set_output(output);
+                    workspace.refresh(xdg_activation_state);
+                }
+                let insert_idx = if after { idx + 1 } else { idx };
+                if set.group == old_group && was_active {
+                    // Moving active workspace to different position in same group.
+                    // Set `active` to new position of this workspace.
+                    set.active = insert_idx;
+                } else if insert_idx <= set.active {
+                    // Otherwise, make sure active workspace is unchanged.
+                    set.active += 1;
+                }
+                set.workspaces.insert(insert_idx, workspace);
+
+                for (i, workspace) in set.workspaces.iter_mut().enumerate() {
+                    workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
+                }
+
+                if set.group != old_group {
+                    let old_set = self
+                        .sets
+                        .values_mut()
+                        .find(|s| s.group == old_group)
+                        .unwrap();
+                    for (i, workspace) in old_set.workspaces.iter_mut().enumerate() {
+                        workspace_set_idx(
+                            workspace_state,
+                            i as u8 + 1,
+                            old_set.idx,
+                            &workspace.handle,
+                        );
+                    }
+                }
+
+                return;
+            }
         }
     }
 
