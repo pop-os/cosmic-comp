@@ -1107,6 +1107,9 @@ impl Workspace {
     pub fn node_desc(&self, focus: KeyboardFocusTarget) -> Option<NodeDesc> {
         match focus {
             KeyboardFocusTarget::Element(mapped) => {
+                if mapped.is_maximized(false) {
+                    return None;
+                }
                 self.tiling_layer.mapped().find_map(|(m, _)| {
                     if m == &mapped {
                         mapped

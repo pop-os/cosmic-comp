@@ -3160,6 +3160,9 @@ impl TilingLayout {
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                     continue;
                 }
+                if mapped.is_maximized(false) {
+                    continue;
+                }
                 if let Some((target, surface_offset)) = mapped.focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
@@ -3188,6 +3191,9 @@ impl TilingLayout {
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
+                    continue;
+                }
+                if mapped.is_maximized(false) {
                     continue;
                 }
                 if let Some((target, surface_offset)) = mapped.focus_under(
@@ -5045,6 +5051,7 @@ fn render_old_tree(
                     _ => unreachable!(),
                 },
             )
+            .filter(|(mapped, _, _, _)| !mapped.is_maximized(false))
             .filter(|(mapped, _, _, _)| {
                 if let Some(root) = target_tree.root_node_id() {
                     is_swap_mode
@@ -5707,6 +5714,11 @@ fn render_new_tree(
                 (new_geo, percentage, false)
             };
 
+            if let Data::Mapped { mapped, .. } = data {
+                if mapped.is_maximized(false) {
+                    return;
+                }
+            }
             processor(node_id, data, geo, original_geo, alpha, animating)
         });
 }
