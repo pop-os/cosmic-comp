@@ -371,6 +371,7 @@ impl FloatingLayout {
         }
         self.space
             .map_element(mapped, geometry.loc.as_logical(), true);
+        self.space.refresh();
     }
 
     pub(in crate::shell) fn map_internal(
@@ -585,6 +586,7 @@ impl FloatingLayout {
             );
         }
         self.space.map_element(mapped, position.as_logical(), false);
+        self.space.refresh();
     }
 
     pub fn remap_minimized(
@@ -612,6 +614,7 @@ impl FloatingLayout {
         mapped.set_minimized(false);
         self.space
             .map_element(mapped.clone(), position.as_logical(), true);
+        self.space.refresh();
         let target_geometry = self.space.element_geometry(&mapped).unwrap().as_local();
 
         self.animations.insert(
@@ -1062,6 +1065,7 @@ impl FloatingLayout {
                 self.map(window, None);
             }
             self.space.map_element(mapped.clone(), location, false);
+            self.space.refresh();
 
             for elem in new_elements.into_iter().rev() {
                 focus_stack.append(&elem);
