@@ -1576,7 +1576,6 @@ impl FloatingLayout {
                         Key::Window(Usage::FocusIndicator, elem.key()),
                         geometry,
                         indicator_thickness,
-                        output_scale,
                         alpha,
                         [
                             active_window_hint.red,

@@ -125,7 +125,6 @@ impl MoveGrabState {
                     )
                     .as_local(),
                     self.indicator_thickness,
-                    output_scale.x,
                     alpha,
                     [
                         active_window_hint.red,
@@ -159,7 +158,6 @@ impl MoveGrabState {
                         thickness,
                         theme.radius_s()[0] as u8, // TODO: Fix once shaders support 4 corner radii customization
                         1.0,
-                        output_scale.x,
                         [
                             active_window_hint.red,
                             active_window_hint.green,
