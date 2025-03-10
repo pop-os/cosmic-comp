@@ -683,7 +683,7 @@ impl Workspaces {
         // Remove workspaces that prefer this output from other sets
         let mut moved_workspaces = Vec::new();
         for other_set in self.sets.values_mut() {
-            let active_handle = other_set.workspaces[set.active].handle;
+            let active_handle = other_set.workspaces[other_set.active].handle;
             let (prefers, doesnt) = other_set
                 .workspaces
                 .drain(..)
