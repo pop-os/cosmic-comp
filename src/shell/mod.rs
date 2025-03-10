@@ -705,7 +705,12 @@ impl Workspaces {
                 .workspaces
                 .iter()
                 .position(|w| w.handle == active_handle)
-                .unwrap_or(other_set.workspaces.len() - 1);
+                .unwrap_or_else(|| {
+                    let idx = other_set.workspaces.len() - 1;
+                    let workspace = &other_set.workspaces[idx];
+                    workspace_state.add_workspace_state(&workspace.handle, WState::Active);
+                    idx
+                })
         }
 
         // Add `moved_workspaces` to set, and update output and index of workspaces
