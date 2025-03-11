@@ -312,7 +312,7 @@ impl CosmicWindow {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));
@@ -343,7 +343,7 @@ impl CosmicWindow {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));

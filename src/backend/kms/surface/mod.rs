@@ -45,7 +45,7 @@ use smithay::{
             multigpu::{Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, ImportDma, Offscreen, Renderer, Texture,
+            Bind, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
         },
     },
     desktop::utils::OutputPresentationFeedback,
@@ -92,13 +92,6 @@ use super::{drm_helpers, render::gles::GbmGlowBackend};
 
 #[cfg(feature = "debug")]
 use smithay_egui::EguiState;
-
-#[cfg(feature = "debug")]
-static INTEL_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/intel.svg");
-#[cfg(feature = "debug")]
-static AMD_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/amd.svg");
-#[cfg(feature = "debug")]
-static NVIDIA_LOGO: &'static [u8] = include_bytes!("../../../../resources/icons/nvidia.svg");
 
 #[derive(Debug)]
 pub struct Surface {
@@ -740,19 +733,6 @@ impl SurfaceThreadState {
             unsafe { GlowRenderer::new(egl) }.context("Failed to create renderer")?;
         init_shaders(renderer.borrow_mut()).context("Failed to initialize shaders")?;
 
-        #[cfg(feature = "debug")]
-        {
-            self.egui
-                .load_svg(&mut renderer, String::from("intel"), INTEL_LOGO)
-                .unwrap();
-            self.egui
-                .load_svg(&mut renderer, String::from("amd"), AMD_LOGO)
-                .unwrap();
-            self.egui
-                .load_svg(&mut renderer, String::from("nvidia"), NVIDIA_LOGO)
-                .unwrap();
-        }
-
         self.api.as_mut().add_node(node, gbm, renderer);
         /*
         } else {
@@ -1107,10 +1087,11 @@ impl SurfaceThreadState {
             mirroring_state
                 .texture
                 .render()
-                .draw::<_, <GlMultiRenderer as Renderer>::Error>(|tex| {
-                    let res = match mirroring_state.damage_tracker.render_output_with(
+                .draw::<_, <GlMultiRenderer as RendererSuper>::Error>(|tex| {
+                    let mut fb = renderer.bind(tex)?;
+                    let res = match mirroring_state.damage_tracker.render_output(
                         &mut renderer,
-                        tex.clone(),
+                        &mut fb,
                         1,
                         &elements,
                         CLEAR_COLOR,
@@ -1119,8 +1100,8 @@ impl SurfaceThreadState {
                         Err(RenderError::Rendering(err)) => return Err(err),
                         Err(RenderError::OutputNoMode(_)) => unreachable!(),
                     };
-
                     renderer.wait(&res.sync)?;
+                    std::mem::drop(fb);
 
                     let transform = mirrored_output.current_transform();
                     let area = tex.size().to_logical(1, transform);
@@ -1235,34 +1216,39 @@ impl SurfaceThreadState {
 
                             let mut sync = SyncPoint::default();
 
-                            if let Some(ref damage) = damage {
-                                let buffer = frame.buffer();
-                                if let Ok(dmabuf) = get_dmabuf(&buffer) {
-                                    renderer
-                                        .bind(dmabuf.clone())
-                                        .map_err(RenderError::<<GlMultiRenderer as Renderer>::Error>::Rendering)?;
-                                } else {
-                                    let size = buffer_dimensions(&buffer).ok_or(RenderError::<
-                                        <GlMultiRenderer as Renderer>::Error,
-                                    >::Rendering(
-                                        MultiError::ImportFailed,
-                                    ))?;
-                                    let format =
-                                        with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                                            .map_err(|_| OutputNoMode)? // eh, we have to do some error
-                                            .expect("We should be able to convert all hardcoded shm screencopy formats");
-                                    let render_buffer =
-                                        Offscreen::<GlesRenderbuffer>::create_buffer(
-                                            &mut renderer,
-                                            format,
-                                            size,
-                                        )
-                                        .map_err(RenderError::<<GlMultiRenderer as Renderer>::Error>::Rendering)?;
-                                    renderer
-                                        .bind(render_buffer)
-                                        .map_err(RenderError::<<GlMultiRenderer as Renderer>::Error>::Rendering)?;
-                                }
+                            let mut dmabuf_clone;
+                            let mut render_buffer;
+                            let buffer = frame.buffer();
+                            let mut shm_buffer = false;
+                            let mut fb = if let Ok(dmabuf) = get_dmabuf(&buffer) {
+                                dmabuf_clone = dmabuf.clone();
+                                renderer
+                                    .bind(&mut dmabuf_clone)
+                                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?
+                            } else {
+                                shm_buffer = true;
+                                let size = buffer_dimensions(&buffer).ok_or(RenderError::<
+                                    <GlMultiRenderer as RendererSuper>::Error,
+                                >::Rendering(
+                                    MultiError::ImportFailed,
+                                ))?;
+                                let format =
+                                    with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
+                                        .map_err(|_| OutputNoMode)? // eh, we have to do some error
+                                        .expect("We should be able to convert all hardcoded shm screencopy formats");
+                                render_buffer =
+                                    Offscreen::<GlesRenderbuffer>::create_buffer(
+                                        &mut renderer,
+                                        format,
+                                        size,
+                                    )
+                                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
+                                renderer
+                                    .bind(&mut render_buffer)
+                                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?
+                            };
 
+                            if let Some(ref damage) = damage {
                                 let (output_size, output_scale, output_transform) = (
                                     self.output.current_mode().ok_or(OutputNoMode)?.size,
                                     self.output.current_scale().fractional_scale(),
@@ -1292,23 +1278,25 @@ impl SurfaceThreadState {
                                         .to_physical(1);
                                     d
                                 });
+
                                 match frame_result
                                     .blit_frame_result(
                                         output_size,
                                         output_transform,
                                         output_scale,
                                         &mut renderer,
+                                        &mut fb,
                                         adjusted,
                                         filter,
                                     )
                                     .map_err(|err| match err {
                                         BlitFrameResultError::Rendering(err) => RenderError::<
-                                            <GlMultiRenderer as Renderer>::Error,
+                                            <GlMultiRenderer as RendererSuper>::Error,
                                         >::Rendering(
                                             err
                                         ),
                                         BlitFrameResultError::Export(_) => RenderError::<
-                                            <GlMultiRenderer as Renderer>::Error,
+                                            <GlMultiRenderer as RendererSuper>::Error,
                                         >::Rendering(
                                             MultiError::DeviceMissing,
                                         ),
@@ -1329,13 +1317,14 @@ impl SurfaceThreadState {
                                         continue;
                                     }
                                 };
-                            }
+                            };
 
                             let transform = self.output.current_transform();
 
                             match submit_buffer(
                                 frame,
                                 &mut renderer,
+                                shm_buffer.then_some(&mut fb),
                                 transform,
                                 damage.as_deref(),
                                 sync,

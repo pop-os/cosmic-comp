@@ -131,7 +131,7 @@ pub fn draw_surface_cursor<R>(
 ) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: Clone + 'static,
+    R::TextureId: Clone + 'static,
 {
     let position = location.into();
     let scale = scale.into();
@@ -172,7 +172,7 @@ pub fn draw_dnd_icon<R>(
 ) -> Vec<WaylandSurfaceRenderElement<R>>
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: Clone + 'static,
+    R::TextureId: Clone + 'static,
 {
     if get_role(&surface) != Some("dnd_icon") {
         warn!(
@@ -262,7 +262,7 @@ pub fn draw_cursor<R>(
 ) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
 where
     R: Renderer + ImportMem + ImportAll,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
 {
     // draw the cursor as relevant
     // reset the cursor if the surface is no longer alive

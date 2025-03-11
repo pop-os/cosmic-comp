@@ -84,13 +84,14 @@ features = [
   "wayland_frontend",
   "xwayland",
 ]
-version = "0.4"
+git = "https://github.com/smithay/smithay"
+rev = "a503d98"
 
 [dependencies.smithay-egui]
 features = ["svg"]
 git = "https://github.com/Smithay/smithay-egui.git"
 optional = true
-rev = "e9411da"
+rev = "e720136"
 
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
@@ -113,9 +114,6 @@ inherits = "release"
 
 [profile.release]
 lto = "fat"
-
-[patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "f93476c" }
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "e706814" }

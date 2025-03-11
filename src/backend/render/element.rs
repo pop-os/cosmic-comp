@@ -22,7 +22,7 @@ use super::{cursor::CursorRenderElement, GlMultiRenderer};
 pub enum CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     Workspace(
@@ -45,7 +45,7 @@ where
 impl<R> Element for CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn id(&self) -> &Id {
@@ -196,13 +196,13 @@ where
 impl<R> RenderElement<R> for CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn draw(
         &self,
-        frame: &mut R::Frame<'_>,
+        frame: &mut R::Frame<'_, '_>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -286,7 +286,7 @@ impl<R> From<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>
     for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>) -> Self {
@@ -301,7 +301,7 @@ where
 impl<R> From<DamageElement> for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: DamageElement) -> Self {
@@ -312,7 +312,7 @@ where
 impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
@@ -324,7 +324,7 @@ where
 impl<R> From<TextureRenderElement<GlesTexture>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
@@ -338,8 +338,12 @@ where
 {
     fn glow_renderer(&self) -> &GlowRenderer;
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer;
-    fn glow_frame<'a, 'frame>(frame: &'a Self::Frame<'frame>) -> &'a GlowFrame<'frame>;
-    fn glow_frame_mut<'a, 'frame>(frame: &'a mut Self::Frame<'frame>) -> &'a mut GlowFrame<'frame>;
+    fn glow_frame<'a, 'frame, 'buffer>(
+        frame: &'a Self::Frame<'frame, 'buffer>,
+    ) -> &'a GlowFrame<'frame, 'buffer>;
+    fn glow_frame_mut<'a, 'frame, 'buffer>(
+        frame: &'a mut Self::Frame<'frame, 'buffer>,
+    ) -> &'a mut GlowFrame<'frame, 'buffer>;
 }
 
 impl AsGlowRenderer for GlowRenderer {
@@ -349,10 +353,14 @@ impl AsGlowRenderer for GlowRenderer {
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
         self
     }
-    fn glow_frame<'a, 'frame>(frame: &'a Self::Frame<'frame>) -> &'a GlowFrame<'frame> {
+    fn glow_frame<'a, 'frame, 'buffer>(
+        frame: &'a Self::Frame<'frame, 'buffer>,
+    ) -> &'a GlowFrame<'frame, 'buffer> {
         frame
     }
-    fn glow_frame_mut<'a, 'frame>(frame: &'a mut Self::Frame<'frame>) -> &'a mut GlowFrame<'frame> {
+    fn glow_frame_mut<'a, 'frame, 'buffer>(
+        frame: &'a mut Self::Frame<'frame, 'buffer>,
+    ) -> &'a mut GlowFrame<'frame, 'buffer> {
         frame
     }
 }
@@ -364,10 +372,14 @@ impl<'a> AsGlowRenderer for GlMultiRenderer<'a> {
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
         self.as_mut()
     }
-    fn glow_frame<'b, 'frame>(frame: &'b Self::Frame<'frame>) -> &'b GlowFrame<'frame> {
+    fn glow_frame<'b, 'frame, 'buffer>(
+        frame: &'b Self::Frame<'frame, 'buffer>,
+    ) -> &'b GlowFrame<'frame, 'buffer> {
         frame.as_ref()
     }
-    fn glow_frame_mut<'b, 'frame>(frame: &'b mut Self::Frame<'frame>) -> &'b mut GlowFrame<'frame> {
+    fn glow_frame_mut<'b, 'frame, 'buffer>(
+        frame: &'b mut Self::Frame<'frame, 'buffer>,
+    ) -> &'b mut GlowFrame<'frame, 'buffer> {
         frame.as_mut()
     }
 }
@@ -415,12 +427,12 @@ impl Element for DamageElement {
 impl<R: Renderer> RenderElement<R> for DamageElement {
     fn draw(
         &self,
-        _frame: &mut <R as Renderer>::Frame<'_>,
+        _frame: &mut R::Frame<'_, '_>,
         _src: Rectangle<f64, BufferCoords>,
         _dst: Rectangle<i32, Physical>,
         _damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <R as Renderer>::Error> {
+    ) -> Result<(), R::Error> {
         Ok(())
     }
 }

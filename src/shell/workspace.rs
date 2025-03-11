@@ -1160,7 +1160,7 @@ impl Workspace {
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -1363,7 +1363,7 @@ impl Workspace {
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -1521,7 +1521,7 @@ pub struct OutputNotMapped;
 pub enum WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
 {
     OverrideRedirect(WaylandSurfaceRenderElement<R>),
     Fullscreen(RescaleRenderElement<CosmicWindowRenderElement<R>>),
@@ -1533,7 +1533,7 @@ where
 impl<R> Element for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
@@ -1633,12 +1633,12 @@ where
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: 'static,
+    R::Error: FromGlesError,
 {
     fn draw(
         &self,
-        frame: &mut R::Frame<'_>,
+        frame: &mut R::Frame<'_, '_>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
@@ -1688,7 +1688,7 @@ where
 impl<R> From<RescaleRenderElement<CosmicWindowRenderElement<R>>> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: RescaleRenderElement<CosmicWindowRenderElement<R>>) -> Self {
@@ -1699,7 +1699,7 @@ where
 impl<R> From<CosmicWindowRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicWindowRenderElement<R>) -> Self {
@@ -1710,7 +1710,7 @@ where
 impl<R> From<WaylandSurfaceRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: WaylandSurfaceRenderElement<R>) -> Self {
@@ -1721,7 +1721,7 @@ where
 impl<R> From<CosmicMappedRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicMappedRenderElement<R>) -> Self {
@@ -1732,7 +1732,7 @@ where
 impl<R> From<TextureRenderElement<GlesTexture>> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {

@@ -39,7 +39,6 @@ use smithay::{
         allocator::dmabuf::Dmabuf,
         drm::{DrmDeviceFd, DrmNode},
         renderer::{
-            buffer_dimensions,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
@@ -60,11 +59,7 @@ use smithay::{
     input::Seat,
     output::{Output, OutputNoMode},
     utils::{IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Time, Transform},
-    wayland::{
-        dmabuf::get_dmabuf,
-        session_lock::LockSurface,
-        shm::{shm_format_to_fourcc, with_buffer_contents},
-    },
+    wayland::{dmabuf::get_dmabuf, session_lock::LockSurface},
 };
 
 #[cfg(feature = "debug")]
@@ -80,8 +75,8 @@ use super::kms::Timings;
 
 pub type GlMultiRenderer<'a> =
     MultiRenderer<'a, 'a, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
-pub type GlMultiFrame<'a, 'frame> =
-    MultiFrame<'a, 'a, 'frame, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
+pub type GlMultiFrame<'a, 'frame, 'buffer> =
+    MultiFrame<'a, 'a, 'frame, 'buffer, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
 pub type GlMultiError = MultiError<GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
 
 pub enum RendererRef<'a> {
@@ -414,7 +409,7 @@ pub fn cursor_elements<'a, 'frame, R>(
 ) -> Vec<CosmicElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     let scale = output.current_scale().fractional_scale();
@@ -556,8 +551,8 @@ pub fn output_elements<R>(
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
@@ -647,11 +642,11 @@ pub fn workspace_elements<R>(
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
-) -> Result<Vec<CosmicElement<R>>, RenderError<<R as Renderer>::Error>>
+) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
@@ -970,7 +965,7 @@ fn session_lock_elements<R>(
 ) -> Vec<WaylandSurfaceRenderElement<R>>
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: Clone + 'static,
+    R::TextureId: Clone + 'static,
 {
     if let Some(surface) = lock_surface {
         let scale = Scale::from(output.current_scale().fractional_scale());
@@ -988,33 +983,31 @@ where
 }
 
 #[profiling::function]
-pub fn render_output<'d, R, Target, OffTarget>(
+pub fn render_output<'d, R, OffTarget>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
-    target: Target,
+    target: &mut R::Framebuffer<'_>,
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     shell: &Arc<RwLock<Shell>>,
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
-) -> Result<RenderOutputResult<'d>, RenderError<<R as Renderer>::Error>>
+) -> Result<RenderOutputResult<'d>, RenderError<R::Error>>
 where
     R: Renderer
         + ImportAll
         + ImportMem
         + ExportMem
         + Bind<Dmabuf>
-        + Bind<Target>
         + Offscreen<OffTarget>
-        + Blit<Target>
+        + Blit
         + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
-    Target: Clone,
 {
     let shell_ref = shell.read().unwrap();
     let (previous_workspace, workspace) = shell_ref
@@ -1038,7 +1031,7 @@ where
     let result = render_workspace(
         gpu,
         renderer,
-        target.clone(),
+        target,
         damage_tracker,
         age,
         None,
@@ -1055,12 +1048,12 @@ where
     match result {
         Ok((res, mut elements)) => {
             for (session, frame) in output.take_pending_frames() {
-                if let Some((frame, damage)) = render_session(
+                if let Some((frame, damage)) = render_session::<_, _, OffTarget>(
                     renderer,
                     &session.user_data().get::<SessionData>().unwrap(),
                     frame,
                     output.current_transform(),
-                    |buffer, renderer, dt, age, additional_damage| {
+                    |buffer, renderer, offscreen, dt, age, additional_damage| {
                         let old_len = if !additional_damage.is_empty() {
                             let area = output
                                 .current_mode()
@@ -1104,29 +1097,23 @@ where
 
                         if let (Some(ref damage), _) = &res {
                             if let Ok(dmabuf) = get_dmabuf(buffer) {
-                                renderer
-                                    .bind(dmabuf.clone())
+                                let mut dmabuf_clone = dmabuf.clone();
+                                let mut fb = renderer
+                                    .bind(&mut dmabuf_clone)
                                     .map_err(RenderError::Rendering)?;
+                                for rect in damage.iter() {
+                                    renderer
+                                        .blit(target, &mut fb, *rect, *rect, TextureFilter::Nearest)
+                                        .map_err(RenderError::Rendering)?;
+                                }
                             } else {
-                                let size = buffer_dimensions(buffer).unwrap();
-                                let format = with_buffer_contents(buffer, |_, _, data| {
-                                    shm_format_to_fourcc(data.format)
-                                })
-                                .map_err(|_| OutputNoMode)? // eh, we have to do some error
-                                .expect(
-                                    "We should be able to convert all hardcoded shm screencopy formats",
-                                );
-                                let render_buffer = renderer
-                                    .create_buffer(format, size)
-                                    .map_err(RenderError::Rendering)?;
-                                renderer
-                                    .bind(render_buffer)
-                                    .map_err(RenderError::Rendering)?;
-                            }
-                            for rect in damage.iter() {
-                                renderer
-                                    .blit_from(target.clone(), *rect, *rect, TextureFilter::Nearest)
-                                    .map_err(RenderError::Rendering)?;
+                                let fb =
+                                    offscreen.expect("shm buffers should have offscreen target");
+                                for rect in damage.iter() {
+                                    renderer
+                                        .blit(target, fb, *rect, *rect, TextureFilter::Nearest)
+                                        .map_err(RenderError::Rendering)?;
+                                }
                             }
                         }
 
@@ -1148,10 +1135,10 @@ where
 }
 
 #[profiling::function]
-pub fn render_workspace<'d, R, Target, OffTarget>(
+pub fn render_workspace<'d, R>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
-    target: Target,
+    target: &mut R::Framebuffer<'_>,
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
@@ -1163,18 +1150,11 @@ pub fn render_workspace<'d, R, Target, OffTarget>(
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
-) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<<R as Renderer>::Error>>
+) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R::Error>>
 where
-    R: Renderer
-        + ImportAll
-        + ImportMem
-        + ExportMem
-        + Bind<Dmabuf>
-        + Bind<Target>
-        + Offscreen<OffTarget>
-        + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + AsGlowRenderer,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
@@ -1203,9 +1183,9 @@ where
         );
     }
 
-    renderer.bind(target).map_err(RenderError::Rendering)?;
     let res = damage_tracker.render_output(
         renderer,
+        target,
         age,
         &elements,
         CLEAR_COLOR, // TODO use a theme neutral color

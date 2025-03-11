@@ -11,7 +11,7 @@ use smithay::backend::{
         gles::GlesError,
         glow::GlowRenderer,
         multigpu::{ApiDevice, Error as MultiError, GraphicsApi},
-        Renderer,
+        RendererSuper,
     },
     SwapBuffersError,
 };
@@ -182,7 +182,7 @@ impl ApiDevice for GbmGlowDevice {
 impl<T: GraphicsApi, A: AsFd + Clone + 'static> FromGlesError for MultiError<GbmGlowBackend<A>, T>
 where
     T::Error: 'static,
-    <<T::Device as ApiDevice>::Renderer as Renderer>::Error: 'static,
+    <<T::Device as ApiDevice>::Renderer as RendererSuper>::Error: 'static,
 {
     #[inline]
     fn from_gles_error(err: GlesError) -> MultiError<GbmGlowBackend<A>, T> {
