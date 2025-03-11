@@ -20,7 +20,7 @@ use super::{
 
 #[derive(Default)]
 pub struct CosmicWorkspaceV2DataInner {
-    capabilities: Option<WorkspaceCapabilities>,
+    capabilities: Option<zcosmic_workspace_handle_v2::WorkspaceCapabilities>,
     tiling: Option<zcosmic_workspace_handle_v2::TilingState>,
 }
 
@@ -190,22 +190,22 @@ pub fn send_workspace_to_client(
         .lock()
         .unwrap();
 
-    if handle_state.capabilities != Some(workspace.capabilities) {
-        let caps = workspace
-            .capabilities
-            .iter()
-            .filter_map(|cap| match cap {
-                WorkspaceCapabilities::Rename => {
-                    Some(zcosmic_workspace_handle_v2::WorkspaceCapabilities::Rename)
-                }
-                WorkspaceCapabilities::SetTilingState => {
-                    Some(zcosmic_workspace_handle_v2::WorkspaceCapabilities::SetTilingState)
-                }
-                _ => None,
-            })
-            .collect::<zcosmic_workspace_handle_v2::WorkspaceCapabilities>();
-        instance.capabilities(caps);
-        handle_state.capabilities = Some(workspace.capabilities);
+    let capabilities = workspace
+        .capabilities
+        .iter()
+        .filter_map(|cap| match cap {
+            WorkspaceCapabilities::Rename => {
+                Some(zcosmic_workspace_handle_v2::WorkspaceCapabilities::Rename)
+            }
+            WorkspaceCapabilities::SetTilingState => {
+                Some(zcosmic_workspace_handle_v2::WorkspaceCapabilities::SetTilingState)
+            }
+            _ => None,
+        })
+        .collect::<zcosmic_workspace_handle_v2::WorkspaceCapabilities>();
+    if handle_state.capabilities != Some(capabilities) {
+        instance.capabilities(capabilities);
+        handle_state.capabilities = Some(capabilities);
         changed = true;
     }
 
