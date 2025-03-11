@@ -23,7 +23,7 @@ use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
 #[derive(Default)]
 pub struct WorkspaceDataInner {
     name: String,
-    capabilities: Option<WorkspaceCapabilities>,
+    capabilities: Option<ext_workspace_handle_v1::WorkspaceCapabilities>,
     coordinates: Vec<u32>,
     states: Option<ext_workspace_handle_v1::State>,
     pub(super) cosmic_v2_handle: Option<Weak<ZcosmicWorkspaceHandleV2>>,
@@ -416,6 +416,7 @@ where
         handle_state.name = workspace.name.clone();
         changed = true;
     }
+
     if handle_state.coordinates != workspace.coordinates {
         let coords = workspace
             .coordinates
@@ -426,30 +427,32 @@ where
         handle_state.coordinates = workspace.coordinates.clone();
         changed = true;
     }
-    if handle_state.capabilities != Some(workspace.capabilities) {
-        let caps = workspace
-            .capabilities
-            .iter()
-            .filter_map(|cap| match cap {
-                WorkspaceCapabilities::Activate => {
-                    Some(ext_workspace_handle_v1::WorkspaceCapabilities::Activate)
-                }
-                WorkspaceCapabilities::Deactivate => {
-                    Some(ext_workspace_handle_v1::WorkspaceCapabilities::Deactivate)
-                }
-                WorkspaceCapabilities::Remove => {
-                    Some(ext_workspace_handle_v1::WorkspaceCapabilities::Remove)
-                }
-                WorkspaceCapabilities::Assign => {
-                    Some(ext_workspace_handle_v1::WorkspaceCapabilities::Assign)
-                }
-                _ => None,
-            })
-            .collect::<ext_workspace_handle_v1::WorkspaceCapabilities>();
-        instance.capabilities(caps);
-        handle_state.capabilities = Some(workspace.capabilities.clone());
+
+    let capabilities = workspace
+        .capabilities
+        .iter()
+        .filter_map(|cap| match cap {
+            WorkspaceCapabilities::Activate => {
+                Some(ext_workspace_handle_v1::WorkspaceCapabilities::Activate)
+            }
+            WorkspaceCapabilities::Deactivate => {
+                Some(ext_workspace_handle_v1::WorkspaceCapabilities::Deactivate)
+            }
+            WorkspaceCapabilities::Remove => {
+                Some(ext_workspace_handle_v1::WorkspaceCapabilities::Remove)
+            }
+            WorkspaceCapabilities::Assign => {
+                Some(ext_workspace_handle_v1::WorkspaceCapabilities::Assign)
+            }
+            _ => None,
+        })
+        .collect::<ext_workspace_handle_v1::WorkspaceCapabilities>();
+    if handle_state.capabilities != Some(capabilities) {
+        instance.capabilities(capabilities);
+        handle_state.capabilities = Some(capabilities);
         changed = true;
     }
+
     if handle_state.states != Some(workspace.states) {
         instance.state(workspace.states);
         handle_state.states = Some(workspace.states.clone());
