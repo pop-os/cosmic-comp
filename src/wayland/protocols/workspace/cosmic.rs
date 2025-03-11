@@ -8,9 +8,11 @@ use smithay::{
     },
 };
 
+use std::sync::Mutex;
+
 use super::{
     GroupCapabilities, Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler,
-    WorkspaceData, WorkspaceGlobalData, WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle,
+    WorkspaceGlobalData, WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle,
     WorkspaceHandler, WorkspaceState,
 };
 
@@ -23,12 +25,23 @@ use cosmic_protocols::workspace::{
     v2::server::zcosmic_workspace_handle_v2,
 };
 
+#[derive(Default)]
+pub struct CosmicWorkspaceV1DataInner {
+    name: String,
+    capabilities: Option<WorkspaceCapabilities>,
+    coordinates: Vec<u32>,
+    states: Option<ext_workspace_handle_v1::State>,
+    tiling: Option<zcosmic_workspace_handle_v2::TilingState>,
+}
+
+pub type CosmicWorkspaceV1Data = Mutex<CosmicWorkspaceV1DataInner>;
+
 impl<D> GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -60,7 +73,7 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -113,7 +126,7 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -169,12 +182,12 @@ where
     }
 }
 
-impl<D> Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData, D> for WorkspaceState<D>
+impl<D> Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data, D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -184,7 +197,7 @@ where
         client: &Client,
         obj: &ZcosmicWorkspaceHandleV1,
         request: zcosmic_workspace_handle_v1::Request,
-        _data: &WorkspaceData,
+        _data: &CosmicWorkspaceV1Data,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
@@ -278,7 +291,7 @@ where
         state: &mut D,
         _client: ClientId,
         resource: &ZcosmicWorkspaceHandleV1,
-        _data: &WorkspaceData,
+        _data: &CosmicWorkspaceV1Data,
     ) {
         for group in &mut state.workspace_state_mut().groups {
             for workspace in &mut group.workspaces {
@@ -297,7 +310,7 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -391,7 +404,7 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -403,7 +416,7 @@ where
                 if let Ok(handle) = client.create_resource::<ZcosmicWorkspaceHandleV1, _, D>(
                     dh,
                     group.version(),
-                    WorkspaceData::default(),
+                    CosmicWorkspaceV1Data::default(),
                 ) {
                     group.workspace(&handle);
                     workspace.instances.push((mngr.downgrade(), handle));
@@ -417,7 +430,11 @@ where
         }
     };
 
-    let mut handle_state = instance.data::<WorkspaceData>().unwrap().lock().unwrap();
+    let mut handle_state = instance
+        .data::<CosmicWorkspaceV1Data>()
+        .unwrap()
+        .lock()
+        .unwrap();
     let mut changed = false;
 
     if handle_state.name != workspace.name {
