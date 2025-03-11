@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::collections::HashMap;
-
 use crate::{
     backend::kms::Timings,
     shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget, PointerFocusToplevel},
     State,
 };
-use egui::{load::SizedTexture, Color32, Vec2};
+use egui::Color32;
 use smithay::{
     backend::{
         drm::DrmNode,
@@ -97,33 +95,6 @@ pub fn fps_ui<'a>(
         })
         .unzip();
 
-    let vendors = HashMap::from([
-        (
-            "0x10de",
-            state
-                .with_image(renderer, "nvidia", |image, ctx| {
-                    (image.texture_id(ctx), image.size_vec2())
-                })
-                .expect("Logo images not loaded?"),
-        ),
-        (
-            "0x1002",
-            state
-                .with_image(renderer, "amd", |image, ctx| {
-                    (image.texture_id(ctx), image.size_vec2())
-                })
-                .expect("Logo images not loaded?"),
-        ),
-        (
-            "0x8086",
-            state
-                .with_image(renderer, "intel", |image, ctx| {
-                    (image.texture_id(ctx), image.size_vec2())
-                })
-                .expect("Logo images not loaded?"),
-        ),
-    ]);
-
     state.render(
         |ctx| {
             egui::Area::new("main".into())
@@ -152,11 +123,21 @@ pub fn fps_ui<'a>(
                                     "/sys/class/drm/renderD{}/device/vendor",
                                     gpu.minor()
                                 )) {
-                                    if let Some((texture_id, mut size)) = vendors.get(vendor.trim())
-                                    {
-                                        let factor = resp.rect.height() / size.y;
-                                        size = Vec2::from([size.x * factor, resp.rect.height()]);
-                                        ui.image(SizedTexture::new(*texture_id, size));
+                                    if let Some(img) = match vendor.trim() {
+                                        "0x10de" => Some(egui::include_image!(
+                                            "../resources/icons/nvidia.svg"
+                                        )),
+                                        "0x1002" => {
+                                            Some(egui::include_image!("../resources/icons/amd.svg"))
+                                        }
+                                        "0x8086" => Some(egui::include_image!(
+                                            "../resources/icons/intel.svg"
+                                        )),
+                                        _ => None,
+                                    } {
+                                        ui.add(
+                                            egui::Image::new(img).max_height(resp.rect.height()),
+                                        );
                                     }
                                 }
                             });

@@ -3565,7 +3565,7 @@ impl TilingLayout {
 
                         let third_width = (last_geometry.size.w as f64 / 3.0).round() as i32;
                         let third_height = (last_geometry.size.h as f64 / 3.0).round() as i32;
-                        let stack_region = Rectangle::from_extemities(
+                        let stack_region = Rectangle::from_extremities(
                             (
                                 last_geometry.loc.x + third_width,
                                 last_geometry.loc.y + third_height,
@@ -3942,7 +3942,7 @@ impl TilingLayout {
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -4102,7 +4102,7 @@ impl TilingLayout {
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -4276,7 +4276,7 @@ fn geometries_for_groupview<'a, R>(
 )
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer + 'a,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
 {
@@ -4906,7 +4906,7 @@ fn render_old_tree_popups<R>(
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -4949,7 +4949,7 @@ fn render_old_tree_windows<R>(
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5115,7 +5115,7 @@ fn render_new_tree_popups<R>(
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5181,7 +5181,7 @@ fn render_new_tree_windows<R>(
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,

@@ -47,16 +47,15 @@ pub struct WinitState {
 impl WinitState {
     #[profiling::function]
     pub fn render_output(&mut self, state: &mut Common) -> Result<()> {
-        self.backend
+        let age = self.backend.buffer_age().unwrap_or(0);
+        let (renderer, mut fb) = self
+            .backend
             .bind()
             .with_context(|| "Failed to bind buffer")?;
-        let age = self.backend.buffer_age().unwrap_or(0);
-
-        let surface = self.backend.egl_surface();
-        match render::render_output::<_, _, GlesRenderbuffer>(
+        match render::render_output::<_, GlesRenderbuffer>(
             None,
-            self.backend.renderer(),
-            surface.clone(),
+            renderer,
+            &mut fb,
             &mut self.damage_tracker,
             age,
             &state.shell,
@@ -65,9 +64,7 @@ impl WinitState {
             CursorMode::NotDefault,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
-                self.backend
-                    .bind()
-                    .with_context(|| "Failed to bind display")?;
+                std::mem::drop(fb);
                 self.backend
                     .submit(damage.map(|x| x.as_slice()))
                     .with_context(|| "Failed to submit buffer for display")?;

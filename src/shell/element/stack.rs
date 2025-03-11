@@ -618,7 +618,7 @@ impl CosmicStack {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         C: From<CosmicStackRenderElement<R>>,
     {
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
@@ -645,7 +645,7 @@ impl CosmicStack {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         C: From<CosmicStackRenderElement<R>>,
     {
         let offset = self

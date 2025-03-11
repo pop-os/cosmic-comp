@@ -170,7 +170,7 @@ impl OutputZoomState {
     where
         C: From<<IcedElement<ZoomProgram> as AsRenderElements<R>>::RenderElement>,
         R: Renderer + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
     {
         let size = self.element.current_size().to_f64();
         let output_geo = output.geometry().to_f64();
@@ -372,7 +372,7 @@ impl ZoomState {
     where
         C: From<<IcedElement<ZoomProgram> as AsRenderElements<R>>::RenderElement>,
         R: Renderer + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
     {
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
         output_state.lock().unwrap().render(renderer, output)

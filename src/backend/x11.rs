@@ -202,14 +202,17 @@ pub struct Surface {
 
 impl Surface {
     pub fn render_output(&mut self, renderer: &mut GlowRenderer, state: &mut Common) -> Result<()> {
-        let (buffer, age) = self
+        let (mut buffer, age) = self
             .surface
             .buffer()
             .with_context(|| "Failed to allocate buffer")?;
-        match render::render_output::<_, _, GlesRenderbuffer>(
+        let mut fb = renderer
+            .bind(&mut buffer)
+            .with_context(|| "Failed to bind dmabuf")?;
+        match render::render_output::<_, GlesRenderbuffer>(
             None,
             renderer,
-            buffer.clone(),
+            &mut fb,
             &mut self.damage_tracker,
             age as usize,
             &state.shell,
