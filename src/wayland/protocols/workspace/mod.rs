@@ -32,9 +32,11 @@ use cosmic_protocols::workspace::{
 };
 
 mod cosmic;
+pub use cosmic::CosmicWorkspaceV1Data;
 mod cosmic_v2;
-pub use cosmic_v2::CosmicWorkspaceData;
+pub use cosmic_v2::CosmicWorkspaceV2Data;
 mod ext;
+pub use ext::WorkspaceData;
 
 pub use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::GroupCapabilities;
 
@@ -59,14 +61,14 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -85,7 +87,7 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static;
@@ -155,31 +157,19 @@ pub struct WorkspaceHandle {
     id: usize,
 }
 
-#[derive(Default)]
-pub struct WorkspaceDataInner {
-    name: String,
-    capabilities: Option<WorkspaceCapabilities>,
-    coordinates: Vec<u32>,
-    states: Option<ext_workspace_handle_v1::State>,
-    tiling: Option<zcosmic_workspace_handle_v2::TilingState>,
-    cosmic_v2_handle: Option<Weak<ZcosmicWorkspaceHandleV2>>,
-}
-
-pub type WorkspaceData = Mutex<WorkspaceDataInner>;
-
 pub trait WorkspaceHandler
 where
     Self: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
         + Sized
         + 'static,
 {
@@ -232,14 +222,14 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -501,13 +491,13 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -763,14 +753,14 @@ where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV1, ()>
         + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, WorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
         + GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -792,7 +782,7 @@ macro_rules! delegate_workspace {
             cosmic_protocols::workspace::v1::server::zcosmic_workspace_group_handle_v1::ZcosmicWorkspaceGroupHandleV1: $crate::wayland::protocols::workspace::WorkspaceGroupData
         ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::ZcosmicWorkspaceHandleV1: $crate::wayland::protocols::workspace::WorkspaceData
+            cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::ZcosmicWorkspaceHandleV1: $crate::wayland::protocols::workspace::CosmicWorkspaceV1Data
         ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
 
         smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
@@ -815,7 +805,7 @@ macro_rules! delegate_workspace {
             cosmic_protocols::workspace::v2::server::zcosmic_workspace_manager_v2::ZcosmicWorkspaceManagerV2: ()
         ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::ZcosmicWorkspaceHandleV2: $crate::wayland::protocols::workspace::CosmicWorkspaceData
+            cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::ZcosmicWorkspaceHandleV2: $crate::wayland::protocols::workspace::CosmicWorkspaceV2Data
         ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
     };
 }

@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::ZcosmicWorkspaceHandleV2;
+
 use smithay::reexports::wayland_server::{
     backend::{ClientData, ClientId},
-    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
 };
 
+use std::sync::Mutex;
+
 use super::{
-    Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceData,
-    WorkspaceGlobalData, WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle,
-    WorkspaceHandler, WorkspaceState,
+    Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceGlobalData,
+    WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle, WorkspaceHandler, WorkspaceState,
 };
 
 use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
@@ -16,6 +19,17 @@ use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
     ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
     ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
 };
+
+#[derive(Default)]
+pub struct WorkspaceDataInner {
+    name: String,
+    capabilities: Option<WorkspaceCapabilities>,
+    coordinates: Vec<u32>,
+    states: Option<ext_workspace_handle_v1::State>,
+    pub(super) cosmic_v2_handle: Option<Weak<ZcosmicWorkspaceHandleV2>>,
+}
+
+pub type WorkspaceData = Mutex<WorkspaceDataInner>;
 
 impl<D> GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
 where

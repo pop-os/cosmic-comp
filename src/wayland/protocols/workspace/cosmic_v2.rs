@@ -19,21 +19,21 @@ use super::{
 };
 
 #[derive(Default)]
-pub struct CosmicWorkspaceDataInner {
+pub struct CosmicWorkspaceV2DataInner {
     capabilities: Option<WorkspaceCapabilities>,
     tiling: Option<zcosmic_workspace_handle_v2::TilingState>,
 }
 
-pub struct CosmicWorkspaceData {
+pub struct CosmicWorkspaceV2Data {
     workspace: Weak<ExtWorkspaceHandleV1>,
-    inner: Mutex<CosmicWorkspaceDataInner>,
+    inner: Mutex<CosmicWorkspaceV2DataInner>,
 }
 
 impl<D> GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData, D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -58,7 +58,7 @@ impl<D> Dispatch<ZcosmicWorkspaceManagerV2, (), D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -79,9 +79,9 @@ where
             } => {
                 let cosmic_workspace = data_init.init(
                     cosmic_workspace,
-                    CosmicWorkspaceData {
+                    CosmicWorkspaceV2Data {
                         workspace: workspace.downgrade(),
-                        inner: Mutex::new(CosmicWorkspaceDataInner::default()),
+                        inner: Mutex::new(CosmicWorkspaceV2DataInner::default()),
                     },
                 );
                 if let Some(data) = workspace.data::<WorkspaceData>() {
@@ -115,11 +115,11 @@ where
     }
 }
 
-impl<D> Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData, D> for WorkspaceState<D>
+impl<D> Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data, D> for WorkspaceState<D>
 where
     D: GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
         + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceData>
+        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
         + WorkspaceHandler
         + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
@@ -129,7 +129,7 @@ where
         client: &Client,
         _obj: &ZcosmicWorkspaceHandleV2,
         request: zcosmic_workspace_handle_v2::Request,
-        data: &CosmicWorkspaceData,
+        data: &CosmicWorkspaceV2Data,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
@@ -184,7 +184,7 @@ pub fn send_workspace_to_client(
     let mut changed = false;
 
     let mut handle_state = instance
-        .data::<CosmicWorkspaceData>()
+        .data::<CosmicWorkspaceV2Data>()
         .unwrap()
         .inner
         .lock()
