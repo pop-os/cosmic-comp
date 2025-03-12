@@ -154,7 +154,7 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     additional_scale: f64,
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
-    pending_update: bool,
+    pending_realloc: bool,
 
     // state
     size: Size<i32, Logical>,
@@ -207,7 +207,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             additional_scale: self.additional_scale,
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
-            pending_update: self.pending_update.clone(),
+            pending_realloc: self.pending_realloc.clone(),
             size: self.size.clone(),
             last_seat: self.last_seat.clone(),
             cursor_pos: self.cursor_pos.clone(),
@@ -234,7 +234,7 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
             )
             .field("buffers", &"...")
             .field("size", &self.size)
-            .field("pending_update", &self.pending_update)
+            .field("pending_realloc", &self.pending_realloc)
             .field("last_seat", &self.last_seat)
             .field("cursor_pos", &self.cursor_pos)
             .field("touch_map", &self.touch_map)
@@ -292,7 +292,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             additional_scale: 1.0,
             outputs: HashSet::new(),
             buffers: HashMap::new(),
-            pending_update: false,
+            pending_realloc: false,
             size,
             cursor_pos: None,
             last_seat,
@@ -306,7 +306,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             executor_token,
             rx,
         };
-        let _ = internal.update(true);
+        internal.update(true);
 
         IcedElement(Arc::new(Mutex::new(internal)))
     }
@@ -345,7 +345,8 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         }
 
         internal_ref.size = size;
-        internal_ref.pending_update = true;
+        internal_ref.pending_realloc = true;
+        internal_ref.update(true);
     }
 
     pub fn set_additional_scale(&self, scale: f64) {
@@ -404,14 +405,14 @@ impl<P: Program + Send + 'static + Clone> IcedElement<P> {
 
 impl<P: Program + Send + 'static> IcedElementInternal<P> {
     #[profiling::function]
-    fn update(&mut self, mut force: bool) -> Vec<Task<<P as Program>::Message>> {
+    fn update(&mut self, mut force: bool) {
         while let Ok(Some(message)) = self.rx.try_recv() {
             self.state.queue_message(message);
             force = true;
         }
 
         if !force {
-            return Vec::new();
+            return;
         }
 
         let cursor = self
@@ -446,7 +447,6 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
                 }));
             }
         }
-        Vec::new()
     }
 }
 
@@ -469,7 +469,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         // TODO: Update iced widgets to handle touch using event position, not cursor_pos
         internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-        let _ = internal.update(true);
+        internal.update(true);
     }
 
     fn motion(
@@ -486,7 +486,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-        let _ = internal.update(true);
+        internal.update(true);
     }
 
     fn relative_motion(
@@ -515,7 +515,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             ButtonState::Released => MouseEvent::ButtonReleased(button),
         }));
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-        let _ = internal.update(true);
+        internal.update(true);
     }
 
     fn axis(
@@ -540,7 +540,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
                     }
                 },
             }));
-        let _ = internal.update(true);
+        internal.update(true);
     }
 
     fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) {}
@@ -556,7 +556,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));
-        let _ = internal.update(true);
+        internal.update(true);
     }
 
     fn gesture_swipe_begin(
@@ -903,8 +903,7 @@ where
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier
         let internal_ref = &mut *internal;
-        let force = std::mem::replace(&mut internal_ref.pending_update, false);
-        if force {
+        if std::mem::replace(&mut internal_ref.pending_realloc, false) {
             for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
                 let buffer_size = internal_ref
                     .size
@@ -915,7 +914,6 @@ where
                 *old_primitives = None;
             }
         }
-        let _ = internal_ref.update(force);
 
         scale = scale * internal_ref.additional_scale;
         if let Some((buffer, ref mut old_layers)) =
