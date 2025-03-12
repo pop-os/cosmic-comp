@@ -2092,14 +2092,24 @@ impl State {
                         }
                     }
                     Stage::SessionLock(lock_surface) => {
-                        return ControlFlow::Break(Ok(lock_surface.map(|surface| {
-                            (
-                                PointerFocusTarget::WlSurface {
-                                    surface: surface.wl_surface().clone(),
-                                    toplevel: None,
-                                },
-                                output_geo.loc.to_f64(),
-                            )
+                        return ControlFlow::Break(Ok(lock_surface.and_then(|surface| {
+                            let location = output_geo.loc;
+                            if let Some((surface, surface_loc)) = under_from_surface_tree(
+                                surface.wl_surface(),
+                                global_pos.as_logical(),
+                                location.as_logical(),
+                                WindowSurfaceType::ALL,
+                            ) {
+                                Some((
+                                    PointerFocusTarget::WlSurface {
+                                        surface,
+                                        toplevel: None,
+                                    },
+                                    surface_loc.as_global().to_f64(),
+                                ))
+                            } else {
+                                None
+                            }
                         })));
                     }
                     Stage::LayerPopup {
