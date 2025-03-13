@@ -705,7 +705,6 @@ impl CosmicStack {
                             true,
                             &state.common.config,
                             &state.common.event_loop_handle,
-                            &state.common.xdg_activation_state,
                             false,
                         );
                         if let Some((grab, focus)) = res {
@@ -848,7 +847,6 @@ impl Program for CosmicStackInternal {
                                 false,
                                 &state.common.config,
                                 &state.common.event_loop_handle,
-                                &state.common.xdg_activation_state,
                                 false,
                             );
                             if let Some((grab, focus)) = res {
@@ -1493,7 +1491,6 @@ impl PointerTarget<State> for CosmicStack {
                             true,
                             &state.common.config,
                             &state.common.event_loop_handle,
-                            &state.common.xdg_activation_state,
                             false,
                         );
                         if let Some((grab, focus)) = res {

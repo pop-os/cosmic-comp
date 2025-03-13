@@ -993,7 +993,6 @@ impl State {
 
         let output = shell.seats.last_active().active_output();
         let workspace = shell.active_space_mut(&output).unwrap();
-        workspace.pending_tokens.insert(token.clone());
         let handle = workspace.handle;
         std::mem::drop(shell);
         data.user_data

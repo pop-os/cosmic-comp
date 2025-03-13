@@ -256,7 +256,6 @@ pub fn window_items(
                         false,
                         &state.common.config,
                         &state.common.event_loop_handle,
-                        &state.common.xdg_activation_state,
                         false,
                     );
 

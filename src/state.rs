@@ -361,11 +361,7 @@ impl BackendData {
             });
 
             match final_config.enabled {
-                OutputState::Enabled => {
-                    shell
-                        .workspaces
-                        .add_output(&output, workspace_state, xdg_activation_state)
-                }
+                OutputState::Enabled => shell.workspaces.add_output(&output, workspace_state),
                 _ => {
                     let shell = &mut *shell;
                     shell.workspaces.remove_output(

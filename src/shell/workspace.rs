@@ -1,3 +1,4 @@
+use crate::wayland::handlers::xdg_activation::ActivationContext;
 use crate::{
     backend::render::{
         element::{AsGlowRenderer, FromGlesError},
@@ -42,11 +43,11 @@ use smithay::{
     wayland::{
         compositor::{add_blocker, Blocker, BlockerState},
         seat::WaylandFocus,
-        xdg_activation::{XdgActivationState, XdgActivationToken},
+        xdg_activation::XdgActivationState,
     },
 };
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -85,7 +86,6 @@ pub struct Workspace {
     pub focus_stack: FocusStacks,
     pub screencopy: ScreencopySessions,
     pub output_stack: VecDeque<String>,
-    pub pending_tokens: HashSet<XdgActivationToken>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
 }
@@ -258,14 +258,13 @@ impl Workspace {
                 queue.push_back(output_name);
                 queue
             },
-            pending_tokens: HashSet::new(),
             backdrop_id: Id::new(),
             dirty: AtomicBool::new(false),
         }
     }
 
     #[profiling::function]
-    pub fn refresh(&mut self, xdg_activation_state: &XdgActivationState) {
+    pub fn refresh(&mut self) {
         // TODO: `Option::take_if` once stabilitized
         if self.fullscreen.as_ref().is_some_and(|w| !w.alive()) {
             let _ = self.fullscreen.take();
@@ -273,9 +272,25 @@ impl Workspace {
 
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
+    }
 
-        self.pending_tokens
-            .retain(|token| xdg_activation_state.data_for_token(token).is_some());
+    fn has_activation_token(&self, xdg_activation_state: &XdgActivationState) -> bool {
+        xdg_activation_state.tokens().any(|(_, data)| {
+            if let ActivationContext::Workspace(handle) =
+                data.user_data.get::<ActivationContext>().unwrap()
+            {
+                *handle == self.handle
+                    && data.timestamp.elapsed() < super::ACTIVATION_TOKEN_EXPIRE_TIME
+            } else {
+                false
+            }
+        })
+    }
+
+    // Auto-removal of workspaces is allowed if empty, unless blocked by an
+    // unused and unexpired activation token.
+    pub fn can_auto_remove(&self, xdg_activation_state: &XdgActivationState) -> bool {
+        self.is_empty() && !self.has_activation_token(xdg_activation_state)
     }
 
     pub fn refresh_focus_stack(&mut self) {
@@ -1071,7 +1086,6 @@ impl Workspace {
         self.floating_layer.mapped().next().is_none()
             && self.tiling_layer.mapped().next().is_none()
             && self.minimized_windows.is_empty()
-            && self.pending_tokens.is_empty()
     }
 
     pub fn is_fullscreen(&self, mapped: &CosmicMapped) -> bool {

@@ -430,7 +430,7 @@ impl XwmHandler for State {
             shell.outputs().cloned().collect::<Vec<_>>()
         };
         for output in outputs.iter() {
-            shell.refresh_active_space(output, &self.common.xdg_activation_state);
+            shell.refresh_active_space(output);
         }
 
         for output in outputs.into_iter() {
@@ -593,7 +593,6 @@ impl XwmHandler for State {
                 false,
                 &self.common.config,
                 &self.common.event_loop_handle,
-                &self.common.xdg_activation_state,
                 true,
             ) {
                 std::mem::drop(shell);

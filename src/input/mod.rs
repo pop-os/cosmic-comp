@@ -725,7 +725,6 @@ impl State {
                                                             false,
                                                             &state.common.config,
                                                             &state.common.event_loop_handle,
-                                                            &state.common.xdg_activation_state,
                                                             false,
                                                         );
                                                         drop(shell);
