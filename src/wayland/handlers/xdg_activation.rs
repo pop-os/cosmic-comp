@@ -45,7 +45,6 @@ impl XdgActivationHandler for State {
                 let output = seat.active_output();
                 let mut shell = self.common.shell.write().unwrap();
                 let workspace = shell.active_space_mut(&output).unwrap();
-                workspace.pending_tokens.insert(token.clone());
                 let handle = workspace.handle;
                 data.user_data
                     .insert_if_missing(move || ActivationContext::Workspace(handle));
@@ -89,7 +88,6 @@ impl XdgActivationHandler for State {
             let output = seat.active_output();
             let mut shell = self.common.shell.write().unwrap();
             let workspace = shell.active_space_mut(&output).unwrap();
-            workspace.pending_tokens.insert(token.clone());
             let handle = workspace.handle;
             data.user_data
                 .insert_if_missing(move || ActivationContext::Workspace(handle));

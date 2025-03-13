@@ -110,6 +110,7 @@ const GESTURE_MAX_LENGTH: f64 = 150.0;
 const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
 const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
 const MOVE_GRAB_Y_OFFSET: f64 = 16.;
+const ACTIVATION_TOKEN_EXPIRE_TIME: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub enum Trigger {
@@ -532,7 +533,7 @@ impl WorkspaceSet {
         self.output = new_output.clone();
     }
 
-    fn refresh(&mut self, xdg_activation_state: &XdgActivationState) {
+    fn refresh(&mut self) {
         if let Some((_, start)) = self.previously_active {
             match start {
                 WorkspaceDelta::Shortcut(st) => {
@@ -551,7 +552,7 @@ impl WorkspaceSet {
                 _ => {}
             }
         } else {
-            self.workspaces[self.active].refresh(xdg_activation_state);
+            self.workspaces[self.active].refresh();
         }
         self.sticky_layer.refresh();
     }
@@ -575,7 +576,11 @@ impl WorkspaceSet {
         self.workspaces.push(workspace);
     }
 
-    fn ensure_last_empty(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
+    fn ensure_last_empty(
+        &mut self,
+        state: &mut WorkspaceUpdateGuard<State>,
+        xdg_activation_state: &XdgActivationState,
+    ) {
         // add empty at the end, if necessary
         if self.workspaces.last().map_or(true, |last| !last.is_empty()) {
             self.add_empty_workspace(state);
@@ -590,7 +595,7 @@ impl WorkspaceSet {
             .map(|(i, workspace)| {
                 let previous_is_empty =
                     i > 0 && self.workspaces.get(i - 1).map_or(false, |w| w.is_empty());
-                let keep = if workspace.is_empty() {
+                let keep = if workspace.can_auto_remove(xdg_activation_state) {
                     // Keep empty workspace if it's active, or it's the last workspace,
                     // and the previous worspace is not both active and empty.
                     i == self.active
@@ -656,7 +661,6 @@ impl Workspaces {
         &mut self,
         output: &Output,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-        xdg_activation_state: &XdgActivationState,
     ) {
         if self.sets.contains_key(output) {
             return;
@@ -723,7 +727,7 @@ impl Workspaces {
         }
         for (i, workspace) in set.workspaces.iter_mut().enumerate() {
             workspace.set_output(output);
-            workspace.refresh(xdg_activation_state);
+            workspace.refresh();
             workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
             if i == set.active {
                 workspace_state.add_workspace_state(&workspace.handle, WState::Active);
@@ -768,7 +772,7 @@ impl Workspaces {
                 let new_set = self.sets.get_mut(&new_output).unwrap();
                 let workspace_group = new_set.group;
                 for (i, mut workspace) in set.workspaces.into_iter().enumerate() {
-                    if workspace.is_empty() {
+                    if workspace.can_auto_remove(xdg_activation_state) {
                         workspace_state.remove_workspace(workspace.handle);
                     } else {
                         // update workspace protocol state
@@ -776,7 +780,7 @@ impl Workspaces {
 
                         // update mapping
                         workspace.set_output(&new_output);
-                        workspace.refresh(xdg_activation_state);
+                        workspace.refresh();
                         new_set.workspaces.push(workspace);
 
                         // If workspace was active, and the new set's active workspace is empty, make this workspace
@@ -835,7 +839,6 @@ impl Workspaces {
         to: &Output,
         handle: &WorkspaceHandle,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-        xdg_activation_state: &XdgActivationState,
     ) {
         if !self.sets.contains_key(to) {
             return;
@@ -848,7 +851,7 @@ impl Workspaces {
             let new_set = self.sets.get_mut(to).unwrap();
             move_workspace_to_group(&mut workspace, &new_set.group, workspace_state);
             workspace.set_output(to);
-            workspace.refresh(xdg_activation_state);
+            workspace.refresh();
             new_set.workspaces.insert(new_set.active + 1, workspace)
         }
     }
@@ -970,7 +973,10 @@ impl Workspaces {
                 let mut active = self.sets[0].active;
                 let mut keep = vec![true; len];
                 for i in 0..len {
-                    let has_windows = self.sets.values().any(|s| !s.workspaces[i].is_empty());
+                    let has_windows = self
+                        .sets
+                        .values()
+                        .any(|s| !s.workspaces[i].can_auto_remove(xdg_activation_state));
 
                     if !has_windows && i != active && i != len - 1 {
                         for workspace in self.sets.values().map(|s| &s.workspaces[i]) {
@@ -1004,13 +1010,13 @@ impl Workspaces {
             }
             WorkspaceMode::OutputBound => {
                 for set in self.sets.values_mut() {
-                    set.ensure_last_empty(workspace_state);
+                    set.ensure_last_empty(workspace_state, xdg_activation_state);
                 }
             }
         }
 
         for set in self.sets.values_mut() {
-            set.refresh(xdg_activation_state)
+            set.refresh()
         }
     }
 
@@ -1098,7 +1104,7 @@ impl Workspaces {
         )
     }
 
-    pub fn set_theme(&mut self, theme: cosmic::Theme, xdg_activation_state: &XdgActivationState) {
+    pub fn set_theme(&mut self, theme: cosmic::Theme) {
         for (_, s) in &mut self.sets {
             s.theme = theme.clone();
 
@@ -1117,10 +1123,10 @@ impl Workspaces {
             }
         }
 
-        self.force_redraw(xdg_activation_state);
+        self.force_redraw();
     }
 
-    pub fn force_redraw(&mut self, xdg_activation_state: &XdgActivationState) {
+    pub fn force_redraw(&mut self) {
         for (_, s) in &mut self.sets {
             s.sticky_layer.mapped().for_each(|m| {
                 m.force_redraw();
@@ -1132,7 +1138,7 @@ impl Workspaces {
                     m.force_redraw();
                 });
 
-                w.refresh(xdg_activation_state);
+                w.refresh();
                 w.dirty.store(true, Ordering::Relaxed);
                 w.recalculate();
             }
@@ -1189,11 +1195,9 @@ pub struct InvalidWorkspaceIndex;
 impl Common {
     pub fn add_output(&mut self, output: &Output) {
         let mut shell = self.shell.write().unwrap();
-        shell.workspaces.add_output(
-            output,
-            &mut self.workspace_state.update(),
-            &self.xdg_activation_state,
-        );
+        shell
+            .workspaces
+            .add_output(output, &mut self.workspace_state.update());
 
         if let Some(state) = shell.zoom_state.as_ref() {
             output.user_data().insert_if_missing_threadsafe(|| {
@@ -1233,13 +1237,9 @@ impl Common {
         }
 
         let mut shell = self.shell.write().unwrap();
-        shell.workspaces.migrate_workspace(
-            from,
-            to,
-            handle,
-            &mut self.workspace_state.update(),
-            &self.xdg_activation_state,
-        );
+        shell
+            .workspaces
+            .migrate_workspace(from, to, handle, &mut self.workspace_state.update());
 
         std::mem::drop(shell);
         self.refresh(); // fixes index of moved workspace
@@ -1273,9 +1273,8 @@ impl Common {
 
     #[profiling::function]
     pub fn refresh(&mut self) {
-        self.xdg_activation_state.retain_tokens(|_, data| {
-            Instant::now().duration_since(data.timestamp) < Duration::from_secs(5)
-        });
+        self.xdg_activation_state
+            .retain_tokens(|_, data| data.timestamp.elapsed() < ACTIVATION_TOKEN_EXPIRE_TIME);
         self.shell.write().unwrap().refresh(
             &self.xdg_activation_state,
             &mut self.workspace_state.update(),
@@ -1658,13 +1657,9 @@ impl Shell {
         }
     }
 
-    pub fn refresh_active_space(
-        &mut self,
-        output: &Output,
-        xdg_activation_state: &XdgActivationState,
-    ) {
+    pub fn refresh_active_space(&mut self, output: &Output) {
         if let Some(w) = self.workspaces.active_mut(output) {
-            w.refresh(xdg_activation_state)
+            w.refresh()
         }
     }
 
@@ -2919,7 +2914,6 @@ impl Shell {
         move_out_of_stack: bool,
         config: &Config,
         evlh: &LoopHandle<'static, State>,
-        xdg_activation_state: &XdgActivationState,
         client_initiated: bool,
     ) -> Option<(MoveGrab, Focus)> {
         let serial = serial.into();
@@ -3094,7 +3088,7 @@ impl Shell {
             self.workspaces
                 .space_for_handle_mut(&workspace_handle)
                 .unwrap()
-                .refresh(xdg_activation_state);
+                .refresh();
         }
 
         mapped.set_activate(true);
@@ -3931,7 +3925,7 @@ impl Shell {
             *container = toolkit;
             drop(container);
             self.refresh(xdg_activation_state, workspace_state);
-            self.workspaces.force_redraw(xdg_activation_state);
+            self.workspaces.force_redraw();
         }
     }
 
@@ -3943,8 +3937,7 @@ impl Shell {
     ) {
         self.theme = theme.clone();
         self.refresh(xdg_activation_state, workspace_state);
-        self.workspaces
-            .set_theme(theme.clone(), xdg_activation_state);
+        self.workspaces.set_theme(theme.clone());
     }
 
     pub fn theme(&self) -> &cosmic::Theme {

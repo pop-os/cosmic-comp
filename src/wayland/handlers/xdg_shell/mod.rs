@@ -174,7 +174,6 @@ impl XdgShellHandler for State {
             false,
             &self.common.config,
             &self.common.event_loop_handle,
-            &self.common.xdg_activation_state,
             true,
         ) {
             std::mem::drop(shell);
@@ -421,7 +420,7 @@ impl XdgShellHandler for State {
                 .visible_output_for_surface(surface.wl_surface())
                 .cloned();
             if let Some(output) = output.as_ref() {
-                shell.refresh_active_space(output, &self.common.xdg_activation_state);
+                shell.refresh_active_space(output);
             }
 
             // animations might be unblocked now
