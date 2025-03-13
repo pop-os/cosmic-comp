@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::{output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
-    config::{AdaptiveSync, OutputConfig, OutputState},
+    config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState},
     shell::Shell,
     utils::prelude::*,
     wayland::protocols::screencopy::Frame as ScreencopyFrame,
@@ -739,7 +739,7 @@ fn create_output_for_conn(drm: &mut DrmDevice, conn: connector::Handle) -> Resul
         .ok();
     let (phys_w, phys_h) = conn_info.size().unwrap_or((0, 0));
 
-    Ok(Output::new(
+    let output = Output::new(
         interface,
         PhysicalProperties {
             size: (phys_w as i32, phys_h as i32).into(),
@@ -760,7 +760,13 @@ fn create_output_for_conn(drm: &mut DrmDevice, conn: connector::Handle) -> Resul
                 .and_then(|info| info.model())
                 .unwrap_or_else(|| String::from("Unknown")),
         },
-    ))
+    );
+    if let Some(edid) = edid_info.as_ref().and_then(|x| x.edid()) {
+        output
+            .user_data()
+            .insert_if_missing(|| EdidProduct::from(edid.vendor_product()));
+    }
+    Ok(output)
 }
 
 fn populate_modes(
