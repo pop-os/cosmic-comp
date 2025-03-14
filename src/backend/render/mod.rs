@@ -739,7 +739,7 @@ where
         )
     };
 
-    render_input_order(
+    render_input_order::<()>(
         &*shell,
         output,
         previous,
