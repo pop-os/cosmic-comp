@@ -331,7 +331,6 @@ pub struct WorkspaceSet {
     previously_active: Option<(usize, WorkspaceDelta)>,
     pub active: usize,
     pub group: WorkspaceGroupHandle,
-    idx: usize,
     tiling_enabled: bool,
     output: Output,
     theme: cosmic::Theme,
@@ -437,7 +436,6 @@ impl WorkspaceSet {
     fn new(
         state: &mut WorkspaceUpdateGuard<'_, State>,
         output: &Output,
-        idx: usize,
         tiling_enabled: bool,
         theme: cosmic::Theme,
     ) -> WorkspaceSet {
@@ -448,7 +446,6 @@ impl WorkspaceSet {
             previously_active: None,
             active: 0,
             group: group_handle,
-            idx,
             tiling_enabled,
             theme,
             sticky_layer,
@@ -569,7 +566,6 @@ impl WorkspaceSet {
         workspace_set_idx(
             state,
             self.workspaces.len() as u8 + 1,
-            self.idx,
             &workspace.handle,
             // this method is only used by code paths related to dynamic workspaces, so this should be fine
         );
@@ -619,17 +615,61 @@ impl WorkspaceSet {
             .count();
 
         if kept.iter().any(|val| *val == false) {
-            for (i, workspace) in self.workspaces.iter().enumerate() {
-                workspace_set_idx(state, i as u8 + 1, self.idx, &workspace.handle);
-            }
+            self.update_workspace_idxs(state);
         }
     }
 
-    fn update_idx(&mut self, state: &mut WorkspaceUpdateGuard<'_, State>, idx: usize) {
-        self.idx = idx;
+    fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
         for (i, workspace) in self.workspaces.iter().enumerate() {
-            workspace_set_idx(state, i as u8 + 1, idx, &workspace.handle);
+            workspace_set_idx(state, i as u8 + 1, &workspace.handle);
         }
+    }
+
+    fn post_remove_workspace(
+        &mut self,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        previous_active_handle: &WorkspaceHandle,
+    ) {
+        if self.workspaces.is_empty() {
+            self.add_empty_workspace(workspace_state);
+        }
+        self.update_workspace_idxs(workspace_state);
+        self.active = self
+            .workspaces
+            .iter()
+            .position(|w| w.handle == *previous_active_handle)
+            .unwrap_or_else(|| {
+                let idx = self.workspaces.len() - 1;
+                let workspace = &self.workspaces[idx];
+                workspace_state.add_workspace_state(&workspace.handle, WState::Active);
+                idx
+            });
+    }
+
+    // Remove a workspace from the set, and return it, for adding to a different workspace
+    fn remove_workspace(
+        &mut self,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        handle: &WorkspaceHandle,
+    ) -> Option<Workspace> {
+        let previous_active_handle = self.workspaces[self.active].handle;
+        let idx = self.workspaces.iter().position(|w| w.handle == *handle)?;
+        let workspace = self.workspaces.remove(idx);
+        self.post_remove_workspace(workspace_state, &previous_active_handle);
+        Some(workspace)
+    }
+
+    // Remove all workspaces matched by the callback from the set
+    fn remove_workspaces(
+        &mut self,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        cb: impl Fn(&Workspace) -> bool,
+    ) -> Vec<Workspace> {
+        let previous_active_handle = self.workspaces[self.active].handle;
+        let (prefers, doesnt) = self.workspaces.drain(..).partition(cb);
+        self.workspaces = doesnt;
+        self.post_remove_workspace(workspace_state, &previous_active_handle);
+        prefers
     }
 }
 
@@ -674,48 +714,18 @@ impl Workspaces {
                 set
             })
             .unwrap_or_else(|| {
-                WorkspaceSet::new(
-                    workspace_state,
-                    &output,
-                    self.sets.len(),
-                    self.autotile,
-                    self.theme.clone(),
-                )
+                WorkspaceSet::new(workspace_state, &output, self.autotile, self.theme.clone())
             });
         workspace_state.add_group_output(&set.group, &output);
 
         // Remove workspaces that prefer this output from other sets
-        let mut moved_workspaces = Vec::new();
-        for other_set in self.sets.values_mut() {
-            let active_handle = other_set.workspaces[other_set.active].handle;
-            let (prefers, doesnt) = other_set
-                .workspaces
-                .drain(..)
-                .partition(|w| w.prefers_output(output));
-            moved_workspaces.extend(prefers);
-            other_set.workspaces = doesnt;
-            if other_set.workspaces.is_empty() {
-                other_set.add_empty_workspace(workspace_state);
-            }
-            for (i, workspace) in other_set.workspaces.iter_mut().enumerate() {
-                workspace_set_idx(
-                    workspace_state,
-                    i as u8 + 1,
-                    other_set.idx,
-                    &workspace.handle,
-                );
-            }
-            other_set.active = other_set
-                .workspaces
-                .iter()
-                .position(|w| w.handle == active_handle)
-                .unwrap_or_else(|| {
-                    let idx = other_set.workspaces.len() - 1;
-                    let workspace = &other_set.workspaces[idx];
-                    workspace_state.add_workspace_state(&workspace.handle, WState::Active);
-                    idx
-                })
-        }
+        let mut moved_workspaces = self
+            .sets
+            .values_mut()
+            .flat_map(|other_set| {
+                other_set.remove_workspaces(workspace_state, |w| w.prefers_output(output))
+            })
+            .collect::<Vec<_>>();
 
         // Add `moved_workspaces` to set, and update output and index of workspaces
         for workspace in &mut moved_workspaces {
@@ -725,10 +735,10 @@ impl Workspaces {
         if set.workspaces.is_empty() {
             set.add_empty_workspace(workspace_state);
         }
+        set.update_workspace_idxs(workspace_state);
         for (i, workspace) in set.workspaces.iter_mut().enumerate() {
             workspace.set_output(output);
             workspace.refresh();
-            workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
             if i == set.active {
                 workspace_state.add_workspace_state(&workspace.handle, WState::Active);
             }
@@ -820,10 +830,6 @@ impl Workspaces {
                 } else {
                     workspace_state.remove_group_output(&workspace_group, output);
                 }
-
-                for (i, set) in self.sets.values_mut().enumerate() {
-                    set.update_idx(workspace_state, i);
-                }
             } else {
                 workspace_state.remove_group_output(&set.group, output);
                 self.backup_set = Some(set);
@@ -844,15 +850,17 @@ impl Workspaces {
             return;
         }
 
-        if let Some(mut workspace) = self.sets.get_mut(from).and_then(|set| {
-            let pos = set.workspaces.iter().position(|w| &w.handle == handle)?;
-            Some(set.workspaces.remove(pos))
-        }) {
+        if let Some(mut workspace) = self
+            .sets
+            .get_mut(from)
+            .and_then(|set| set.remove_workspace(workspace_state, handle))
+        {
             let new_set = self.sets.get_mut(to).unwrap();
             move_workspace_to_group(&mut workspace, &new_set.group, workspace_state);
             workspace.set_output(to);
             workspace.refresh();
-            new_set.workspaces.insert(new_set.active + 1, workspace)
+            new_set.workspaces.insert(new_set.active + 1, workspace);
+            new_set.update_workspace_idxs(workspace_state);
         }
     }
 
@@ -916,10 +924,6 @@ impl Workspaces {
                         }
                         // Otherwise we are fine
                     }
-                }
-                // fixup indices
-                for (i, set) in self.sets.values_mut().enumerate() {
-                    set.update_idx(workspace_state, i);
                 }
             }
             _ => {}
@@ -997,14 +1001,7 @@ impl Workspaces {
 
                 if keep.iter().any(|val| *val == false) {
                     for set in self.sets.values_mut() {
-                        for (i, workspace) in set.workspaces.iter().enumerate() {
-                            workspace_set_idx(
-                                workspace_state,
-                                i as u8 + 1,
-                                set.idx,
-                                &workspace.handle,
-                            );
-                        }
+                        set.update_workspace_idxs(workspace_state);
                     }
                 }
             }
@@ -1242,7 +1239,6 @@ impl Common {
             .migrate_workspace(from, to, handle, &mut self.workspace_state.update());
 
         std::mem::drop(shell);
-        self.refresh(); // fixes index of moved workspace
     }
 
     pub fn update_config(&mut self) {
@@ -4019,11 +4015,10 @@ impl Shell {
 fn workspace_set_idx(
     state: &mut WorkspaceUpdateGuard<'_, State>,
     idx: u8,
-    output_pos: usize,
     handle: &WorkspaceHandle,
 ) {
     state.set_workspace_name(handle, format!("{}", idx));
-    state.set_workspace_coordinates(handle, [Some(idx as u32), Some(output_pos as u32), None]);
+    state.set_workspace_coordinates(handle, &[idx as u32]);
 }
 
 pub fn check_grab_preconditions(

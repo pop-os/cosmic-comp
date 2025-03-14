@@ -669,22 +669,14 @@ where
         self.0.workspace_coordinates(workspace)
     }
 
-    pub fn set_workspace_coordinates(
-        &mut self,
-        workspace: &WorkspaceHandle,
-        coords: [Option<u32>; 3],
-    ) {
+    pub fn set_workspace_coordinates(&mut self, workspace: &WorkspaceHandle, coords: &[u32]) {
         if let Some(workspace) = self
             .0
             .groups
             .iter_mut()
             .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
         {
-            workspace.coordinates = coords
-                .iter()
-                .flat_map(std::convert::identity)
-                .copied()
-                .collect();
+            workspace.coordinates = coords.to_vec();
         }
     }
 
