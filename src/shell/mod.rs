@@ -876,66 +876,58 @@ impl Workspaces {
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         after: bool,
     ) {
-        let Some((old_group, mut workspace, was_active)) = self.sets.values_mut().find_map(|set| {
-            set.workspaces
-                .iter()
-                .position(|w| w.handle == *handle)
-                .map(|idx| {
-                    if idx < set.active {
-                        // Decrement `active` so same workspace remains active
-                        set.active -= 1;
-                    }
-                    (set.group, set.workspaces.remove(idx), set.active == idx)
-                })
-        }) else {
+        let (Some(old_output), Some(new_output)) = (
+            self.space_for_handle(handle).map(|w| w.output.clone()),
+            self.space_for_handle(other_handle)
+                .map(|w| w.output.clone()),
+        ) else {
             return;
         };
 
-        for (output, set) in self.sets.iter_mut() {
-            if let Some(idx) = set
+        // Check which workspace is active on the new set; before removing from the
+        // old set in cause we're moving an active workspace within the same set.
+        let new_set = &mut self.sets[&new_output];
+        let previous_active_handle = new_set.workspaces[new_set.active].handle;
+
+        // Remove workspace from old set
+        let old_set = &mut self.sets[&old_output];
+        let mut workspace = if new_output != old_output {
+            old_set.remove_workspace(workspace_state, handle).unwrap()
+        } else {
+            // If set is the same, just remove it here without adding empty workspace,
+            // updating `active`, etc.
+            let idx = old_set
                 .workspaces
                 .iter()
-                .position(|w| w.handle == *other_handle)
-            {
-                if set.group != old_group {
-                    move_workspace_to_group(&mut workspace, &set.group, workspace_state);
-                    workspace.set_output(output);
-                    workspace.refresh();
-                }
-                let insert_idx = if after { idx + 1 } else { idx };
-                if set.group == old_group && was_active {
-                    // Moving active workspace to different position in same group.
-                    // Set `active` to new position of this workspace.
-                    set.active = insert_idx;
-                } else if insert_idx <= set.active {
-                    // Otherwise, make sure active workspace is unchanged.
-                    set.active += 1;
-                }
-                set.workspaces.insert(insert_idx, workspace);
+                .position(|w| w.handle == *handle)
+                .unwrap();
+            old_set.workspaces.remove(idx)
+        };
 
-                for (i, workspace) in set.workspaces.iter_mut().enumerate() {
-                    workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
-                }
+        let new_set = &mut self.sets[&new_output];
 
-                if set.group != old_group {
-                    let old_set = self
-                        .sets
-                        .values_mut()
-                        .find(|s| s.group == old_group)
-                        .unwrap();
-                    for (i, workspace) in old_set.workspaces.iter_mut().enumerate() {
-                        workspace_set_idx(
-                            workspace_state,
-                            i as u8 + 1,
-                            old_set.idx,
-                            &workspace.handle,
-                        );
-                    }
-                }
-
-                return;
-            }
+        if new_output != old_output {
+            move_workspace_to_group(&mut workspace, &new_set.group, workspace_state);
+            workspace.set_output(&new_output);
+            workspace.refresh();
         }
+
+        // Insert workspace into new set, relative to `other_handle`
+        let idx = new_set
+            .workspaces
+            .iter()
+            .position(|w| w.handle == *other_handle)
+            .unwrap();
+        let insert_idx = if after { idx + 1 } else { idx };
+        new_set.workspaces.insert(insert_idx, workspace);
+
+        new_set.active = new_set
+            .workspaces
+            .iter()
+            .position(|w| w.handle == previous_active_handle)
+            .unwrap();
+
+        new_set.update_workspace_idxs(workspace_state);
     }
 
     pub fn update_config(
