@@ -7,7 +7,7 @@ use crate::{
         winit::WinitState,
         x11::X11State,
     },
-    config::{Config, OutputConfig, OutputState},
+    config::{Config, OutputConfig, OutputState, ScreenFilter},
     input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
@@ -308,6 +308,7 @@ impl BackendData {
         &mut self,
         test_only: bool,
         loop_handle: &LoopHandle<'static, State>,
+        screen_filter: &ScreenFilter,
         shell: Arc<RwLock<Shell>>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
@@ -318,6 +319,7 @@ impl BackendData {
             BackendData::Kms(ref mut state) => state.apply_config_for_outputs(
                 test_only,
                 loop_handle,
+                screen_filter,
                 shell.clone(),
                 startup_done,
                 clock,
@@ -453,6 +455,15 @@ impl BackendData {
             BackendData::Winit(winit) => Ok(RendererRef::Glow(winit.backend.renderer())),
             BackendData::X11(x11) => Ok(RendererRef::Glow(&mut x11.renderer)),
             _ => unreachable!("No backend set when getting offscreen renderer"),
+        }
+    }
+
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> anyhow::Result<()> {
+        match self {
+            BackendData::Kms(ref mut state) => state.update_screen_filter(screen_filter),
+            BackendData::Winit(ref mut state) => state.update_screen_filter(screen_filter),
+            BackendData::X11(ref mut state) => state.update_screen_filter(screen_filter),
+            _ => unreachable!("No backend set when setting screen filters"),
         }
     }
 }

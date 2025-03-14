@@ -46,8 +46,8 @@ use smithay::{
                 AsRenderElements, Element, Id, Kind, RenderElement,
             },
             gles::{
-                element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
-                UniformName, UniformType,
+                element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer,
+                GlesTexProgram, Uniform, UniformName, UniformType,
             },
             glow::GlowRenderer,
             multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
@@ -105,6 +105,7 @@ impl<'a> AsMut<GlowRenderer> for RendererRef<'a> {
 pub static CLEAR_COLOR: Color32F = Color32F::new(0.153, 0.161, 0.165, 1.0);
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
+pub static POSTPROCESS_SHADER: &str = include_str!("./shaders/offscreen.frag");
 pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
 pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
 
@@ -346,11 +347,14 @@ impl BackdropShader {
     }
 }
 
+pub struct PostprocessShader(pub GlesTexProgram);
+
 pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     {
         let egl_context = renderer.egl_context();
         if egl_context.user_data().get::<IndicatorShader>().is_some()
             && egl_context.user_data().get::<BackdropShader>().is_some()
+            && egl_context.user_data().get::<PostprocessShader>().is_some()
         {
             return Ok(());
         }
@@ -371,6 +375,13 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("radius", UniformType::_1f),
         ],
     )?;
+    let postprocess_shader = renderer.compile_custom_texture_shader(
+        POSTPROCESS_SHADER,
+        &[
+            UniformName::new("invert", UniformType::_1f),
+            UniformName::new("color_mode", UniformType::_1f),
+        ],
+    )?;
 
     let egl_context = renderer.egl_context();
     egl_context
@@ -379,6 +390,9 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     egl_context
         .user_data()
         .insert_if_missing(|| BackdropShader(rectangle_shader));
+    egl_context
+        .user_data()
+        .insert_if_missing(|| PostprocessShader(postprocess_shader));
 
     Ok(())
 }

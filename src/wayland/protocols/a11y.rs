@@ -2,14 +2,16 @@
 
 use cosmic_protocols::a11y::v1::server::cosmic_a11y_manager_v1;
 use smithay::reexports::wayland_server::{
-    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New,
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
 };
-use wayland_backend::server::GlobalId;
+use wayland_backend::{protocol::WEnum, server::GlobalId};
 
 pub trait A11yHandler {
     fn a11y_state(&mut self) -> &mut A11yState;
 
     fn request_screen_magnifier(&mut self, enabled: bool);
+    fn request_screen_invert(&mut self, inverted: bool);
+    fn request_screen_filter(&mut self, filter: Option<ColorFilter>);
 }
 
 #[derive(Debug)]
@@ -18,6 +20,39 @@ pub struct A11yState {
     instances: Vec<cosmic_a11y_manager_v1::CosmicA11yManagerV1>,
 
     magnifier_state: bool,
+    screen_inverted: bool,
+    screen_filter: Option<ColorFilter>,
+}
+
+struct Unknown;
+
+fn protocol_to_color_filter(
+    protocol: WEnum<cosmic_a11y_manager_v1::Filter>,
+) -> Result<Option<ColorFilter>, Unknown> {
+    match protocol {
+        WEnum::Value(cosmic_a11y_manager_v1::Filter::Disabled) => Ok(None),
+        WEnum::Value(cosmic_a11y_manager_v1::Filter::Greyscale) => Ok(Some(ColorFilter::Greyscale)),
+        WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeProtanopia) => {
+            Ok(Some(ColorFilter::Protanopia))
+        }
+        WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeDeuteranopia) => {
+            Ok(Some(ColorFilter::Deuteranopia))
+        }
+        WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeTritanopia) => {
+            Ok(Some(ColorFilter::Tritanopia))
+        }
+        WEnum::Unknown(_) | WEnum::Value(_) => Err(Unknown),
+    }
+}
+
+fn color_filter_to_protocol(filter: Option<ColorFilter>) -> cosmic_a11y_manager_v1::Filter {
+    match filter {
+        None => cosmic_a11y_manager_v1::Filter::Disabled,
+        Some(ColorFilter::Greyscale) => cosmic_a11y_manager_v1::Filter::Greyscale,
+        Some(ColorFilter::Protanopia) => cosmic_a11y_manager_v1::Filter::DaltonizeProtanopia,
+        Some(ColorFilter::Deuteranopia) => cosmic_a11y_manager_v1::Filter::DaltonizeDeuteranopia,
+        Some(ColorFilter::Tritanopia) => cosmic_a11y_manager_v1::Filter::DaltonizeTritanopia,
+    }
 }
 
 impl A11yState {
@@ -27,7 +62,7 @@ impl A11yState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, cosmic_a11y_manager_v1::CosmicA11yManagerV1, _>(
-            1,
+            2,
             A11yGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -37,6 +72,8 @@ impl A11yState {
             instances: Vec::new(),
 
             magnifier_state: false,
+            screen_inverted: false,
+            screen_filter: None,
         }
     }
 
@@ -53,6 +90,31 @@ impl A11yState {
             } else {
                 cosmic_a11y_manager_v1::ActiveState::Disabled
             });
+        }
+    }
+
+    pub fn set_screen_inverted(&mut self, enabled: bool) {
+        self.screen_inverted = enabled;
+        self.send_screen_filter();
+    }
+
+    pub fn set_screen_filter(&mut self, state: Option<ColorFilter>) {
+        self.screen_filter = state;
+        self.send_screen_filter();
+    }
+
+    fn send_screen_filter(&self) {
+        for instance in &self.instances {
+            if instance.version() >= cosmic_a11y_manager_v1::EVT_SCREEN_FILTER_SINCE {
+                instance.screen_filter(
+                    if self.screen_inverted {
+                        cosmic_a11y_manager_v1::ActiveState::Enabled
+                    } else {
+                        cosmic_a11y_manager_v1::ActiveState::Disabled
+                    },
+                    color_filter_to_protocol(self.screen_filter),
+                );
+            }
         }
     }
 }
@@ -85,6 +147,17 @@ where
             cosmic_a11y_manager_v1::ActiveState::Disabled
         });
 
+        if instance.version() >= cosmic_a11y_manager_v1::EVT_SCREEN_FILTER_SINCE {
+            instance.screen_filter(
+                if state.screen_inverted {
+                    cosmic_a11y_manager_v1::ActiveState::Enabled
+                } else {
+                    cosmic_a11y_manager_v1::ActiveState::Disabled
+                },
+                color_filter_to_protocol(state.screen_filter),
+            );
+        }
+
         state.instances.push(instance);
     }
 
@@ -108,12 +181,30 @@ where
     ) {
         match request {
             cosmic_a11y_manager_v1::Request::SetMagnifier { active } => {
-                state.request_screen_magnifier(
-                    active
-                        .into_result()
-                        .unwrap_or(cosmic_a11y_manager_v1::ActiveState::Disabled)
-                        == cosmic_a11y_manager_v1::ActiveState::Enabled,
-                );
+                let enabled = active
+                    .into_result()
+                    .unwrap_or(cosmic_a11y_manager_v1::ActiveState::Disabled)
+                    == cosmic_a11y_manager_v1::ActiveState::Enabled;
+                if enabled != state.a11y_state().magnifier_state {
+                    state.request_screen_magnifier(enabled);
+                }
+            }
+            cosmic_a11y_manager_v1::Request::SetScreenFilter { inverted, filter } => {
+                let inverted = inverted
+                    .into_result()
+                    .unwrap_or(cosmic_a11y_manager_v1::ActiveState::Disabled)
+                    == cosmic_a11y_manager_v1::ActiveState::Enabled;
+                let filter = protocol_to_color_filter(filter);
+
+                if inverted != state.a11y_state().screen_inverted {
+                    state.request_screen_invert(inverted);
+                }
+
+                if let Ok(filter) = filter {
+                    if filter != state.a11y_state().screen_filter {
+                        state.request_screen_filter(filter);
+                    }
+                }
             }
             _ => unreachable!(),
         }
@@ -140,3 +231,5 @@ macro_rules! delegate_a11y {
     };
 }
 pub(crate) use delegate_a11y;
+
+use crate::config::ColorFilter;

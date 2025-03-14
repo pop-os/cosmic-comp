@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render,
-    config::OutputConfig,
+    config::{OutputConfig, ScreenFilter},
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
@@ -186,6 +186,11 @@ impl X11State {
         } else {
             Ok(vec![surface.output.clone()])
         }
+    }
+
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
+        let _ = screen_filter;
+        Ok(())
     }
 }
 
