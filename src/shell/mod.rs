@@ -615,9 +615,13 @@ impl WorkspaceSet {
             .count();
 
         if kept.iter().any(|val| *val == false) {
-            for (i, workspace) in self.workspaces.iter().enumerate() {
-                workspace_set_idx(state, i as u8 + 1, &workspace.handle);
-            }
+            self.update_workspace_idxs(state);
+        }
+    }
+
+    fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
+        for (i, workspace) in self.workspaces.iter().enumerate() {
+            workspace_set_idx(state, i as u8 + 1, &workspace.handle);
         }
     }
 }
@@ -680,9 +684,7 @@ impl Workspaces {
             if other_set.workspaces.is_empty() {
                 other_set.add_empty_workspace(workspace_state);
             }
-            for (i, workspace) in other_set.workspaces.iter_mut().enumerate() {
-                workspace_set_idx(workspace_state, i as u8 + 1, &workspace.handle);
-            }
+            other_set.update_workspace_idxs(workspace_state);
             other_set.active = other_set
                 .workspaces
                 .iter()
@@ -703,10 +705,10 @@ impl Workspaces {
         if set.workspaces.is_empty() {
             set.add_empty_workspace(workspace_state);
         }
+        set.update_workspace_idxs(workspace_state);
         for (i, workspace) in set.workspaces.iter_mut().enumerate() {
             workspace.set_output(output);
             workspace.refresh();
-            workspace_set_idx(workspace_state, i as u8 + 1, &workspace.handle);
             if i == set.active {
                 workspace_state.add_workspace_state(&workspace.handle, WState::Active);
             }
@@ -967,9 +969,7 @@ impl Workspaces {
 
                 if keep.iter().any(|val| *val == false) {
                     for set in self.sets.values_mut() {
-                        for (i, workspace) in set.workspaces.iter().enumerate() {
-                            workspace_set_idx(workspace_state, i as u8 + 1, &workspace.handle);
-                        }
+                        set.update_workspace_idxs(workspace_state);
                     }
                 }
             }
