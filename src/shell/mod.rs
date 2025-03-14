@@ -331,7 +331,6 @@ pub struct WorkspaceSet {
     previously_active: Option<(usize, WorkspaceDelta)>,
     pub active: usize,
     pub group: WorkspaceGroupHandle,
-    idx: usize,
     tiling_enabled: bool,
     output: Output,
     theme: cosmic::Theme,
@@ -437,7 +436,6 @@ impl WorkspaceSet {
     fn new(
         state: &mut WorkspaceUpdateGuard<'_, State>,
         output: &Output,
-        idx: usize,
         tiling_enabled: bool,
         theme: cosmic::Theme,
     ) -> WorkspaceSet {
@@ -448,7 +446,6 @@ impl WorkspaceSet {
             previously_active: None,
             active: 0,
             group: group_handle,
-            idx,
             tiling_enabled,
             theme,
             sticky_layer,
@@ -569,7 +566,6 @@ impl WorkspaceSet {
         workspace_set_idx(
             state,
             self.workspaces.len() as u8 + 1,
-            self.idx,
             &workspace.handle,
             // this method is only used by code paths related to dynamic workspaces, so this should be fine
         );
@@ -620,15 +616,8 @@ impl WorkspaceSet {
 
         if kept.iter().any(|val| *val == false) {
             for (i, workspace) in self.workspaces.iter().enumerate() {
-                workspace_set_idx(state, i as u8 + 1, self.idx, &workspace.handle);
+                workspace_set_idx(state, i as u8 + 1, &workspace.handle);
             }
-        }
-    }
-
-    fn update_idx(&mut self, state: &mut WorkspaceUpdateGuard<'_, State>, idx: usize) {
-        self.idx = idx;
-        for (i, workspace) in self.workspaces.iter().enumerate() {
-            workspace_set_idx(state, i as u8 + 1, idx, &workspace.handle);
         }
     }
 }
@@ -674,13 +663,7 @@ impl Workspaces {
                 set
             })
             .unwrap_or_else(|| {
-                WorkspaceSet::new(
-                    workspace_state,
-                    &output,
-                    self.sets.len(),
-                    self.autotile,
-                    self.theme.clone(),
-                )
+                WorkspaceSet::new(workspace_state, &output, self.autotile, self.theme.clone())
             });
         workspace_state.add_group_output(&set.group, &output);
 
@@ -698,12 +681,7 @@ impl Workspaces {
                 other_set.add_empty_workspace(workspace_state);
             }
             for (i, workspace) in other_set.workspaces.iter_mut().enumerate() {
-                workspace_set_idx(
-                    workspace_state,
-                    i as u8 + 1,
-                    other_set.idx,
-                    &workspace.handle,
-                );
+                workspace_set_idx(workspace_state, i as u8 + 1, &workspace.handle);
             }
             other_set.active = other_set
                 .workspaces
@@ -728,7 +706,7 @@ impl Workspaces {
         for (i, workspace) in set.workspaces.iter_mut().enumerate() {
             workspace.set_output(output);
             workspace.refresh();
-            workspace_set_idx(workspace_state, i as u8 + 1, set.idx, &workspace.handle);
+            workspace_set_idx(workspace_state, i as u8 + 1, &workspace.handle);
             if i == set.active {
                 workspace_state.add_workspace_state(&workspace.handle, WState::Active);
             }
@@ -819,10 +797,6 @@ impl Workspaces {
                     workspace_state.remove_workspace_group(set.group);
                 } else {
                     workspace_state.remove_group_output(&workspace_group, output);
-                }
-
-                for (i, set) in self.sets.values_mut().enumerate() {
-                    set.update_idx(workspace_state, i);
                 }
             } else {
                 workspace_state.remove_group_output(&set.group, output);
@@ -917,10 +891,6 @@ impl Workspaces {
                         // Otherwise we are fine
                     }
                 }
-                // fixup indices
-                for (i, set) in self.sets.values_mut().enumerate() {
-                    set.update_idx(workspace_state, i);
-                }
             }
             _ => {}
         };
@@ -998,12 +968,7 @@ impl Workspaces {
                 if keep.iter().any(|val| *val == false) {
                     for set in self.sets.values_mut() {
                         for (i, workspace) in set.workspaces.iter().enumerate() {
-                            workspace_set_idx(
-                                workspace_state,
-                                i as u8 + 1,
-                                set.idx,
-                                &workspace.handle,
-                            );
+                            workspace_set_idx(workspace_state, i as u8 + 1, &workspace.handle);
                         }
                     }
                 }
@@ -4019,11 +3984,10 @@ impl Shell {
 fn workspace_set_idx(
     state: &mut WorkspaceUpdateGuard<'_, State>,
     idx: u8,
-    output_pos: usize,
     handle: &WorkspaceHandle,
 ) {
     state.set_workspace_name(handle, format!("{}", idx));
-    state.set_workspace_coordinates(handle, &[idx as u32, output_pos as u32]);
+    state.set_workspace_coordinates(handle, &[idx as u32]);
 }
 
 pub fn check_grab_preconditions(
