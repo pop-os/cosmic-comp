@@ -822,13 +822,21 @@ impl Workspaces {
 
         if let Some(mut workspace) = self.sets.get_mut(from).and_then(|set| {
             let pos = set.workspaces.iter().position(|w| &w.handle == handle)?;
-            Some(set.workspaces.remove(pos))
+            let workspace = set.workspaces.remove(pos);
+            if set.workspaces.is_empty() {
+                set.add_empty_workspace(workspace_state);
+            }
+            set.active = set.active.max(set.workspaces.len() - 1);
+            workspace_state.add_workspace_state(&set.workspaces[set.active].handle, WState::Active);
+            set.update_workspace_idxs(workspace_state);
+            Some(workspace)
         }) {
             let new_set = self.sets.get_mut(to).unwrap();
             move_workspace_to_group(&mut workspace, &new_set.group, workspace_state);
             workspace.set_output(to);
             workspace.refresh();
-            new_set.workspaces.insert(new_set.active + 1, workspace)
+            new_set.workspaces.insert(new_set.active + 1, workspace);
+            new_set.update_workspace_idxs(workspace_state);
         }
     }
 
@@ -1207,7 +1215,6 @@ impl Common {
             .migrate_workspace(from, to, handle, &mut self.workspace_state.update());
 
         std::mem::drop(shell);
-        self.refresh(); // fixes index of moved workspace
     }
 
     pub fn update_config(&mut self) {
