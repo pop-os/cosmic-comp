@@ -116,5 +116,5 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "e706814" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "e706814" }
+cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "3c96684" }
+cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "3c96684" }
