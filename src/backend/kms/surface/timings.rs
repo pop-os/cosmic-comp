@@ -207,15 +207,21 @@ impl Timings {
             return None;
         }
 
-        Some(
-            self.previous_frames
-                .iter()
-                .rev()
-                .take(window)
-                .map(|f| f.frame_time())
-                .sum::<Duration>()
-                / (window.min(self.previous_frames.len()) as u32),
-        )
+        Some({
+            let count = window.min(self.previous_frames.len()) as u32;
+            let mut total = Duration::ZERO;
+
+            for frame in self.previous_frames.iter().rev().take(window) {
+                if let Some(new_total) = total.checked_add(frame.frame_time()) {
+                    total = new_total;
+                } else {
+                    // Handle overflow by falling back to 30fps
+                    return Some(Duration::from_secs(1) / 30);
+                }
+            }
+
+            total / count
+        })
     }
 
     pub fn avg_fps(&self) -> f64 {
