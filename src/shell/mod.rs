@@ -4023,7 +4023,7 @@ fn workspace_set_idx(
     handle: &WorkspaceHandle,
 ) {
     state.set_workspace_name(handle, format!("{}", idx));
-    state.set_workspace_coordinates(handle, [Some(idx as u32), Some(output_pos as u32), None]);
+    state.set_workspace_coordinates(handle, &[idx as u32, output_pos as u32]);
 }
 
 pub fn check_grab_preconditions(
