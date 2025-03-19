@@ -69,6 +69,7 @@ pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
     numlock: (Option<PathBuf>, NumlockStateConfig),
     pub accessibility_zoom: (Option<PathBuf>, ZoomState),
+    accessibility_filter: (Option<PathBuf>, ScreenFilter),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -180,6 +181,29 @@ impl OutputConfig {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 pub struct ZoomState {
     pub last_level: f64,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
+pub struct ScreenFilter {
+    pub inverted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_filter: Option<ColorFilter>,
+}
+
+impl ScreenFilter {
+    pub fn is_noop(&self) -> bool {
+        self.inverted == false && self.color_filter.is_none()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+// these values need to match with offscreen.frag
+pub enum ColorFilter {
+    Greyscale = 1,
+    Protanopia = 2,
+    Deuteranopia = 3,
+    Tritanopia = 4,
 }
 
 impl Config {
@@ -311,6 +335,18 @@ impl Config {
             ),
         };
 
+        let _ = loop_handle.insert_idle(|state| {
+            let filter_conf = state.common.config.dynamic_conf.screen_filter();
+            state
+                .common
+                .a11y_state
+                .set_screen_inverted(filter_conf.inverted);
+            state
+                .common
+                .a11y_state
+                .set_screen_filter(filter_conf.color_filter);
+        });
+
         Config {
             dynamic_conf: Self::load_dynamic(xdg.as_ref(), &cosmic_comp_config),
             cosmic_conf: cosmic_comp_config,
@@ -337,10 +373,17 @@ impl Config {
             xdg.and_then(|base| base.place_state_file("cosmic-comp/a11y_zoom.ron").ok());
         let zoom = Self::load_zoom_state(&zoom_path, cosmic);
 
+        let filter_path = xdg.and_then(|base| {
+            base.place_state_file("cosmic-comp/a11y_screen_filter.ron")
+                .ok()
+        });
+        let filter = Self::load_filter_state(&filter_path);
+
         DynamicConfig {
             outputs: (output_path, outputs),
             numlock: (numlock_path, numlock),
             accessibility_zoom: (zoom_path, zoom),
+            accessibility_filter: (filter_path, filter),
         }
     }
 
@@ -435,6 +478,29 @@ impl Config {
         }
     }
 
+    fn load_filter_state(path: &Option<PathBuf>) -> ScreenFilter {
+        if let Some(path) = path.as_ref() {
+            if path.exists() {
+                match ron::de::from_reader::<_, ScreenFilter>(
+                    OpenOptions::new().read(true).open(path).unwrap(),
+                ) {
+                    Ok(config) => return config,
+                    Err(err) => {
+                        warn!(?err, "Failed to read screen_filter state, resetting..");
+                        if let Err(err) = std::fs::remove_file(path) {
+                            error!(?err, "Failed to remove screen_filter state.");
+                        }
+                    }
+                };
+            }
+        }
+
+        ScreenFilter {
+            inverted: false,
+            color_filter: None,
+        }
+    }
+
     pub fn shortcut_for_action(&self, action: &shortcuts::Action) -> Option<String> {
         self.shortcuts.shortcut_for_action(action)
     }
@@ -486,6 +552,7 @@ impl Config {
             if let Err(err) = backend.apply_config_for_outputs(
                 false,
                 loop_handle,
+                self.dynamic_conf.screen_filter(),
                 shell.clone(),
                 workspace_state,
                 xdg_activation_state,
@@ -511,6 +578,7 @@ impl Config {
                 if let Err(err) = backend.apply_config_for_outputs(
                     false,
                     loop_handle,
+                    self.dynamic_conf.screen_filter(),
                     shell.clone(),
                     workspace_state,
                     xdg_activation_state,
@@ -553,6 +621,7 @@ impl Config {
             if let Err(err) = backend.apply_config_for_outputs(
                 false,
                 loop_handle,
+                self.dynamic_conf.screen_filter(),
                 shell.clone(),
                 workspace_state,
                 xdg_activation_state,
@@ -718,6 +787,17 @@ impl DynamicConfig {
         PersistenceGuard(
             self.accessibility_zoom.0.clone(),
             &mut self.accessibility_zoom.1,
+        )
+    }
+
+    pub fn screen_filter(&self) -> &ScreenFilter {
+        &self.accessibility_filter.1
+    }
+
+    pub fn screen_filter_mut(&mut self) -> PersistenceGuard<'_, ScreenFilter> {
+        PersistenceGuard(
+            self.accessibility_filter.0.clone(),
+            &mut self.accessibility_filter.1,
         )
     }
 }

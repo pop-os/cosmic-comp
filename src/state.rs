@@ -7,7 +7,7 @@ use crate::{
         winit::WinitState,
         x11::X11State,
     },
-    config::{Config, OutputConfig, OutputState},
+    config::{Config, OutputConfig, OutputState, ScreenFilter},
     input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
@@ -450,6 +450,10 @@ impl BackendData {
             BackendData::X11(x11) => Ok(RendererRef::Glow(&mut x11.renderer)),
             _ => unreachable!("No backend set when getting offscreen renderer"),
         }
+    }
+
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> anyhow::Result<()> {
+        let _ = screen_filter; // TODO
     }
 }
 
