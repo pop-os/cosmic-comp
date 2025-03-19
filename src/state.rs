@@ -457,8 +457,8 @@ impl BackendData {
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> anyhow::Result<()> {
         match self {
             BackendData::Kms(ref mut state) => state.update_screen_filter(screen_filter),
-            BackendData::Winit(ref mut state) => {}, // TODO
-            BackendData::X11(ref mut state) => {}, // TODO
+            BackendData::Winit(ref mut state) => state.update_screen_filter(screen_filter),
+            BackendData::X11(ref mut state) => state.update_screen_filter(screen_filter),
             _ => unreachable!("No backend set when setting screen filters"),
         }
     }
