@@ -146,10 +146,10 @@ pub fn render_session<F, R, T>(
 where
     R: ExportMem + Offscreen<T>,
     R::Error: FromGlesError,
-    F: for<'d, 'f> FnOnce(
+    F: for<'d> FnOnce(
         &WlBuffer,
         &mut R,
-        Option<&mut R::Framebuffer<'f>>,
+        Option<&mut R::Framebuffer<'_>>,
         &'d mut OutputDamageTracker,
         usize,
         Vec<Rectangle<i32, BufferCoords>>,
