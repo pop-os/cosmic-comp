@@ -213,7 +213,7 @@ impl Timings {
                 .rev()
                 .take(window)
                 .map(|f| f.frame_time())
-                .sum::<Duration>()
+                .try_fold(Duration::ZERO, |acc, x| acc.checked_add(x))?
                 / (window.min(self.previous_frames.len()) as u32),
         )
     }
