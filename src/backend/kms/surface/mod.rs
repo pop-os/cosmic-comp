@@ -6,7 +6,7 @@ use crate::{
         init_shaders, output_elements, CursorMode, GlMultiRenderer, PostprocessOutputConfig,
         PostprocessShader, PostprocessState, CLEAR_COLOR,
     },
-    config::AdaptiveSync,
+    config::{AdaptiveSync, ScreenFilter},
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
@@ -40,12 +40,12 @@ use smithay::{
                 utils::{constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior},
                 Element, Kind, RenderElementStates,
             },
-            gles::{GlesRenderbuffer, GlesTexture},
+            gles::{element::TextureShaderElement, GlesRenderbuffer, GlesRenderer, Uniform},
             glow::GlowRenderer,
             multigpu::{Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
+            Bind, Blit, ImportDma, Offscreen, Renderer, RendererSuper, Texture, TextureFilter,
         },
     },
     desktop::utils::OutputPresentationFeedback,
@@ -74,7 +74,7 @@ use smithay::{
 use tracing::{error, trace, warn};
 
 use std::{
-    borrow::BorrowMut,
+    borrow::{Borrow, BorrowMut},
     collections::{hash_map, HashMap, HashSet},
     mem,
     sync::{
@@ -129,6 +129,7 @@ pub struct SurfaceThreadState {
 
     output: Output,
     mirroring: Option<Output>,
+    screen_filter: ScreenFilter,
     postprocess_textures: HashMap<DrmNode, PostprocessState>,
 
     shell: Arc<RwLock<Shell>>,
@@ -190,6 +191,7 @@ pub enum ThreadCommand {
         node: DrmNode,
     },
     UpdateMirroring(Option<Output>),
+    UpdateScreenFilter(ScreenFilter),
     VBlank(Option<DrmEventMetadata>),
     ScheduleRender,
     AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
@@ -214,6 +216,7 @@ impl Surface {
         dev_node: DrmNode,
         target_node: DrmNode,
         evlh: &LoopHandle<'static, State>,
+        screen_filter: ScreenFilter,
         shell: Arc<RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
     ) -> Result<Self> {
@@ -233,6 +236,7 @@ impl Surface {
                     target_node,
                     shell,
                     active_clone,
+                    screen_filter,
                     tx2,
                     rx,
                     startup_done,
@@ -354,6 +358,12 @@ impl Surface {
             .send(ThreadCommand::UpdateMirroring(output));
     }
 
+    pub fn set_screen_filter(&mut self, config: ScreenFilter) {
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::UpdateScreenFilter(config));
+    }
+
     pub fn adaptive_sync_support(&self) -> Result<VrrSupport> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let _ = self
@@ -447,6 +457,7 @@ fn surface_thread(
     target_node: DrmNode,
     shell: Arc<RwLock<Shell>>,
     active: Arc<AtomicBool>,
+    screen_filter: ScreenFilter,
     thread_sender: Sender<SurfaceCommand>,
     thread_receiver: Channel<ThreadCommand>,
     startup_done: Arc<AtomicBool>,
@@ -490,6 +501,7 @@ fn surface_thread(
 
         output,
         mirroring: None,
+        screen_filter,
         postprocess_textures: HashMap::new(),
 
         shell,
@@ -527,6 +539,9 @@ fn surface_thread(
             }
             Event::Msg(ThreadCommand::UpdateMirroring(mirroring_output)) => {
                 state.update_mirroring(mirroring_output);
+            }
+            Event::Msg(ThreadCommand::UpdateScreenFilter(filter_config)) => {
+                state.update_screen_filter(filter_config);
             }
             Event::Msg(ThreadCommand::AdaptiveSyncAvailable(result)) => {
                 if let Some(compositor) = state.compositor.as_mut() {
@@ -989,11 +1004,15 @@ impl SurfaceThreadState {
         let source_output = self
             .mirroring
             .as_ref()
+            .or((!self.screen_filter.is_noop()).then(|| &self.output))
             .filter(|output| {
                 PostprocessOutputConfig::for_output_untransformed(output)
                     != PostprocessOutputConfig::for_output(&self.output)
+                    || !self.screen_filter.is_noop()
             });
 
+        let mut pre_postprocess_states = None;
+        let mut pre_postprocess_texture = None;
         let res = if let Some(source_output) = source_output {
             let offscreen_output_config =
                 PostprocessOutputConfig::for_output_untransformed(source_output);
@@ -1023,6 +1042,10 @@ impl SurfaceThreadState {
                 .texture
                 .render()
                 .draw::<_, <GlMultiRenderer as RendererSuper>::Error>(|tex| {
+                    if self.mirroring.is_none() {
+                        pre_postprocess_texture = Some(tex.clone());
+                    }
+
                     let mut fb = renderer.bind(tex)?;
                     let res = match postprocess_state.damage_tracker.render_output(
                         &mut renderer,
@@ -1035,6 +1058,11 @@ impl SurfaceThreadState {
                         Err(RenderError::Rendering(err)) => return Err(err),
                         Err(RenderError::OutputNoMode(_)) => unreachable!(),
                     };
+
+                    if self.mirroring.is_none() {
+                        pre_postprocess_states = Some(res.states);
+                    }
+
                     renderer.wait(&res.sync)?;
                     std::mem::drop(fb);
 
@@ -1061,29 +1089,52 @@ impl SurfaceThreadState {
                 None,
                 Kind::Unspecified,
             );
-            let texture_geometry =
-                texture_elem.geometry(self.output.current_scale().fractional_scale().into());
-            elements = constrain_render_elements(
-                std::iter::once(texture_elem),
-                (0, 0),
-                Rectangle::from_size(
-                    self.output
-                        .geometry()
-                        .size
-                        .as_logical()
-                        .to_f64()
-                        .to_physical(self.output.current_scale().fractional_scale())
-                        .to_i32_round(),
-                ),
-                texture_geometry,
-                ConstrainScaleBehavior::Fit,
-                ConstrainAlign::CENTER,
-                1.0,
-            )
-            .map(CosmicElement::Postprocess)
-            .collect::<Vec<_>>();
 
             renderer = self.api.single_renderer(&self.target_node).unwrap();
+
+            let postprocess_texture_shader = Borrow::<GlesRenderer>::borrow(renderer.as_mut())
+                .egl_context()
+                .user_data()
+                .get::<PostprocessShader>()
+                .expect("OffscreenShader should be available through `init_shaders`");
+            let texture_geometry =
+                texture_elem.geometry(self.output.current_scale().fractional_scale().into());
+            elements = {
+                let texture_elem = TextureShaderElement::new(
+                    texture_elem,
+                    postprocess_texture_shader.0.clone(),
+                    vec![
+                        Uniform::new("invert", if self.screen_filter.inverted { 1. } else { 0. }),
+                        Uniform::new(
+                            "color_mode",
+                            self.screen_filter
+                                .color_filter
+                                .map(|val| val as u8 as f32)
+                                .unwrap_or(0.),
+                        ),
+                    ],
+                );
+                constrain_render_elements(
+                    std::iter::once(texture_elem),
+                    (0, 0),
+                    Rectangle::from_size(
+                        self.output
+                            .geometry()
+                            .size
+                            .as_logical()
+                            .to_f64()
+                            .to_physical(self.output.current_scale().fractional_scale())
+                            .to_i32_round(),
+                    ),
+                    texture_geometry,
+                    ConstrainScaleBehavior::Fit,
+                    ConstrainAlign::CENTER,
+                    1.0,
+                )
+                .map(CosmicElement::Postprocess)
+                .collect::<Vec<_>>()
+            };
+
             if let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr)) {
                 warn!("Unable to set adaptive VRR state: {}", err);
             }
@@ -1150,16 +1201,15 @@ impl SurfaceThreadState {
                             };
 
                             let mut sync = SyncPoint::default();
-
                             let mut dmabuf_clone;
                             let mut render_buffer;
                             let buffer = frame.buffer();
                             let mut shm_buffer = false;
                             let mut fb = if let Ok(dmabuf) = get_dmabuf(&buffer) {
                                 dmabuf_clone = dmabuf.clone();
-                                renderer
+                                Some(renderer
                                     .bind(&mut dmabuf_clone)
-                                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?
+                                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?)
                             } else {
                                 shm_buffer = true;
                                 let size = buffer_dimensions(&buffer).ok_or(RenderError::<
@@ -1171,16 +1221,24 @@ impl SurfaceThreadState {
                                     with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
                                         .map_err(|_| OutputNoMode)? // eh, we have to do some error
                                         .expect("We should be able to convert all hardcoded shm screencopy formats");
-                                render_buffer =
-                                    Offscreen::<GlesRenderbuffer>::create_buffer(
-                                        &mut renderer,
-                                        format,
-                                        size,
-                                    )
-                                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
-                                renderer
-                                    .bind(&mut render_buffer)
-                                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?
+
+                                if pre_postprocess_texture
+                                    .as_ref()
+                                    .is_some_and(|tex| tex.format() == Some(format))
+                                {
+                                    None
+                                } else {
+                                    render_buffer =
+                                        Offscreen::<GlesRenderbuffer>::create_buffer(
+                                            &mut renderer,
+                                            format,
+                                            size,
+                                        )
+                                        .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
+                                    Some(renderer
+                                        .bind(&mut render_buffer)
+                                        .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?)
+                                }
                             };
 
                             if let Some(ref damage) = damage {
@@ -1214,52 +1272,76 @@ impl SurfaceThreadState {
                                     d
                                 });
 
-                                match frame_result
-                                    .blit_frame_result(
-                                        output_size,
-                                        output_transform,
-                                        output_scale,
-                                        &mut renderer,
-                                        &mut fb,
-                                        adjusted,
-                                        filter,
-                                    )
-                                    .map_err(|err| match err {
-                                        BlitFrameResultError::Rendering(err) => RenderError::<
-                                            <GlMultiRenderer as RendererSuper>::Error,
-                                        >::Rendering(
-                                            err
-                                        ),
-                                        BlitFrameResultError::Export(_) => RenderError::<
-                                            <GlMultiRenderer as RendererSuper>::Error,
-                                        >::Rendering(
-                                            MultiError::DeviceMissing,
-                                        ),
-                                    }) {
-                                    Ok(new_sync) => {
-                                        sync = new_sync;
+                                if let Some(tex) = pre_postprocess_texture.as_mut() {
+                                    let mut tex_fb = renderer.bind(tex).map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
+
+                                    if let Some(fb) = fb.as_mut() {
+                                        for rect in adjusted {
+                                            renderer
+                                                .blit(
+                                                    &mut tex_fb,
+                                                    fb,
+                                                    rect,
+                                                    rect,
+                                                    TextureFilter::Linear,
+                                                )
+                                                .map_err(
+                                                    RenderError::<
+                                                        <GlMultiRenderer as RendererSuper>::Error,
+                                                    >::Rendering,
+                                                )?;
+                                        }
+                                    } else {
+                                        fb = Some(tex_fb);
                                     }
-                                    Err(err) => {
-                                        tracing::warn!(?err, "Failed to screencopy");
-                                        session
-                                            .user_data()
-                                            .get::<SessionData>()
-                                            .unwrap()
-                                            .lock()
-                                            .unwrap()
-                                            .reset();
-                                        frame.fail(FailureReason::Unknown);
-                                        continue;
-                                    }
+                                } else {
+                                    match frame_result
+                                        .blit_frame_result(
+                                            output_size,
+                                            output_transform,
+                                            output_scale,
+                                            &mut renderer,
+                                            fb.as_mut().unwrap(),
+                                            adjusted,
+                                            filter,
+                                        )
+                                        .map_err(|err| match err {
+                                            BlitFrameResultError::Rendering(err) => RenderError::<
+                                                <GlMultiRenderer as RendererSuper>::Error,
+                                            >::Rendering(
+                                                err
+                                            ),
+                                            BlitFrameResultError::Export(_) => RenderError::<
+                                                <GlMultiRenderer as RendererSuper>::Error,
+                                            >::Rendering(
+                                                MultiError::DeviceMissing,
+                                            ),
+                                        }) {
+                                        Ok(new_sync) => {
+                                            sync = new_sync;
+                                        }
+                                        Err(err) => {
+                                            tracing::warn!(?err, "Failed to screencopy");
+                                            session
+                                                .user_data()
+                                                .get::<SessionData>()
+                                                .unwrap()
+                                                .lock()
+                                                .unwrap()
+                                                .reset();
+                                            frame.fail(FailureReason::Unknown);
+                                            continue;
+                                        }
+                                    };
                                 };
-                            };
+                            }
 
                             let transform = self.output.current_transform();
 
                             match submit_buffer(
                                 frame,
                                 &mut renderer,
-                                shm_buffer.then_some(&mut fb),
+                                shm_buffer.then_some(fb.as_mut().unwrap()),
                                 transform,
                                 damage.as_deref(),
                                 sync,
@@ -1286,7 +1368,8 @@ impl SurfaceThreadState {
                         }
 
                         if self.mirroring.is_none() {
-                            let states = frame_result.states;
+                            // If postprocessing, use states from first render
+                            let states = pre_postprocess_states.unwrap_or(frame_result.states);
                             self.send_dmabuf_feedback(states);
                         }
 
@@ -1383,6 +1466,11 @@ impl SurfaceThreadState {
 
     fn update_mirroring(&mut self, mirroring_output: Option<Output>) {
         self.mirroring = mirroring_output;
+        self.postprocess_textures.clear();
+    }
+
+    fn update_screen_filter(&mut self, filter_config: ScreenFilter) {
+        self.screen_filter = filter_config;
         self.postprocess_textures.clear();
     }
 
