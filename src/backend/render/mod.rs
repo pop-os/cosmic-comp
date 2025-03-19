@@ -13,6 +13,7 @@ use std::{
 use crate::debug::fps_ui;
 use crate::{
     backend::{kms::render::gles::GbmGlowBackend, render::element::DamageElement},
+    config::ScreenFilter,
     shell::{
         element::CosmicMappedKey,
         focus::{render_input_order, target::WindowGroup, Stage},
@@ -36,7 +37,7 @@ use cosmic::Theme;
 use element::FromGlesError;
 use smithay::{
     backend::{
-        allocator::dmabuf::Dmabuf,
+        allocator::{dmabuf::Dmabuf, Fourcc},
         drm::{DrmDeviceFd, DrmNode},
         renderer::{
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
@@ -52,13 +53,15 @@ use smithay::{
             glow::GlowRenderer,
             multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
             sync::SyncPoint,
-            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
             TextureFilter,
         },
     },
     input::Seat,
     output::{Output, OutputNoMode},
-    utils::{IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Time, Transform},
+    utils::{
+        IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
+    },
     wayland::{dmabuf::get_dmabuf, session_lock::LockSurface},
 };
 
@@ -105,6 +108,7 @@ impl<'a> AsMut<GlowRenderer> for RendererRef<'a> {
 pub static CLEAR_COLOR: Color32F = Color32F::new(0.153, 0.161, 0.165, 1.0);
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
+pub static POSTPROCESS_SHADER: &str = include_str!("./shaders/offscreen.frag");
 pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
 pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
 
@@ -346,11 +350,14 @@ impl BackdropShader {
     }
 }
 
+pub struct PostprocessShader(pub GlesTexProgram);
+
 pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     {
         let egl_context = renderer.egl_context();
         if egl_context.user_data().get::<IndicatorShader>().is_some()
             && egl_context.user_data().get::<BackdropShader>().is_some()
+            && egl_context.user_data().get::<PostprocessShader>().is_some()
         {
             return Ok(());
         }
@@ -371,6 +378,13 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("radius", UniformType::_1f),
         ],
     )?;
+    let postprocess_shader = renderer.compile_custom_texture_shader(
+        POSTPROCESS_SHADER,
+        &[
+            UniformName::new("invert", UniformType::_1f),
+            UniformName::new("color_mode", UniformType::_1f),
+        ],
+    )?;
 
     let egl_context = renderer.egl_context();
     egl_context
@@ -379,6 +393,9 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     egl_context
         .user_data()
         .insert_if_missing(|| BackdropShader(rectangle_shader));
+    egl_context
+        .user_data()
+        .insert_if_missing(|| PostprocessShader(postprocess_shader));
 
     Ok(())
 }
@@ -974,6 +991,83 @@ where
     } else {
         Vec::new()
     }
+}
+
+// Used for mirroring and postprocessing
+#[derive(Debug)]
+pub struct PostprocessState {
+    pub texture: TextureRenderBuffer<GlesTexture>,
+    pub damage_tracker: OutputDamageTracker,
+    pub output_config: PostprocessOutputConfig,
+}
+
+impl PostprocessState {
+    pub fn new_with_renderer<R: Renderer + Offscreen<GlesTexture>>(
+        renderer: &mut R,
+        format: Fourcc,
+        output_config: PostprocessOutputConfig,
+    ) -> Result<Self, R::Error> {
+        let size = output_config.size;
+        let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
+        let opaque_regions = vec![Rectangle::from_size(buffer_size)];
+
+        let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
+        let texture_buffer = TextureRenderBuffer::from_texture(
+            renderer,
+            texture,
+            1,
+            Transform::Normal,
+            Some(opaque_regions),
+        );
+
+        // Don't use `from_output` to avoid applying output transform
+        let damage_tracker =
+            OutputDamageTracker::new(size, output_config.fractional_scale, Transform::Normal);
+
+        Ok(PostprocessState {
+            texture: texture_buffer,
+            damage_tracker,
+            output_config,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct PostprocessOutputConfig {
+    pub size: Size<i32, Physical>,
+    pub fractional_scale: f64,
+}
+
+impl PostprocessOutputConfig {
+    pub fn for_output_untransformed(output: &Output) -> Self {
+        Self {
+            // Apply inverse of output transform to mode size to get correct size
+            // for an untransformed render.
+            size: output.current_transform().invert().transform_size(
+                output
+                    .current_mode()
+                    .map(|mode| mode.size)
+                    .unwrap_or_default(),
+            ),
+            fractional_scale: output.current_scale().fractional_scale(),
+        }
+    }
+
+    pub fn for_output(output: &Output) -> Self {
+        Self {
+            size: output
+                .current_mode()
+                .map(|mode| mode.size)
+                .unwrap_or_default(),
+            fractional_scale: output.current_scale().fractional_scale(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ScreenFilterStorage {
+    pub filter: ScreenFilter,
+    pub state: Option<PostprocessState>,
 }
 
 #[profiling::function]
