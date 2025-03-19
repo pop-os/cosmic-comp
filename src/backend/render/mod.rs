@@ -43,11 +43,16 @@ use smithay::{
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-                utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
+                texture::{TextureRenderBuffer, TextureRenderElement},
+                utils::{
+                    constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior,
+                    CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
+                },
                 AsRenderElements, Element, Id, Kind, RenderElement,
             },
             gles::{
-                element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
+                element::{PixelShaderElement, TextureShaderElement},
+                GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
                 UniformName, UniformType,
             },
             glow::GlowRenderer,
@@ -1071,7 +1076,7 @@ pub struct ScreenFilterStorage {
 }
 
 #[profiling::function]
-pub fn render_output<'d, R, OffTarget>(
+pub fn render_output<'d, R>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
     target: &mut R::Framebuffer<'_>,
@@ -1081,6 +1086,7 @@ pub fn render_output<'d, R, OffTarget>(
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
+    screen_filter: &'d mut ScreenFilterStorage,
 ) -> Result<RenderOutputResult<'d>, RenderError<R::Error>>
 where
     R: Renderer
@@ -1088,7 +1094,7 @@ where
         + ImportMem
         + ExportMem
         + Bind<Dmabuf>
-        + Offscreen<OffTarget>
+        + Offscreen<GlesTexture>
         + Blit
         + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
@@ -1116,27 +1122,154 @@ where
         ElementFilter::All
     };
 
-    let result = render_workspace(
-        gpu,
-        renderer,
-        target,
-        damage_tracker,
-        age,
-        None,
-        shell,
-        zoom_state.as_ref(),
-        now,
-        output,
-        previous_workspace,
-        workspace,
-        cursor_mode,
-        element_filter,
-    );
+    let mut postprocess_texture = None;
+    let result = if !screen_filter.filter.is_noop() {
+        if screen_filter.state.as_ref().is_none_or(|state| {
+            state.output_config != PostprocessOutputConfig::for_output_untransformed(output)
+        }) {
+            screen_filter.state = Some(
+                PostprocessState::new_with_renderer(
+                    renderer,
+                    target.format().unwrap_or(Fourcc::Abgr8888),
+                    PostprocessOutputConfig::for_output_untransformed(output),
+                )
+                .map_err(RenderError::Rendering)?,
+            );
+        }
+
+        let state = screen_filter.state.as_mut().unwrap();
+        let mut result = Err(RenderError::OutputNoMode(OutputNoMode));
+        state
+            .texture
+            .render()
+            .draw::<_, RenderError<R::Error>>(|tex| {
+                let mut target = renderer.bind(tex).map_err(RenderError::Rendering)?;
+                result = render_workspace(
+                    gpu,
+                    renderer,
+                    &mut target,
+                    &mut state.damage_tracker,
+                    1,
+                    None,
+                    shell,
+                    zoom_state.as_ref(),
+                    now,
+                    output,
+                    previous_workspace,
+                    workspace,
+                    cursor_mode,
+                    element_filter,
+                );
+                std::mem::drop(target);
+                postprocess_texture = Some(tex.clone());
+
+                Ok(if let Ok((res, _)) = result.as_ref() {
+                    renderer.wait(&res.sync).map_err(RenderError::Rendering)?;
+                    let transform = output.current_transform();
+                    let area = tex.size().to_logical(1, transform);
+
+                    res.damage
+                        .cloned()
+                        .map(|v| {
+                            v.into_iter()
+                                .map(|r| r.to_logical(1).to_buffer(1, transform, &area))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                })
+            })?;
+
+        if result.is_ok() {
+            let texture_elem = TextureRenderElement::from_texture_render_buffer(
+                (0., 0.),
+                &state.texture,
+                Some(1.0),
+                None,
+                None,
+                Kind::Unspecified,
+            );
+
+            let postprocess_texture_shader = renderer
+                .glow_renderer_mut()
+                .egl_context()
+                .user_data()
+                .get::<PostprocessShader>()
+                .expect("OffscreenShader should be available through `init_shaders`");
+            let texture_geometry =
+                texture_elem.geometry(output.current_scale().fractional_scale().into());
+            let elements = {
+                let texture_elem = TextureShaderElement::new(
+                    texture_elem,
+                    postprocess_texture_shader.0.clone(),
+                    vec![
+                        Uniform::new(
+                            "invert",
+                            if screen_filter.filter.inverted {
+                                1.
+                            } else {
+                                0.
+                            },
+                        ),
+                        Uniform::new(
+                            "color_mode",
+                            screen_filter
+                                .filter
+                                .color_filter
+                                .map(|val| val as u8 as f32)
+                                .unwrap_or(0.),
+                        ),
+                    ],
+                );
+                constrain_render_elements(
+                    std::iter::once(texture_elem),
+                    (0, 0),
+                    Rectangle::from_size(
+                        output
+                            .geometry()
+                            .size
+                            .as_logical()
+                            .to_f64()
+                            .to_physical(output.current_scale().fractional_scale())
+                            .to_i32_round(),
+                    ),
+                    texture_geometry,
+                    ConstrainScaleBehavior::Fit,
+                    ConstrainAlign::CENTER,
+                    1.0,
+                )
+                .map(CosmicElement::Postprocess)
+                .collect::<Vec<_>>()
+            };
+
+            damage_tracker.render_output(renderer, target, age, &elements, CLEAR_COLOR)?;
+        }
+
+        result
+    } else {
+        render_workspace(
+            gpu,
+            renderer,
+            target,
+            damage_tracker,
+            age,
+            None,
+            shell,
+            zoom_state.as_ref(),
+            now,
+            output,
+            previous_workspace,
+            workspace,
+            cursor_mode,
+            element_filter,
+        )
+    };
 
     match result {
         Ok((res, mut elements)) => {
             for (session, frame) in output.take_pending_frames() {
-                if let Some((frame, damage)) = render_session::<_, _, OffTarget>(
+                if let Some((frame, damage)) = render_session::<_, _, GlesTexture>(
                     renderer,
                     &session.user_data().get::<SessionData>().unwrap(),
                     frame,
@@ -1184,24 +1317,46 @@ where
                         }
 
                         if let (Some(ref damage), _) = &res {
-                            if let Ok(dmabuf) = get_dmabuf(buffer) {
-                                let mut dmabuf_clone = dmabuf.clone();
-                                let mut fb = renderer
-                                    .bind(&mut dmabuf_clone)
+                            let blit_to_buffer =
+                                |renderer: &mut R, blit_from: &mut R::Framebuffer<'_>| {
+                                    if let Ok(dmabuf) = get_dmabuf(buffer) {
+                                        let mut dmabuf_clone = dmabuf.clone();
+                                        let mut fb = renderer.bind(&mut dmabuf_clone)?;
+                                        for rect in damage.iter() {
+                                            renderer.blit(
+                                                blit_from,
+                                                &mut fb,
+                                                *rect,
+                                                *rect,
+                                                TextureFilter::Nearest,
+                                            )?;
+                                        }
+                                    } else {
+                                        let fb = offscreen
+                                            .expect("shm buffers should have offscreen target");
+                                        for rect in damage.iter() {
+                                            renderer.blit(
+                                                blit_from,
+                                                fb,
+                                                *rect,
+                                                *rect,
+                                                TextureFilter::Nearest,
+                                            )?;
+                                        }
+                                    }
+
+                                    Result::<_, R::Error>::Ok(())
+                                };
+
+                            // we would want to just assign a different framebuffer to a variable, depending on the code-path,
+                            // but then rustc tries to equate the lifetime of target with the lifetime of our temporary fb...
+                            // So instead of duplicating all the code, we use a closure..
+                            if let Some(tex) = postprocess_texture.as_mut() {
+                                let mut fb = renderer.bind(tex).map_err(RenderError::Rendering)?;
+                                blit_to_buffer(renderer, &mut fb)
                                     .map_err(RenderError::Rendering)?;
-                                for rect in damage.iter() {
-                                    renderer
-                                        .blit(target, &mut fb, *rect, *rect, TextureFilter::Nearest)
-                                        .map_err(RenderError::Rendering)?;
-                                }
                             } else {
-                                let fb =
-                                    offscreen.expect("shm buffers should have offscreen target");
-                                for rect in damage.iter() {
-                                    renderer
-                                        .blit(target, fb, *rect, *rect, TextureFilter::Nearest)
-                                        .map_err(RenderError::Rendering)?;
-                                }
+                                blit_to_buffer(renderer, target).map_err(RenderError::Rendering)?;
                             }
                         }
 
