@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, num::NonZeroU64, time::Duration};
 
 use smithay::utils::{Clock, Monotonic, Time};
-use tracing::error;
+use tracing::{debug, error};
 
 const FRAME_TIME_BUFFER: Duration = Duration::from_millis(1);
 const FRAME_TIME_WINDOW: usize = 3;
@@ -138,13 +138,20 @@ impl Timings {
 
     pub fn presented(&mut self, value: Time<Monotonic>) {
         if let Some(frame) = self.pending_frame.take() {
-            self.previous_frames.push_back(Frame {
+            let new_frame = Frame {
                 render_start: frame.render_start,
                 render_duration_elements: frame.render_duration_elements.unwrap_or_default(),
                 render_duration_draw: frame.render_duration_draw.unwrap_or_default(),
                 presentation_submitted: frame.presentation_submitted.unwrap(),
                 presentation_presented: value,
-            });
+            };
+            if new_frame.render_start > new_frame.presentation_submitted {
+                debug!(
+                    "frame time overflowed: {}",
+                    new_frame.frame_time().as_millis()
+                );
+            }
+            self.previous_frames.push_back(new_frame);
             while self.previous_frames.len() > Self::WINDOW_SIZE {
                 self.previous_frames.pop_front();
             }
