@@ -308,6 +308,7 @@ impl BackendData {
         &mut self,
         test_only: bool,
         loop_handle: &LoopHandle<'static, State>,
+        screen_filter: &ScreenFilter,
         shell: Arc<RwLock<Shell>>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
@@ -318,6 +319,7 @@ impl BackendData {
             BackendData::Kms(ref mut state) => state.apply_config_for_outputs(
                 test_only,
                 loop_handle,
+                screen_filter,
                 shell.clone(),
                 startup_done,
                 clock,
@@ -453,7 +455,12 @@ impl BackendData {
     }
 
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> anyhow::Result<()> {
-        let _ = screen_filter; // TODO
+        match self {
+            BackendData::Kms(ref mut state) => state.update_screen_filter(screen_filter),
+            BackendData::Winit(ref mut state) => {}, // TODO
+            BackendData::X11(ref mut state) => {}, // TODO
+            _ => unreachable!("No backend set when setting screen filters"),
+        }
     }
 }
 

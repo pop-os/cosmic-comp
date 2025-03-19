@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{AdaptiveSync, OutputState},
+    config::{AdaptiveSync, OutputState, ScreenFilter},
     shell::Shell,
     state::BackendData,
     utils::prelude::*,
@@ -558,6 +558,7 @@ impl KmsState {
         &mut self,
         test_only: bool,
         loop_handle: &LoopHandle<'static, State>,
+        screen_filter: &ScreenFilter,
         shell: Arc<RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
         clock: &Clock<Monotonic>,
@@ -658,6 +659,7 @@ impl KmsState {
                         Some(crtc),
                         (w, 0),
                         loop_handle,
+                        screen_filter.clone(),
                         shell.clone(),
                         startup_done.clone(),
                     )?;
@@ -926,5 +928,20 @@ impl KmsState {
         }
 
         Ok(all_outputs)
+    }
+
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
+        for device in self.drm_devices.values_mut() {
+            for surface in device.surfaces.values_mut() {
+                surface.set_screen_filter(screen_filter.clone());
+            }
+        }
+
+        // We don't expect this to fail in a meaningful way.
+        // The shader is already compiled at this point and we don't rely on any features,
+        // that might not be available for any filters we currently expose.
+        //
+        // But we might conditionally fail here in the future.
+        Ok(())
     }
 }

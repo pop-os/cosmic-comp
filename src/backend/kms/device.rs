@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::{output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
-    config::{AdaptiveSync, OutputConfig, OutputState},
+    config::{AdaptiveSync, OutputConfig, OutputState, ScreenFilter},
     shell::Shell,
     utils::prelude::*,
     wayland::protocols::screencopy::Frame as ScreencopyFrame,
@@ -272,6 +272,7 @@ impl State {
                     maybe_crtc,
                     (w, 0),
                     &self.common.event_loop_handle,
+                    self.common.config.dynamic_conf.screen_filter().clone(),
                     self.common.shell.clone(),
                     self.common.startup_done.clone(),
                 ) {
@@ -365,6 +366,7 @@ impl State {
                         maybe_crtc,
                         (w, 0),
                         &self.common.event_loop_handle,
+                        self.common.config.dynamic_conf.screen_filter().clone(),
                         self.common.shell.clone(),
                         self.common.startup_done.clone(),
                     ) {
@@ -516,6 +518,7 @@ impl Device {
         maybe_crtc: Option<crtc::Handle>,
         position: (u32, u32),
         evlh: &LoopHandle<'static, State>,
+        screen_filter: ScreenFilter,
         shell: Arc<RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
     ) -> Result<(Output, bool)> {
@@ -579,6 +582,7 @@ impl Device {
                     self.dev_node,
                     self.render_node,
                     evlh,
+                    screen_filter,
                     shell,
                     startup_done,
                 ) {
