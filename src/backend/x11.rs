@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render,
-    config::OutputConfig,
+    config::{OutputConfig, ScreenFilter},
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
@@ -20,7 +20,6 @@ use smithay::{
         input::{Event, InputEvent},
         renderer::{
             damage::{OutputDamageTracker, RenderOutputResult},
-            gles::GlesRenderbuffer,
             glow::GlowRenderer,
             Bind, ImportDma,
         },
@@ -41,7 +40,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
 
-use super::render::init_shaders;
+use super::render::{init_shaders, ScreenFilterStorage};
 
 #[derive(Debug)]
 enum Allocator {
@@ -146,6 +145,7 @@ impl X11State {
             render: ping.clone(),
             dirty: false,
             pending: true,
+            screen_filter_state: ScreenFilterStorage::default(),
         });
 
         // schedule first render
@@ -187,6 +187,13 @@ impl X11State {
             Ok(vec![surface.output.clone()])
         }
     }
+
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
+        for surface in &mut self.surfaces {
+            surface.screen_filter_state.filter = screen_filter.clone();
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -198,6 +205,7 @@ pub struct Surface {
     render: ping::Ping,
     dirty: bool,
     pending: bool,
+    screen_filter_state: ScreenFilterStorage,
 }
 
 impl Surface {
@@ -209,7 +217,7 @@ impl Surface {
         let mut fb = renderer
             .bind(&mut buffer)
             .with_context(|| "Failed to bind dmabuf")?;
-        match render::render_output::<_, GlesRenderbuffer>(
+        match render::render_output(
             None,
             renderer,
             &mut fb,
@@ -219,6 +227,7 @@ impl Surface {
             state.clock.now(),
             &self.output,
             render::CursorMode::NotDefault,
+            &mut self.screen_filter_state,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 self.surface

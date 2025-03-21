@@ -136,6 +136,7 @@ impl State {
         let res = self.backend.apply_config_for_outputs(
             test_only,
             &self.common.event_loop_handle,
+            self.common.config.dynamic_conf.screen_filter(),
             self.common.shell.clone(),
             &mut self.common.workspace_state.update(),
             &self.common.xdg_activation_state,
@@ -158,6 +159,7 @@ impl State {
                 if let Err(err) = self.backend.apply_config_for_outputs(
                     false,
                     &self.common.event_loop_handle,
+                    self.common.config.dynamic_conf.screen_filter(),
                     self.common.shell.clone(),
                     &mut self.common.workspace_state.update(),
                     &self.common.xdg_activation_state,

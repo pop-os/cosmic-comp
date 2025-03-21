@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render,
-    config::OutputConfig,
+    config::{OutputConfig, ScreenFilter},
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
@@ -14,7 +14,6 @@ use smithay::{
         egl::EGLDevice,
         renderer::{
             damage::{OutputDamageTracker, RenderOutputResult},
-            gles::GlesRenderbuffer,
             glow::GlowRenderer,
             ImportDma,
         },
@@ -34,7 +33,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, time::Duration};
 use tracing::{error, info, warn};
 
-use super::render::{init_shaders, CursorMode};
+use super::render::{init_shaders, CursorMode, ScreenFilterStorage};
 
 #[derive(Debug)]
 pub struct WinitState {
@@ -42,6 +41,7 @@ pub struct WinitState {
     pub backend: WinitGraphicsBackend<GlowRenderer>,
     output: Output,
     damage_tracker: OutputDamageTracker,
+    screen_filter_state: ScreenFilterStorage,
 }
 
 impl WinitState {
@@ -52,7 +52,7 @@ impl WinitState {
             .backend
             .bind()
             .with_context(|| "Failed to bind buffer")?;
-        match render::render_output::<_, GlesRenderbuffer>(
+        match render::render_output(
             None,
             renderer,
             &mut fb,
@@ -62,6 +62,7 @@ impl WinitState {
             state.clock.now(),
             &self.output,
             CursorMode::NotDefault,
+            &mut self.screen_filter_state,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 std::mem::drop(fb);
@@ -121,6 +122,11 @@ impl WinitState {
         } else {
             Ok(vec![self.output.clone()])
         }
+    }
+
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
+        self.screen_filter_state.filter = screen_filter.clone();
+        Ok(())
     }
 }
 
@@ -209,6 +215,7 @@ pub fn init_backend(
         backend,
         output: output.clone(),
         damage_tracker: OutputDamageTracker::from_output(&output),
+        screen_filter_state: ScreenFilterStorage::default(),
     });
 
     state
