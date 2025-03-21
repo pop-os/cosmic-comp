@@ -3,8 +3,8 @@
 use crate::{
     backend::render::{
         element::{CosmicElement, DamageElement},
-        init_shaders, output_elements, CursorMode, GlMultiRenderer, PostprocessOutputConfig,
-        PostprocessShader, PostprocessState, CLEAR_COLOR,
+        init_shaders, output_elements, CursorMode, GlMultiError, GlMultiRenderer,
+        PostprocessOutputConfig, PostprocessShader, PostprocessState, CLEAR_COLOR,
     },
     config::{AdaptiveSync, ScreenFilter},
     shell::Shell,
@@ -25,6 +25,7 @@ use smithay::{
         allocator::{
             format::FormatSet,
             gbm::{GbmAllocator, GbmDevice},
+            Fourcc,
         },
         drm::{
             compositor::{BlitFrameResultError, FrameError, FrameFlags, PrimaryPlaneElement},
@@ -37,15 +38,21 @@ use smithay::{
             damage::Error as RenderError,
             element::{
                 texture::TextureRenderElement,
-                utils::{constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior},
+                utils::{
+                    constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior, Relocate,
+                    RelocateRenderElement,
+                },
                 Element, Kind, RenderElementStates,
             },
-            gles::{element::TextureShaderElement, GlesRenderbuffer, GlesRenderer, Uniform},
+            gles::{
+                element::TextureShaderElement, GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform,
+            },
             glow::GlowRenderer,
             multigpu::{Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, Blit, ImportDma, Offscreen, Renderer, RendererSuper, Texture, TextureFilter,
+            Bind, Blit, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
+            TextureFilter,
         },
     },
     desktop::utils::OutputPresentationFeedback,
@@ -63,7 +70,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{Buffer as BufferCoords, Clock, Monotonic, Physical, Rectangle, Transform},
+    utils::{Buffer as BufferCoords, Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder},
         presentation::Refresh,
@@ -936,6 +943,7 @@ impl SurfaceThreadState {
 
         // we can't use the elements after `compositor.render_frame`,
         // so let's collect everything we need for screencopy now
+        let mut has_cursor_mode_none = false;
         let frames: Vec<(
             ScreencopySession,
             ScreencopyFrame,
@@ -993,6 +1001,10 @@ impl SurfaceThreadState {
                             elements.truncate(old_len);
                         }
 
+                        if !session.draw_cursor() {
+                            has_cursor_mode_none = true;
+                        }
+
                         let res = res.map(|(a, b)| (a.cloned(), b));
                         std::mem::drop(damage_tracking);
                         (session, frame, res)
@@ -1011,8 +1023,16 @@ impl SurfaceThreadState {
                     || !self.screen_filter.is_noop()
             });
 
-        let mut pre_postprocess_states = None;
-        let mut pre_postprocess_texture = None;
+        #[derive(Debug, Default)]
+        struct PrePostprocessData {
+            states: Option<RenderElementStates>,
+            texture: Option<GlesTexture>,
+            cursor_texture: Option<GlesTexture>,
+            cursor_geometry: Option<Rectangle<i32, Physical>>,
+        }
+
+        let mut pre_postprocess_data = PrePostprocessData::default();
+
         let res = if let Some(source_output) = source_output {
             let offscreen_output_config =
                 PostprocessOutputConfig::for_output_untransformed(source_output);
@@ -1038,12 +1058,104 @@ impl SurfaceThreadState {
                 }
             };
 
+            if has_cursor_mode_none && self.mirroring.is_none() {
+                // TODO: use `extract_if` once stablized
+                let cursor_element_count = elements
+                    .iter()
+                    .take_while(|elem| elem.kind() == Kind::Cursor)
+                    .count();
+                let cursor_elements = elements.drain(..cursor_element_count).collect::<Vec<_>>();
+                let scale = source_output.current_scale().fractional_scale().into();
+
+                let geometry: Option<Rectangle<i32, Physical>> =
+                    cursor_elements.iter().fold(None, |acc, elem| {
+                        let geometry = elem.geometry(scale);
+                        if let Some(acc) = acc {
+                            Some(acc.merge(geometry))
+                        } else {
+                            Some(geometry)
+                        }
+                    });
+
+                if let Some(geometry) = geometry {
+                    let cursor_elements = cursor_elements
+                        .into_iter()
+                        .map(|elem| {
+                            RelocateRenderElement::from_element(
+                                elem,
+                                Point::from((-geometry.loc.x, -geometry.loc.y)),
+                                Relocate::Relative,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+
+                    postprocess_state.track_cursor(
+                        &mut renderer,
+                        Fourcc::Abgr8888,
+                        geometry.size,
+                        scale,
+                    )?;
+
+                    postprocess_state
+                        .cursor_texture
+                        .as_mut()
+                        .unwrap()
+                        .render()
+                        .draw::<_, <GlMultiRenderer as RendererSuper>::Error>(|tex| {
+                            if self.mirroring.is_none() {
+                                pre_postprocess_data.cursor_geometry = Some(geometry);
+                                pre_postprocess_data.cursor_texture = Some(tex.clone());
+                            }
+
+                            let mut fb = renderer.bind(tex)?;
+                            let res = match postprocess_state
+                                .cursor_damage_tracker
+                                .as_mut()
+                                .unwrap()
+                                .render_output(
+                                    &mut renderer,
+                                    &mut fb,
+                                    1,
+                                    &cursor_elements,
+                                    [0.0, 0.0, 0.0, 0.0],
+                                ) {
+                                Ok(res) => res,
+                                Err(RenderError::Rendering(err)) => return Err(err),
+                                Err(RenderError::OutputNoMode(_)) => unreachable!(),
+                            };
+
+                            if self.mirroring.is_none() {
+                                pre_postprocess_data.states = Some(res.states);
+                            }
+
+                            renderer.wait(&res.sync)?;
+                            std::mem::drop(fb);
+
+                            let transform = source_output.current_transform();
+                            let area = tex.size().to_logical(1, transform);
+
+                            Ok(res
+                                .damage
+                                .cloned()
+                                .map(|v| {
+                                    v.into_iter()
+                                        .map(|r| r.to_logical(1).to_buffer(1, transform, &area))
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default())
+                        })
+                        .context("Failed to draw to offscreen render target")?;
+                }
+            } else {
+                postprocess_state.remove_cursor();
+            }
+
             postprocess_state
                 .texture
                 .render()
                 .draw::<_, <GlMultiRenderer as RendererSuper>::Error>(|tex| {
                     if self.mirroring.is_none() {
-                        pre_postprocess_texture = Some(tex.clone());
+                        pre_postprocess_data.texture = Some(tex.clone());
                     }
 
                     let mut fb = renderer.bind(tex)?;
@@ -1060,7 +1172,11 @@ impl SurfaceThreadState {
                     };
 
                     if self.mirroring.is_none() {
-                        pre_postprocess_states = Some(res.states);
+                        if let Some(states) = pre_postprocess_data.states.as_mut() {
+                            states.states.extend(res.states.states);
+                        } else {
+                            pre_postprocess_data.states = Some(res.states);
+                        }
                     }
 
                     renderer.wait(&res.sync)?;
@@ -1081,26 +1197,73 @@ impl SurfaceThreadState {
                 })
                 .context("Failed to draw to offscreen render target")?;
 
-            let texture_elem = TextureRenderElement::from_texture_render_buffer(
-                (0., 0.),
-                &postprocess_state.texture,
-                Some(1.0),
-                None,
-                None,
-                Kind::Unspecified,
-            );
-
             renderer = self.api.single_renderer(&self.target_node).unwrap();
-
-            let postprocess_texture_shader = Borrow::<GlesRenderer>::borrow(renderer.as_mut())
+            let postprocess_texture_shader = Borrow::<GlesRenderer>::borrow(renderer.as_ref())
                 .egl_context()
                 .user_data()
                 .get::<PostprocessShader>()
                 .expect("OffscreenShader should be available through `init_shaders`");
-            let texture_geometry =
-                texture_elem.geometry(self.output.current_scale().fractional_scale().into());
+
             elements = {
-                let texture_elem = TextureShaderElement::new(
+                let mut elements: [Option<TextureShaderElement>; 2] = [None, None];
+                if let Some(cursor_texture) = postprocess_state.cursor_texture.as_ref() {
+                    let cursor_geometry = pre_postprocess_data.cursor_geometry.unwrap();
+                    let texture_elem = TextureRenderElement::from_texture_render_buffer(
+                        cursor_geometry.loc.to_f64(),
+                        cursor_texture,
+                        None,
+                        Some(Rectangle::new(
+                            Point::from((0., 0.)),
+                            cursor_geometry.size.to_logical(1).to_f64(),
+                        )),
+                        Some(
+                            cursor_geometry
+                                .size
+                                .to_f64()
+                                .to_logical(self.output.current_scale().fractional_scale())
+                                .to_i32_round(),
+                        ),
+                        Kind::Cursor,
+                    );
+
+                    elements[0] = Some(TextureShaderElement::new(
+                        texture_elem,
+                        postprocess_texture_shader.0.clone(),
+                        vec![
+                            Uniform::new(
+                                "invert",
+                                if self.screen_filter.inverted { 1. } else { 0. },
+                            ),
+                            Uniform::new(
+                                "color_mode",
+                                self.screen_filter
+                                    .color_filter
+                                    .map(|val| val as u8 as f32)
+                                    .unwrap_or(0.),
+                            ),
+                        ],
+                    ));
+                }
+
+                let texture_elem = TextureRenderElement::from_texture_render_buffer(
+                    (0., 0.),
+                    &postprocess_state.texture,
+                    None,
+                    Some(Rectangle::new(
+                        Point::from((0., 0.)),
+                        postprocess_state.output_config.size.to_logical(1).to_f64(),
+                    )),
+                    Some(
+                        postprocess_state
+                            .output_config
+                            .size
+                            .to_f64()
+                            .to_logical(postprocess_state.output_config.fractional_scale)
+                            .to_i32_round(),
+                    ),
+                    Kind::Unspecified,
+                );
+                elements[1] = Some(TextureShaderElement::new(
                     texture_elem,
                     postprocess_texture_shader.0.clone(),
                     vec![
@@ -1113,23 +1276,24 @@ impl SurfaceThreadState {
                                 .unwrap_or(0.),
                         ),
                     ],
-                );
+                ));
+
                 constrain_render_elements(
-                    std::iter::once(texture_elem),
+                    elements.into_iter().flatten(),
                     (0, 0),
                     Rectangle::from_size(
                         self.output
                             .geometry()
                             .size
                             .as_logical()
-                            .to_f64()
-                            .to_physical(self.output.current_scale().fractional_scale())
-                            .to_i32_round(),
+                            .to_physical_precise_round(
+                                self.output.current_scale().fractional_scale(),
+                            ),
                     ),
-                    texture_geometry,
+                    Rectangle::new(Point::from((0, 0)), postprocess_state.output_config.size),
                     ConstrainScaleBehavior::Fit,
                     ConstrainAlign::CENTER,
-                    1.0,
+                    postprocess_state.output_config.fractional_scale,
                 )
                 .map(CosmicElement::Postprocess)
                 .collect::<Vec<_>>()
@@ -1141,7 +1305,7 @@ impl SurfaceThreadState {
             compositor.render_frame(
                 &mut renderer,
                 &elements,
-                [0.0, 0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0, 0.0],
                 self.frame_flags.union(additional_frame_flags),
             )
         } else {
@@ -1222,9 +1386,12 @@ impl SurfaceThreadState {
                                         .map_err(|_| OutputNoMode)? // eh, we have to do some error
                                         .expect("We should be able to convert all hardcoded shm screencopy formats");
 
-                                if pre_postprocess_texture
+                                if pre_postprocess_data
+                                    .texture
                                     .as_ref()
                                     .is_some_and(|tex| tex.format() == Some(format))
+                                    && (session.draw_cursor() == false
+                                        || pre_postprocess_data.cursor_texture.is_none())
                                 {
                                     None
                                 } else {
@@ -1262,21 +1429,25 @@ impl SurfaceThreadState {
                                     .flatten();
 
                                 // If the screen is rotated, we must convert damage to match output.
-                                let adjusted = damage.iter().copied().map(|mut d| {
-                                    d.size = d
-                                        .size
-                                        .to_logical(1)
-                                        .to_buffer(1, output_transform)
-                                        .to_logical(1, Transform::Normal)
-                                        .to_physical(1);
-                                    d
-                                });
+                                let adjusted = damage
+                                    .iter()
+                                    .copied()
+                                    .map(|mut d| {
+                                        d.size = d
+                                            .size
+                                            .to_logical(1)
+                                            .to_buffer(1, output_transform)
+                                            .to_logical(1, Transform::Normal)
+                                            .to_physical(1);
+                                        d
+                                    })
+                                    .collect::<Vec<_>>();
 
-                                if let Some(tex) = pre_postprocess_texture.as_mut() {
+                                if let Some(tex) = pre_postprocess_data.texture.as_mut() {
                                     let mut tex_fb = renderer.bind(tex).map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
 
                                     if let Some(fb) = fb.as_mut() {
-                                        for rect in adjusted {
+                                        for rect in adjusted.iter().copied() {
                                             renderer
                                                 .blit(
                                                     &mut tex_fb,
@@ -1290,6 +1461,68 @@ impl SurfaceThreadState {
                                                         <GlMultiRenderer as RendererSuper>::Error,
                                                     >::Rendering,
                                                 )?;
+                                        }
+                                        if let Some(cursor_geometry) = pre_postprocess_data
+                                            .cursor_geometry
+                                            .as_ref()
+                                            .filter(|_| session.draw_cursor())
+                                        {
+                                            let cursor_damage = adjusted
+                                                .iter()
+                                                .filter_map(|rect| {
+                                                    cursor_geometry.intersection(*rect)
+                                                })
+                                                .map(|rect| {
+                                                    Rectangle::new(
+                                                        rect.loc - cursor_geometry.loc,
+                                                        rect.size,
+                                                    )
+                                                })
+                                                .collect::<Vec<_>>();
+                                            let mut frame = renderer
+                                                .render(fb, output_size, output_transform)
+                                                .map_err(
+                                                    RenderError::<
+                                                        <GlMultiRenderer as RendererSuper>::Error,
+                                                    >::Rendering,
+                                                )?;
+                                            frame
+                                                .as_mut()
+                                                .render_texture_from_to(
+                                                    pre_postprocess_data
+                                                        .cursor_texture
+                                                        .as_ref()
+                                                        .unwrap(),
+                                                    Rectangle::new(
+                                                        Point::from((0., 0.)),
+                                                        cursor_geometry
+                                                            .size
+                                                            .to_logical(1)
+                                                            .to_buffer(1, Transform::Normal)
+                                                            .to_f64(),
+                                                    ),
+                                                    *cursor_geometry,
+                                                    &cursor_damage,
+                                                    &[*cursor_geometry],
+                                                    Transform::Normal,
+                                                    1.0,
+                                                )
+                                                .map_err(GlMultiError::Render)
+                                                .map_err(
+                                                    RenderError::<
+                                                        <GlMultiRenderer as RendererSuper>::Error,
+                                                    >::Rendering,
+                                                )?;
+                                            let sync = frame.finish().map_err(
+                                                RenderError::<
+                                                    <GlMultiRenderer as RendererSuper>::Error,
+                                                >::Rendering,
+                                            )?;
+                                            renderer.wait(&sync).map_err(
+                                                RenderError::<
+                                                    <GlMultiRenderer as RendererSuper>::Error,
+                                                >::Rendering,
+                                            )?;
                                         }
                                     } else {
                                         fb = Some(tex_fb);
@@ -1369,7 +1602,7 @@ impl SurfaceThreadState {
 
                         if self.mirroring.is_none() {
                             // If postprocessing, use states from first render
-                            let states = pre_postprocess_states.unwrap_or(frame_result.states);
+                            let states = pre_postprocess_data.states.unwrap_or(frame_result.states);
                             self.send_dmabuf_feedback(states);
                         }
 
