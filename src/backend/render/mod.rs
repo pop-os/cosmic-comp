@@ -63,7 +63,7 @@ use smithay::{
         },
     },
     input::Seat,
-    output::{Output, OutputNoMode},
+    output::{Output, OutputModeSource, OutputNoMode},
     utils::{
         IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
     },
@@ -1003,6 +1003,8 @@ where
 pub struct PostprocessState {
     pub texture: TextureRenderBuffer<GlesTexture>,
     pub damage_tracker: OutputDamageTracker,
+    pub cursor_texture: Option<TextureRenderBuffer<GlesTexture>>,
+    pub cursor_damage_tracker: Option<OutputDamageTracker>,
     pub output_config: PostprocessOutputConfig,
 }
 
@@ -1032,8 +1034,53 @@ impl PostprocessState {
         Ok(PostprocessState {
             texture: texture_buffer,
             damage_tracker,
+            cursor_texture: None,
+            cursor_damage_tracker: None,
             output_config,
         })
+    }
+
+    pub fn track_cursor<R: Renderer + Offscreen<GlesTexture>>(
+        &mut self,
+        renderer: &mut R,
+        format: Fourcc,
+        size: Size<i32, Physical>,
+        scale: Scale<f64>,
+    ) -> Result<(), R::Error> {
+        let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
+
+        if let (Some(tex), Some(tracker)) = (
+            self.cursor_texture.as_ref(),
+            self.cursor_damage_tracker.as_ref(),
+        ) {
+            if tex.format().is_some_and(|f| f == format)
+                && tracker.mode()
+                    == &(OutputModeSource::Static {
+                        size,
+                        scale,
+                        transform: Transform::Normal,
+                    })
+            {
+                return Ok(());
+            }
+        }
+
+        let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
+
+        let texture_buffer =
+            TextureRenderBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
+
+        let damage_tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
+
+        self.cursor_texture = Some(texture_buffer);
+        self.cursor_damage_tracker = Some(damage_tracker);
+
+        Ok(())
+    }
+
+    pub fn remove_cursor(&mut self) {
+        self.cursor_texture.take();
+        self.cursor_damage_tracker.take();
     }
 }
 
