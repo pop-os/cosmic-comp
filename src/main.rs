@@ -24,6 +24,10 @@ use wayland::protocols::overlap_notify::OverlapNotifyState;
 
 use crate::wayland::handlers::compositor::client_compositor_state;
 
+use clap_lex::RawArgs;
+
+use std::error::Error;
+
 pub mod backend;
 pub mod config;
 pub mod dbus;
@@ -95,7 +99,30 @@ impl State {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
+    let raw_args = RawArgs::from_args();
+    let mut cursor = raw_args.cursor();
+    let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
+
+    // Parse the arguments
+    while let Some(arg) = raw_args.next_os(&mut cursor) {
+        match arg.to_str() {
+            Some("--help") | Some("-h") => {
+                print_help(env!("CARGO_PKG_VERSION"), git_hash);
+                return Ok(());
+            }
+            Some("--version") | Some("-V") => {
+                println!(
+                    "cosmic-comp {} (git commit {})",
+                    env!("CARGO_PKG_VERSION"),
+                    git_hash
+                );
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     // setup logger
     logger::init_logger()?;
     info!("Cosmic starting up!");
@@ -191,6 +218,21 @@ fn main() -> Result<()> {
     std::mem::drop(state);
 
     Ok(())
+}
+
+fn print_help(version: &str, git_rev: &str) {
+    println!(
+        r#"cosmic-comp {version} (git commit {git_rev})
+System76 <info@system76.com>
+	    
+Designed for the COSMIC™ desktop environment, cosmic-comp is a Wayland Compositor.
+	    
+Project home page: https://github.com/pop-os/cosmic-comp
+	    
+Options:
+  -h, --help     Show this message
+  -v, --version  Show the version of cosmic-comp"#
+    );
 }
 
 fn init_wayland_display(
