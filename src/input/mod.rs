@@ -853,6 +853,7 @@ impl State {
                             .accessibility_zoom
                             .enable_mouse_zoom_shortcuts
                     {
+                        seat.modifiers_shortcut_queue().clear();
                         if let Some(mut percentage) = event
                             .amount_v120(Axis::Vertical)
                             .map(|val| val / 120.)
