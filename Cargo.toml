@@ -60,6 +60,8 @@ rustix = { version = "0.38.32", features = ["process"] }
 smallvec = "1.13.2"
 rand = "0.8.5"
 reis = { version = "0.4", features = ["calloop"] }
+# CLI arguments
+clap_lex = "0.7"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
