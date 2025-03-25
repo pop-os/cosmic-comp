@@ -68,7 +68,6 @@ pub struct Config {
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
     numlock: (Option<PathBuf>, NumlockStateConfig),
-    pub accessibility_zoom: (Option<PathBuf>, ZoomState),
     accessibility_filter: (Option<PathBuf>, ScreenFilter),
 }
 
@@ -176,11 +175,6 @@ impl OutputConfig {
             refresh: self.mode_refresh() as i32,
         }
     }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct ZoomState {
-    pub last_level: f64,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
@@ -348,7 +342,7 @@ impl Config {
         });
 
         Config {
-            dynamic_conf: Self::load_dynamic(xdg.as_ref(), &cosmic_comp_config),
+            dynamic_conf: Self::load_dynamic(xdg.as_ref()),
             cosmic_conf: cosmic_comp_config,
             cosmic_helper: config,
             settings_context,
@@ -358,20 +352,13 @@ impl Config {
         }
     }
 
-    fn load_dynamic(
-        xdg: Option<&xdg::BaseDirectories>,
-        cosmic: &CosmicCompConfig,
-    ) -> DynamicConfig {
+    fn load_dynamic(xdg: Option<&xdg::BaseDirectories>) -> DynamicConfig {
         let output_path =
             xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
         let outputs = Self::load_outputs(&output_path);
         let numlock_path =
             xdg.and_then(|base| base.place_state_file("cosmic-comp/numlock.ron").ok());
         let numlock = Self::load_numlock(&numlock_path);
-
-        let zoom_path =
-            xdg.and_then(|base| base.place_state_file("cosmic-comp/a11y_zoom.ron").ok());
-        let zoom = Self::load_zoom_state(&zoom_path, cosmic);
 
         let filter_path = xdg.and_then(|base| {
             base.place_state_file("cosmic-comp/a11y_screen_filter.ron")
@@ -382,7 +369,6 @@ impl Config {
         DynamicConfig {
             outputs: (output_path, outputs),
             numlock: (numlock_path, numlock),
-            accessibility_zoom: (zoom_path, zoom),
             accessibility_filter: (filter_path, filter),
         }
     }
@@ -447,35 +433,6 @@ impl Config {
                 .ok()
             })
             .unwrap_or_default()
-    }
-
-    fn load_zoom_state(path: &Option<PathBuf>, cosmic: &CosmicCompConfig) -> ZoomState {
-        if let Some(path) = path.as_ref() {
-            if path.exists() {
-                match ron::de::from_reader::<_, ZoomState>(
-                    OpenOptions::new().read(true).open(path).unwrap(),
-                ) {
-                    Ok(mut config) => {
-                        if config.last_level <= 1.0 {
-                            warn!("Invalid level, resetting");
-                            config.last_level =
-                                1.0 + cosmic.accessibility_zoom.increment as f64 / 100.0;
-                        }
-                        return config;
-                    }
-                    Err(err) => {
-                        warn!(?err, "Failed to read zoom_state, resetting..");
-                        if let Err(err) = std::fs::remove_file(path) {
-                            error!(?err, "Failed to remove zoom_state.");
-                        }
-                    }
-                };
-            }
-        }
-
-        ZoomState {
-            last_level: 1.0 + cosmic.accessibility_zoom.increment as f64 / 100.0,
-        }
     }
 
     fn load_filter_state(path: &Option<PathBuf>) -> ScreenFilter {
@@ -777,17 +734,6 @@ impl DynamicConfig {
 
     pub fn numlock_mut(&mut self) -> PersistenceGuard<'_, NumlockStateConfig> {
         PersistenceGuard(self.numlock.0.clone(), &mut self.numlock.1)
-    }
-
-    pub fn zoom_state(&self) -> &ZoomState {
-        &self.accessibility_zoom.1
-    }
-
-    pub fn zoom_state_mut(&mut self) -> PersistenceGuard<'_, ZoomState> {
-        PersistenceGuard(
-            self.accessibility_zoom.0.clone(),
-            &mut self.accessibility_zoom.1,
-        )
     }
 
     pub fn screen_filter(&self) -> &ScreenFilter {
