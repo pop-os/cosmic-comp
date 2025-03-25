@@ -280,7 +280,7 @@ impl ZoomState {
             ZoomMovement::Continuously => output_state_ref.focal_point = cursor_position.to_f64(),
             ZoomMovement::OnEdge => {
                 if !zoomed_output_geometry
-                    .overlaps_or_touches(Rectangle::new(original_position, Size::from((1, 1))))
+                    .overlaps_or_touches(Rectangle::new(original_position, Size::from((16, 16))))
                 {
                     zoomed_output_geometry.loc = cursor_position.to_global(&output)
                         - zoomed_output_geometry.size.downscale(2).to_point();
