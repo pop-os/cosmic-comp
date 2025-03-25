@@ -133,6 +133,7 @@ pub struct ZoomConfig {
     pub show_overlay: bool,
     pub increment: u32,
     pub view_moves: ZoomMovement,
+    pub enable_mouse_zoom_shortcuts: bool,
 }
 
 impl Default for ZoomConfig {
@@ -142,6 +143,7 @@ impl Default for ZoomConfig {
             show_overlay: true,
             increment: 50,
             view_moves: ZoomMovement::Continuously,
+            enable_mouse_zoom_shortcuts: true,
         }
     }
 }
