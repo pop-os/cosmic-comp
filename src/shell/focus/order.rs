@@ -73,7 +73,7 @@ fn render_input_order_internal<R: 'static>(
     if shell
         .zoom_state
         .as_ref()
-        .is_some_and(|state| state.current_level() != 1.0)
+        .is_some_and(|state| state.show_overlay && state.current_level() != 1.0)
     {
         callback(Stage::ZoomUI)?;
     }

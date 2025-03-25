@@ -51,6 +51,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct ZoomState {
     pub(super) seat: Seat<State>,
+    pub(super) show_overlay: bool,
     pub(super) level: f64,
     pub(super) increment: u32,
     pub(super) movement: ZoomMovement,
@@ -780,21 +781,19 @@ impl Program for ZoomProgram {
             }
             ZoomMessage::Close => {
                 let _ = loop_handle.insert_idle(|state| {
-                    let seat = state
+                    state
                         .common
-                        .shell
-                        .read()
-                        .unwrap()
-                        .seats
-                        .last_active()
-                        .clone();
-                    state.common.shell.write().unwrap().trigger_zoom(
-                        &seat,
-                        1.0,
-                        &state.common.config.cosmic_conf.accessibility_zoom,
-                        true,
-                        &state.common.event_loop_handle,
-                    );
+                        .config
+                        .cosmic_conf
+                        .accessibility_zoom
+                        .show_overlay = false;
+                    if let Err(err) = state.common.config.cosmic_helper.set(
+                        "accessibility_zoom",
+                        state.common.config.cosmic_conf.accessibility_zoom,
+                    ) {
+                        error!(?err, "Failed to update zoom config");
+                    }
+                    state.common.update_config();
                 });
             }
             ZoomMessage::Update {
