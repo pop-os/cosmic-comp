@@ -845,7 +845,14 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    if seat.get_keyboard().unwrap().modifier_state().logo {
+                    if seat.get_keyboard().unwrap().modifier_state().logo
+                        && self
+                            .common
+                            .config
+                            .cosmic_conf
+                            .accessibility_zoom
+                            .enable_mouse_zoom_shortcuts
+                    {
                         if let Some(mut percentage) = event
                             .amount_v120(Axis::Vertical)
                             .map(|val| val / 120.)
