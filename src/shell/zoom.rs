@@ -701,7 +701,8 @@ impl Program for ZoomProgram {
                                         Item::new(crate::fl!("a11y-zoom-settings"), |handle| {
                                             let _ = handle.insert_idle(move |state| {
                                                 state.spawn_command(
-                                                    "cosmic-settings page-accessibility".into(),
+                                                    "cosmic-settings accessibility-magnifier"
+                                                        .into(),
                                                 );
                                             });
                                         }),
