@@ -11,7 +11,6 @@ use crate::{
         handlers::xdg_activation::ActivationContext, protocols::workspace::WorkspaceUpdateGuard,
     },
 };
-use calloop::timer::{TimeoutAction, Timer};
 use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
 use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
@@ -24,7 +23,7 @@ use smithay::{
 use tracing::info;
 use tracing::{error, warn};
 
-use std::{os::unix::process::CommandExt, thread, time::Duration};
+use std::{os::unix::process::CommandExt, thread};
 
 use super::gestures;
 
@@ -1033,11 +1032,6 @@ impl State {
             .zoom_state()
             .map(|state| (state.current_seat(), state.current_level()))
             .unwrap_or_else(|| (seat.clone(), 1.0));
-        let change = if current_level == 1.0 && animate {
-            self.common.config.dynamic_conf.zoom_state().last_level - 1.0
-        } else {
-            change
-        };
 
         if current_level == 1. && change <= 0. {
             return;
@@ -1052,36 +1046,6 @@ impl State {
                 animate,
                 &self.common.event_loop_handle,
             );
-
-            if new_level > 1. {
-                // bypass the persistence guard, so that `update_zoom` call pick up the latest value
-                self.common
-                    .config
-                    .dynamic_conf
-                    .accessibility_zoom
-                    .1
-                    .last_level = new_level;
-
-                // and then debounce the config write, because of `Super+<Scroll Wheel>`
-                if let Some(token) = self.common.zoom_config_debounce.take() {
-                    self.common.event_loop_handle.remove(token);
-                }
-                match self.common.event_loop_handle.insert_source(
-                    Timer::from_duration(Duration::from_secs(5)),
-                    move |_, _, state| {
-                        state.common.config.dynamic_conf.zoom_state_mut().last_level = new_level;
-                        let _ = state.common.zoom_config_debounce.take();
-                        TimeoutAction::Drop
-                    },
-                ) {
-                    Ok(token) => {
-                        self.common.zoom_config_debounce = Some(token);
-                    }
-                    Err(err) => {
-                        warn!("Failed to schedule debounced configuration write: {}", err);
-                    }
-                }
-            }
         }
     }
 }

@@ -21,7 +21,7 @@ impl A11yHandler for State {
         {
             let seat = shell.seats.last_active().clone();
             let level = if enabled {
-                self.common.config.dynamic_conf.zoom_state().last_level
+                1.0 + (self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0)
             } else {
                 1.0
             };
