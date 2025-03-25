@@ -1202,7 +1202,7 @@ impl Common {
                 Mutex::new(OutputZoomState::new(
                     &state.seat,
                     output,
-                    state.level,
+                    1.0,
                     state.increment,
                     state.movement,
                     self.event_loop_handle.clone(),
@@ -1253,11 +1253,9 @@ impl Common {
 
             for output in shell_ref.workspaces.sets.keys() {
                 let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
-                output_state.lock().unwrap().update(
-                    zoom_state.level,
-                    zoom_state.movement,
-                    zoom_state.increment,
-                );
+                let mut output_state_ref = output_state.lock().unwrap();
+                let level = output_state_ref.level;
+                output_state_ref.update(level, false, zoom_state.movement, zoom_state.increment);
             }
         }
 
@@ -1861,13 +1859,12 @@ impl Shell {
             .workspaces
             .spaces()
             .any(|workspace| workspace.animations_going())
-            || self.zoom_state.as_ref().is_some_and(|state| {
-                state.previous_level.is_some()
-                    || self.outputs().any(|o| {
-                        o.user_data()
-                            .get::<Mutex<OutputZoomState>>()
-                            .is_some_and(|state| state.lock().unwrap().is_animating())
-                    })
+            || self.zoom_state.as_ref().is_some_and(|_| {
+                self.outputs().any(|o| {
+                    o.user_data()
+                        .get::<Mutex<OutputZoomState>>()
+                        .is_some_and(|state| state.lock().unwrap().is_animating())
+                })
             })
     }
 
@@ -2005,6 +2002,7 @@ impl Shell {
     pub fn trigger_zoom(
         &mut self,
         seat: &Seat<State>,
+        output: Option<&Output>,
         level: f64,
         zoom_config: &ZoomConfig,
         animate: bool,
@@ -2014,51 +2012,53 @@ impl Shell {
             return;
         }
 
-        let previous_level = if let Some(old_state) = self.zoom_state.as_ref() {
-            if &old_state.seat != seat {
-                return;
-            }
-
+        let outputs = output.map(|o| vec![o]).unwrap_or(self.outputs().collect());
+        if self.zoom_state.is_none() {
             for output in self.outputs() {
-                let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
-                output_state.lock().unwrap().update(
-                    level,
-                    zoom_config.view_moves,
-                    zoom_config.increment,
-                );
-            }
-
-            old_state.animating_level()
-        } else {
-            for output in self.outputs() {
-                let output_state = output.user_data().get_or_insert_threadsafe(|| {
+                output.user_data().insert_if_missing_threadsafe(|| {
                     Mutex::new(OutputZoomState::new(
                         seat,
                         output,
-                        level,
+                        1.0,
                         zoom_config.increment,
                         zoom_config.view_moves,
                         loop_handle.clone(),
                         self.theme.clone(),
                     ))
                 });
-                *output_state.lock().unwrap() = OutputZoomState::new(
-                    seat,
-                    output,
-                    level,
-                    zoom_config.increment,
-                    zoom_config.view_moves,
-                    loop_handle.clone(),
-                    self.theme.clone(),
-                );
             }
+        }
 
-            1.
-        };
+        let mut toggled = self.zoom_state.is_none();
+        if let Some(old_state) = self.zoom_state.as_ref() {
+            if &old_state.seat != seat {
+                return;
+            }
+        }
 
-        let toggled = previous_level != level && (previous_level == 1.0 || level == 1.0);
+        for output in &outputs {
+            let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+            output_state.lock().unwrap().update(
+                level,
+                animate,
+                zoom_config.view_moves,
+                zoom_config.increment,
+            );
+        }
+
+        let all_outputs_off = self.outputs().all(|o| {
+            o.user_data()
+                .get::<Mutex<OutputZoomState>>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .current_level()
+                == 1.0
+        });
+        toggled = toggled || all_outputs_off;
+
         if toggled {
-            let value = previous_level == 1.0;
+            let value = !all_outputs_off;
             let _ = loop_handle.insert_idle(move |state| {
                 state.common.a11y_state.set_screen_magnifier(value);
             });
@@ -2067,10 +2067,8 @@ impl Shell {
         self.zoom_state = Some(ZoomState {
             seat: seat.clone(),
             show_overlay: zoom_config.show_overlay,
-            level,
             increment: zoom_config.increment,
             movement: zoom_config.view_moves,
-            previous_level: animate.then_some((previous_level, Instant::now())),
         });
     }
 
@@ -2135,31 +2133,21 @@ impl Shell {
             _ => {}
         }
 
-        if let Some(zoom_state) = self.zoom_state.as_mut() {
-            if zoom_state
-                .previous_level
-                .as_ref()
-                .is_some_and(|(_, start)| {
-                    Instant::now().duration_since(*start) > ANIMATION_DURATION
-                })
-            {
-                zoom_state.previous_level.take();
-            }
-
-            if zoom_state.level == 1. && zoom_state.previous_level.is_none() {
-                self.zoom_state.take();
-            }
-
-            if self.zoom_state.is_some() {
-                for output in self.outputs() {
-                    output
+        if self.zoom_state.is_some() {
+            let mut all_outputs_off = true;
+            for output in self.outputs() {
+                all_outputs_off = all_outputs_off
+                    && output
                         .user_data()
                         .get::<Mutex<OutputZoomState>>()
                         .unwrap()
                         .lock()
                         .unwrap()
                         .refresh();
-                }
+            }
+
+            if all_outputs_off {
+                self.zoom_state.take();
             }
         }
 

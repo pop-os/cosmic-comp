@@ -52,14 +52,14 @@ use super::{
 pub struct ZoomState {
     pub(super) seat: Seat<State>,
     pub(super) show_overlay: bool,
-    pub(super) level: f64,
     pub(super) increment: u32,
     pub(super) movement: ZoomMovement,
-    pub(super) previous_level: Option<(f64, Instant)>,
 }
 
 #[derive(Debug)]
 pub struct OutputZoomState {
+    pub(super) level: f64,
+    pub(super) previous_level: Option<(f64, Instant)>,
     focal_point: Point<f64, Local>,
     previous_point: Option<(Point<f64, Local>, Instant)>,
     element: ZoomElement,
@@ -118,6 +118,8 @@ impl OutputZoomState {
         element.set_additional_scale(level.min(4.));
 
         OutputZoomState {
+            level,
+            previous_level: None,
             focal_point,
             previous_point: None,
             element,
@@ -150,15 +152,40 @@ impl OutputZoomState {
         self.focal_point
     }
 
+    pub fn current_level(&self) -> f64 {
+        self.level
+    }
+
+    pub fn animating_level(&self) -> f64 {
+        if let Some((old_level, start)) = self.previous_level.as_ref() {
+            let percentage = Instant::now().duration_since(*start).as_millis() as f32
+                / ANIMATION_DURATION.as_millis() as f32;
+
+            ease(EaseInOutCubic, *old_level, self.level, percentage)
+        } else {
+            self.level
+        }
+    }
+
     pub fn is_animating(&self) -> bool {
-        self.previous_point.is_some()
+        self.previous_point.is_some() || self.previous_level.is_some()
     }
 
-    pub fn refresh(&self) {
-        self.element.refresh()
+    pub fn refresh(&mut self) -> bool {
+        if self
+            .previous_level
+            .as_ref()
+            .is_some_and(|(_, start)| Instant::now().duration_since(*start) > ANIMATION_DURATION)
+        {
+            self.previous_level.take();
+        }
+        self.element.refresh();
+        self.level == 1. && self.previous_level.is_none()
     }
 
-    pub fn update(&self, level: f64, movement: ZoomMovement, increment: u32) {
+    pub fn update(&mut self, level: f64, animate: bool, movement: ZoomMovement, increment: u32) {
+        self.previous_level = animate.then_some((self.animating_level(), Instant::now()));
+        self.level = level;
         self.element.set_additional_scale(level.min(4.));
         self.element.queue_message(ZoomMessage::Update {
             level,
@@ -189,23 +216,18 @@ impl OutputZoomState {
 }
 
 impl ZoomState {
-    pub fn current_level(&self) -> f64 {
-        self.level
-    }
-
-    pub fn animating_level(&self) -> f64 {
-        if let Some((old_level, start)) = self.previous_level.as_ref() {
-            let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                / ANIMATION_DURATION.as_millis() as f32;
-
-            ease(EaseInOutCubic, *old_level, self.level, percentage)
-        } else {
-            self.level
-        }
-    }
-
     pub fn current_seat(&self) -> Seat<State> {
         self.seat.clone()
+    }
+
+    pub fn current_level(&self, output: &Output) -> f64 {
+        let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+        output_state.lock().unwrap().current_level()
+    }
+
+    pub fn animating_level(&self, output: &Output) -> f64 {
+        let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
+        output_state.lock().unwrap().animating_level()
     }
 
     pub fn animating_focal_point(&self, output: Option<&Output>) -> Point<f64, Global> {
@@ -242,7 +264,7 @@ impl ZoomState {
         let cursor_position = cursor_position.to_i32_round();
         let original_position = original_position.to_i32_round();
         let output_geometry = output.geometry();
-        let mut zoomed_output_geometry = output.zoomed_geometry(self.level).unwrap();
+        let mut zoomed_output_geometry = output.zoomed_geometry().unwrap();
 
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
         let mut output_state_ref = output_state.lock().unwrap();
@@ -285,7 +307,7 @@ impl ZoomState {
                     let mut diff = output_state_ref.focal_point.to_global(&output)
                         + (cursor_position.to_global(&output) - original_position)
                             .to_f64()
-                            .upscale(self.level);
+                            .upscale(output_state_ref.level);
                     diff.x = diff.x.clamp(
                         output_geometry.loc.x as f64,
                         ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
@@ -333,9 +355,9 @@ impl ZoomState {
         pos: Point<f64, Global>,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
         let output_geometry = output.geometry();
-        let zoomed_output_geometry = output.zoomed_geometry(self.level).unwrap().to_f64();
+        let zoomed_output_geometry = output.zoomed_geometry().unwrap().to_f64();
+        let local_pos = global_pos_to_screen_space(pos, output);
 
-        let local_pos = global_pos_to_screen_space(pos, output, self.level);
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
         let output_state_ref = output_state.lock().unwrap();
 
@@ -351,7 +373,7 @@ impl ZoomState {
                 PointerFocusTarget::ZoomUI(output_state_ref.element.clone().into()),
                 {
                     // and vise-versa from screen-space to zoom-space...
-                    let scaled_loc = location.downscale(self.level);
+                    let scaled_loc = location.downscale(output_state_ref.level);
                     let global_loc = Point::<f64, Global>::from((scaled_loc.x, scaled_loc.y))
                         + zoomed_output_geometry.loc;
 
@@ -359,7 +381,7 @@ impl ZoomState {
                     // the relative position for us... Which will be wrong given the cursor movement will
                     // be scaled, while this element isn't, as it exists in screen-space and not workspace-space.
                     // So we shift the location relatively to make up for the scaled movement...
-                    let diff = (pos - global_loc).upscale(self.level - 1.);
+                    let diff = (pos - global_loc).upscale(output_state_ref.level - 1.);
 
                     global_loc - diff
                 },
@@ -383,10 +405,16 @@ impl ZoomState {
 fn global_pos_to_screen_space(
     pos: impl Into<Point<f64, Global>>,
     output: &Output,
-    level: f64,
 ) -> Point<f64, Local> {
     let pos = pos.into();
-    let zoomed_output_geometry = output.zoomed_geometry(level).unwrap().to_f64();
+    let zoomed_output_geometry = output.zoomed_geometry().unwrap().to_f64();
+    let level = output
+        .user_data()
+        .get::<Mutex<OutputZoomState>>()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .current_level();
 
     // lets try to get the global cursor position into screen space
     let relative_to_zoom_geo = Point::<f64, Local>::from((
@@ -551,11 +579,10 @@ impl Program for ZoomProgram {
                             let shell = state.common.shell.read().unwrap();
                             let output = seat.active_output();
 
-                            if let Some(zoom_state) = shell.zoom_state() {
+                            if shell.zoom_state().is_some() {
                                 let location = global_pos_to_screen_space(
                                     start_data.location().as_global(),
                                     &output,
-                                    zoom_state.current_level(),
                                 );
 
                                 let output_geometry = output.geometry();
@@ -573,6 +600,7 @@ impl Program for ZoomProgram {
                                     location.x,
                                     elem_location.y + elem_size.h / 2.,
                                 ));
+                                let level = output_state_ref.level;
                                 std::mem::drop(output_state_ref);
 
                                 let grab = MenuGrab::new(
@@ -684,7 +712,7 @@ impl Program for ZoomProgram {
                                         (elem_size.h / 2.).round() as u32,
                                         false,
                                     ),
-                                    Some(zoom_state.level.min(4.)),
+                                    Some(level.min(4.)),
                                     state.common.event_loop_handle.clone(),
                                     state.common.theme.clone(),
                                 );
@@ -715,11 +743,10 @@ impl Program for ZoomProgram {
                             let shell = state.common.shell.read().unwrap();
                             let output = seat.active_output();
 
-                            if let Some(zoom_state) = shell.zoom_state() {
+                            if shell.zoom_state().is_some() {
                                 let location = global_pos_to_screen_space(
                                     start_data.location().as_global(),
                                     &output,
-                                    zoom_state.current_level(),
                                 );
 
                                 let output_geometry = output.geometry();
@@ -737,6 +764,7 @@ impl Program for ZoomProgram {
                                     location.x,
                                     elem_location.y + (elem_size.h / 2.),
                                 ));
+                                let level = output_state_ref.level;
                                 std::mem::drop(output_state_ref);
 
                                 let grab = MenuGrab::new(
@@ -758,7 +786,7 @@ impl Program for ZoomProgram {
                                     }),
                                     position.to_global(&output).to_i32_round(),
                                     MenuAlignment::PREFER_CENTERED,
-                                    Some(zoom_state.level.min(4.)),
+                                    Some(level.min(4.)),
                                     state.common.event_loop_handle.clone(),
                                     state.common.theme.clone(),
                                 );

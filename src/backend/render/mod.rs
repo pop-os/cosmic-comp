@@ -433,7 +433,7 @@ where
         .map(|state| {
             (
                 state.animating_focal_point(Some(&output)).to_local(&output),
-                state.animating_level(),
+                state.animating_level(&output),
             )
         })
         .unwrap_or_else(|| ((0., 0.).into(), 1.));
@@ -741,7 +741,7 @@ where
         .map(|state| {
             (
                 state.animating_focal_point(Some(&output)).to_local(&output),
-                state.animating_level(),
+                state.animating_level(&output),
             )
         })
         .unwrap_or_else(|| ((0., 0.).into(), 1.));

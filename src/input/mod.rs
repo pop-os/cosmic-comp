@@ -2247,7 +2247,7 @@ where
     B::Device: 'static,
 {
     let geometry = zoom_state
-        .and_then(|state| output.zoomed_geometry(state.current_level()))
+        .and_then(|_| output.zoomed_geometry())
         .unwrap_or_else(|| output.geometry());
     let transform = output.current_transform();
     let size = transform

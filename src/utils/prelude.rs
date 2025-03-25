@@ -23,7 +23,7 @@ use std::{
 
 pub trait OutputExt {
     fn geometry(&self) -> Rectangle<i32, Global>;
-    fn zoomed_geometry(&self, level: f64) -> Option<Rectangle<i32, Global>>;
+    fn zoomed_geometry(&self) -> Option<Rectangle<i32, Global>>;
 
     fn adaptive_sync(&self) -> AdaptiveSync;
     fn set_adaptive_sync(&self, vrr: AdaptiveSync);
@@ -57,7 +57,7 @@ impl OutputExt for Output {
         .as_global()
     }
 
-    fn zoomed_geometry(&self, level: f64) -> Option<Rectangle<i32, Global>> {
+    fn zoomed_geometry(&self) -> Option<Rectangle<i32, Global>> {
         let output_geometry = self.geometry();
 
         let output_state = self.user_data().get::<Mutex<OutputZoomState>>()?;
@@ -66,7 +66,7 @@ impl OutputExt for Output {
         let focal_point = output_state_ref.current_focal_point().to_global(self);
         let mut zoomed_output_geo = output_geometry.to_f64();
         zoomed_output_geo.loc -= focal_point;
-        zoomed_output_geo = zoomed_output_geo.downscale(level);
+        zoomed_output_geo = zoomed_output_geo.downscale(output_state_ref.current_level());
         zoomed_output_geo.loc += focal_point;
 
         Some(zoomed_output_geo.to_i32_round())

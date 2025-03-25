@@ -1027,10 +1027,11 @@ impl State {
     }
 
     pub fn update_zoom(&mut self, seat: &Seat<State>, change: f64, animate: bool) {
+        let output = seat.active_output();
         let mut shell = self.common.shell.write().unwrap();
         let (zoom_seat, current_level) = shell
             .zoom_state()
-            .map(|state| (state.current_seat(), state.current_level()))
+            .map(|state| (state.current_seat(), state.current_level(&output)))
             .unwrap_or_else(|| (seat.clone(), 1.0));
 
         if current_level == 1. && change <= 0. {
@@ -1041,6 +1042,7 @@ impl State {
             let new_level = (current_level + change).max(1.0);
             shell.trigger_zoom(
                 &seat,
+                Some(&output),
                 new_level,
                 &self.common.config.cosmic_conf.accessibility_zoom,
                 animate,
