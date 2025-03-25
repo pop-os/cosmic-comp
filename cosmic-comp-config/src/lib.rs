@@ -130,6 +130,7 @@ fn default_repeat_delay() -> u32 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ZoomConfig {
     pub start_on_login: bool,
+    pub show_overlay: bool,
     pub increment: u32,
     pub view_moves: ZoomMovement,
 }
@@ -138,6 +139,7 @@ impl Default for ZoomConfig {
     fn default() -> Self {
         ZoomConfig {
             start_on_login: false,
+            show_overlay: true,
             increment: 50,
             view_moves: ZoomMovement::Continuously,
         }
