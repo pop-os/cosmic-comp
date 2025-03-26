@@ -2734,6 +2734,19 @@ impl Shell {
                                 stack.append(elem);
                             }
                         }
+
+                        if to_workspace.tiling_enabled {
+                            for mapped in to_workspace
+                                .mapped()
+                                .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                            {
+                                to_workspace.unmaximize_request(&mapped);
+                            }
+                        }
+
                         let res = TilingLayout::move_tree(
                             &mut from_workspace.tiling_layer,
                             &mut to_workspace.tiling_layer,
