@@ -2591,10 +2591,19 @@ impl Shell {
 
         let any_seat = seat.unwrap_or(self.seats.last_active()).clone();
         let mut to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
-        let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(&seat));
         if window_state.layer == ManagedLayer::Floating || !to_workspace.tiling_enabled {
             to_workspace.floating_layer.map(mapped.clone(), None);
         } else {
+            for mapped in to_workspace
+                .mapped()
+                .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                .cloned()
+                .collect::<Vec<_>>()
+                .into_iter()
+            {
+                to_workspace.unmaximize_request(&mapped);
+            }
+            let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(&seat));
             to_workspace.tiling_layer.map(
                 mapped.clone(),
                 focus_stack.as_ref().map(|x| x.iter()),
