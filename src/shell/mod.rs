@@ -2750,6 +2750,21 @@ impl Shell {
                         );
                         from_workspace.refresh_focus_stack();
                         to_workspace.refresh_focus_stack();
+
+                        if !to_workspace.tiling_enabled {
+                            to_workspace.tiling_enabled = true;
+                            for mapped in to_workspace
+                                .tiling_layer
+                                .mapped()
+                                .map(|(mapped, _)| mapped.clone())
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                            {
+                                to_workspace.toggle_floating_window(&seat, &mapped);
+                            }
+                            to_workspace.tiling_enabled = false;
+                        }
+
                         return Ok(res.zip(new_pos));
                     }
                 }
