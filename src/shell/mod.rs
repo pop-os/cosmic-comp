@@ -518,14 +518,14 @@ impl WorkspaceSet {
         }
     }
 
-    fn set_output(&mut self, new_output: &Output) {
+    fn set_output(&mut self, new_output: &Output, explicit: bool) {
         self.sticky_layer.set_output(new_output);
         for window in self.sticky_layer.windows() {
             toplevel_leave_output(&window, &self.output);
             toplevel_enter_output(&window, &new_output);
         }
         for workspace in &mut self.workspaces {
-            workspace.set_output(new_output);
+            workspace.set_output(new_output, explicit);
         }
         self.output = new_output.clone();
     }
@@ -711,7 +711,7 @@ impl Workspaces {
             .backup_set
             .take()
             .map(|mut set| {
-                set.set_output(output);
+                set.set_output(output, false);
                 set
             })
             .unwrap_or_else(|| {
@@ -738,7 +738,7 @@ impl Workspaces {
         }
         set.update_workspace_idxs(workspace_state);
         for (i, workspace) in set.workspaces.iter_mut().enumerate() {
-            workspace.set_output(output);
+            workspace.set_output(output, false);
             workspace.refresh();
             if i == set.active {
                 workspace_state.add_workspace_state(&workspace.handle, WState::Active);
@@ -790,7 +790,7 @@ impl Workspaces {
                         move_workspace_to_group(&mut workspace, &workspace_group, workspace_state);
 
                         // update mapping
-                        workspace.set_output(&new_output);
+                        workspace.set_output(&new_output, false);
                         workspace.refresh();
                         new_set.workspaces.push(workspace);
 
@@ -840,6 +840,7 @@ impl Workspaces {
         }
     }
 
+    // Move workspace from one output to another, explicitly by the user
     fn migrate_workspace(
         &mut self,
         from: &Output,
@@ -858,7 +859,7 @@ impl Workspaces {
         {
             let new_set = self.sets.get_mut(to).unwrap();
             move_workspace_to_group(&mut workspace, &new_set.group, workspace_state);
-            workspace.set_output(to);
+            workspace.set_output(to, true);
             workspace.refresh();
             new_set.workspaces.insert(new_set.active + 1, workspace);
             new_set.update_workspace_idxs(workspace_state);
