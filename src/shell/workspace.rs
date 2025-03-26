@@ -85,7 +85,7 @@ pub struct Workspace {
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
     pub screencopy: ScreencopySessions,
-    pub output_stack: VecDeque<String>,
+    output_stack: VecDeque<String>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
 }
@@ -361,7 +361,11 @@ impl Workspace {
         &self.output
     }
 
-    pub fn set_output(&mut self, output: &Output) {
+    // Set output the workspace is on
+    //
+    // If `explicit` is `true`, the user has explicitly moved the workspace
+    // to this output, so previous outputs it was on can be forgotten.
+    pub fn set_output(&mut self, output: &Output, explicit: bool) {
         self.tiling_layer.set_output(output);
         self.floating_layer.set_output(output);
         for mapped in self.mapped() {
@@ -375,6 +379,9 @@ impl Workspace {
                 toplevel_leave_output(&surface, &self.output);
                 toplevel_enter_output(&surface, output);
             }
+        }
+        if explicit {
+            self.output_stack.clear();
         }
         let output_name = output.name();
         if let Some(pos) = self
