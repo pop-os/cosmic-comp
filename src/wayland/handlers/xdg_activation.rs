@@ -154,10 +154,29 @@ impl XdgActivationHandler for State {
                         }
 
                         if in_current_workspace {
-                            let target = element.into();
+                            if seat.get_keyboard().unwrap().current_focus()
+                                != Some(element.clone().into())
+                                && current_workspace.is_tiled(&element)
+                            {
+                                for mapped in current_workspace
+                                    .mapped()
+                                    .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                                    .cloned()
+                                    .collect::<Vec<_>>()
+                                    .into_iter()
+                                {
+                                    current_workspace.unmaximize_request(&mapped);
+                                }
+                            }
 
                             std::mem::drop(shell);
-                            Shell::set_focus(self, Some(&target), &seat, None, false);
+                            Shell::set_focus(
+                                self,
+                                Some(&element.clone().into()),
+                                &seat,
+                                None,
+                                false,
+                            );
                         } else if let Some(w) = element_workspace {
                             shell.append_focus_stack(&element, &seat);
                             let mut workspace_guard = self.common.workspace_state.update();

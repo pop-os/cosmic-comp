@@ -53,12 +53,28 @@ impl ToplevelManagementHandler for State {
                     .unwrap()
                     .clone();
 
+                let handle = workspace.handle;
                 let res = shell.activate(
                     &output,
                     idx,
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
                 );
+
+                let workspace = shell.workspaces.space_for_handle_mut(&handle).unwrap();
+                if seat.get_keyboard().unwrap().current_focus() != Some(mapped.clone().into())
+                    && workspace.is_tiled(&mapped)
+                {
+                    for mapped in workspace
+                        .mapped()
+                        .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                    {
+                        workspace.unmaximize_request(&mapped);
+                    }
+                }
                 std::mem::drop(shell);
 
                 if seat.active_output() != *output {
