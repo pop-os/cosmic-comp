@@ -4,6 +4,7 @@ use crate::{
         element::{AsGlowRenderer, FromGlesError},
         BackdropShader,
     },
+    config::EdidProduct,
     shell::{
         layout::{floating::FloatingLayout, tiling::TilingLayout},
         OverviewMode, ANIMATION_DURATION,
@@ -73,6 +74,25 @@ use super::{
 
 const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OutputMatch {
+    name: String,
+    edid: Option<EdidProduct>,
+}
+
+impl OutputMatch {
+    fn for_output(output: &Output) -> Self {
+        Self {
+            name: output.name(),
+            edid: output.edid().cloned(),
+        }
+    }
+
+    fn matches(&self, output: &Output) -> bool {
+        self.edid.as_ref() == output.edid() && (self.edid.is_some() || self.name == output.name())
+    }
+}
+
 #[derive(Debug)]
 pub struct Workspace {
     pub output: Output,
@@ -85,7 +105,7 @@ pub struct Workspace {
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
     pub screencopy: ScreencopySessions,
-    output_stack: VecDeque<String>,
+    output_stack: VecDeque<OutputMatch>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
 }
@@ -241,7 +261,7 @@ impl Workspace {
     ) -> Workspace {
         let tiling_layer = TilingLayout::new(theme.clone(), &output);
         let floating_layer = FloatingLayout::new(theme, &output);
-        let output_name = output.name();
+        let output_match = OutputMatch::for_output(&output);
 
         Workspace {
             output,
@@ -255,7 +275,7 @@ impl Workspace {
             screencopy: ScreencopySessions::default(),
             output_stack: {
                 let mut queue = VecDeque::new();
-                queue.push_back(output_name);
+                queue.push_back(output_match);
                 queue
             },
             backdrop_id: Id::new(),
@@ -383,21 +403,16 @@ impl Workspace {
         if explicit {
             self.output_stack.clear();
         }
-        let output_name = output.name();
-        if let Some(pos) = self
-            .output_stack
-            .iter()
-            .position(|name| name == &output_name)
-        {
+        if let Some(pos) = self.output_stack.iter().position(|i| i.matches(output)) {
             self.output_stack.truncate(pos + 1);
         } else {
-            self.output_stack.push_back(output.name());
+            self.output_stack.push_back(OutputMatch::for_output(output));
         }
         self.output = output.clone();
     }
 
     pub fn prefers_output(&self, output: &Output) -> bool {
-        self.output_stack.contains(&output.name())
+        self.output_stack.iter().any(|i| i.matches(output))
     }
 
     pub fn unmap(&mut self, mapped: &CosmicMapped) -> Option<ManagedState> {
