@@ -146,10 +146,18 @@ impl Common {
             .last_active()
             .get_keyboard()
         {
-            if let Some(KeyboardFocusTarget::Element(mapped)) = keyboard.current_focus() {
-                if let Some(surface) = mapped.active_window().x11_surface() {
-                    return surface.xwm_id().unwrap() == xwm;
+            match keyboard.current_focus() {
+                Some(KeyboardFocusTarget::Element(mapped)) => {
+                    if let Some(surface) = mapped.active_window().x11_surface() {
+                        return surface.xwm_id().unwrap() == xwm;
+                    }
                 }
+                Some(KeyboardFocusTarget::Fullscreen(surface)) => {
+                    if let Some(surface) = surface.x11_surface() {
+                        return surface.xwm_id().unwrap() == xwm;
+                    }
+                }
+                _ => {}
             }
         }
 
