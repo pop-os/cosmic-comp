@@ -762,22 +762,20 @@ impl XwmHandler for State {
     fn new_selection(&mut self, xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         trace!(?selection, ?mime_types, "Got Selection from Xwayland",);
 
-        if self.common.is_x_focused(xwm) {
-            let seat = self
-                .common
-                .shell
-                .read()
-                .unwrap()
-                .seats
-                .last_active()
-                .clone();
-            match selection {
-                SelectionTarget::Clipboard => {
-                    set_data_device_selection(&self.common.display_handle, &seat, mime_types, xwm)
-                }
-                SelectionTarget::Primary => {
-                    set_primary_selection(&self.common.display_handle, &seat, mime_types, xwm)
-                }
+        let seat = self
+            .common
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .clone();
+        match selection {
+            SelectionTarget::Clipboard => {
+                set_data_device_selection(&self.common.display_handle, &seat, mime_types, xwm)
+            }
+            SelectionTarget::Primary => {
+                set_primary_selection(&self.common.display_handle, &seat, mime_types, xwm)
             }
         }
     }
