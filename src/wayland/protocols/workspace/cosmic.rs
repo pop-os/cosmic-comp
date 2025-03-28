@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::{
-    reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1,
-    reexports::wayland_server::{
-        backend::{ClientData, ClientId},
-        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, WEnum,
-    },
+use smithay::reexports::wayland_server::{
+    backend::{ClientData, ClientId},
+    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, WEnum,
 };
 
 use std::sync::Mutex;
 
 use super::{
-    GroupCapabilities, Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler,
+    GroupCapabilities, Request, State, Workspace, WorkspaceCapabilities, WorkspaceClientHandler,
     WorkspaceGlobalData, WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle,
     WorkspaceHandler, WorkspaceState,
 };
@@ -30,7 +27,7 @@ pub struct CosmicWorkspaceV1DataInner {
     name: String,
     capabilities: Option<WorkspaceCapabilities>,
     coordinates: Vec<u32>,
-    states: Option<ext_workspace_handle_v1::State>,
+    states: Option<State>,
     tiling: Option<zcosmic_workspace_handle_v2::TilingState>,
 }
 
@@ -485,15 +482,9 @@ where
             .states
             .iter()
             .filter_map(|state| match state {
-                ext_workspace_handle_v1::State::Active => {
-                    Some(zcosmic_workspace_handle_v1::State::Active)
-                }
-                ext_workspace_handle_v1::State::Urgent => {
-                    Some(zcosmic_workspace_handle_v1::State::Urgent)
-                }
-                ext_workspace_handle_v1::State::Hidden => {
-                    Some(zcosmic_workspace_handle_v1::State::Hidden)
-                }
+                State::Active => Some(zcosmic_workspace_handle_v1::State::Active),
+                State::Urgent => Some(zcosmic_workspace_handle_v1::State::Urgent),
+                State::Hidden => Some(zcosmic_workspace_handle_v1::State::Hidden),
                 _ => None,
             })
             .flat_map(|state| (state as u32).to_ne_bytes())
