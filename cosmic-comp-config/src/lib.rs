@@ -46,6 +46,8 @@ pub struct CosmicCompConfig {
     pub focus_follows_cursor_delay: u64,
     /// Let X11 applications scale themselves
     pub descale_xwayland: bool,
+    /// Let X11 applications snoop on certain key-presses to allow for global shortcuts
+    pub xwayland_eavesdropping: XwaylandEavesdropping,
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
     pub accessibility_zoom: ZoomConfig,
@@ -79,6 +81,7 @@ impl Default for CosmicCompConfig {
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
             descale_xwayland: false,
+            xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
         }
@@ -153,4 +156,19 @@ pub enum ZoomMovement {
     OnEdge,
     Centered,
     Continuously,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub struct XwaylandEavesdropping {
+    pub keyboard: EavesdroppingKeyboardMode,
+    pub pointer: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum EavesdroppingKeyboardMode {
+    None,
+    Modifiers,
+    #[default]
+    Combinations,
+    All,
 }

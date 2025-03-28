@@ -11,12 +11,16 @@ use crate::{
         toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
     },
 };
+use cosmic_comp_config::EavesdroppingKeyboardMode;
 use smithay::{
-    backend::drm::DrmNode,
+    backend::{
+        drm::DrmNode,
+        input::{ButtonState, KeyState, Keycode},
+    },
     desktop::space::SpaceElement,
-    input::pointer::CursorIcon,
+    input::{keyboard::ModifiersState, pointer::CursorIcon},
     reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
-    utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER},
+    utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER},
     wayland::{
         selection::{
             data_device::{
@@ -37,12 +41,16 @@ use smithay::{
     },
 };
 use tracing::{error, trace, warn};
+use xkbcommon::xkb::Keysym;
 
 #[derive(Debug)]
 pub struct XWaylandState {
     pub client: Client,
     pub xwm: Option<X11Wm>,
     pub display: u32,
+    pub pressed_keys: Vec<Keycode>,
+    pub pressed_buttons: Vec<u32>,
+    pub last_modifier_state: Option<ModifiersState>,
 }
 
 impl State {
@@ -84,6 +92,9 @@ impl State {
                         client: client.clone(),
                         xwm: None,
                         display: display_number,
+                        pressed_keys: Vec::new(),
+                        pressed_buttons: Vec::new(),
+                        last_modifier_state: None,
                     });
 
                     let mut wm = match X11Wm::start_wm(
@@ -137,31 +148,225 @@ impl State {
 }
 
 impl Common {
-    fn is_x_focused(&self, xwm: XwmId) -> bool {
-        if let Some(keyboard) = self
+    fn has_x_keyboard_focus(&self, xwmid: XwmId) -> bool {
+        let keyboard = self
             .shell
             .read()
             .unwrap()
             .seats
             .last_active()
             .get_keyboard()
+            .unwrap();
+
+        keyboard
+            .current_focus()
+            .is_some_and(|target| target.is_xwm(xwmid))
+    }
+
+    fn has_x_pointer_focus(&self, xwmid: XwmId) -> bool {
+        let pointer = self
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .get_pointer()
+            .unwrap();
+
+        if let Some(x_client) = self.xwayland_state.as_ref().and_then(|xstate| {
+            xstate
+                .xwm
+                .as_ref()
+                .is_some_and(|xwm| xwm.id() == xwmid)
+                .then_some(&xstate.client)
+        }) {
+            pointer
+                .current_focus()
+                .is_some_and(|target| target.is_client(x_client))
+        } else {
+            false
+        }
+    }
+
+    pub fn xwayland_notify_focus_change(
+        &mut self,
+        target: Option<KeyboardFocusTarget>,
+        serial: Serial,
+    ) {
+        if let Some(xwm_id) = self
+            .xwayland_state
+            .as_ref()
+            .and_then(|xstate| xstate.xwm.as_ref())
+            .map(|xwm| xwm.id())
         {
-            match keyboard.current_focus() {
-                Some(KeyboardFocusTarget::Element(mapped)) => {
-                    if let Some(surface) = mapped.active_window().x11_surface() {
-                        return surface.xwm_id().unwrap() == xwm;
+            if target
+                .as_ref()
+                .is_some_and(|target| matches!(target, KeyboardFocusTarget::LockSurface(_)))
+                || (!self.has_x_keyboard_focus(xwm_id)
+                    && target.as_ref().is_some_and(|target| target.is_xwm(xwm_id)))
+            {
+                self.xwayland_reset_eavesdropping(serial);
+            }
+        }
+    }
+
+    pub fn xwayland_reset_eavesdropping(&mut self, serial: Serial) {
+        let seat = self.shell.read().unwrap().seats.last_active().clone();
+        let keyboard = seat.get_keyboard().unwrap();
+        let pointer = seat.get_pointer().unwrap();
+
+        let xstate = self.xwayland_state.as_mut().unwrap();
+        xstate.last_modifier_state.take();
+        for key in xstate.pressed_keys.drain(..).rev() {
+            for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
+                wl_keyboard.key(serial.into(), 0, key.raw() - 8, KeyState::Released.into());
+            }
+        }
+        for button in xstate.pressed_buttons.drain(..).rev() {
+            for wl_pointer in pointer.client_pointers(&xstate.client) {
+                wl_pointer.button(serial.into(), 0, button, ButtonState::Released.into());
+            }
+        }
+    }
+
+    pub fn xwayland_notify_key_event(
+        &mut self,
+        sym: Keysym,
+        code: Keycode,
+        state: KeyState,
+        serial: Serial,
+        time: u32,
+    ) {
+        let config = self.config.cosmic_conf.xwayland_eavesdropping.keyboard;
+        if config == EavesdroppingKeyboardMode::None {
+            return;
+        }
+
+        if self.xwayland_state.as_ref().is_none_or(|xstate| {
+            xstate
+                .xwm
+                .as_ref()
+                .is_none_or(|xwm| self.has_x_keyboard_focus(xwm.id()))
+        }) {
+            return;
+        }
+
+        let keyboard = self
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .get_keyboard()
+            .unwrap();
+        let modifiers = keyboard.modifier_state();
+        let is_modifier = sym.is_modifier_key();
+
+        let xstate = self.xwayland_state.as_mut().unwrap();
+        if state == KeyState::Pressed {
+            match config {
+                EavesdroppingKeyboardMode::Modifiers => {
+                    if !is_modifier {
+                        return;
                     }
                 }
-                Some(KeyboardFocusTarget::Fullscreen(surface)) => {
-                    if let Some(surface) = surface.x11_surface() {
-                        return surface.xwm_id().unwrap() == xwm;
+                EavesdroppingKeyboardMode::Combinations => {
+                    // don't forward alpha-numeric keys, just because shift is held, but forward shift itself
+                    if !is_modifier && !(modifiers.alt || modifiers.ctrl || modifiers.logo) {
+                        return;
                     }
                 }
                 _ => {}
             }
+
+            xstate.pressed_keys.push(code);
+        } else {
+            let mut removed = false;
+            xstate.pressed_keys.retain(|c| {
+                if *c == code {
+                    removed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if !removed {
+                // Don't forward released events, we don't have a record off.
+                return;
+            }
         }
 
-        false
+        tracing::trace!("Forwaring key {} {:?} to xwayland", code.raw() - 8, state);
+        for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
+            wl_keyboard.key(serial.into(), time, code.raw() - 8, state.into());
+            if xstate.last_modifier_state != Some(modifiers) {
+                xstate.last_modifier_state = Some(modifiers);
+                wl_keyboard.modifiers(
+                    serial.into(),
+                    modifiers.serialized.depressed,
+                    modifiers.serialized.latched,
+                    modifiers.serialized.locked,
+                    modifiers.serialized.layout_effective,
+                );
+            }
+        }
+    }
+
+    pub fn xwayland_notify_pointer_button_event(
+        &mut self,
+        button: u32,
+        state: ButtonState,
+        serial: Serial,
+        time: u32,
+    ) {
+        if !self.config.cosmic_conf.xwayland_eavesdropping.pointer {
+            return;
+        }
+
+        let pointer = self
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .get_pointer()
+            .unwrap();
+
+        if self.xwayland_state.as_ref().is_none_or(|xstate| {
+            xstate
+                .xwm
+                .as_ref()
+                .is_none_or(|xwm| self.has_x_pointer_focus(xwm.id()))
+        }) {
+            return;
+        }
+
+        let xstate = self.xwayland_state.as_mut().unwrap();
+        if state == ButtonState::Pressed {
+            xstate.pressed_buttons.push(button);
+        } else {
+            let mut removed = false;
+            xstate.pressed_buttons.retain(|b| {
+                if *b == button {
+                    removed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if !removed {
+                // Don't forward released events, we don't have a record off.
+                // This can happen if `xwayland_reset_eavesdropping` was called in between
+                return;
+            }
+        }
+
+        tracing::trace!("Forwaring ptr button {} {:?} to Xwayland", button, state);
+        for wl_pointer in pointer.client_pointers(&xstate.client) {
+            wl_pointer.button(serial.into(), time, button, state.into());
+        }
     }
 
     pub fn update_x11_stacking_order(&mut self) {
@@ -756,7 +961,7 @@ impl XwmHandler for State {
     }
 
     fn allow_selection_access(&mut self, xwm: XwmId, _selection: SelectionTarget) -> bool {
-        self.common.is_x_focused(xwm)
+        self.common.has_x_keyboard_focus(xwm)
     }
 
     fn new_selection(&mut self, xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {

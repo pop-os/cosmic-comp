@@ -28,9 +28,12 @@ use smithay::{
         },
         Seat,
     },
-    reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
+    reexports::wayland_server::{
+        backend::ObjectId, protocol::wl_surface::WlSurface, Client, Resource,
+    },
     utils::{IsAlive, Logical, Point, Serial, Transform},
     wayland::{seat::WaylandFocus, session_lock::LockSurface},
+    xwayland::xwm::XwmId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +158,15 @@ impl PointerFocusTarget {
             _ => None,
         }
     }
+
+    pub fn is_client(&self, client: &Client) -> bool {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                surface.client().is_some_and(|c| c == *client)
+            }
+            _ => false,
+        }
+    }
 }
 
 impl KeyboardFocusTarget {
@@ -166,6 +178,24 @@ impl KeyboardFocusTarget {
             }
             _ => None,
         }
+    }
+
+    pub fn is_xwm(&self, xwm: XwmId) -> bool {
+        match self {
+            KeyboardFocusTarget::Element(mapped) => {
+                if let Some(surface) = mapped.active_window().x11_surface() {
+                    return surface.xwm_id().unwrap() == xwm;
+                }
+            }
+            KeyboardFocusTarget::Fullscreen(surface) => {
+                if let Some(surface) = surface.x11_surface() {
+                    return surface.xwm_id().unwrap() == xwm;
+                }
+            }
+            _ => {}
+        }
+
+        false
     }
 }
 
