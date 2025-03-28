@@ -17,7 +17,7 @@ use crate::{
             a11y::A11yState,
             atspi::AtspiState,
             drm::WlDrmState,
-            image_source::ImageSourceState,
+            image_capture_source::ImageCaptureSourceState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
@@ -219,7 +219,7 @@ pub struct Common {
     pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
     pub data_control_state: Option<DataControlState>,
-    pub image_source_state: ImageSourceState,
+    pub image_capture_source_state: ImageCaptureSourceState,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
@@ -532,7 +532,8 @@ impl State {
             OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
-        let image_source_state = ImageSourceState::new::<Self, _>(dh, client_is_privileged);
+        let image_capture_source_state =
+            ImageCaptureSourceState::new::<Self, _>(dh, client_is_privileged);
         let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_is_privileged);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
@@ -632,7 +633,7 @@ impl State {
                 idle_notifier_state,
                 idle_inhibit_manager_state,
                 idle_inhibiting_surfaces,
-                image_source_state,
+                image_capture_source_state,
                 screencopy_state,
                 shm_state,
                 cursor_shape_manager_state,
