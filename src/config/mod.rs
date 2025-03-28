@@ -45,7 +45,7 @@ pub use self::types::*;
 use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
-    XkbConfig, ZoomConfig,
+    XkbConfig, XwaylandEavesdropping, ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -898,6 +898,15 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.descale_xwayland {
                     state.common.config.cosmic_conf.descale_xwayland = new;
                     state.common.update_xwayland_scale();
+                }
+            }
+            "xwayland_eavesdropping" => {
+                let new = get_config::<XwaylandEavesdropping>(&config, "xwayland_eavesdropping");
+                if new != state.common.config.cosmic_conf.xwayland_eavesdropping {
+                    state.common.config.cosmic_conf.xwayland_eavesdropping = new;
+                    state
+                        .common
+                        .xwayland_reset_eavesdropping(SERIAL_COUNTER.next_serial());
                 }
             }
             "focus_follows_cursor" => {
