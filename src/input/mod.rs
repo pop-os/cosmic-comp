@@ -237,9 +237,40 @@ impl State {
                                         .lock()
                                         .unwrap() = Some(serial);
                                 }
-                                Self::filter_keyboard_input(
+
+                                let current_focus = seat.get_keyboard().unwrap().current_focus();
+                                let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
+                                    f.wl_surface()
+                                        .and_then(|surface| {
+                                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                                                .map(|inhibitor| inhibitor.is_active())
+                                        })
+                                        .unwrap_or(false)
+                                });
+                                let sym = handle.modified_sym();
+
+                                let result = Self::filter_keyboard_input(
                                     data, &event, &seat, modifiers, handle, serial,
-                                )
+                                );
+
+                                if (matches!(result, FilterResult::Forward)
+                                    && !seat.get_keyboard().unwrap().is_grabbed()
+                                    && !shortcuts_inhibited
+                                    && !matches!(
+                                        current_focus,
+                                        Some(KeyboardFocusTarget::LockSurface(_))
+                                    ))
+                                // we don't want to accidentally leave any keys pressed
+                                // and do more filtering in `xwayland_notify_key_event`
+                                // for released keys
+                                    || state == KeyState::Released
+                                {
+                                    data.common.xwayland_notify_key_event(
+                                        sym, keycode, state, serial, time,
+                                    );
+                                }
+
+                                result
                             },
                         )
                         .flatten()
@@ -652,7 +683,7 @@ impl State {
                 self.common.idle_notifier_state.notify_activity(&seat);
 
                 let current_focus = seat.get_keyboard().unwrap().current_focus();
-                let shortcuts_inhibited = current_focus.is_some_and(|f| {
+                let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
                     f.wl_surface()
                         .and_then(|surface| {
                             seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
@@ -663,6 +694,7 @@ impl State {
 
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
+
                 let mut pass_event = !seat.supressed_buttons().remove(button);
                 if event.state() == ButtonState::Pressed {
                     // change the keyboard focus unless the pointer is grabbed
@@ -809,6 +841,18 @@ impl State {
                     }
                     std::mem::drop(shell);
                 };
+
+                if pass_event
+                    && !matches!(current_focus, Some(KeyboardFocusTarget::LockSurface(_)))
+                    && !shortcuts_inhibited
+                {
+                    self.common.xwayland_notify_pointer_button_event(
+                        button,
+                        event.state(),
+                        serial,
+                        event.time_msec(),
+                    );
+                }
 
                 let ptr = seat.get_pointer().unwrap();
                 if pass_event {

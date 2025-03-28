@@ -274,12 +274,12 @@ fn update_focus_state(
             }
         }
 
+        let serial = serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial());
+        state
+            .common
+            .xwayland_notify_focus_change(target.cloned(), serial);
         ActiveFocus::set(seat, target.cloned());
-        keyboard.set_focus(
-            state,
-            target.cloned(),
-            serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-        );
+        keyboard.set_focus(state, target.cloned(), serial);
         std::mem::drop(keyboard);
 
         //update the focused output or set it to the active output
