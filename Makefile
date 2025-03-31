@@ -22,6 +22,7 @@ ifneq ($(VENDOR),0)
 endif
 
 TARGET_BIN="$(DESTDIR)$(bindir)/$(BINARY)"
+DEBUG_TARGET_BIN="$(DESTDIR)$(bindir)/debug-$(BINARY)"
 
 KEYBINDINGS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults"
 TILING_EXCEPTIONS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults"
@@ -52,15 +53,41 @@ install:
 	install -Dm0644 "data/keybindings.ron" "$(KEYBINDINGS_CONF)"
 	install -Dm0644 "data/tiling-exceptions.ron" "$(TILING_EXCEPTIONS_CONF)"
 
-install-bare-session: install
-	install -Dm0644 "data/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
+gen-template:
+	mkdir build || true
+	sed -f data/replace.sed data/cosmic-comp.service > build/cosmic-comp.service
+	sed -f data/replace.sed data/cosmic.desktop > build/cosmic.desktop
+
+install-bare-session: install gen-template
+	install -Dm0644 "build/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
 	install -Dm0644 "data/cosmic-session.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-session.target"
 	install -Dm0644 "data/cosmic-session-pre.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-session-pre.target"
-	install -Dm0644 "data/cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp.service"
+	install -Dm0644 "build/cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp.service"
 	install -Dm0755 "data/cosmic-service" "$(DESTDIR)/$(bindir)/cosmic-service"
+
+install-debug:
+	install -Dm0755 "$(CARGO_TARGET_DIR)/$(TARGET)/$(BINARY)" "$(DEBUG_TARGET_BIN)"
+
+gen-debug-template:
+	mkdir build || true
+	sed -f debug-data/replace.sed data/cosmic-comp.service > build/debug-cosmic-comp.service
+	sed -f debug-data/replace.sed data/cosmic.desktop > build/debug-cosmic.desktop
+
+install-debug-session: install-debug gen-debug-template
+	install -Dm0644 "build/debug-cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/debug-cosmic.desktop"
+	install -Dm0644 "build/debug-cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/debug-cosmic-comp.service"
+	install -Dm0755 "debug-data/debug-cosmic-service" "$(DESTDIR)/$(bindir)/debug-cosmic-service"
 
 uninstall:
 	rm "$(TARGET_BIN)" "$(KEYBINDINGS_CONF)"
 
 uninstall-bare-session:
 	rm "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
+
+uninstall-debug:
+	rm "$(DEBUG_TARGET_BIN)"
+
+uninstall-debug-session:
+	rm "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
+	rm "$(DESTDIR)$(libdir)/systemd/user/debug-cosmic-comp.service"
+	rm "$(DESTDIR)/$(bindir)/debug-cosmic-service"
