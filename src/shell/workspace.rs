@@ -88,8 +88,16 @@ impl OutputMatch {
         }
     }
 
-    fn matches(&self, output: &Output) -> bool {
-        self.edid.as_ref() == output.edid() && (self.edid.is_some() || self.name == output.name())
+    // If `disambguate` is true, check that edid *and* connector name match.
+    // Otherwise, match only edid (if it exists)
+    fn matches(&self, output: &Output, disambiguate: bool) -> bool {
+        if self.edid.as_ref() != output.edid() {
+            false
+        } else if disambiguate || self.edid.is_none() {
+            self.name == output.name()
+        } else {
+            true
+        }
     }
 }
 
@@ -403,8 +411,22 @@ impl Workspace {
         if explicit {
             self.output_stack.clear();
         }
-        if let Some(pos) = self.output_stack.iter().position(|i| i.matches(output)) {
+        if let Some(pos) = self
+            .output_stack
+            .iter()
+            .position(|i| i.matches(output, true))
+        {
+            // Matched edid and connector name
             self.output_stack.truncate(pos + 1);
+        } else if let Some(pos) = self
+            .output_stack
+            .iter()
+            .position(|i| i.matches(output, false))
+        {
+            // Matched edid but not connector name; truncate entries that don't match edid,
+            // but keep old entry in case we see two outputs with the same edid.
+            self.output_stack.truncate(pos + 1);
+            self.output_stack.push_back(OutputMatch::for_output(output));
         } else {
             self.output_stack.push_back(OutputMatch::for_output(output));
         }
@@ -412,7 +434,13 @@ impl Workspace {
     }
 
     pub fn prefers_output(&self, output: &Output) -> bool {
-        self.output_stack.iter().any(|i| i.matches(output))
+        // Disambiguate match by connector name if existing output has same edid
+        let disambiguate = output
+            .edid()
+            .is_some_and(|edid| self.output().edid() == Some(edid));
+        self.output_stack
+            .iter()
+            .any(|i| i.matches(output, disambiguate))
     }
 
     pub fn unmap(&mut self, mapped: &CosmicMapped) -> Option<ManagedState> {
