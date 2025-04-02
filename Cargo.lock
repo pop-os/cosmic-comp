@@ -331,6 +331,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "atomic_float"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "628d228f918ac3b82fe590352cc719d30664a0c13ca3a60266fe02c7132d480a"
+
+[[package]]
 name = "atomicwrites"
 version = "0.4.2"
 source = "git+https://github.com/jackpot51/rust-atomicwrites#043ab4859d53ffd3d55334685303d8df39c9f768"
@@ -4679,11 +4685,12 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "smithay"
 version = "0.5.0"
-source = "git+https://github.com/smithay/smithay//?rev=657170c#657170c1c1995f13bde81ced508b47defa4af8ec"
+source = "git+https://github.com/smithay/smithay//?rev=ce61c9b#ce61c9b3293b13adf03863848426f0d7c4907c3e"
 dependencies = [
  "aliasable",
  "appendlist",
  "ash",
+ "atomic_float",
  "bitflags 2.8.0",
  "calloop 0.14.2",
  "cc",

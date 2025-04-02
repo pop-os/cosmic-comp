@@ -506,7 +506,7 @@ impl Common {
                     .get_data::<XWaylandClientData>()
                     .unwrap()
                     .compositor_state
-                    .set_client_scale(new_scale as u32);
+                    .set_client_scale(new_scale as f64);
 
                 // update wl/xdg_outputs
                 for output in self.shell.read().unwrap().outputs() {
