@@ -465,11 +465,10 @@ impl Common {
             let shell = self.shell.read().unwrap();
             shell
                 .outputs()
-                .map(|o| o.current_scale().integer_scale())
-                .max()
-                .unwrap_or(1)
+                .map(|o| o.current_scale().fractional_scale())
+                .fold(1f64, |acc, val| acc.max(val))
         } else {
-            1
+            1.
         };
 
         // compare with current scale
@@ -487,12 +486,18 @@ impl Common {
 
                 // update xorg dpi
                 if let Some(xwm) = xwayland.xwm.as_mut() {
-                    let dpi = new_scale.abs() * 96 * 1024;
+                    let dpi = new_scale.abs().round() as i32 * 96 * 1024;
                     if let Err(err) = xwm.set_xsettings(
                         [
                             ("Xft/DPI".into(), dpi.into()),
-                            ("Gdk/UnscaledDPI".into(), (dpi / new_scale).into()),
-                            ("Gdk/WindowScalingFactor".into(), new_scale.into()),
+                            (
+                                "Gdk/UnscaledDPI".into(),
+                                ((dpi as f64 / new_scale).round() as i32).into(),
+                            ),
+                            (
+                                "Gdk/WindowScalingFactor".into(),
+                                (new_scale.round() as i32).into(),
+                            ),
                         ]
                         .into_iter(),
                     ) {
@@ -506,7 +511,7 @@ impl Common {
                     .get_data::<XWaylandClientData>()
                     .unwrap()
                     .compositor_state
-                    .set_client_scale(new_scale as u32);
+                    .set_client_scale(new_scale);
 
                 // update wl/xdg_outputs
                 for output in self.shell.read().unwrap().outputs() {

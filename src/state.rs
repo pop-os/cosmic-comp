@@ -243,7 +243,7 @@ pub struct Common {
     pub xdg_activation_state: XdgActivationState,
     pub xdg_foreign_state: XdgForeignState,
     pub workspace_state: WorkspaceState<State>,
-    pub xwayland_scale: Option<i32>,
+    pub xwayland_scale: Option<f64>,
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
