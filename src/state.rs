@@ -59,7 +59,7 @@ use smithay::{
         PopupManager,
     },
     input::{pointer::CursorImageStatus, SeatState},
-    output::{Output, Scale},
+    output::{Output, Scale, WeakOutput},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities,
@@ -271,7 +271,7 @@ pub struct SurfaceDmabufFeedback {
 
 #[derive(Debug)]
 struct SurfaceFrameThrottlingState {
-    last_sent_at: RefCell<Option<(Output, usize)>>,
+    last_sent_at: RefCell<Option<(WeakOutput, usize)>>,
 }
 impl Default for SurfaceFrameThrottlingState {
     fn default() -> Self {
@@ -985,7 +985,7 @@ impl Common {
             }
 
             if send {
-                *last_sent_at = Some((output.clone(), sequence));
+                *last_sent_at = Some((output.downgrade(), sequence));
                 Some(output.clone())
             } else {
                 None
