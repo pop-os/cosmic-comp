@@ -167,9 +167,15 @@ impl CosmicWindowInternal {
     pub fn current_focus(&self) -> Option<Focus> {
         unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
     }
+
     /// returns if the window has any current or pending server-side decorations
     pub fn has_ssd(&self, pending: bool) -> bool {
         !self.window.is_decorated(pending)
+    }
+
+    /// returns if the window is currently or pending tiled
+    pub fn is_tiled(&self, pending: bool) -> bool {
+        self.window.is_tiled(pending).unwrap_or(false)
     }
 }
 
@@ -240,16 +246,20 @@ impl CosmicWindow {
         self.0.with_program(|p| {
             let mut offset = Point::from((0., 0.));
             let mut window_ui = None;
-            if p.has_ssd(false) && surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+            let has_ssd = p.has_ssd(false);
+            if (has_ssd || p.is_tiled(false)) && surface_type.contains(WindowSurfaceType::TOPLEVEL)
+            {
                 let geo = p.window.geometry();
 
                 let point_i32 = relative_pos.to_i32_round::<i32>();
+                let ssd_height = has_ssd.then_some(SSD_HEIGHT).unwrap_or(0);
+
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
                         && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                    || (point_i32.y - geo.loc.y >= geo.size.h + SSD_HEIGHT
-                        && point_i32.y - geo.loc.y < geo.size.h + SSD_HEIGHT + RESIZE_BORDER)
+                    || (point_i32.y - geo.loc.y >= geo.size.h + ssd_height
+                        && point_i32.y - geo.loc.y < geo.size.h + ssd_height + RESIZE_BORDER)
                 {
                     window_ui = Some((
                         PointerFocusTarget::WindowUI(self.clone()),
@@ -257,7 +267,7 @@ impl CosmicWindow {
                     ));
                 }
 
-                if point_i32.y - geo.loc.y < SSD_HEIGHT {
+                if has_ssd && (point_i32.y - geo.loc.y < SSD_HEIGHT) {
                     window_ui = Some((
                         PointerFocusTarget::WindowUI(self.clone()),
                         Point::from((0., 0.)),
@@ -265,7 +275,7 @@ impl CosmicWindow {
                 }
             }
 
-            if p.has_ssd(false) {
+            if has_ssd {
                 relative_pos.y -= SSD_HEIGHT as f64;
                 offset.y += SSD_HEIGHT as f64;
             }
@@ -570,11 +580,16 @@ impl SpaceElement for CosmicWindow {
     fn bbox(&self) -> Rectangle<i32, Logical> {
         self.0.with_program(|p| {
             let mut bbox = SpaceElement::bbox(&p.window);
-            if p.has_ssd(false) {
+            let has_ssd = p.has_ssd(false);
+
+            if has_ssd || p.is_tiled(false) {
                 bbox.loc -= Point::from((RESIZE_BORDER, RESIZE_BORDER));
                 bbox.size += Size::from((RESIZE_BORDER * 2, RESIZE_BORDER * 2));
+            }
+            if has_ssd {
                 bbox.size.h += SSD_HEIGHT;
             }
+
             bbox
         })
     }
@@ -680,10 +695,16 @@ impl PointerTarget<State> for CosmicWindow {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
         self.0.with_program(|p| {
-            if p.has_ssd(false) {
-                let Some(next) = Focus::under(&p.window, SSD_HEIGHT, event.location) else {
+            let has_ssd = p.has_ssd(false);
+            if has_ssd || p.is_tiled(false) {
+                let Some(next) = Focus::under(
+                    &p.window,
+                    has_ssd.then_some(SSD_HEIGHT).unwrap_or(0),
+                    event.location,
+                ) else {
                     return;
                 };
+
                 let old_focus = p.swap_focus(Some(next));
                 assert_eq!(old_focus, None);
 
@@ -701,8 +722,13 @@ impl PointerTarget<State> for CosmicWindow {
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
         self.0.with_program(|p| {
-            if p.has_ssd(false) {
-                let Some(next) = Focus::under(&p.window, SSD_HEIGHT, event.location) else {
+            let has_ssd = p.has_ssd(false);
+            if has_ssd || p.is_tiled(false) {
+                let Some(next) = Focus::under(
+                    &p.window,
+                    has_ssd.then_some(SSD_HEIGHT).unwrap_or(0),
+                    event.location,
+                ) else {
                     return;
                 };
                 let _previous = p.swap_focus(Some(next));
