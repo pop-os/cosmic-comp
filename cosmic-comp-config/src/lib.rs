@@ -166,9 +166,9 @@ pub struct XwaylandEavesdropping {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub enum EavesdroppingKeyboardMode {
+    #[default]
     None,
     Modifiers,
-    #[default]
     Combinations,
     All,
 }
