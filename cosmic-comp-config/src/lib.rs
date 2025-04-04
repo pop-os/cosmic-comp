@@ -45,7 +45,7 @@ pub struct CosmicCompConfig {
     /// The delay in milliseconds before focus follows mouse (if enabled)
     pub focus_follows_cursor_delay: u64,
     /// Let X11 applications scale themselves
-    pub descale_xwayland: bool,
+    pub descale_xwayland: XwaylandDescaling,
     /// Let X11 applications snoop on certain key-presses to allow for global shortcuts
     pub xwayland_eavesdropping: XwaylandEavesdropping,
     /// The threshold before windows snap themselves to output edges
@@ -80,7 +80,7 @@ impl Default for CosmicCompConfig {
             focus_follows_cursor: false,
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
-            descale_xwayland: false,
+            descale_xwayland: XwaylandDescaling::Fractional,
             xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
@@ -171,4 +171,15 @@ pub enum EavesdroppingKeyboardMode {
     Modifiers,
     Combinations,
     All,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum XwaylandDescaling {
+    #[serde(rename = "true")]
+    Enabled,
+    #[serde(rename = "false")]
+    Disabled,
+    #[default]
+    Fractional,
 }
