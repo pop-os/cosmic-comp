@@ -45,7 +45,7 @@ pub use self::types::*;
 use cosmic::config::CosmicTk;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
-    XkbConfig, XwaylandEavesdropping, ZoomConfig,
+    XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -917,7 +917,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
             }
             "descale_xwayland" => {
-                let new = get_config::<bool>(&config, "descale_xwayland");
+                let new = get_config::<XwaylandDescaling>(&config, "descale_xwayland");
                 if new != state.common.config.cosmic_conf.descale_xwayland {
                     state.common.config.cosmic_conf.descale_xwayland = new;
                     state.common.update_xwayland_scale();
