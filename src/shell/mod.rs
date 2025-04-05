@@ -10,7 +10,10 @@ use std::{
 };
 use wayland_backend::server::ClientId;
 
-use crate::wayland::{handlers::data_device, protocols::workspace::WorkspaceCapabilities};
+use crate::wayland::{
+    handlers::data_device,
+    protocols::workspace::{State as WState, WorkspaceCapabilities},
+};
 use cosmic_comp_config::{
     workspace::{WorkspaceLayout, WorkspaceMode},
     TileBehavior, ZoomConfig, ZoomMovement,
@@ -38,10 +41,7 @@ use smithay::{
     },
     output::{Output, WeakOutput},
     reexports::{
-        wayland_protocols::ext::{
-            session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
-            workspace::v1::server::ext_workspace_handle_v1::State as WState,
-        },
+        wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
         wayland_server::{protocol::wl_surface::WlSurface, Client},
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
@@ -578,7 +578,11 @@ impl WorkspaceSet {
         xdg_activation_state: &XdgActivationState,
     ) {
         // add empty at the end, if necessary
-        if self.workspaces.last().map_or(true, |last| !last.is_empty()) {
+        if self
+            .workspaces
+            .last()
+            .map_or(true, |last| !last.is_empty() || last.pinned)
+        {
             self.add_empty_workspace(state);
         }
 
@@ -864,6 +868,68 @@ impl Workspaces {
             new_set.workspaces.insert(new_set.active + 1, workspace);
             new_set.update_workspace_idxs(workspace_state);
         }
+    }
+
+    // Move a workspace before/after a different workspace
+    pub fn move_workspace(
+        &mut self,
+        handle: &WorkspaceHandle,
+        other_handle: &WorkspaceHandle,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        after: bool,
+    ) {
+        let (Some(old_output), Some(new_output)) = (
+            self.space_for_handle(handle).map(|w| w.output.clone()),
+            self.space_for_handle(other_handle)
+                .map(|w| w.output.clone()),
+        ) else {
+            return;
+        };
+
+        // Check which workspace is active on the new set; before removing from the
+        // old set in cause we're moving an active workspace within the same set.
+        let new_set = &mut self.sets[&new_output];
+        let previous_active_handle = new_set.workspaces[new_set.active].handle;
+
+        // Remove workspace from old set
+        let old_set = &mut self.sets[&old_output];
+        let mut workspace = if new_output != old_output {
+            old_set.remove_workspace(workspace_state, handle).unwrap()
+        } else {
+            // If set is the same, just remove it here without adding empty workspace,
+            // updating `active`, etc.
+            let idx = old_set
+                .workspaces
+                .iter()
+                .position(|w| w.handle == *handle)
+                .unwrap();
+            old_set.workspaces.remove(idx)
+        };
+
+        let new_set = &mut self.sets[&new_output];
+
+        if new_output != old_output {
+            move_workspace_to_group(&mut workspace, &new_set.group, workspace_state);
+            workspace.set_output(&new_output);
+            workspace.refresh();
+        }
+
+        // Insert workspace into new set, relative to `other_handle`
+        let idx = new_set
+            .workspaces
+            .iter()
+            .position(|w| w.handle == *other_handle)
+            .unwrap();
+        let insert_idx = if after { idx + 1 } else { idx };
+        new_set.workspaces.insert(insert_idx, workspace);
+
+        new_set.active = new_set
+            .workspaces
+            .iter()
+            .position(|w| w.handle == previous_active_handle)
+            .unwrap();
+
+        new_set.update_workspace_idxs(workspace_state);
     }
 
     pub fn update_config(
