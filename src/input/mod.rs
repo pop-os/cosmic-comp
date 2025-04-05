@@ -9,7 +9,7 @@ use crate::{
         },
         Action, Config, PrivateAction,
     },
-    input::gestures::{GestureState, SwipeAction},
+    input::gestures::GestureState,
     shell::{
         focus::{
             render_input_order,
@@ -35,8 +35,8 @@ use calloop::{
     RegistrationToken,
 };
 use cosmic_comp_config::{workspace::WorkspaceLayout, NumlockState};
-use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
+use cosmic_settings_config::shortcuts::{self, Gesture};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
@@ -986,7 +986,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let mut activate_action: Option<SwipeAction> = None;
+                    let mut activate_action: Option<shortcuts::Action> = None;
                     if let Some(ref mut gesture_state) = self.common.gesture_state {
                         let first_update = gesture_state.update(
                             event.delta(),
@@ -1002,63 +1002,30 @@ impl State {
                                     natural_scroll = natural;
                                 }
                             }
-                            activate_action = match gesture_state.fingers {
-                                3 => None, // TODO: 3 finger gestures
-                                4 => {
-                                    if self.common.config.cosmic_conf.workspaces.workspace_layout
-                                        == WorkspaceLayout::Horizontal
-                                    {
-                                        match gesture_state.direction {
-                                            Some(Direction::Left) => {
-                                                if natural_scroll {
-                                                    Some(SwipeAction::NextWorkspace)
-                                                } else {
-                                                    Some(SwipeAction::PrevWorkspace)
-                                                }
-                                            }
-                                            Some(Direction::Right) => {
-                                                if natural_scroll {
-                                                    Some(SwipeAction::PrevWorkspace)
-                                                } else {
-                                                    Some(SwipeAction::NextWorkspace)
-                                                }
-                                            }
-                                            _ => None, // TODO: Other actions
-                                        }
-                                    } else {
-                                        match gesture_state.direction {
-                                            Some(Direction::Up) => {
-                                                if natural_scroll {
-                                                    Some(SwipeAction::NextWorkspace)
-                                                } else {
-                                                    Some(SwipeAction::PrevWorkspace)
-                                                }
-                                            }
-                                            Some(Direction::Down) => {
-                                                if natural_scroll {
-                                                    Some(SwipeAction::PrevWorkspace)
-                                                } else {
-                                                    Some(SwipeAction::NextWorkspace)
-                                                }
-                                            }
-                                            _ => None, // TODO: Other actions
-                                        }
-                                    }
-                                }
-                                _ => None,
-                            };
-
-                            gesture_state.action = activate_action;
+                            activate_action = self
+                                .common
+                                .config
+                                .gestures
+                                .0
+                                .iter()
+                                .find(|(gesture, action)| {
+                                    gesture.fingers == gesture_state.fingers
+                                        && Some(gesture.direction) == gesture_state.direction
+                                })
+                                .map(|(_, action)| action)
+                                .cloned();
+                            gesture_state.action = activate_action.clone();
                         }
 
                         match gesture_state.action {
-                            Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
+                            Some(shortcuts::Action::NextWorkspace)
+                            | Some(shortcuts::Action::PreviousWorkspace) => {
                                 self.common.shell.write().unwrap().update_workspace_delta(
                                     &seat.active_output(),
                                     gesture_state.delta,
                                 )
                             }
-                            _ => {}
+                            _ => {} // TODO: Other actions
                         }
                     } else {
                         let pointer = seat.get_pointer().unwrap();
@@ -1089,7 +1056,8 @@ impl State {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     if let Some(ref gesture_state) = self.common.gesture_state {
                         match gesture_state.action {
-                            Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
+                            Some(shortcuts::Action::NextWorkspace)
+                            | Some(shortcuts::Action::PreviousWorkspace) => {
                                 let velocity = gesture_state.velocity();
                                 let norm_velocity =
                                     if self.common.config.cosmic_conf.workspaces.workspace_layout

@@ -9,8 +9,8 @@ use crate::{
     },
 };
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
-use cosmic_settings_config::window_rules::ApplicationException;
 use cosmic_settings_config::{shortcuts, window_rules, Shortcuts};
+use cosmic_settings_config::{shortcuts::Gestures, window_rules::ApplicationException};
 use serde::{Deserialize, Serialize};
 use smithay::utils::{Clock, Monotonic};
 use smithay::wayland::xdg_activation::XdgActivationState;
@@ -40,6 +40,7 @@ use tracing::{error, warn};
 mod input_config;
 pub mod key_bindings;
 pub use key_bindings::{Action, PrivateAction};
+pub mod gestures;
 mod types;
 pub use self::types::*;
 use cosmic::config::CosmicTk;
@@ -58,6 +59,8 @@ pub struct Config {
     pub settings_context: cosmic_config::Config,
     /// Key bindings from `com.system76.CosmicSettings.Shortcuts`
     pub shortcuts: Shortcuts,
+    /// Gestures from `com.system76.CosmicSettings.Shortcuts`
+    pub gestures: Gestures,
     // Tiling exceptions from `com.system76.CosmicSettings.WindowRules`
     pub tiling_exceptions: Vec<ApplicationException>,
     /// System actions from `com.system76.CosmicSettings.Shortcuts`
@@ -283,6 +286,12 @@ impl Config {
         let system_actions = shortcuts::system_actions(&settings_context);
         let shortcuts = shortcuts::shortcuts(&settings_context);
 
+        // Source gestures
+        let mut gestures = shortcuts::gestures(&settings_context);
+
+        // Add any missing default gestures recommended by the compositor.
+        gestures::add_default_gestures(&mut gestures, workspace.workspace_layout);
+
         // Listen for updates to the keybindings config.
         match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
             Ok(source) => {
@@ -292,6 +301,14 @@ impl Config {
                             // Reload the keyboard shortcuts config.
                             "custom" | "defaults" => {
                                 state.common.config.shortcuts = shortcuts::shortcuts(&config);
+                            }
+
+                            "custom_gestures" | "default_gestures" => {
+                                let mut gestures = shortcuts::gestures(&config);
+                                let layout = get_config::<WorkspaceConfig>(&config, "workspaces")
+                                    .workspace_layout;
+                                gestures::add_default_gestures(&mut gestures, layout);
+                                state.common.config.gestures = gestures;
                             }
 
                             "system_actions" => {
@@ -370,6 +387,7 @@ impl Config {
             cosmic_helper: config,
             settings_context,
             shortcuts,
+            gestures,
             system_actions,
             tiling_exceptions,
         }
