@@ -71,8 +71,12 @@ impl WorkspaceHandler for State {
                         let mut update = self.common.workspace_state.update();
                         if pinned {
                             update.add_workspace_state(&workspace.handle, WState::Pinned);
+                            // TODO update persisted workspace state
+                            // - also need to update on changing other properties that are saved
+                            shell.workspaces.persist(&self.common.config);
                         } else {
                             update.remove_workspace_state(&workspace.handle, WState::Pinned);
+                            shell.workspaces.persist(&self.common.config);
                         }
                     }
                 }

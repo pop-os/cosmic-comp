@@ -538,6 +538,7 @@ where
         &mut self,
         group: &WorkspaceGroupHandle,
         tiling: zcosmic_workspace_handle_v2::TilingState,
+        // TODO way to add id to workspace that doesn't have it
         ext_id: Option<String>,
     ) -> Option<WorkspaceHandle> {
         if let Some(group) = self.0.groups.iter_mut().find(|g| g.id == group.id) {

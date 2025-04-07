@@ -469,6 +469,7 @@ where
         changed = true;
     }
     // TODO ext_workspace_handle_v1::id
+    // TODO send id if pinned
 
     if let Some(cosmic_v2_handle) = handle_state
         .cosmic_v2_handle

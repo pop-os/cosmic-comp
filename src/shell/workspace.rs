@@ -19,6 +19,7 @@ use crate::{
         },
     },
 };
+use cosmic_comp_config::workspace::PinnedWorkspace;
 
 use cosmic::theme::CosmicTheme;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
@@ -73,6 +74,13 @@ use super::{
 };
 
 const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
+
+// For stable workspace id, generate random 24-bit integer, as a hex string
+// Must be compared with existing workspaces work uniqueness.
+pub fn random_id() -> String {
+    let id = rand::random_range(0..(2 << 24));
+    format!("{:x}", id)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OutputMatch {
@@ -293,6 +301,60 @@ impl Workspace {
         }
     }
 
+    pub fn from_pinned(
+        pinned: &PinnedWorkspace,
+        handle: WorkspaceHandle,
+        output: Output,
+        theme: cosmic::Theme,
+    ) -> Self {
+        let tiling_layer = TilingLayout::new(theme.clone(), &output);
+        let floating_layer = FloatingLayout::new(theme, &output);
+        let output_match = OutputMatch::for_output(&output);
+
+        let config_output_match = OutputMatch {
+            name: pinned.output.name.clone(),
+            edid: pinned.output.edid,
+        };
+
+        Workspace {
+            output,
+            tiling_layer,
+            floating_layer,
+            tiling_enabled: pinned.tiling_enabled,
+            minimized_windows: Vec::new(),
+            fullscreen: None,
+            pinned: true,
+            handle,
+            focus_stack: FocusStacks::default(),
+            screencopy: ScreencopySessions::default(),
+            output_stack: {
+                let mut queue = VecDeque::new();
+                queue.push_back(config_output_match.clone());
+                if output_match != config_output_match {
+                    queue.push_back(output_match);
+                }
+                queue
+            },
+            backdrop_id: Id::new(),
+            dirty: AtomicBool::new(false),
+        }
+    }
+
+    pub fn to_pinned(&self) -> Option<PinnedWorkspace> {
+        let output = self.explicit_output().clone();
+        if self.pinned {
+            Some(PinnedWorkspace {
+                output: cosmic_comp_config::workspace::OutputMatch {
+                    name: output.name,
+                    edid: output.edid,
+                },
+                tiling_enabled: self.tiling_enabled,
+            })
+        } else {
+            None
+        }
+    }
+
     // TODO function to add pinned workspace from persistent state
 
     #[profiling::function]
@@ -391,6 +453,11 @@ impl Workspace {
 
     pub fn output(&self) -> &Output {
         &self.output
+    }
+
+    /// Output workspace was originally created on, or explicitly moved to by the user
+    fn explicit_output(&self) -> &OutputMatch {
+        self.output_stack.front().unwrap()
     }
 
     // Set output the workspace is on

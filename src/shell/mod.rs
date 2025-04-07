@@ -6,6 +6,7 @@ use layout::TilingExceptions;
 use std::{
     collections::HashMap,
     sync::{atomic::Ordering, Mutex},
+    thread,
     time::{Duration, Instant},
 };
 use wayland_backend::server::ClientId;
@@ -15,9 +16,10 @@ use crate::wayland::{
     protocols::workspace::{State as WState, WorkspaceCapabilities},
 };
 use cosmic_comp_config::{
-    workspace::{WorkspaceLayout, WorkspaceMode},
+    workspace::{PinnedWorkspace, WorkspaceLayout, WorkspaceMode},
     TileBehavior, ZoomConfig, ZoomMovement,
 };
+use cosmic_config::ConfigSet;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
 use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
@@ -54,6 +56,7 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
+use tracing::error;
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -339,6 +342,7 @@ pub struct WorkspaceSet {
     pub workspaces: Vec<Workspace>,
 }
 
+// TODO from pinned
 fn create_workspace(
     state: &mut WorkspaceUpdateGuard<'_, State>,
     output: &Output,
@@ -367,6 +371,37 @@ fn create_workspace(
         WorkspaceCapabilities::Activate | WorkspaceCapabilities::SetTilingState,
     );
     Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
+}
+
+fn create_workspace_from_pinned(
+    pinned: &PinnedWorkspace,
+    state: &mut WorkspaceUpdateGuard<'_, State>,
+    output: &Output,
+    group_handle: &WorkspaceGroupHandle,
+    active: bool,
+    theme: cosmic::Theme,
+) -> Workspace {
+    let workspace_handle = state
+        .create_workspace(
+            &group_handle,
+            if pinned.tiling_enabled {
+                TilingState::TilingEnabled
+            } else {
+                TilingState::FloatingOnly
+            },
+            // TODO Set id for persistent workspaces
+            None,
+        )
+        .unwrap();
+    state.add_workspace_state(&workspace_handle, WState::Pinned);
+    if active {
+        state.add_workspace_state(&workspace_handle, WState::Active);
+    }
+    state.set_workspace_capabilities(
+        &workspace_handle,
+        WorkspaceCapabilities::Activate | WorkspaceCapabilities::SetTilingState,
+    );
+    Workspace::from_pinned(pinned, workspace_handle, output.clone(), theme.clone())
 }
 
 fn move_workspace_to_group(
@@ -687,6 +722,8 @@ pub struct Workspaces {
     autotile: bool,
     autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
+    // Persisted workspace to add on first `output_add`
+    persisted_workspaces: Vec<PinnedWorkspace>,
 }
 
 impl Workspaces {
@@ -699,6 +736,7 @@ impl Workspaces {
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
+            persisted_workspaces: config.cosmic_conf.pinned_workspaces.clone(),
         }
     }
 
@@ -722,6 +760,20 @@ impl Workspaces {
                 WorkspaceSet::new(workspace_state, &output, self.autotile, self.theme.clone())
             });
         workspace_state.add_group_output(&set.group, &output);
+
+        // If this is the first output added, create workspaces for pinned workspaces from config
+        for pinned in std::mem::take(&mut self.persisted_workspaces) {
+            tracing::error!("pinned workspace: {:?}", pinned);
+            let workspace = create_workspace_from_pinned(
+                &pinned,
+                workspace_state,
+                output,
+                &set.group,
+                false,
+                self.theme.clone(),
+            );
+            set.workspaces.push(workspace);
+        }
 
         // Remove workspaces that prefer this output from other sets
         let mut moved_workspaces = self
@@ -1251,6 +1303,21 @@ impl Workspaces {
     ) {
         self.autotile = autotile;
         self.apply_tile_change(guard, seats);
+    }
+
+    pub fn persist(&self, config: &Config) {
+        let pinned_workspaces: Vec<PinnedWorkspace> = self
+            .sets
+            .values()
+            .flat_map(|set| &set.workspaces)
+            .flat_map(|w| w.to_pinned())
+            .collect();
+        let config = config.cosmic_helper.clone();
+        thread::spawn(move || {
+            if let Err(err) = config.set("pinned_workspaces", pinned_workspaces) {
+                error!(?err, "Failed to update pinned_workspaces key");
+            }
+        });
     }
 }
 
