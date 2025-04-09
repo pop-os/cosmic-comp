@@ -382,7 +382,10 @@ impl BackendData {
         // Update layout for changes in resolution, scale, orientation
         shell.workspaces.recalculate();
 
-        loop_handle.insert_idle(|state| state.common.update_xwayland_scale());
+        loop_handle.insert_idle(move |state| {
+            state.common.update_xwayland_scale();
+            state.common.update_xwayland_primary_output();
+        });
 
         Ok(())
     }

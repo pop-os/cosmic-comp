@@ -128,6 +128,7 @@ impl State {
                     data.notify_ready();
 
                     data.common.update_xwayland_scale();
+                    data.common.update_xwayland_primary_output();
                 }
                 XWaylandEvent::Error => {
                     if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
@@ -637,6 +638,24 @@ impl Common {
             }
         }
     }
+
+    pub fn update_xwayland_primary_output(&mut self) {
+        let mut xwayland_primary_output = None;
+        for output in self.output_configuration_state.outputs() {
+            if output.config().xwayland_primary {
+                xwayland_primary_output = Some(output);
+                break;
+            }
+        }
+
+        if let Some(xstate) = self.xwayland_state.as_mut() {
+            if let Some(xwm) = xstate.xwm.as_mut() {
+                if let Err(err) = xwm.set_randr_primary_output(xwayland_primary_output.as_ref()) {
+                    warn!("Failed to set xwayland primary output: {}", err);
+                };
+            }
+        }
+    }
 }
 
 impl XwmHandler for State {
@@ -1113,6 +1132,17 @@ impl XwmHandler for State {
                 }
             }
         }
+    }
+
+    fn randr_primary_output_change(&mut self, _xwm: XwmId, output_name: Option<String>) {
+        for output in self.common.output_configuration_state.outputs() {
+            output.config_mut().xwayland_primary =
+                output_name.as_deref().is_some_and(|o| o == output.name());
+        }
+        self.common.output_configuration_state.update();
+        self.common
+            .config
+            .write_outputs(self.common.output_configuration_state.outputs());
     }
 
     fn disconnected(&mut self, _xwm: XwmId) {
