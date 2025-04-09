@@ -118,8 +118,8 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "ee0d46f" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "ee0d46f" }
+cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", rev = "67df697" }
+cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", rev = "67df697" }
 
 [patch."https://github.com/smithay/smithay"]
 smithay = { git = "https://github.com/smithay/smithay//", rev = "ce61c9b" }
