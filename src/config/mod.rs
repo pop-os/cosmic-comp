@@ -163,6 +163,8 @@ pub struct OutputConfig {
     pub enabled: OutputState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bpc: Option<u32>,
+    #[serde(default)]
+    pub xwayland_primary: bool,
 }
 
 impl Default for OutputConfig {
@@ -175,6 +177,7 @@ impl Default for OutputConfig {
             position: (0, 0),
             enabled: OutputState::Enabled,
             max_bpc: None,
+            xwayland_primary: false,
         }
     }
 }
@@ -590,6 +593,12 @@ impl Config {
         } else {
             // we don't have a config, so lets generate somewhat sane positions
             let mut w = 0;
+            if !outputs.iter().any(|o| o.config().xwayland_primary) {
+                // if we don't have a primary output for xwayland from a previous config, pick one
+                if let Some(primary) = outputs.iter().find(|o| o.mirroring().is_none()) {
+                    primary.config_mut().xwayland_primary = true;
+                }
+            }
             for output in outputs.iter().filter(|o| o.mirroring().is_none()) {
                 {
                     let mut config = output.config_mut();
