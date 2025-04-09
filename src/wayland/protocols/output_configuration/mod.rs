@@ -58,6 +58,8 @@ pub trait OutputConfigurationHandler: Sized {
 
     fn test_configuration(&mut self, conf: Vec<(Output, OutputConfiguration)>) -> bool;
     fn apply_configuration(&mut self, conf: Vec<(Output, OutputConfiguration)>) -> bool;
+
+    fn request_xwayland_primary(&mut self, output: Option<Output>);
 }
 
 pub struct OutputMngrGlobalData {
@@ -189,7 +191,7 @@ where
         );
 
         let extension_global = dh.create_global::<D, ZcosmicOutputManagerV1, _>(
-            2,
+            3,
             OutputMngrGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -503,6 +505,14 @@ where
         }
         if physical.model != "Unknown" {
             instance.obj.model(physical.model);
+        }
+    }
+
+    if let Some(extension_obj) = instance.extension_obj.as_ref() {
+        if inner.enabled
+            && extension_obj.version() >= zcosmic_output_head_v1::EVT_XWAYLAND_PRIMARY_SINCE
+        {
+            extension_obj.xwayland_primary(output.config().xwayland_primary as u32);
         }
     }
 }
