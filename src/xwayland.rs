@@ -652,9 +652,12 @@ impl Common {
             if let Some(xwm) = xstate.xwm.as_mut() {
                 if let Err(err) = xwm.set_randr_primary_output(xwayland_primary_output.as_ref()) {
                     warn!("Failed to set xwayland primary output: {}", err);
+                    return;
                 };
             }
         }
+
+        self.output_configuration_state.update();
     }
 }
 

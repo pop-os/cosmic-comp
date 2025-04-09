@@ -21,7 +21,7 @@ use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_manager_v1::{self, ZcosmicOutputManagerV1},
 };
 
-use crate::wayland::protocols::output_configuration::*;
+use crate::{config::OutputState as EnabledState, wayland::protocols::output_configuration::*};
 
 impl<D> GlobalDispatch<ZcosmicOutputManagerV1, OutputMngrGlobalData, D>
     for OutputConfigurationState<D>
@@ -108,6 +108,25 @@ where
                 config_head,
             } => {
                 data_init.init(extended, config_head.downgrade());
+            }
+            zcosmic_output_manager_v1::Request::SetXwaylandPrimary { head } => {
+                let Some(head) = head else {
+                    state.request_xwayland_primary(None);
+                    return;
+                };
+
+                let inner = state.output_configuration_state();
+                if let Some(head_data) = inner.instances.iter_mut().find_map(|instance| {
+                    instance
+                        .heads
+                        .iter()
+                        .find(|instance| instance.extension_obj.as_ref() == Some(&head))
+                }) {
+                    let output = head_data.output.clone();
+                    if output.config().enabled == EnabledState::Enabled {
+                        state.request_xwayland_primary(Some(output));
+                    }
+                }
             }
             _ => {}
         }
