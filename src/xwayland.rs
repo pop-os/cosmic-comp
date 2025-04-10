@@ -569,10 +569,16 @@ impl Common {
             }
             XwaylandDescaling::Fractional => {
                 let shell = self.shell.read().unwrap();
-                shell
-                    .outputs()
-                    .map(|o| o.current_scale().fractional_scale())
-                    .fold(1f64, |acc, val| acc.max(val))
+                let val =
+                    if let Some(output) = shell.outputs().find(|o| o.config().xwayland_primary) {
+                        output.current_scale().fractional_scale().max(1f64)
+                    } else {
+                        shell
+                            .outputs()
+                            .map(|o| o.current_scale().fractional_scale())
+                            .fold(1f64, |acc, val| acc.max(val))
+                    };
+                val
             }
         };
 
@@ -1143,6 +1149,7 @@ impl XwmHandler for State {
                 output_name.as_deref().is_some_and(|o| o == output.name());
         }
         self.common.output_configuration_state.update();
+        self.common.update_xwayland_scale();
         self.common
             .config
             .write_outputs(self.common.output_configuration_state.outputs());
