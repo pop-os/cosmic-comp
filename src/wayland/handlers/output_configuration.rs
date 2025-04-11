@@ -6,6 +6,7 @@ use tracing::{error, warn};
 use crate::{
     config::{OutputConfig, OutputState},
     state::State,
+    utils::prelude::OutputExt,
     wayland::protocols::output_configuration::{
         delegate_output_configuration, ModeConfiguration, OutputConfiguration,
         OutputConfigurationHandler, OutputConfigurationState,
@@ -24,6 +25,17 @@ impl OutputConfigurationHandler for State {
     }
     fn apply_configuration(&mut self, conf: Vec<(Output, OutputConfiguration)>) -> bool {
         self.output_configuration(false, conf)
+    }
+
+    fn request_xwayland_primary(&mut self, primary_output: Option<Output>) {
+        for output in self.common.output_configuration_state.outputs() {
+            output.config_mut().xwayland_primary =
+                primary_output.as_ref().is_some_and(|o| *o == output);
+        }
+        self.common.update_xwayland_primary_output();
+        self.common
+            .config
+            .write_outputs(self.common.output_configuration_state.outputs());
     }
 }
 
