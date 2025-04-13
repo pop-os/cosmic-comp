@@ -33,6 +33,7 @@ pub mod config;
 pub mod dbus;
 #[cfg(feature = "debug")]
 pub mod debug;
+pub mod hooks;
 pub mod input;
 mod logger;
 pub mod session;
@@ -99,7 +100,7 @@ impl State {
     }
 }
 
-pub fn run() -> Result<(), Box<dyn Error>> {
+pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     let raw_args = RawArgs::from_args();
     let mut cursor = raw_args.cursor();
     let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
@@ -143,6 +144,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         socket,
         event_loop.handle(),
         event_loop.get_signal(),
+        hooks,
     );
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;

@@ -3,5 +3,5 @@
 use anyhow::Result;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    cosmic_comp::run()
+    cosmic_comp::run(Default::default())
 }
