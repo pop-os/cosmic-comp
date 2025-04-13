@@ -1,12 +1,20 @@
+use cosmic_settings_config::shortcuts;
 use smithay::{
-    input::pointer::{
-        AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
-        GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
-        GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
-        MotionEvent, PointerGrab, PointerInnerHandle, RelativeMotionEvent,
+    input::{
+        pointer::{
+            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
+            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
+            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
+            RelativeMotionEvent,
+        },
+        touch::{
+            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, UpEvent,
+        },
     },
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
-    utils::{Logical, Point},
+    utils::{Logical, Point, Serial},
     xwayland::xwm,
 };
 
@@ -17,6 +25,50 @@ use super::{
     layout::{floating::ResizeSurfaceGrab, tiling::ResizeForkGrab},
 };
 
+#[derive(Debug, Clone)]
+pub enum GrabStartData {
+    Touch(TouchGrabStartData<State>),
+    Pointer(PointerGrabStartData<State>),
+}
+
+impl GrabStartData {
+    pub fn focus(&self) -> Option<&(PointerFocusTarget, Point<f64, Logical>)> {
+        match self {
+            Self::Touch(touch) => touch.focus.as_ref(),
+            Self::Pointer(pointer) => pointer.focus.as_ref(),
+        }
+    }
+
+    pub fn set_focus(&mut self, focus: Option<(PointerFocusTarget, Point<f64, Logical>)>) {
+        match self {
+            Self::Touch(touch) => touch.focus = focus,
+            Self::Pointer(pointer) => pointer.focus = focus,
+        }
+    }
+
+    pub fn location(&self) -> Point<f64, Logical> {
+        match self {
+            Self::Touch(touch) => touch.location,
+            Self::Pointer(pointer) => pointer.location,
+        }
+    }
+
+    pub fn set_location(&mut self, location: Point<f64, Logical>) {
+        match self {
+            Self::Touch(touch) => touch.location = location,
+            Self::Pointer(pointer) => pointer.location = location,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReleaseMode {
+    Click,
+    NoMouseButtons,
+}
+
+mod menu;
+pub use self::menu::*;
 mod moving;
 pub use self::moving::*;
 
@@ -52,6 +104,36 @@ impl ResizeEdge {
             new_edge.insert(ResizeEdge::LEFT);
         }
         *self = new_edge;
+    }
+}
+
+impl From<shortcuts::action::ResizeEdge> for ResizeEdge {
+    fn from(edge: shortcuts::action::ResizeEdge) -> Self {
+        match edge {
+            shortcuts::action::ResizeEdge::Bottom => ResizeEdge::BOTTOM,
+            shortcuts::action::ResizeEdge::BottomLeft => ResizeEdge::BOTTOM_LEFT,
+            shortcuts::action::ResizeEdge::BottomRight => ResizeEdge::BOTTOM_RIGHT,
+            shortcuts::action::ResizeEdge::Left => ResizeEdge::LEFT,
+            shortcuts::action::ResizeEdge::Right => ResizeEdge::RIGHT,
+            shortcuts::action::ResizeEdge::Top => ResizeEdge::TOP,
+            shortcuts::action::ResizeEdge::TopLeft => ResizeEdge::TOP_LEFT,
+            shortcuts::action::ResizeEdge::TopRight => ResizeEdge::TOP_RIGHT,
+        }
+    }
+}
+
+impl Into<shortcuts::action::ResizeEdge> for ResizeEdge {
+    fn into(self) -> shortcuts::action::ResizeEdge {
+        match self {
+            ResizeEdge::BOTTOM => shortcuts::action::ResizeEdge::Bottom,
+            ResizeEdge::BOTTOM_LEFT => shortcuts::action::ResizeEdge::BottomLeft,
+            ResizeEdge::BOTTOM_RIGHT => shortcuts::action::ResizeEdge::BottomRight,
+            ResizeEdge::LEFT => shortcuts::action::ResizeEdge::Left,
+            ResizeEdge::RIGHT => shortcuts::action::ResizeEdge::Right,
+            ResizeEdge::TOP => shortcuts::action::ResizeEdge::Top,
+            ResizeEdge::TOP_LEFT => shortcuts::action::ResizeEdge::TopLeft,
+            _ => shortcuts::action::ResizeEdge::TopRight,
+        }
     }
 }
 
@@ -102,17 +184,26 @@ impl From<ResizeForkGrab> for ResizeGrab {
     }
 }
 
+impl ResizeGrab {
+    pub fn is_touch_grab(&self) -> bool {
+        match self {
+            ResizeGrab::Floating(grab) => grab.is_touch_grab(),
+            ResizeGrab::Tiling(grab) => grab.is_touch_grab(),
+        }
+    }
+}
+
 impl PointerGrab<State> for ResizeGrab {
     fn motion(
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &MotionEvent,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => grab.motion(data, handle, focus, event),
-            ResizeGrab::Tiling(grab) => grab.motion(data, handle, focus, event),
+            ResizeGrab::Floating(grab) => PointerGrab::motion(grab, data, handle, focus, event),
+            ResizeGrab::Tiling(grab) => PointerGrab::motion(grab, data, handle, focus, event),
         }
     }
 
@@ -120,7 +211,7 @@ impl PointerGrab<State> for ResizeGrab {
         &mut self,
         data: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         match self {
@@ -155,8 +246,8 @@ impl PointerGrab<State> for ResizeGrab {
 
     fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
         match self {
-            ResizeGrab::Floating(grab) => grab.frame(data, handle),
-            ResizeGrab::Tiling(grab) => grab.frame(data, handle),
+            ResizeGrab::Floating(grab) => PointerGrab::frame(grab, data, handle),
+            ResizeGrab::Tiling(grab) => PointerGrab::frame(grab, data, handle),
         }
     }
 
@@ -258,8 +349,112 @@ impl PointerGrab<State> for ResizeGrab {
 
     fn start_data(&self) -> &PointerGrabStartData<State> {
         match self {
-            ResizeGrab::Floating(grab) => grab.start_data(),
-            ResizeGrab::Tiling(grab) => grab.start_data(),
+            ResizeGrab::Floating(grab) => PointerGrab::start_data(grab),
+            ResizeGrab::Tiling(grab) => PointerGrab::start_data(grab),
+        }
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        match self {
+            ResizeGrab::Floating(grab) => PointerGrab::unset(grab, data),
+            ResizeGrab::Tiling(grab) => PointerGrab::unset(grab, data),
+        }
+    }
+}
+
+impl TouchGrab<State> for ResizeGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &DownEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+        }
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &UpEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::up(grab, data, handle, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::up(grab, data, handle, event, seq),
+        }
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &TouchMotionEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+        }
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::frame(grab, data, handle, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::frame(grab, data, handle, seq),
+        }
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::cancel(grab, data, handle, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::cancel(grab, data, handle, seq),
+        }
+    }
+
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &ShapeEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+        }
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &OrientationEvent,
+        seq: Serial,
+    ) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+            ResizeGrab::Tiling(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+        }
+    }
+
+    fn start_data(&self) -> &TouchGrabStartData<State> {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::start_data(grab),
+            ResizeGrab::Tiling(grab) => TouchGrab::start_data(grab),
+        }
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        match self {
+            ResizeGrab::Floating(grab) => TouchGrab::unset(grab, data),
+            ResizeGrab::Tiling(grab) => TouchGrab::unset(grab, data),
         }
     }
 }

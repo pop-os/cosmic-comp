@@ -1,299 +1,56 @@
-// SPDX-License-Identifier: GPL-3.0-only
+use cosmic_settings_config::shortcuts::State as KeyState;
+use cosmic_settings_config::shortcuts::{self, Modifiers};
+use smithay::input::keyboard::ModifiersState;
 
-use crate::shell::{focus::FocusDirection, grabs::ResizeEdge, Direction, ResizeDirection};
-use cosmic_comp_config::workspace::WorkspaceLayout;
-use serde::Deserialize;
-use smithay::{
-    backend::input::KeyState,
-    input::keyboard::{xkb::keysym_get_name, ModifiersState},
-};
-use std::collections::HashMap;
-
-use super::types::*;
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub enum KeyModifier {
-    Ctrl,
-    Alt,
-    Shift,
-    Super,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
-pub struct KeyModifiers {
-    pub ctrl: bool,
-    pub alt: bool,
-    pub shift: bool,
-    pub logo: bool,
-}
-
-impl PartialEq<ModifiersState> for KeyModifiers {
-    fn eq(&self, other: &ModifiersState) -> bool {
-        self.ctrl == other.ctrl
-            && self.alt == other.alt
-            && self.shift == other.shift
-            && self.logo == other.logo
-    }
-}
-
-impl Into<KeyModifiers> for ModifiersState {
-    fn into(self) -> KeyModifiers {
-        KeyModifiers {
-            ctrl: self.ctrl,
-            alt: self.alt,
-            shift: self.shift,
-            logo: self.logo,
-        }
-    }
-}
-
-impl std::ops::AddAssign<KeyModifier> for KeyModifiers {
-    fn add_assign(&mut self, rhs: KeyModifier) {
-        match rhs {
-            KeyModifier::Ctrl => self.ctrl = true,
-            KeyModifier::Alt => self.alt = true,
-            KeyModifier::Shift => self.shift = true,
-            KeyModifier::Super => self.logo = true,
-        };
-    }
-}
-
-impl std::ops::BitOr for KeyModifier {
-    type Output = KeyModifiers;
-
-    fn bitor(self, rhs: KeyModifier) -> Self::Output {
-        let mut modifiers = self.into();
-        modifiers += rhs;
-        modifiers
-    }
-}
-
-impl Into<KeyModifiers> for KeyModifier {
-    fn into(self) -> KeyModifiers {
-        let mut modifiers = KeyModifiers {
-            ctrl: false,
-            alt: false,
-            shift: false,
-            logo: false,
-        };
-        modifiers += self;
-        modifiers
-    }
-}
-
-/// Describtion of a key combination that might be
-/// handled by the compositor.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Hash)]
-#[serde(deny_unknown_fields)]
-pub struct KeyPattern {
-    /// What modifiers are expected to be pressed alongside the key
-    #[serde(deserialize_with = "deserialize_KeyModifiers")]
-    pub modifiers: KeyModifiers,
-    /// The actual key, that was pressed
-    #[serde(deserialize_with = "deserialize_Keysym", default)]
-    pub key: Option<Keysym>,
-}
-
-impl KeyPattern {
-    pub fn new(modifiers: impl Into<KeyModifiers>, key: Option<Keysym>) -> KeyPattern {
-        KeyPattern {
-            modifiers: modifiers.into(),
-            key,
-        }
-    }
-}
-
-impl ToString for KeyPattern {
-    fn to_string(&self) -> String {
-        let mut result = String::new();
-        if self.modifiers.logo {
-            result += "Super+";
-        }
-        if self.modifiers.ctrl {
-            result += "Ctrl+";
-        }
-        if self.modifiers.alt {
-            result += "Alt+";
-        }
-        if self.modifiers.shift {
-            result += "Shift+";
-        }
-
-        if let Some(key) = self.key {
-            result += &keysym_get_name(key);
-        } else {
-            result.remove(result.len() - 1);
-        }
-        result
-    }
-}
-
-#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
-    Terminate,
-    Debug,
-    Close,
-
-    Workspace(u8),
-    NextWorkspace,
-    PreviousWorkspace,
-    LastWorkspace,
-    MoveToWorkspace(u8),
-    MoveToNextWorkspace,
-    MoveToPreviousWorkspace,
-    MoveToLastWorkspace,
-    SendToWorkspace(u8),
-    SendToNextWorkspace,
-    SendToPreviousWorkspace,
-    SendToLastWorkspace,
-
-    NextOutput,
-    PreviousOutput,
-    MoveToNextOutput,
-    MoveToPreviousOutput,
-    SendToNextOutput,
-    SendToPreviousOutput,
-
-    Focus(FocusDirection),
-    Move(Direction),
-
-    ToggleOrientation,
-    Orientation(crate::shell::layout::Orientation),
-
-    ToggleStacking,
-    ToggleTiling,
-    ToggleWindowFloating,
-    SwapWindow,
-
-    Resizing(ResizeDirection),
-    #[serde(skip)]
-    _ResizingInternal(ResizeDirection, ResizeEdge, KeyState),
-    Maximize,
-    Spawn(String),
+    /// Behaviors managed internally by cosmic-comp.
+    Private(PrivateAction),
+    /// Behaviors managed via cosmic-settings.
+    Shortcut(shortcuts::Action),
 }
 
-fn insert_binding(
-    key_bindings: &mut HashMap<KeyPattern, Action>,
-    modifiers: KeyModifiers,
-    keys: impl Iterator<Item = Keysym>,
-    action: Action,
-) {
-    if !key_bindings.values().any(|a| a == &action) {
-        for key in keys {
-            let pattern = KeyPattern {
-                modifiers: modifiers.clone(),
-                key: Some(key),
-            };
-            if !key_bindings.contains_key(&pattern) {
-                key_bindings.insert(pattern, action.clone());
-            }
-        }
+#[derive(Clone, Debug, Eq, PartialEq)]
+// Behaviors which are internally defined and emitted.
+pub enum PrivateAction {
+    Escape,
+    Resizing(
+        shortcuts::action::ResizeDirection,
+        shortcuts::action::ResizeEdge,
+        shortcuts::State,
+    ),
+}
+
+/// Convert `cosmic_settings_config::shortcuts::State` to `smithay::backend::input::KeyState`.
+pub fn cosmic_keystate_to_smithay(value: KeyState) -> smithay::backend::input::KeyState {
+    match value {
+        KeyState::Pressed => smithay::backend::input::KeyState::Pressed,
+        KeyState::Released => smithay::backend::input::KeyState::Released,
     }
 }
 
-pub fn add_default_bindings(
-    key_bindings: &mut HashMap<KeyPattern, Action>,
-    workspace_layout: WorkspaceLayout,
-) {
-    let (workspace_previous, workspace_next, output_previous, output_next) = match workspace_layout
-    {
-        WorkspaceLayout::Horizontal => (
-            [Keysym::Left, Keysym::h],
-            [Keysym::Right, Keysym::l],
-            [Keysym::Up, Keysym::k],
-            [Keysym::Down, Keysym::j],
-        ),
-        WorkspaceLayout::Vertical => (
-            [Keysym::Up, Keysym::k],
-            [Keysym::Down, Keysym::j],
-            [Keysym::Left, Keysym::h],
-            [Keysym::Right, Keysym::l],
-        ),
-    };
+/// Convert `smithay::backend::input::KeyState` to `cosmic_settings_config::shortcuts::State`.
+pub fn cosmic_keystate_from_smithay(value: smithay::backend::input::KeyState) -> KeyState {
+    match value {
+        smithay::backend::input::KeyState::Pressed => KeyState::Pressed,
+        smithay::backend::input::KeyState::Released => KeyState::Released,
+    }
+}
 
-    insert_binding(
-        key_bindings,
-        KeyModifiers {
-            logo: true,
-            ctrl: true,
-            ..Default::default()
-        },
-        workspace_previous.iter().copied(),
-        Action::PreviousWorkspace,
-    );
-    insert_binding(
-        key_bindings,
-        KeyModifiers {
-            logo: true,
-            ctrl: true,
-            ..Default::default()
-        },
-        workspace_next.iter().copied(),
-        Action::NextWorkspace,
-    );
-    insert_binding(
-        key_bindings,
-        KeyModifiers {
-            logo: true,
-            ctrl: true,
-            shift: true,
-            ..Default::default()
-        },
-        workspace_previous.iter().copied(),
-        Action::MoveToPreviousWorkspace,
-    );
-    insert_binding(
-        key_bindings,
-        KeyModifiers {
-            logo: true,
-            ctrl: true,
-            shift: true,
-            ..Default::default()
-        },
-        workspace_next.iter().copied(),
-        Action::MoveToNextWorkspace,
-    );
+/// Compare `cosmic_settings_config::shortcuts::Modifiers` to `smithay::input::keyboard::ModifiersState`.
+pub fn cosmic_modifiers_eq_smithay(this: &Modifiers, other: &ModifiersState) -> bool {
+    this.ctrl == other.ctrl
+        && this.alt == other.alt
+        && this.shift == other.shift
+        && this.logo == other.logo
+}
 
-    insert_binding(
-        key_bindings,
-        KeyModifiers {
-            logo: true,
-            ctrl: true,
-            ..Default::default()
-        },
-        output_previous.iter().copied(),
-        Action::PreviousOutput,
-    );
-    insert_binding(
-        key_bindings,
-        KeyModifiers {
-            logo: true,
-            ctrl: true,
-            ..Default::default()
-        },
-        output_next.iter().copied(),
-        Action::NextOutput,
-    );
-    insert_binding(
-        key_bindings,
-        KeyModifiers {
-            logo: true,
-            ctrl: true,
-            shift: true,
-            ..Default::default()
-        },
-        output_previous.iter().copied(),
-        Action::MoveToPreviousOutput,
-    );
-    insert_binding(
-        key_bindings,
-        KeyModifiers {
-            logo: true,
-            ctrl: true,
-            shift: true,
-            ..Default::default()
-        },
-        output_next.iter().copied(),
-        Action::MoveToNextOutput,
-    );
+/// Convert `smithay::input::keyboard::ModifiersState` to `cosmic_settings_config::shortcuts::Modifiers`
+pub fn cosmic_modifiers_from_smithay(value: ModifiersState) -> Modifiers {
+    Modifiers {
+        ctrl: value.ctrl,
+        alt: value.alt,
+        shift: value.shift,
+        logo: value.logo,
+    }
 }

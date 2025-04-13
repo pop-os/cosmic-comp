@@ -2,17 +2,27 @@ name: "Build"
 on:
   pull_request:
     branches:
-    - master_jammy
+    - master
   push:
     branches:
-    - master_jammy
+    - master
 jobs:
-  build:
+#  build:
+#    runs-on: ubuntu-latest
+#    steps:
+#    - uses: actions/checkout@v3
+#    - uses: cachix/install-nix-action@v22
+#      with:
+#        nix_path: nixpkgs=channel:nixpkgs-unstable
+#    - run: GIT_LFS_SKIP_SMUDGE=1 nix build
+#    - run: nix flake check
+  check-features:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - uses: cachix/install-nix-action@v22
-      with:
-        nix_path: nixpkgs=channel:nixpkgs-unstable
-    - run: GIT_LFS_SKIP_SMUDGE=1 nix build
-    - run: nix flake check
+    - uses: dtolnay/rust-toolchain@stable
+    - run: sudo apt-get update; sudo apt-get install -y libdrm-dev libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev
+    - run: cargo check --no-default-features
+    - run: cargo check --features debug
+    - run: cargo check --features profile-with-tracy
+    - run: cargo fmt --all -- --check

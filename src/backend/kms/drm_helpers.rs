@@ -1,25 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use anyhow::{anyhow, Result};
-use smithay::reexports::drm::control::{
-    atomic::AtomicModeReq,
-    connector::{self, State as ConnectorState},
-    crtc,
-    dumbbuffer::DumbBuffer,
-    property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
-    ResourceHandle,
+use anyhow::{anyhow, Context, Result};
+use libdisplay_info::{edid::DisplayDescriptorTag, info::Info};
+use smithay::{
+    reexports::drm::control::{
+        atomic::AtomicModeReq,
+        connector::{self, State as ConnectorState},
+        crtc,
+        dumbbuffer::DumbBuffer,
+        property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
+        ResourceHandle,
+    },
+    utils::Transform,
 };
 use std::{collections::HashMap, ops::Range};
 
 pub fn display_configuration(
     device: &mut impl ControlDevice,
     supports_atomic: bool,
-) -> Result<HashMap<connector::Handle, crtc::Handle>> {
+) -> Result<HashMap<connector::Handle, Option<crtc::Handle>>> {
     let res_handles = device.resource_handles()?;
     let connectors = res_handles.connectors();
 
     let mut map = HashMap::new();
     let mut cleanup = Vec::new();
+
     // We expect the previous running drm master (likely the login mananger)
     // to leave the drm device in a sensible state.
     // That means, to reduce flickering, we try to keep an established mapping.
@@ -31,7 +36,7 @@ pub fn display_configuration(
             if let Some(crtc) = device.get_encoder(enc)?.crtc() {
                 // If is is connected we found a mapping
                 if conn.state() == ConnectorState::Connected {
-                    map.insert(conn.handle(), crtc);
+                    map.insert(conn.handle(), Some(crtc));
                 // If not, the user just unplugged something,
                 // or the drm master did not cleanup?
                 // Well, I guess we cleanup after them.
@@ -41,6 +46,7 @@ pub fn display_configuration(
             }
         }
     }
+
     // But just in case we try to match all remaining connectors.
     for conn in connectors
         .iter()
@@ -56,12 +62,14 @@ pub fn display_configuration(
             .flat_map(|encoder_handle| device.get_encoder(*encoder_handle))
         {
             for crtc in res_handles.filter_crtcs(encoder_info.possible_crtcs()) {
-                if !map.values().any(|v| *v == crtc) {
-                    map.insert(conn.handle(), crtc);
+                if !map.values().any(|v| *v == Some(crtc)) {
+                    map.insert(conn.handle(), Some(crtc));
                     break 'outer;
                 }
             }
         }
+
+        map.entry(conn.handle()).or_insert(None);
     }
 
     // And then cleanup
@@ -119,9 +127,11 @@ pub fn display_configuration(
 
         device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)?;
     } else {
-        for crtc in cleanup {
+        for crtc in res_handles.crtcs() {
             #[allow(deprecated)]
-            let _ = device.set_cursor(crtc, Option::<&DumbBuffer>::None);
+            let _ = device.set_cursor(*crtc, Option::<&DumbBuffer>::None);
+        }
+        for crtc in cleanup {
             // null commit (necessary to trigger removal on the kernel side with the legacy api.)
             let _ = device.set_crtc(crtc, None, (0, 0), &[], None);
         }
@@ -156,51 +166,24 @@ pub fn interface_name(device: &impl ControlDevice, connector: connector::Handle)
     ))
 }
 
-pub struct EdidInfo {
-    pub model: String,
-    pub manufacturer: String,
-}
-
-pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> Result<EdidInfo> {
-    use edid_rs::{parse as edid_parse, MonitorDescriptor};
-
+pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> Result<Info> {
     let edid_prop = get_prop(device, connector, "EDID")?;
     let edid_info = device.get_property(edid_prop)?;
-    let mut manufacturer = "Unknown".into();
-    let mut model = "Unknown".into();
+
+    let mut edid = None;
     let props = device.get_properties(connector)?;
     let (ids, vals) = props.as_props_and_values();
     for (&id, &val) in ids.iter().zip(vals.iter()) {
         if id == edid_prop {
             if let property::Value::Blob(edid_blob) = edid_info.value_type().convert_value(val) {
                 let blob = device.get_property_blob(edid_blob)?;
-                let mut reader = std::io::Cursor::new(blob);
-                if let Some(edid) = edid_parse(&mut reader).ok() {
-                    manufacturer = {
-                        let id = edid.product.manufacturer_id;
-                        let code = [id.0, id.1, id.2];
-                        get_manufacturer(&code).into()
-                    };
-                    model = if let Some(MonitorDescriptor::MonitorName(name)) = edid
-                        .descriptors
-                        .0
-                        .iter()
-                        .find(|x| matches!(x, MonitorDescriptor::MonitorName(_)))
-                    {
-                        name.clone()
-                    } else {
-                        format!("{}", edid.product.product_code)
-                    };
-                }
+                edid = Some(Info::parse_edid(&blob).context("Unable to parse edid")?);
             }
             break;
         }
     }
 
-    Ok(EdidInfo {
-        model,
-        manufacturer,
-    })
+    edid.ok_or(anyhow!("No EDID found"))
 }
 
 pub fn get_prop(
@@ -236,78 +219,7 @@ pub fn get_property_val(
     anyhow::bail!("No prop found for {}", name)
 }
 
-fn get_manufacturer(vendor: &[char; 3]) -> &'static str {
-    match vendor {
-        ['A', 'A', 'A'] => "Avolites Ltd",
-        ['A', 'C', 'I'] => "Ancor Communications Inc",
-        ['A', 'C', 'R'] => "Acer Technologies",
-        ['A', 'D', 'A'] => "Addi-Data GmbH",
-        ['A', 'P', 'P'] => "Apple Computer Inc",
-        ['A', 'S', 'K'] => "Ask A/S",
-        ['A', 'V', 'T'] => "Avtek (Electronics) Pty Ltd",
-        ['B', 'N', 'O'] => "Bang & Olufsen",
-        ['B', 'N', 'Q'] => "BenQ Corporation",
-        ['C', 'M', 'N'] => "Chimei Innolux Corporation",
-        ['C', 'M', 'O'] => "Chi Mei Optoelectronics corp.",
-        ['C', 'R', 'O'] => "Extraordinary Technologies PTY Limited",
-        ['D', 'E', 'L'] => "Dell Inc.",
-        ['D', 'G', 'C'] => "Data General Corporation",
-        ['D', 'O', 'N'] => "DENON, Ltd.",
-        ['E', 'N', 'C'] => "Eizo Nanao Corporation",
-        ['E', 'P', 'H'] => "Epiphan Systems Inc.",
-        ['E', 'X', 'P'] => "Data Export Corporation",
-        ['F', 'N', 'I'] => "Funai Electric Co., Ltd.",
-        ['F', 'U', 'S'] => "Fujitsu Siemens Computers GmbH",
-        ['G', 'S', 'M'] => "Goldstar Company Ltd",
-        ['H', 'I', 'Q'] => "Kaohsiung Opto Electronics Americas, Inc.",
-        ['H', 'S', 'D'] => "HannStar Display Corp",
-        ['H', 'T', 'C'] => "Hitachi Ltd",
-        ['H', 'W', 'P'] => "Hewlett Packard",
-        ['I', 'N', 'T'] => "Interphase Corporation",
-        ['I', 'N', 'X'] => "Communications Supply Corporation (A division of WESCO)",
-        ['I', 'T', 'E'] => "Integrated Tech Express Inc",
-        ['I', 'V', 'M'] => "Iiyama North America",
-        ['L', 'E', 'N'] => "Lenovo Group Limited",
-        ['M', 'A', 'X'] => "Rogen Tech Distribution Inc",
-        ['M', 'E', 'G'] => "Abeam Tech Ltd",
-        ['M', 'E', 'I'] => "Panasonic Industry Company",
-        ['M', 'T', 'C'] => "Mars-Tech Corporation",
-        ['M', 'T', 'X'] => "Matrox",
-        ['N', 'E', 'C'] => "NEC Corporation",
-        ['N', 'E', 'X'] => "Nexgen Mediatech Inc.",
-        ['O', 'N', 'K'] => "ONKYO Corporation",
-        ['O', 'R', 'N'] => "ORION ELECTRIC CO., LTD.",
-        ['O', 'T', 'M'] => "Optoma Corporation",
-        ['O', 'V', 'R'] => "Oculus VR, Inc.",
-        ['P', 'H', 'L'] => "Philips Consumer Electronics Company",
-        ['P', 'I', 'O'] => "Pioneer Electronic Corporation",
-        ['P', 'N', 'R'] => "Planar Systems, Inc.",
-        ['Q', 'D', 'S'] => "Quanta Display Inc.",
-        ['R', 'A', 'T'] => "Rent-A-Tech",
-        ['R', 'E', 'N'] => "Renesas Technology Corp.",
-        ['S', 'A', 'M'] => "Samsung Electric Company",
-        ['S', 'A', 'N'] => "Sanyo Electric Co., Ltd.",
-        ['S', 'E', 'C'] => "Seiko Epson Corporation",
-        ['S', 'H', 'P'] => "Sharp Corporation",
-        ['S', 'I', 'I'] => "Silicon Image, Inc.",
-        ['S', 'N', 'Y'] => "Sony",
-        ['S', 'T', 'D'] => "STD Computer Inc",
-        ['S', 'V', 'S'] => "SVSI",
-        ['S', 'Y', 'N'] => "Synaptics Inc",
-        ['T', 'C', 'L'] => "Technical Concepts Ltd",
-        ['T', 'O', 'P'] => "Orion Communications Co., Ltd.",
-        ['T', 'S', 'B'] => "Toshiba America Info Systems Inc",
-        ['T', 'S', 'T'] => "Transtream Inc",
-        ['U', 'N', 'K'] => "Unknown",
-        ['V', 'E', 'S'] => "Vestel Elektronik Sanayi ve Ticaret A. S.",
-        ['V', 'I', 'T'] => "Visitech AS",
-        ['V', 'I', 'Z'] => "VIZIO, Inc",
-        ['V', 'S', 'C'] => "ViewSonic Corporation",
-        ['Y', 'M', 'H'] => "Yamaha Corporation",
-        _ => "Unknown",
-    }
-}
-
+// Returns refresh rate in milliherz
 pub fn calculate_refresh_rate(mode: Mode) -> u32 {
     let htotal = mode.hsync().2 as u32;
     let vtotal = mode.vsync().2 as u32;
@@ -327,38 +239,24 @@ pub fn calculate_refresh_rate(mode: Mode) -> u32 {
     refresh as u32
 }
 
-pub fn supports_vrr(dev: &impl ControlDevice, conn: connector::Handle) -> Result<bool> {
-    get_property_val(dev, conn, "vrr_capable").map(|(val_type, val)| {
-        match val_type.convert_value(val) {
-            property::Value::UnsignedRange(res) => res == 1,
-            property::Value::Boolean(res) => res,
-            _ => false,
+pub fn get_minimum_refresh_rate(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+) -> Result<Option<u32>> {
+    let info = edid_info(device, connector)?;
+    let edid = info.edid().context("EDID lacking into")?;
+    for descriptor in edid.display_descriptors() {
+        if descriptor.tag() == DisplayDescriptorTag::RangeLimits {
+            return Ok(Some(
+                descriptor
+                    .range_limits()
+                    .context("Invalid range limits descriptor")?
+                    .min_vert_rate_hz as u32,
+            ));
         }
-    })
-}
-
-pub fn set_vrr(
-    dev: &impl ControlDevice,
-    crtc: crtc::Handle,
-    conn: connector::Handle,
-    vrr: bool,
-) -> Result<bool> {
-    if supports_vrr(dev, conn)? {
-        dev.set_property(
-            conn,
-            get_prop(dev, crtc, "VRR_ENABLED")?,
-            property::Value::UnsignedRange(if vrr { 1 } else { 0 }).into(),
-        )
-        .map_err(Into::<anyhow::Error>::into)
-        .and_then(|_| get_property_val(dev, crtc, "VRR_ENABLED"))
-        .map(|(val_type, val)| match val_type.convert_value(val) {
-            property::Value::UnsignedRange(vrr) => vrr == 1,
-            property::Value::Boolean(vrr) => vrr,
-            _ => false,
-        })
-    } else {
-        Ok(false)
     }
+
+    Ok(None)
 }
 
 pub fn get_max_bpc(
@@ -399,4 +297,22 @@ pub fn set_max_bpc(dev: &impl ControlDevice, conn: connector::Handle, bpc: u32) 
         property::Value::UnsignedRange(val) => val as u32,
         _ => unreachable!(),
     })
+}
+
+pub fn panel_orientation(dev: &impl ControlDevice, conn: connector::Handle) -> Result<Transform> {
+    let (val_type, val) = get_property_val(dev, conn, "panel orientation")?;
+    match val_type.convert_value(val) {
+        property::Value::Enum(Some(val)) => match val.value() {
+            // "Normal"
+            0 => Ok(Transform::Normal),
+            // "Upside Down"
+            1 => Ok(Transform::_180),
+            // "Left Side Up"
+            2 => Ok(Transform::_90),
+            // "Right Side Up"
+            3 => Ok(Transform::_270),
+            _ => Err(anyhow!("panel orientation has invalid value '{:?}'", val)),
+        },
+        _ => Err(anyhow!("panel orientation has wrong value type")),
+    }
 }

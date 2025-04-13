@@ -1,26 +1,14 @@
 use cosmic::{
     font::Font,
-    iced::{
-        widget::{self, container::draw_background, rule::FillMode},
-        Element,
-    },
+    iced::widget::{self, container::draw_background, rule::FillMode},
     iced_core::{
         alignment, event,
         layout::{Layout, Limits, Node},
         mouse, overlay, renderer,
-        widget::{
-            operation::{Operation, OperationOutputWrapper},
-            text::StyleSheet as TextStyleSheet,
-            tree::Tree,
-            Id, Widget,
-        },
-        Clipboard, Color, Length, Rectangle, Shell, Size,
+        widget::{operation::Operation, tree::Tree, Id, Widget},
+        Border, Clipboard, Color, Length, Rectangle, Shell, Size,
     },
-    iced_style::{
-        button::StyleSheet as ButtonStyleSheet, container::StyleSheet as ContainerStyleSheet,
-        rule::StyleSheet as RuleStyleSheet,
-    },
-    iced_widget::{scrollable::AbsoluteOffset, text},
+    iced_widget::scrollable::AbsoluteOffset,
     theme,
     widget::{icon::from_name, Icon},
     Apply,
@@ -28,28 +16,53 @@ use cosmic::{
 
 use super::tab_text::tab_text;
 
+/// The background color of the stack tab header.
+pub(super) fn primary_container_color(theme: &cosmic::cosmic_theme::Theme) -> Color {
+    const PRIMARY_CONTAINER_DARK: Color = Color::from_rgba(0.149, 0.149, 0.149, 1.0);
+    const PRIMARY_CONTAINER_LIGHT: Color = Color::from_rgba(0.894, 0.894, 0.894, 1.0);
+
+    if theme.is_dark {
+        PRIMARY_CONTAINER_DARK
+    } else {
+        PRIMARY_CONTAINER_LIGHT
+    }
+}
+
+/// The background color for the selected stack tab.
+pub(super) fn selected_state_color(theme: &cosmic::cosmic_theme::Theme) -> Color {
+    const SELECTED_STATE_DARK: Color = Color::from_rgba(0.195, 0.195, 0.195, 1.0);
+    const SELECTED_STATE_LIGHT: Color = Color::from_rgba(0.8344, 0.8344, 0.8344, 1.0);
+
+    if theme.is_dark {
+        SELECTED_STATE_DARK
+    } else {
+        SELECTED_STATE_LIGHT
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(super) enum TabRuleTheme {
     ActiveActivated,
     ActiveDeactivated,
     Default,
 }
 
-impl Into<theme::Rule> for TabRuleTheme {
-    fn into(self) -> theme::Rule {
-        match self {
-            Self::ActiveActivated => theme::Rule::custom(|theme| widget::rule::Appearance {
+impl From<TabRuleTheme> for theme::Rule {
+    fn from(theme: TabRuleTheme) -> Self {
+        match theme {
+            TabRuleTheme::ActiveActivated => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().accent_color().into(),
                 width: 4,
                 radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
-            Self::ActiveDeactivated => theme::Rule::custom(|theme| widget::rule::Appearance {
+            TabRuleTheme::ActiveDeactivated => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().palette.neutral_5.into(),
                 width: 4,
                 radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
-            Self::Default => theme::Rule::custom(|theme| widget::rule::Appearance {
+            TabRuleTheme::Default => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().palette.neutral_5.into(),
                 width: 4,
                 radius: 8.0.into(),
@@ -59,6 +72,7 @@ impl Into<theme::Rule> for TabRuleTheme {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(super) enum TabBackgroundTheme {
     ActiveActivated,
     ActiveDeactivated,
@@ -66,47 +80,54 @@ pub(super) enum TabBackgroundTheme {
 }
 
 impl TabBackgroundTheme {
-    fn background_color(&self) -> Color {
+    /// Select the background color of stack tabs based on dark theme preference.
+    fn background_color(self, theme: &theme::Theme) -> Color {
         match self {
-            TabBackgroundTheme::ActiveActivated => Color::from_rgba(0.365, 0.365, 0.365, 1.0),
-            TabBackgroundTheme::ActiveDeactivated => Color::from_rgba(0.365, 0.365, 0.365, 1.0),
-            TabBackgroundTheme::Default => Color::from_rgba(0.26, 0.26, 0.26, 1.0),
+            TabBackgroundTheme::ActiveActivated | TabBackgroundTheme::ActiveDeactivated => {
+                selected_state_color(theme.cosmic())
+            }
+
+            TabBackgroundTheme::Default => primary_container_color(theme.cosmic()),
         }
     }
 }
 
-impl Into<theme::Container> for TabBackgroundTheme {
-    fn into(self) -> theme::Container {
-        let background_color = cosmic::iced::Background::Color(self.background_color());
-        match self {
-            Self::ActiveActivated => {
-                theme::Container::custom(move |theme| widget::container::Appearance {
+impl From<TabBackgroundTheme> for theme::Container<'_> {
+    fn from(background_theme: TabBackgroundTheme) -> Self {
+        match background_theme {
+            TabBackgroundTheme::ActiveActivated => {
+                Self::custom(move |theme| widget::container::Style {
                     icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(background_color),
-                    border_radius: 0.0.into(),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
+                    background: Some(background_theme.background_color(theme).into()),
+                    border: Border {
+                        radius: 0.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    shadow: Default::default(),
                 })
             }
-            Self::ActiveDeactivated => {
-                theme::Container::custom(move |_theme| widget::container::Appearance {
+            TabBackgroundTheme::ActiveDeactivated => {
+                Self::custom(move |theme| widget::container::Style {
                     icon_color: None,
                     text_color: None,
-                    background: Some(background_color),
-                    border_radius: 0.0.into(),
-                    border_width: 0.0,
-                    border_color: Color::TRANSPARENT,
+                    background: Some(background_theme.background_color(theme).into()),
+                    border: Border {
+                        radius: 0.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    shadow: Default::default(),
                 })
             }
-            Self::Default => theme::Container::Transparent,
+            TabBackgroundTheme::Default => Self::Transparent,
         }
     }
 }
 
 pub trait TabMessage: Clone {
     fn activate(idx: usize) -> Self;
-    fn is_activate(&self) -> Option<usize>;
 
     fn scroll_further() -> Self;
     fn scroll_back() -> Self;
@@ -121,20 +142,22 @@ pub struct Tab<Message: TabMessage> {
     font: Font,
     close_message: Option<Message>,
     press_message: Option<Message>,
+    right_click_message: Option<Message>,
     rule_theme: TabRuleTheme,
     background_theme: TabBackgroundTheme,
     active: bool,
 }
 
-impl<Message: TabMessage> Tab<Message> {
+impl<Message: TabMessage + 'static> Tab<Message> {
     pub fn new(title: impl Into<String>, app_id: impl Into<String>, id: Id) -> Self {
         Tab {
             id,
             app_icon: from_name(app_id.into()).size(16).icon(),
             title: title.into(),
-            font: cosmic::font::FONT,
+            font: cosmic::font::default(),
             close_message: None,
             press_message: None,
+            right_click_message: None,
             rule_theme: TabRuleTheme::Default,
             background_theme: TabBackgroundTheme::Default,
             active: false,
@@ -143,6 +166,11 @@ impl<Message: TabMessage> Tab<Message> {
 
     pub fn on_press(mut self, message: Message) -> Self {
         self.press_message = Some(message);
+        self
+    }
+
+    pub fn on_right_click(mut self, message: Message) -> Self {
+        self.right_click_message = Some(message);
         self
     }
 
@@ -176,57 +204,38 @@ impl<Message: TabMessage> Tab<Message> {
         self
     }
 
-    pub(super) fn internal<'a, Renderer>(self, idx: usize) -> TabInternal<'a, Message, Renderer>
-    where
-        Renderer: cosmic::iced_core::Renderer + 'a,
-        Renderer: cosmic::iced_core::text::Renderer<Font = Font>,
-        Renderer::Theme: ButtonStyleSheet<Style = theme::iced::Button>,
-        Renderer::Theme: ContainerStyleSheet,
-        Renderer::Theme: RuleStyleSheet<Style = theme::Rule>,
-        Renderer::Theme: TextStyleSheet,
-        Message: 'a,
-        widget::Button<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
-        widget::Container<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
-        widget::Text<'a, Renderer>: Into<Element<'a, Message, Renderer>>,
-        Icon: Into<Element<'a, Message, Renderer>>,
-    {
+    pub(super) fn internal<'a>(self, idx: usize) -> TabInternal<'a, Message> {
         let mut close_button = from_name("window-close-symbolic")
             .size(16)
             .prefer_svg(true)
             .icon()
             .apply(widget::button)
             .padding(0)
-            .style(theme::iced::Button::Text);
+            .class(theme::iced::Button::Text);
         if let Some(close_message) = self.close_message {
             close_button = close_button.on_press(close_message);
         }
 
         let items = vec![
-            widget::vertical_rule(4).style(self.rule_theme).into(),
+            widget::vertical_rule(4).class(self.rule_theme).into(),
             self.app_icon
+                .clone()
                 .apply(widget::container)
-                .height(Length::Fill)
                 .width(Length::Shrink)
                 .padding([2, 4])
-                .center_y()
+                .center_y(Length::Fill)
                 .into(),
-            Element::<'a, Message, Renderer>::new(
-                text(self.title)
-                    .size(14)
-                    .font(self.font)
-                    .horizontal_alignment(alignment::Horizontal::Left)
-                    .vertical_alignment(alignment::Vertical::Center)
-                    .apply(tab_text)
-                    .background(self.background_theme.background_color())
-                    .height(Length::Fill)
-                    .width(Length::Fill),
-            ),
+            tab_text(self.title, self.active)
+                .font(self.font)
+                .font_size(14.0)
+                .height(Length::Fill)
+                .width(Length::Fill)
+                .into(),
             close_button
                 .apply(widget::container)
-                .height(Length::Fill)
                 .width(Length::Shrink)
                 .padding([2, 4])
-                .center_y()
+                .center_y(Length::Fill)
                 .align_x(alignment::Horizontal::Right)
                 .into(),
         ];
@@ -238,6 +247,7 @@ impl<Message: TabMessage> Tab<Message> {
             background: self.background_theme.into(),
             elements: items,
             press_message: self.press_message,
+            right_click_message: self.right_click_message,
         }
     }
 }
@@ -249,19 +259,18 @@ const MIN_TAB_WIDTH: i32 = 38;
 const TEXT_BREAKPOINT: i32 = 44;
 const CLOSE_BREAKPOINT: i32 = 125;
 
-pub(super) struct TabInternal<'a, Message: TabMessage, Renderer> {
+pub(super) struct TabInternal<'a, Message: TabMessage> {
     id: Id,
     idx: usize,
     active: bool,
-    background: theme::Container,
-    elements: Vec<Element<'a, Message, Renderer>>,
+    background: theme::Container<'a>,
+    elements: Vec<cosmic::Element<'a, Message>>,
     press_message: Option<Message>,
+    right_click_message: Option<Message>,
 }
 
-impl<'a, Message, Renderer> Widget<Message, Renderer> for TabInternal<'a, Message, Renderer>
+impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabInternal<'a, Message>
 where
-    Renderer: cosmic::iced_core::Renderer,
-    Renderer::Theme: ContainerStyleSheet<Style = theme::Container>,
     Message: TabMessage,
 {
     fn id(&self) -> Option<Id> {
@@ -272,19 +281,19 @@ where
         self.elements.iter().map(Tree::new).collect()
     }
 
+    fn set_id(&mut self, id: Id) {
+        self.id = id;
+    }
+
     fn diff(&mut self, tree: &mut Tree) {
-        tree.diff_children(&mut self.elements)
+        tree.diff_children(&mut self.elements);
     }
 
-    fn width(&self) -> Length {
-        Length::Fill
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
     }
 
-    fn height(&self) -> Length {
-        Length::Fill
-    }
-
-    fn layout(&self, renderer: &Renderer, limits: &Limits) -> Node {
+    fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
         let min_size = Size {
             height: TAB_HEIGHT as f32,
             width: if self.active {
@@ -298,7 +307,9 @@ where
             .min_height(min_size.height)
             .width(Length::Fill)
             .height(Length::Fill);
-        let size = limits.resolve(min_size).max(min_size);
+        let size = limits
+            .resolve(Length::Shrink, Length::Shrink, min_size)
+            .max(min_size);
 
         let limits = Limits::new(size, size)
             .min_width(size.width)
@@ -309,6 +320,8 @@ where
             cosmic::iced_core::layout::flex::Axis::Horizontal,
             renderer,
             &limits,
+            Length::Fill,
+            Length::Fill,
             0.into(),
             8.,
             cosmic::iced::Alignment::Center,
@@ -319,6 +332,7 @@ where
             } else {
                 &self.elements[0..2]
             },
+            &mut tree.children,
         )
     }
 
@@ -326,8 +340,8 @@ where
         &self,
         tree: &mut Tree,
         layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn Operation<OperationOutputWrapper<Message>>,
+        renderer: &cosmic::Renderer,
+        operation: &mut dyn Operation<()>,
     ) {
         operation.container(None, layout.bounds(), &mut |operation| {
             self.elements
@@ -338,7 +352,7 @@ where
                     child
                         .as_widget()
                         .operate(state, layout, renderer, operation);
-                })
+                });
         });
     }
 
@@ -348,7 +362,7 @@ where
         event: event::Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
@@ -384,6 +398,15 @@ where
             }
             if matches!(
                 event,
+                event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right))
+            ) {
+                if let Some(message) = self.right_click_message.clone() {
+                    shell.publish(message);
+                    return event::Status::Captured;
+                }
+            }
+            if matches!(
+                event,
                 event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             ) {
                 shell.publish(Message::activate(self.idx));
@@ -400,7 +423,7 @@ where
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
     ) -> mouse::Interaction {
         self.elements
             .iter()
@@ -418,14 +441,15 @@ where
     fn draw(
         &self,
         tree: &Tree,
-        renderer: &mut Renderer,
-        theme: &Renderer::Theme,
+        renderer: &mut cosmic::Renderer,
+        theme: &cosmic::Theme,
         renderer_style: &renderer::Style,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
     ) {
-        let style = theme.appearance(&self.background);
+        use cosmic::widget::container::Catalog;
+        let style = theme.style(&self.background);
 
         draw_background(renderer, &style, layout.bounds());
 
@@ -455,8 +479,9 @@ where
         &'b mut self,
         tree: &'b mut Tree,
         layout: Layout<'_>,
-        renderer: &Renderer,
-    ) -> Option<overlay::Element<'b, Message, Renderer>> {
-        overlay::from_children(&mut self.elements, tree, layout, renderer)
+        renderer: &cosmic::Renderer,
+        translation: cosmic::iced::Vector,
+    ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
+        overlay::from_children(&mut self.elements, tree, layout, renderer, translation)
     }
 }

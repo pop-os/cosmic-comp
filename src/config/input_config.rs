@@ -79,6 +79,7 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
         } else {
             None
         },
+        map_to_output: None,
     }
 }
 

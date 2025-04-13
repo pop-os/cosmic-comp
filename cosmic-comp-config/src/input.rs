@@ -5,7 +5,9 @@
 pub use input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+// Note: For the following values, None is used to represent the system default
+// Configuration for input devices
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct InputConfig {
     pub state: DeviceState,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -27,16 +29,18 @@ pub struct InputConfig {
     pub scroll_config: Option<ScrollConfig>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub tap_config: Option<TapConfig>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub map_to_output: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct AccelConfig {
     #[serde(with = "AccelProfileDef")]
     pub profile: Option<AccelProfile>,
     pub speed: f64,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct ScrollConfig {
     #[serde(with = "ScrollMethodDef")]
     pub method: Option<ScrollMethod>,
@@ -45,7 +49,7 @@ pub struct ScrollConfig {
     pub scroll_factor: Option<f64>,
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DeviceState {
     Enabled,
     Disabled,
@@ -58,7 +62,7 @@ impl Default for DeviceState {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TapConfig {
     pub enabled: bool,
     #[serde(with = "TapButtonMapDef")]

@@ -11,10 +11,12 @@ impl XWaylandKeyboardGrabHandler for State {
         let element = self
             .common
             .shell
+            .read()
+            .unwrap()
             .workspaces
             .spaces()
-            .find_map(|x| x.element_for_wl_surface(surface))?;
-        Some(KeyboardFocusTarget::Element(element.clone()))
+            .find_map(|x| x.element_for_surface(surface).cloned())?;
+        Some(KeyboardFocusTarget::Element(element))
     }
 }
 delegate_xwayland_keyboard_grab!(State);

@@ -6,30 +6,25 @@ use smithay::{
         allocator::Fourcc,
         renderer::{
             element::{
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-                texture::{TextureBuffer, TextureRenderElement},
                 Kind,
             },
             ImportAll, ImportMem, Renderer,
         },
     },
     input::{
-        pointer::{CursorImageAttributes, CursorImageStatus},
+        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
         Seat,
     },
     reexports::wayland_server::protocol::wl_surface,
     render_elements,
-    utils::{IsAlive, Logical, Monotonic, Point, Scale, Time, Transform},
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Monotonic, Point, Scale, Size, Time, Transform,
+    },
     wayland::compositor::{get_role, with_states},
 };
-use std::{
-    any::{Any, TypeId},
-    cell::RefCell,
-    collections::HashMap,
-    io::Read,
-    sync::Mutex,
-    time::Duration,
-};
+use std::{collections::HashMap, io::Read, sync::Mutex};
 use tracing::warn;
 use xcursor::{
     parser::{parse_xcursor, Image},
@@ -38,26 +33,6 @@ use xcursor::{
 
 static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../../resources/cursor.rgba");
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CursorShape {
-    Default,
-    ColResize,
-    RowResize,
-    Grab,
-}
-
-impl ToString for CursorShape {
-    fn to_string(&self) -> String {
-        match self {
-            CursorShape::Default => "default",
-            CursorShape::ColResize => "col-resize",
-            CursorShape::RowResize => "row-resize",
-            CursorShape::Grab => "grabbing",
-        }
-        .to_string()
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Cursor {
     icons: Vec<Image>,
@@ -65,9 +40,10 @@ pub struct Cursor {
 }
 
 impl Cursor {
-    pub fn load(theme: &CursorTheme, shape: CursorShape, size: u32) -> Cursor {
-        let icons = load_icon(&theme, shape)
+    pub fn load(theme: &CursorTheme, shape: CursorIcon, size: u32) -> Cursor {
+        let icons = load_icon(theme, shape)
             .map_err(|err| warn!(?err, "Unable to load xcursor, using fallback cursor"))
+            .or_else(|_| load_icon(theme, CursorIcon::Default))
             .unwrap_or_else(|_| {
                 vec![Image {
                     size: 32,
@@ -94,7 +70,7 @@ fn nearest_images(size: u32, images: &[Image]) -> impl Iterator<Item = &Image> {
     // Follow the nominal size of the cursor to choose the nearest
     let nearest_image = images
         .iter()
-        .min_by_key(|image| (size as i32 - image.size as i32).abs())
+        .min_by_key(|image| u32::abs_diff(size, image.size))
         .unwrap();
 
     images.iter().filter(move |image| {
@@ -104,10 +80,15 @@ fn nearest_images(size: u32, images: &[Image]) -> impl Iterator<Item = &Image> {
 
 fn frame(mut millis: u32, size: u32, images: &[Image]) -> Image {
     let total = nearest_images(size, images).fold(0, |acc, image| acc + image.delay);
-    millis %= total;
+
+    if total == 0 {
+        millis = 0;
+    } else {
+        millis %= total;
+    }
 
     for img in nearest_images(size, images) {
-        if millis < img.delay {
+        if millis <= img.delay {
             return img.clone();
         }
         millis -= img.delay;
@@ -126,7 +107,7 @@ enum Error {
     Parse,
 }
 
-fn load_icon(theme: &CursorTheme, shape: CursorShape) -> Result<Vec<Image>, Error> {
+fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error> {
     let icon_path = theme
         .load_icon(&shape.to_string())
         .ok_or(Error::NoDefaultCursor)?;
@@ -137,8 +118,8 @@ fn load_icon(theme: &CursorTheme, shape: CursorShape) -> Result<Vec<Image>, Erro
 }
 
 render_elements! {
-    pub CursorRenderElement<R> where R: ImportAll;
-    Static=TextureRenderElement<<R as Renderer>::TextureId>,
+    pub CursorRenderElement<R> where R: ImportAll + ImportMem;
+    Static=MemoryRenderBufferRenderElement<R>,
     Surface=WaylandSurfaceRenderElement<R>,
 }
 
@@ -147,12 +128,12 @@ pub fn draw_surface_cursor<R>(
     surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<CursorRenderElement<R>>
+) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: Clone + 'static,
 {
-    let mut position = location.into();
+    let position = location.into();
     let scale = scale.into();
     let h = with_states(&surface, |states| {
         states
@@ -162,8 +143,12 @@ where
             .lock()
             .unwrap()
             .hotspot
+            .to_buffer(
+                1,
+                Transform::Normal,
+                &Size::from((1, 1)), /* Size doesn't matter for Transform::Normal */
+            )
     });
-    position -= h;
 
     render_elements_from_surface_tree(
         renderer,
@@ -173,21 +158,22 @@ where
         1.0,
         Kind::Cursor,
     )
+    .into_iter()
+    .map(|elem| (elem, h))
+    .collect()
 }
 
+#[profiling::function]
 pub fn draw_dnd_icon<R>(
     renderer: &mut R,
     surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Logical>>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<CursorRenderElement<R>>
+) -> Vec<WaylandSurfaceRenderElement<R>>
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: Clone + 'static,
 {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
-
     if get_role(&surface) != Some("dnd_icon") {
         warn!(
             ?surface,
@@ -205,16 +191,35 @@ where
     )
 }
 
-pub struct CursorState {
-    current_cursor: RefCell<CursorShape>,
-    pub cursors: HashMap<CursorShape, Cursor>,
-    current_image: RefCell<Option<Image>>,
-    image_cache: RefCell<HashMap<(TypeId, usize), Vec<(Image, Box<dyn Any + 'static>)>>>,
+pub type CursorState = Mutex<CursorStateInner>;
+pub struct CursorStateInner {
+    current_cursor: Option<CursorIcon>,
+
+    cursor_theme: CursorTheme,
+    cursor_size: u32,
+
+    cursors: HashMap<CursorIcon, Cursor>,
+    current_image: Option<Image>,
+    image_cache: Vec<(Image, MemoryRenderBuffer)>,
 }
 
-impl CursorState {
-    pub fn set_shape(&self, shape: CursorShape) {
-        *self.current_cursor.borrow_mut() = shape;
+impl CursorStateInner {
+    pub fn set_shape(&mut self, shape: CursorIcon) {
+        self.current_cursor = Some(shape);
+    }
+
+    pub fn unset_shape(&mut self) {
+        self.current_cursor = None;
+    }
+
+    pub fn get_named_cursor(&mut self, shape: CursorIcon) -> &Cursor {
+        self.cursors
+            .entry(shape)
+            .or_insert_with(|| Cursor::load(&self.cursor_theme, shape, self.cursor_size))
+    }
+
+    pub fn size(&self) -> u32 {
+        self.cursor_size
     }
 }
 
@@ -229,58 +234,43 @@ pub fn load_cursor_theme() -> (CursorTheme, u32) {
     (CursorTheme::load(&name), size)
 }
 
-impl Default for CursorState {
-    fn default() -> CursorState {
+impl Default for CursorStateInner {
+    fn default() -> CursorStateInner {
         let (theme, size) = load_cursor_theme();
-        CursorState {
-            current_cursor: RefCell::new(CursorShape::Default),
-            cursors: {
-                let mut map = HashMap::new();
-                map.insert(
-                    CursorShape::Default,
-                    Cursor::load(&theme, CursorShape::Default, size),
-                );
-                map.insert(
-                    CursorShape::ColResize,
-                    Cursor::load(&theme, CursorShape::ColResize, size),
-                );
-                map.insert(
-                    CursorShape::RowResize,
-                    Cursor::load(&theme, CursorShape::RowResize, size),
-                );
-                map.insert(
-                    CursorShape::Grab,
-                    Cursor::load(&theme, CursorShape::Grab, size),
-                );
-                map
-            },
-            current_image: RefCell::new(None),
-            image_cache: RefCell::new(HashMap::new()),
+        CursorStateInner {
+            current_cursor: None,
+
+            cursor_size: size,
+            cursor_theme: theme,
+
+            cursors: HashMap::new(),
+            current_image: None,
+            image_cache: Vec::new(),
         }
     }
 }
 
+#[profiling::function]
 pub fn draw_cursor<R>(
     renderer: &mut R,
     seat: &Seat<State>,
     location: Point<f64, Logical>,
     scale: Scale<f64>,
+    buffer_scale: f64,
     time: Time<Monotonic>,
     draw_default: bool,
-) -> Vec<CursorRenderElement<R>>
+) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
 where
     R: Renderer + ImportMem + ImportAll,
-    <R as Renderer>::TextureId: Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
 {
-    #[cfg(feature = "debug")]
-    puffin::profile_function!();
     // draw the cursor as relevant
     // reset the cursor if the surface is no longer alive
     let cursor_status = seat
         .user_data()
-        .get::<RefCell<CursorImageStatus>>()
-        .map(|cell| {
-            let mut cursor_status = cell.borrow_mut();
+        .get::<Mutex<CursorImageStatus>>()
+        .map(|lock| {
+            let mut cursor_status = lock.lock().unwrap();
             if let CursorImageStatus::Surface(ref surface) = *cursor_status {
                 if !surface.alive() {
                     *cursor_status = CursorImageStatus::default_named();
@@ -290,67 +280,66 @@ where
         })
         .unwrap_or(CursorImageStatus::default_named());
 
-    if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
-    // TODO: Handle other named cursors
-    } else if draw_default && CursorImageStatus::default_named() == cursor_status {
-        let integer_scale = scale.x.max(scale.y).ceil() as u32;
+    let seat_userdata = seat.user_data();
+    let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
+    let state = &mut *state_ref;
 
-        let seat_userdata = seat.user_data();
-        let state = seat_userdata.get::<CursorState>().unwrap();
+    let named_cursor = state.current_cursor.or(match cursor_status {
+        CursorImageStatus::Named(named_cursor) => Some(named_cursor),
+        _ => None,
+    });
+    if let Some(current_cursor) = named_cursor {
+        if !draw_default && current_cursor == CursorIcon::Default {
+            return Vec::new();
+        }
+
+        let integer_scale = (scale.x.max(scale.y) * buffer_scale).ceil() as u32;
         let frame = state
-            .cursors
-            .get(&*state.current_cursor.borrow())
-            .unwrap()
-            .get_image(
-                integer_scale,
-                Into::<Duration>::into(time).as_millis() as u32,
-            );
+            .get_named_cursor(current_cursor)
+            .get_image(integer_scale, time.as_millis());
+        let actual_scale = (frame.size / state.size()).max(1);
 
-        let mut cache = state.image_cache.borrow_mut();
-        let pointer_images = cache
-            .entry((TypeId::of::<TextureBuffer<R::TextureId>>(), renderer.id()))
-            .or_default();
-
-        let maybe_image = pointer_images
-            .iter()
-            .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None })
-            .and_then(|texture| texture.downcast_ref::<TextureBuffer<R::TextureId>>());
+        let pointer_images = &mut state.image_cache;
+        let maybe_image =
+            pointer_images
+                .iter()
+                .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None });
         let pointer_image = match maybe_image {
             Some(image) => image,
             None => {
-                let texture = TextureBuffer::from_memory(
-                    renderer,
+                let buffer = MemoryRenderBuffer::from_slice(
                     &frame.pixels_rgba,
-                    Fourcc::Abgr8888,
+                    Fourcc::Argb8888,
                     (frame.width as i32, frame.height as i32),
-                    false,
-                    integer_scale as i32,
+                    actual_scale as i32,
                     Transform::Normal,
                     None,
-                )
-                .expect("Failed to import cursor bitmap");
-                pointer_images.push((frame.clone(), Box::new(texture.clone())));
-                pointer_images
-                    .last()
-                    .and_then(|(_, i)| i.downcast_ref::<TextureBuffer<R::TextureId>>())
-                    .unwrap()
+                );
+                pointer_images.push((frame.clone(), buffer));
+                pointer_images.last().map(|(_, i)| i).unwrap()
             }
         };
 
-        let hotspot = Point::<i32, Logical>::from((frame.xhot as i32, frame.yhot as i32)).to_f64();
-        *state.current_image.borrow_mut() = Some(frame);
+        let hotspot = Point::<i32, BufferCoords>::from((frame.xhot as i32, frame.yhot as i32));
+        state.current_image = Some(frame);
 
-        return vec![CursorRenderElement::Static(
-            TextureRenderElement::from_texture_buffer(
-                (location - hotspot).to_physical(scale),
-                pointer_image,
-                None,
-                None,
-                None,
-                Kind::Cursor,
+        return vec![(
+            CursorRenderElement::Static(
+                MemoryRenderBufferRenderElement::from_buffer(
+                    renderer,
+                    location.to_physical(scale),
+                    &pointer_image,
+                    None,
+                    None,
+                    None,
+                    Kind::Cursor,
+                )
+                .expect("Failed to import cursor bitmap"),
             ),
+            hotspot,
         )];
+    } else if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
+        return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
     } else {
         Vec::new()
     }

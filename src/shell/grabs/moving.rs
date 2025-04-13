@@ -2,9 +2,7 @@
 
 use crate::{
     backend::render::{
-        cursor::{CursorShape, CursorState},
-        element::AsGlowRenderer,
-        IndicatorShader, Key, Usage,
+        cursor::CursorState, element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage,
     },
     shell::{
         element::{
@@ -12,40 +10,47 @@ use crate::{
             CosmicMappedRenderElement,
         },
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
-        CosmicMapped, CosmicSurface,
+        layout::floating::TiledCorners,
+        CosmicMapped, CosmicSurface, Direction, ManagedLayer,
     },
     utils::prelude::*,
+    wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
 };
 
+use calloop::LoopHandle;
 use cosmic::theme::CosmicTheme;
 use smithay::{
-    backend::renderer::{
-        element::{utils::RescaleRenderElement, AsRenderElements, RenderElement},
-        ImportAll, ImportMem, Renderer,
+    backend::{
+        input::ButtonState,
+        renderer::{
+            element::{utils::RescaleRenderElement, AsRenderElements, RenderElement},
+            ImportAll, ImportMem, Renderer,
+        },
     },
-    desktop::space::SpaceElement,
+    desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
     input::{
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
+            AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
             GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
             RelativeMotionEvent,
         },
+        touch::{self, GrabStartData as TouchGrabStartData, TouchGrab, TouchInnerHandle},
         Seat,
     },
     output::Output,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial},
-    wayland::compositor::SurfaceData,
+    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial, SERIAL_COUNTER},
 };
 use std::{
-    cell::RefCell,
     collections::HashSet,
-    time::{Duration, Instant},
+    sync::{atomic::Ordering, Mutex},
+    time::Instant,
 };
 
-pub type SeatMoveGrabState = RefCell<Option<MoveGrabState>>;
+use super::{GrabStartData, ReleaseMode};
+
+pub type SeatMoveGrabState = Mutex<Option<MoveGrabState>>;
 
 const RESCALE_ANIMATION_DURATION: f64 = 150.0;
 
@@ -54,28 +59,23 @@ pub struct MoveGrabState {
     window_offset: Point<i32, Logical>,
     indicator_thickness: u8,
     start: Instant,
-    tiling: bool,
+    previous: ManagedLayer,
+    snapping_zone: Option<SnappingZone>,
     stacking_indicator: Option<(StackHover, Point<i32, Logical>)>,
+    location: Point<f64, Logical>,
+    cursor_output: Output,
 }
 
 impl MoveGrabState {
-    pub fn render<I, R>(
-        &self,
-        renderer: &mut R,
-        seat: &Seat<State>,
-        output: &Output,
-        theme: &CosmicTheme,
-    ) -> Vec<I>
+    #[profiling::function]
+    pub fn render<I, R>(&self, renderer: &mut R, output: &Output, theme: &CosmicTheme) -> Vec<I>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {
-        #[cfg(feature = "debug")]
-        puffin::profile_function!();
-
-        let scale = if self.tiling {
+        let scale = if self.previous == ManagedLayer::Tiling {
             0.6 + ((1.0
                 - (Instant::now().duration_since(self.start).as_millis() as f64
                     / RESCALE_ANIMATION_DURATION)
@@ -84,16 +84,14 @@ impl MoveGrabState {
         } else {
             1.0
         };
-        let alpha = if &seat.active_output() == output {
+        let alpha = if &self.cursor_output == output {
             1.0
         } else {
             0.4
         };
 
-        let cursor_at = seat.get_pointer().unwrap().current_location();
-
         let mut window_geo = self.window.geometry();
-        window_geo.loc += cursor_at.to_i32_round() + self.window_offset;
+        window_geo.loc += self.location.to_i32_round() + self.window_offset;
         if !output
             .geometry()
             .as_logical()
@@ -106,7 +104,7 @@ impl MoveGrabState {
         let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
         let scaling_offset =
             self.window_offset - self.window_offset.to_f64().upscale(scale).to_i32_round();
-        let render_location = cursor_at.to_i32_round() - output.geometry().loc.as_logical()
+        let render_location = self.location.to_i32_round() - output.geometry().loc.as_logical()
             + self.window_offset
             - scaling_offset;
 
@@ -115,8 +113,8 @@ impl MoveGrabState {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
                     renderer,
-                    Key::Window(Usage::MoveGrabIndicator, self.window.clone()),
-                    Rectangle::from_loc_and_size(
+                    Key::Window(Usage::MoveGrabIndicator, self.window.key()),
+                    Rectangle::new(
                         render_location,
                         self.window
                             .geometry()
@@ -127,7 +125,6 @@ impl MoveGrabState {
                     )
                     .as_local(),
                     self.indicator_thickness,
-                    output_scale.x,
                     alpha,
                     [
                         active_window_hint.red,
@@ -141,9 +138,59 @@ impl MoveGrabState {
             None
         };
 
-        let (window_elements, popup_elements) = self
+        let non_exclusive_geometry = {
+            let layers = layer_map_for_output(&output);
+            layers.non_exclusive_zone()
+        };
+
+        let gaps = (theme.gaps.0 as i32, theme.gaps.1 as i32);
+        let thickness = self.indicator_thickness.max(1);
+
+        let snapping_indicator = match &self.snapping_zone {
+            Some(t) if &self.cursor_output == output => {
+                let base_color = theme.palette.neutral_9;
+                let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
+                vec![
+                    CosmicMappedRenderElement::from(IndicatorShader::element(
+                        renderer,
+                        Key::Window(Usage::SnappingIndicator, self.window.key()),
+                        overlay_geometry,
+                        thickness,
+                        theme.radius_s()[0] as u8, // TODO: Fix once shaders support 4 corner radii customization
+                        1.0,
+                        [
+                            active_window_hint.red,
+                            active_window_hint.green,
+                            active_window_hint.blue,
+                        ],
+                    ))
+                    .into(),
+                    CosmicMappedRenderElement::from(BackdropShader::element(
+                        renderer,
+                        Key::Window(Usage::SnappingIndicator, self.window.key()),
+                        t.overlay_geometry(non_exclusive_geometry, gaps),
+                        theme.radius_s()[0], // TODO: Fix once shaders support 4 corner radii customization
+                        0.4,
+                        [base_color.red, base_color.green, base_color.blue],
+                    ))
+                    .into(),
+                ]
+            }
+            _ => vec![],
+        };
+
+        let w_elements = self
             .window
-            .split_render_elements::<R, CosmicMappedRenderElement<R>>(
+            .render_elements::<R, CosmicMappedRenderElement<R>>(
+                renderer,
+                (render_location - self.window.geometry().loc)
+                    .to_physical_precise_round(output_scale),
+                output_scale,
+                alpha,
+            );
+        let p_elements = self
+            .window
+            .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
                 renderer,
                 (render_location - self.window.geometry().loc)
                     .to_physical_precise_round(output_scale),
@@ -161,9 +208,9 @@ impl MoveGrabState {
                     1.0,
                 )
             })
-            .chain(popup_elements)
+            .chain(p_elements)
             .chain(focus_element)
-            .chain(window_elements.into_iter().map(|elem| match elem {
+            .chain(w_elements.into_iter().map(|elem| match elem {
                 CosmicMappedRenderElement::Stack(stack) => {
                     CosmicMappedRenderElement::GrabbedStack(
                         RescaleRenderElement::from_element(
@@ -188,20 +235,13 @@ impl MoveGrabState {
                 }
                 x => x,
             }))
+            .chain(snapping_indicator)
             .map(I::from)
             .collect()
     }
 
-    pub fn send_frames(
-        &self,
-        output: &Output,
-        time: impl Into<Duration>,
-        throttle: Option<Duration>,
-        primary_scan_out_output: impl FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
-    ) {
-        self.window
-            .active_window()
-            .send_frame(output, time, throttle, primary_scan_out_output)
+    pub fn element(&self) -> CosmicMapped {
+        self.window.clone()
     }
 
     pub fn window(&self) -> CosmicSurface {
@@ -209,43 +249,123 @@ impl MoveGrabState {
     }
 }
 
+struct NotSend<T>(pub T);
+unsafe impl<T> Send for NotSend<T> {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnappingZone {
+    Maximize,
+    Top,
+    TopLeft,
+    Left,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+    Right,
+    TopRight,
+}
+
+const SNAP_RANGE: i32 = 32;
+const SNAP_RANGE_MAXIMIZE: i32 = 22;
+const SNAP_RANGE_TOP: i32 = 16;
+
+impl SnappingZone {
+    pub fn contains(
+        &self,
+        point: Point<i32, Local>,
+        output_geometry: Rectangle<i32, Local>,
+    ) -> bool {
+        if !output_geometry.contains(point) {
+            return false;
+        }
+        let top_zone_32 = point.y < output_geometry.loc.y + SNAP_RANGE_MAXIMIZE;
+        let top_zone_56 = point.y < output_geometry.loc.y + SNAP_RANGE_MAXIMIZE + SNAP_RANGE_TOP;
+        let left_zone = point.x < output_geometry.loc.x + SNAP_RANGE;
+        let right_zone = point.x > output_geometry.loc.x + output_geometry.size.w - SNAP_RANGE;
+        let bottom_zone = point.y > output_geometry.loc.y + output_geometry.size.h - SNAP_RANGE;
+        let left_6th = point.x < output_geometry.loc.x + (output_geometry.size.w / 6);
+        let right_6th = point.x > output_geometry.loc.x + (output_geometry.size.w * 5 / 6);
+        let top_4th = point.y < output_geometry.loc.y + (output_geometry.size.h / 4);
+        let bottom_4th = point.y > output_geometry.loc.y + (output_geometry.size.h * 3 / 4);
+        match self {
+            SnappingZone::Maximize => top_zone_32 && !left_6th && !right_6th,
+            SnappingZone::Top => top_zone_56 && !top_zone_32 && !left_6th && !right_6th,
+            SnappingZone::TopLeft => (top_zone_56 && left_6th) || (left_zone && top_4th),
+            SnappingZone::Left => left_zone && !top_4th && !bottom_4th,
+            SnappingZone::BottomLeft => (bottom_zone && left_6th) || (left_zone && bottom_4th),
+            SnappingZone::Bottom => bottom_zone && !left_6th && !right_6th,
+            SnappingZone::BottomRight => (bottom_zone && right_6th) || (right_zone && bottom_4th),
+            SnappingZone::Right => right_zone && !top_4th && !bottom_4th,
+            SnappingZone::TopRight => (top_zone_56 && right_6th) || (right_zone && top_4th),
+        }
+    }
+    pub fn overlay_geometry(
+        &self,
+        non_exclusive_geometry: Rectangle<i32, Logical>,
+        gaps: (i32, i32),
+    ) -> Rectangle<i32, Local> {
+        match self {
+            SnappingZone::Maximize => non_exclusive_geometry.as_local(),
+            SnappingZone::Top => TiledCorners::Top.relative_geometry(non_exclusive_geometry, gaps),
+            SnappingZone::TopLeft => {
+                TiledCorners::TopLeft.relative_geometry(non_exclusive_geometry, gaps)
+            }
+            SnappingZone::Left => {
+                TiledCorners::Left.relative_geometry(non_exclusive_geometry, gaps)
+            }
+            SnappingZone::BottomLeft => {
+                TiledCorners::BottomLeft.relative_geometry(non_exclusive_geometry, gaps)
+            }
+            SnappingZone::Bottom => {
+                TiledCorners::Bottom.relative_geometry(non_exclusive_geometry, gaps)
+            }
+            SnappingZone::BottomRight => {
+                TiledCorners::BottomRight.relative_geometry(non_exclusive_geometry, gaps)
+            }
+            SnappingZone::Right => {
+                TiledCorners::Right.relative_geometry(non_exclusive_geometry, gaps)
+            }
+            SnappingZone::TopRight => {
+                TiledCorners::TopRight.relative_geometry(non_exclusive_geometry, gaps)
+            }
+        }
+    }
+}
+
 pub struct MoveGrab {
     window: CosmicMapped,
-    start_data: PointerGrabStartData<State>,
+    start_data: GrabStartData,
     seat: Seat<State>,
     cursor_output: Output,
     window_outputs: HashSet<Output>,
-    tiling: bool,
+    previous: ManagedLayer,
+    release: ReleaseMode,
+    edge_snap_threshold: f64,
+    // SAFETY: This is only used on drop which will always be on the main thread
+    evlh: NotSend<LoopHandle<'static, State>>,
 }
 
-impl PointerGrab<State> for MoveGrab {
-    fn motion(
-        &mut self,
-        state: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
-        event: &MotionEvent,
-    ) {
-        let Some(current_output) = state
-            .common
-            .shell
+impl MoveGrab {
+    fn update_location(&mut self, state: &mut State, location: Point<f64, Logical>) {
+        let mut shell = state.common.shell.write().unwrap();
+
+        let Some(current_output) = shell
             .outputs()
             .find(|output| {
                 output
                     .geometry()
                     .as_logical()
-                    .contains(handle.current_location().to_i32_round())
+                    .overlaps_or_touches(Rectangle::new(location.to_i32_floor(), (0, 0).into()))
             })
             .cloned()
         else {
             return;
         };
         if self.cursor_output != current_output {
-            state
-                .common
-                .shell
+            shell
                 .workspaces
                 .active_mut(&self.cursor_output)
+                .unwrap()
                 .tiling_layer
                 .cleanup_drag();
             self.cursor_output = current_output.clone();
@@ -255,11 +375,46 @@ impl PointerGrab<State> for MoveGrab {
             .seat
             .user_data()
             .get::<SeatMoveGrabState>()
-            .map(|s| s.borrow_mut());
+            .map(|s| s.lock().unwrap());
         if let Some(grab_state) = borrow.as_mut().and_then(|s| s.as_mut()) {
+            grab_state.location = location;
+            grab_state.cursor_output = self.cursor_output.clone();
+
             let mut window_geo = self.window.geometry();
-            window_geo.loc += event.location.to_i32_round() + grab_state.window_offset;
-            for output in state.common.shell.outputs() {
+            window_geo.loc += location.to_i32_round() + grab_state.window_offset;
+
+            if matches!(self.previous, ManagedLayer::Floating | ManagedLayer::Sticky) {
+                let loc = (grab_state.window_offset.to_f64() + grab_state.location).as_local();
+                let size = window_geo.size.to_f64().as_local();
+                let output_geom = self
+                    .cursor_output
+                    .geometry()
+                    .to_f64()
+                    .to_local(&self.cursor_output);
+                let output_loc = output_geom.loc;
+                let output_size = output_geom.size;
+
+                grab_state.location.x = if (loc.x - output_loc.x).abs() < self.edge_snap_threshold {
+                    output_loc.x - grab_state.window_offset.x as f64
+                } else if ((loc.x + size.w) - (output_loc.x + output_size.w)).abs()
+                    < self.edge_snap_threshold
+                {
+                    output_loc.x + output_size.w - grab_state.window_offset.x as f64 - size.w
+                } else {
+                    grab_state.location.x
+                };
+                grab_state.location.y = if (loc.y - output_loc.y).abs() < self.edge_snap_threshold {
+                    output_loc.y - grab_state.window_offset.y as f64
+                } else if ((loc.y + size.h) - (output_loc.y + output_size.h)).abs()
+                    < self.edge_snap_threshold
+                {
+                    output_loc.y + output_size.h - grab_state.window_offset.y as f64 - size.h
+                } else {
+                    grab_state.location.y
+                };
+            }
+
+            for output in shell.outputs() {
                 if let Some(overlap) = output.geometry().as_logical().intersection(window_geo) {
                     if self.window_outputs.insert(output.clone()) {
                         self.window.output_enter(output, overlap);
@@ -277,41 +432,69 @@ impl PointerGrab<State> for MoveGrab {
                 }
             }
 
-            if self.tiling {
-                let indicator_location = state
-                    .common
-                    .shell
-                    .active_space(&current_output)
-                    .tiling_layer
-                    .stacking_indicator();
-
-                if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
-                    grab_state.stacking_indicator = indicator_location.map(|geo| {
-                        let element = stack_hover(
-                            state.common.event_loop_handle.clone(),
-                            geo.size.as_logical(),
-                            state.common.theme.clone(),
+            let indicator_location = shell.stacking_indicator(&current_output, self.previous);
+            if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
+                grab_state.stacking_indicator = indicator_location.map(|geo| {
+                    let element = stack_hover(
+                        state.common.event_loop_handle.clone(),
+                        geo.size.as_logical(),
+                        state.common.theme.clone(),
+                    );
+                    for output in &self.window_outputs {
+                        element.output_enter(
+                            output,
+                            Rectangle::from_size(output.geometry().size.as_logical()),
                         );
-                        for output in &self.window_outputs {
-                            element.output_enter(
-                                output,
-                                Rectangle::from_loc_and_size(
-                                    (0, 0),
-                                    output.geometry().size.as_logical(),
-                                ),
-                            );
-                        }
-                        (element, geo.loc.as_logical())
-                    });
-                }
+                    }
+                    (element, geo.loc.as_logical())
+                });
+            }
+
+            // Check for overlapping with zones
+            if grab_state.previous == ManagedLayer::Floating {
+                let output_geometry = current_output.geometry().to_local(&current_output);
+                grab_state.snapping_zone = [
+                    SnappingZone::Maximize,
+                    SnappingZone::Top,
+                    SnappingZone::TopLeft,
+                    SnappingZone::Left,
+                    SnappingZone::BottomLeft,
+                    SnappingZone::Bottom,
+                    SnappingZone::BottomRight,
+                    SnappingZone::Right,
+                    SnappingZone::TopRight,
+                ]
+                .iter()
+                .find(|&x| {
+                    x.contains(
+                        location
+                            .as_global()
+                            .to_local(&current_output)
+                            .to_i32_floor(),
+                        output_geometry,
+                    )
+                })
+                .cloned();
             }
         }
         drop(borrow);
+    }
+}
+
+impl PointerGrab<State> for MoveGrab {
+    fn motion(
+        &mut self,
+        state: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        self.update_location(state, event.location);
 
         // While the grab is active, no client has pointer focus
         handle.motion(state, None, event);
         if !self.window.alive() {
-            self.ungrab(state, handle, event.serial, event.time);
+            handle.unset_grab(self, state, event.serial, event.time, true);
         }
     }
 
@@ -319,7 +502,7 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(PointerFocusTarget, Point<i32, Logical>)>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &RelativeMotionEvent,
     ) {
         // While the grab is active, no client has pointer focus
@@ -333,8 +516,17 @@ impl PointerGrab<State> for MoveGrab {
         event: &ButtonEvent,
     ) {
         handle.button(state, event);
-        if handle.current_pressed().is_empty() {
-            self.ungrab(state, handle, event.serial, event.time);
+        match self.release {
+            ReleaseMode::NoMouseButtons => {
+                if handle.current_pressed().is_empty() {
+                    handle.unset_grab(self, state, event.serial, event.time, true);
+                }
+            }
+            ReleaseMode::Click => {
+                if event.state == ButtonState::Pressed {
+                    handle.unset_grab(self, state, event.serial, event.time, true);
+                }
+            }
         }
     }
 
@@ -424,153 +616,315 @@ impl PointerGrab<State> for MoveGrab {
     }
 
     fn start_data(&self) -> &PointerGrabStartData<State> {
-        &self.start_data
+        match &self.start_data {
+            GrabStartData::Pointer(start_data) => start_data,
+            _ => unreachable!(),
+        }
     }
+
+    fn unset(&mut self, _data: &mut State) {}
+}
+
+impl TouchGrab<State> for MoveGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &touch::DownEvent,
+        seq: Serial,
+    ) {
+        handle.down(data, None, event, seq)
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &touch::UpEvent,
+        seq: Serial,
+    ) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            handle.unset_grab(self, data);
+        }
+
+        handle.up(data, event, seq);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &touch::MotionEvent,
+        seq: Serial,
+    ) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
+            self.update_location(data, event.location);
+        }
+
+        handle.motion(data, None, event, seq);
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        handle.frame(data, seq)
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+        handle.unset_grab(self, data);
+    }
+
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &touch::ShapeEvent,
+        seq: Serial,
+    ) {
+        handle.shape(data, event, seq)
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &touch::OrientationEvent,
+        seq: Serial,
+    ) {
+        handle.orientation(data, event, seq)
+    }
+
+    fn start_data(&self) -> &TouchGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::Touch(start_data) => start_data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn unset(&mut self, _data: &mut State) {}
 }
 
 impl MoveGrab {
     pub fn new(
-        start_data: PointerGrabStartData<State>,
+        start_data: GrabStartData,
         window: CosmicMapped,
         seat: &Seat<State>,
-        initial_cursor_location: Point<f64, Global>,
         initial_window_location: Point<i32, Global>,
+        cursor_output: Output,
         indicator_thickness: u8,
-        was_tiled: bool,
+        edge_snap_threshold: f64,
+        previous_layer: ManagedLayer,
+        release: ReleaseMode,
+        evlh: LoopHandle<'static, State>,
     ) -> MoveGrab {
-        let output = seat.active_output();
         let mut outputs = HashSet::new();
-        outputs.insert(output.clone());
-        window.output_enter(&output, window.geometry()); // not accurate but...
+        outputs.insert(cursor_output.clone());
+        window.output_enter(&cursor_output, window.geometry()); // not accurate but...
+        window.moved_since_mapped.store(true, Ordering::SeqCst);
 
         let grab_state = MoveGrabState {
             window: window.clone(),
-            window_offset: (initial_window_location - initial_cursor_location.to_i32_round())
-                .as_logical(),
+            window_offset: (initial_window_location
+                - start_data.location().as_global().to_i32_round())
+            .as_logical(),
             indicator_thickness,
             start: Instant::now(),
             stacking_indicator: None,
-            tiling: was_tiled,
+            snapping_zone: None,
+            previous: previous_layer,
+            location: start_data.location(),
+            cursor_output: cursor_output.clone(),
         };
 
         *seat
             .user_data()
             .get::<SeatMoveGrabState>()
             .unwrap()
-            .borrow_mut() = Some(grab_state);
+            .lock()
+            .unwrap() = Some(grab_state);
 
         {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.set_shape(CursorShape::Grab);
+            cursor_state.lock().unwrap().set_shape(CursorIcon::Grabbing);
         }
 
         MoveGrab {
             window,
             start_data,
             seat: seat.clone(),
+            cursor_output,
             window_outputs: outputs,
-            cursor_output: output,
-            tiling: was_tiled,
+            previous: previous_layer,
+            release,
+            edge_snap_threshold,
+            evlh: NotSend(evlh),
         }
     }
 
     pub fn is_tiling_grab(&self) -> bool {
-        self.tiling
+        self.previous == ManagedLayer::Tiling
     }
 
-    fn ungrab(
-        &mut self,
-        state: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        serial: Serial,
-        time: u32,
-    ) {
+    pub fn is_touch_grab(&self) -> bool {
+        match self.start_data {
+            GrabStartData::Touch(_) => true,
+            GrabStartData::Pointer(_) => false,
+        }
+    }
+}
+
+impl Drop for MoveGrab {
+    fn drop(&mut self) {
         // No more buttons are pressed, release the grab.
-        let output = self.seat.active_output();
+        let output = self.cursor_output.clone();
+        let seat = self.seat.clone();
+        let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
+        let previous = self.previous;
+        let window = self.window.clone();
+        let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
 
-        let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) = self
-            .seat
-            .user_data()
-            .get::<SeatMoveGrabState>()
-            .and_then(|s| s.borrow_mut().take())
-        {
-            if grab_state.window.alive() {
-                let window_location = (handle.current_location().to_i32_round()
-                    + grab_state.window_offset)
-                    .as_global();
+        let _ = self.evlh.0.insert_idle(move |state| {
+            let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) =
+                seat.user_data()
+                    .get::<SeatMoveGrabState>()
+                    .and_then(|s| s.lock().unwrap().take())
+            {
+                if grab_state.window.alive() {
+                    let window_location =
+                        (grab_state.location.to_i32_round() + grab_state.window_offset).as_global();
+                    let mut shell = state.common.shell.write().unwrap();
 
-                let workspace_handle = state.common.shell.active_space(&output).handle;
-                for old_output in self.window_outputs.iter().filter(|o| *o != &output) {
-                    grab_state.window.output_leave(old_output);
-                }
-                for (window, _) in grab_state.window.windows() {
-                    state
-                        .common
-                        .shell
-                        .toplevel_info_state
-                        .toplevel_enter_workspace(&window, &workspace_handle);
-                    state
-                        .common
-                        .shell
-                        .toplevel_info_state
-                        .toplevel_enter_output(&window, &output);
-                }
+                    let workspace_handle = shell.active_space(&output).unwrap().handle;
+                    for old_output in window_outputs.iter().filter(|o| *o != &output) {
+                        grab_state.window.output_leave(old_output);
+                    }
 
-                if self.tiling {
-                    let (window, location) = state
-                        .common
-                        .shell
-                        .active_space_mut(&output)
-                        .tiling_layer
-                        .drop_window(grab_state.window);
-                    Some((window, location.to_global(&output)))
+                    for (window, _) in grab_state.window.windows() {
+                        toplevel_enter_output(&window, &output);
+                        if previous != ManagedLayer::Sticky {
+                            toplevel_enter_workspace(&window, &workspace_handle);
+                        }
+                    }
+
+                    match previous {
+                        ManagedLayer::Sticky => {
+                            grab_state.window.set_geometry(Rectangle::new(
+                                window_location,
+                                grab_state.window.geometry().size.as_global(),
+                            ));
+                            let set = shell.workspaces.sets.get_mut(&output).unwrap();
+                            let (window, location) = set
+                                .sticky_layer
+                                .drop_window(grab_state.window, window_location.to_local(&output));
+
+                            Some((window, location.to_global(&output)))
+                        }
+                        ManagedLayer::Tiling
+                            if shell.active_space(&output).unwrap().tiling_enabled =>
+                        {
+                            let (window, location) = shell
+                                .active_space_mut(&output)
+                                .unwrap()
+                                .tiling_layer
+                                .drop_window(grab_state.window);
+                            Some((window, location.to_global(&output)))
+                        }
+                        _ => {
+                            grab_state.window.set_geometry(Rectangle::new(
+                                window_location,
+                                grab_state.window.geometry().size.as_global(),
+                            ));
+                            let theme = shell.theme.clone();
+                            let workspace = shell.active_space_mut(&output).unwrap();
+                            let (window, location) = workspace.floating_layer.drop_window(
+                                grab_state.window,
+                                window_location.to_local(&workspace.output),
+                            );
+
+                            if previous == ManagedLayer::Floating {
+                                if let Some(sz) = grab_state.snapping_zone {
+                                    if sz == SnappingZone::Maximize {
+                                        shell.maximize_toggle(&window, &seat);
+                                    } else {
+                                        let directions = match sz {
+                                            SnappingZone::Maximize => vec![],
+                                            SnappingZone::Top => vec![Direction::Up],
+                                            SnappingZone::TopLeft => {
+                                                vec![Direction::Up, Direction::Left]
+                                            }
+                                            SnappingZone::Left => vec![Direction::Left],
+                                            SnappingZone::BottomLeft => {
+                                                vec![Direction::Down, Direction::Left]
+                                            }
+                                            SnappingZone::Bottom => vec![Direction::Down],
+                                            SnappingZone::BottomRight => {
+                                                vec![Direction::Down, Direction::Right]
+                                            }
+                                            SnappingZone::Right => vec![Direction::Right],
+                                            SnappingZone::TopRight => {
+                                                vec![Direction::Up, Direction::Right]
+                                            }
+                                        };
+                                        for direction in directions {
+                                            workspace.floating_layer.move_element(
+                                                direction,
+                                                &seat,
+                                                ManagedLayer::Floating,
+                                                &theme,
+                                                &window,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Some((window, location.to_global(&output)))
+                        }
+                    }
                 } else {
-                    grab_state.window.set_geometry(Rectangle::from_loc_and_size(
-                        window_location,
-                        grab_state.window.geometry().size.as_global(),
-                    ));
-                    let workspace = state.common.shell.active_space_mut(&output);
-                    workspace.floating_layer.map_internal(
-                        grab_state.window,
-                        Some(window_location.to_local(&workspace.output)),
-                        None,
-                    );
-
-                    Some((self.window.clone(), window_location))
+                    None
                 }
             } else {
                 None
+            };
+
+            {
+                let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+                cursor_state.lock().unwrap().unset_shape();
             }
-        } else {
-            None
-        };
 
-        handle.unset_grab(state, serial, time, true);
+            if let Some((mapped, position)) = position {
+                let serial = SERIAL_COUNTER.next_serial();
+                if !is_touch_grab {
+                    let pointer = seat.get_pointer().unwrap();
+                    let current_location = pointer.current_location();
 
-        {
-            let cursor_state = self.seat.user_data().get::<CursorState>().unwrap();
-            cursor_state.set_shape(CursorShape::Default);
-        }
-
-        if let Some((mapped, position)) = position {
-            handle.motion(
-                state,
-                Some((
-                    PointerFocusTarget::from(mapped.clone()),
-                    position.as_logical() - self.window.geometry().loc,
-                )),
-                &MotionEvent {
-                    location: handle.current_location(),
-                    serial,
-                    time,
-                },
-            );
-            Common::set_focus(
-                state,
-                Some(&KeyboardFocusTarget::from(mapped)),
-                &self.seat,
-                Some(serial),
-            )
-        }
+                    if let Some((target, offset)) = mapped.focus_under(
+                        current_location - position.as_logical().to_f64(),
+                        WindowSurfaceType::ALL,
+                    ) {
+                        pointer.motion(
+                            state,
+                            Some((
+                                target,
+                                position.as_logical().to_f64() - window.geometry().loc.to_f64()
+                                    + offset,
+                            )),
+                            &MotionEvent {
+                                location: pointer.current_location(),
+                                serial,
+                                time: state.common.clock.now().as_millis(),
+                            },
+                        );
+                    }
+                }
+                Shell::set_focus(
+                    state,
+                    Some(&KeyboardFocusTarget::from(mapped)),
+                    &seat,
+                    Some(serial),
+                    false,
+                )
+            }
+        });
     }
 }

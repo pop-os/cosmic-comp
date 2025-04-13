@@ -5,7 +5,7 @@ libdir = $(prefix)/lib
 sharedir = $(prefix)/share
 
 BINARY = cosmic-comp
-ID = com.pop-os.Compositor
+CARGO_TARGET_DIR ?= target
 TARGET = debug
 DEBUG ?= 0
 
@@ -22,6 +22,9 @@ ifneq ($(VENDOR),0)
 endif
 
 TARGET_BIN="$(DESTDIR)$(bindir)/$(BINARY)"
+
+KEYBINDINGS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults"
+TILING_EXCEPTIONS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults"
 
 all: extract-vendor
 	cargo build $(ARGS)
@@ -45,7 +48,9 @@ ifeq ($(VENDOR),1)
 endif
 
 install:
-	install -Dm0755 "target/$(TARGET)/$(BINARY)" "$(TARGET_BIN)"
+	install -Dm0755 "$(CARGO_TARGET_DIR)/$(TARGET)/$(BINARY)" "$(TARGET_BIN)"
+	install -Dm0644 "data/keybindings.ron" "$(KEYBINDINGS_CONF)"
+	install -Dm0644 "data/tiling-exceptions.ron" "$(TILING_EXCEPTIONS_CONF)"
 
 install-bare-session: install
 	install -Dm0644 "data/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
@@ -55,7 +60,7 @@ install-bare-session: install
 	install -Dm0755 "data/cosmic-service" "$(DESTDIR)/$(bindir)/cosmic-service"
 
 uninstall:
-	rm "$(TARGET_BIN)"
+	rm "$(TARGET_BIN)" "$(KEYBINDINGS_CONF)"
 
 uninstall-bare-session:
 	rm "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"

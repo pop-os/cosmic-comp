@@ -41,13 +41,20 @@ impl FractionalScaleHandler for State {
                 .or_else(|| {
                     self.common
                         .shell
-                        .visible_outputs_for_surface(&surface)
-                        .next()
+                        .read()
+                        .unwrap()
+                        .visible_output_for_surface(&surface)
+                        .cloned()
                 })
         })
         .unwrap_or_else(|| {
-            let seat = self.common.last_active_seat();
-            seat.active_output()
+            self.common
+                .shell
+                .read()
+                .unwrap()
+                .seats
+                .last_active()
+                .active_output()
         });
 
         with_states(&surface, |states| {

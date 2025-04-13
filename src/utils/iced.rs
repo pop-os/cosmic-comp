@@ -3,32 +3,33 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     sync::{mpsc::Receiver, Arc, Mutex},
-    time::{Duration, Instant},
 };
 
 use cosmic::{
     iced::{
+        advanced::widget::Tree,
         event::Event,
+        futures::{FutureExt, StreamExt},
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
-        window::{Event as WindowEvent, Id},
-        Command, Point as IcedPoint, Rectangle as IcedRectangle, Size as IcedSize,
+        touch::{Event as TouchEvent, Finger},
+        window::Event as WindowEvent,
+        Limits, Point as IcedPoint, Size as IcedSize, Task,
     },
-    iced_core::{clipboard::Null as NullClipboard, renderer::Style, Color},
-    iced_renderer::{graphics::Renderer as IcedGraphicsRenderer, Renderer as IcedRenderer},
+    iced_core::{clipboard::Null as NullClipboard, id::Id, renderer::Style, Color, Length, Pixels},
     iced_runtime::{
-        command::Action,
         program::{Program as IcedProgram, State},
-        Debug,
+        task::into_stream,
+        Action, Debug,
     },
     Theme,
 };
 use iced_tiny_skia::{
     graphics::{damage, Viewport},
-    Backend, Primitive,
+    Layer,
 };
-pub type Element<'a, Message> = cosmic::iced::Element<'a, Message, IcedRenderer<Theme>>;
 
+use once_cell::sync::Lazy;
 use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
@@ -51,6 +52,10 @@ use smithay::{
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
             PointerTarget, RelativeMotionEvent,
         },
+        touch::{
+            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
+            UpEvent,
+        },
         Seat,
     },
     output::Output,
@@ -62,7 +67,9 @@ use smithay::{
     },
 };
 
-pub struct IcedElement<P: Program + Send + 'static>(Arc<Mutex<IcedElementInternal<P>>>);
+static ID: Lazy<Id> = Lazy::new(|| Id::new("Program"));
+
+pub struct IcedElement<P: Program + Send + 'static>(pub(crate) Arc<Mutex<IcedElementInternal<P>>>);
 
 impl<P: Program + Send + 'static> fmt::Debug for IcedElement<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -70,8 +77,8 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElement<P> {
     }
 }
 
-// SAFETY: We cannot really be sure about `iced_native::program::State` sadly,
-// but the rest should be fine.
+// SAFETY: It is not, we need to make sure we never move this into another thread and drop it there,
+//  as on drop it could trigger RefCells in calloop.
 unsafe impl<P: Program + Send + 'static> Send for IcedElementInternal<P> {}
 
 impl<P: Program + Send + 'static> Clone for IcedElement<P> {
@@ -99,13 +106,14 @@ pub trait Program {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
-    ) -> Command<Self::Message> {
-        let _ = (message, loop_handle);
-        Command::none()
+        last_seat: Option<&(Seat<crate::state::State>, Serial)>,
+    ) -> Task<Self::Message> {
+        let _ = (message, loop_handle, last_seat);
+        Task::none()
     }
-    fn view(&self) -> Element<'_, Self::Message>;
+    fn view(&self) -> cosmic::Element<'_, Self::Message>;
 
-    fn background_color(&self) -> Color {
+    fn background_color(&self, _theme: &cosmic::Theme) -> Color {
         Color::TRANSPARENT
     }
 
@@ -114,46 +122,57 @@ pub trait Program {
         pixels: &mut tiny_skia::PixmapMut<'_>,
         damage: &[Rectangle<i32, BufferCoords>],
         scale: f32,
+        theme: &cosmic::Theme,
     ) {
-        let _ = (pixels, damage, scale);
+        let _ = (pixels, damage, scale, theme);
     }
 }
 
-struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::State>);
+struct ProgramWrapper<P: Program> {
+    program: P,
+    evlh: LoopHandle<'static, crate::state::State>,
+    last_seat: Arc<Mutex<Option<(Seat<crate::state::State>, Serial)>>>,
+}
+
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
-    type Renderer = IcedRenderer<Theme>;
+    type Renderer = cosmic::Renderer;
+    type Theme = cosmic::Theme;
 
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        self.0.update(message, &self.1)
+    fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+        let last_seat = self.last_seat.lock().unwrap();
+        self.program.update(message, &self.evlh, last_seat.as_ref())
     }
 
-    fn view(&self, _id: Id) -> Element<'_, Self::Message> {
-        self.0.view()
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
+        self.program.view()
     }
 }
 
-struct IcedElementInternal<P: Program + Send + 'static> {
+pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
+    additional_scale: f64,
     outputs: HashSet<Output>,
-    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Primitive>, Color)>)>,
-    pending_update: Option<Instant>,
+    buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
+    pending_realloc: bool,
 
     // state
     size: Size<i32, Logical>,
+    last_seat: Arc<Mutex<Option<(Seat<crate::state::State>, Serial)>>>,
     cursor_pos: Option<Point<f64, Logical>>,
+    touch_map: HashMap<Finger, IcedPoint>,
 
     // iced
     theme: Theme,
-    renderer: IcedRenderer<Theme>,
+    renderer: cosmic::Renderer,
     state: State<ProgramWrapper<P>>,
     debug: Debug,
 
     // futures
     handle: LoopHandle<'static, crate::state::State>,
-    scheduler: Scheduler<<P as Program>::Message>,
+    scheduler: Scheduler<Option<<P as Program>::Message>>,
     executor_token: Option<RegistrationToken>,
-    rx: Receiver<<P as Program>::Message>,
+    rx: Receiver<Option<<P as Program>::Message>>,
 }
 
 impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
@@ -170,23 +189,29 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         if !self.state.is_queue_empty() {
             tracing::warn!("Missing force_update call");
         }
-        let mut renderer =
-            IcedRenderer::TinySkia(IcedGraphicsRenderer::new(Backend::new(Default::default())));
+        let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
         let mut debug = Debug::new();
         let state = State::new(
-            Id(0),
-            ProgramWrapper(self.state.program().0.clone(), handle.clone()),
+            ID.clone(),
+            ProgramWrapper {
+                program: self.state.program().program.clone(),
+                evlh: handle.clone(),
+                last_seat: self.last_seat.clone(),
+            },
             IcedSize::new(self.size.w as f32, self.size.h as f32),
             &mut renderer,
             &mut debug,
         );
 
         IcedElementInternal {
+            additional_scale: self.additional_scale,
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
-            pending_update: self.pending_update.clone(),
+            pending_realloc: self.pending_realloc.clone(),
             size: self.size.clone(),
+            last_seat: self.last_seat.clone(),
             cursor_pos: self.cursor_pos.clone(),
+            touch_map: self.touch_map.clone(),
             theme: self.theme.clone(),
             renderer,
             state,
@@ -202,11 +227,18 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
 impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IcedElementInternal")
+            .field("additional_scale", &self.additional_scale)
+            .field(
+                "outputs",
+                &self.outputs.iter().map(|o| o.name()).collect::<Vec<_>>(),
+            )
             .field("buffers", &"...")
             .field("size", &self.size)
-            .field("pending_update", &self.pending_update)
+            .field("pending_realloc", &self.pending_realloc)
+            .field("last_seat", &self.last_seat)
             .field("cursor_pos", &self.cursor_pos)
-            .field("theme", &self.theme)
+            .field("touch_map", &self.touch_map)
+            .field("theme", &"...")
             .field("renderer", &"...")
             .field("state", &"...")
             .field("debug", &self.debug)
@@ -232,13 +264,17 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
-        let mut renderer =
-            IcedRenderer::TinySkia(IcedGraphicsRenderer::new(Backend::new(Default::default())));
+        let last_seat = Arc::new(Mutex::new(None));
+        let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
         let mut debug = Debug::new();
 
         let state = State::new(
-            Id(0),
-            ProgramWrapper(program, handle.clone()),
+            ID.clone(),
+            ProgramWrapper {
+                program,
+                evlh: handle.clone(),
+                last_seat: last_seat.clone(),
+            },
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
             &mut debug,
@@ -253,11 +289,14 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             .ok();
 
         let mut internal = IcedElementInternal {
+            additional_scale: 1.0,
             outputs: HashSet::new(),
             buffers: HashMap::new(),
-            pending_update: None,
+            pending_realloc: false,
             size,
             cursor_pos: None,
+            last_seat,
+            touch_map: HashMap::new(),
             theme,
             renderer,
             state,
@@ -267,14 +306,31 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             executor_token,
             rx,
         };
-        let _ = internal.update(true);
+        internal.update(true);
 
         IcedElement(Arc::new(Mutex::new(internal)))
     }
 
     pub fn with_program<R>(&self, func: impl FnOnce(&P) -> R) -> R {
         let internal = self.0.lock().unwrap();
-        func(&internal.state.program().0)
+        func(&internal.state.program().program)
+    }
+
+    pub fn minimum_size(&self) -> Size<i32, Logical> {
+        let internal = self.0.lock().unwrap();
+        let element = internal.state.program().program.view();
+        let node = element
+            .as_widget()
+            .layout(
+                // TODO Avoid creating a new tree here?
+                &mut Tree::new(element.as_widget()),
+                &internal.renderer,
+                &Limits::new(IcedSize::ZERO, IcedSize::INFINITY)
+                    .width(Length::Shrink)
+                    .height(Length::Shrink),
+            )
+            .size();
+        Size::from((node.width.ceil() as i32, node.height.ceil() as i32))
     }
 
     pub fn loop_handle(&self) -> LoopHandle<'static, crate::state::State> {
@@ -289,20 +345,21 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         }
 
         internal_ref.size = size;
-        for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
-            let buffer_size = internal_ref
-                .size
-                .to_f64()
-                .to_buffer(**scale, Transform::Normal)
-                .to_i32_round();
-            *buffer =
-                MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None);
-            *old_primitives = None;
-        }
+        internal_ref.pending_realloc = true;
+        internal_ref.update(true);
+    }
 
-        if internal_ref.pending_update.is_none() {
-            internal_ref.pending_update = Some(Instant::now());
+    pub fn set_additional_scale(&self, scale: f64) {
+        {
+            let mut internal = self.0.lock().unwrap();
+            let internal_ref = &mut *internal;
+            if internal_ref.additional_scale == scale {
+                return;
+            }
+
+            internal_ref.additional_scale = scale;
         }
+        self.refresh();
     }
 
     pub fn force_update(&self) {
@@ -321,6 +378,19 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         }
         internal.update(true);
     }
+
+    pub fn current_size(&self) -> Size<i32, Logical> {
+        let internal = self.0.lock().unwrap();
+        internal
+            .size
+            .to_f64()
+            .upscale(internal.additional_scale)
+            .to_i32_round()
+    }
+
+    pub fn queue_message(&self, msg: P::Message) {
+        self.0.lock().unwrap().state.queue_message(msg);
+    }
 }
 
 impl<P: Program + Send + 'static + Clone> IcedElement<P> {
@@ -334,14 +404,15 @@ impl<P: Program + Send + 'static + Clone> IcedElement<P> {
 }
 
 impl<P: Program + Send + 'static> IcedElementInternal<P> {
-    fn update(&mut self, mut force: bool) -> Vec<Action<<P as Program>::Message>> {
-        while let Ok(message) = self.rx.try_recv() {
+    #[profiling::function]
+    fn update(&mut self, mut force: bool) {
+        while let Ok(Some(message)) = self.rx.try_recv() {
             self.state.queue_message(message);
             force = true;
         }
 
         if !force {
-            return Vec::new();
+            return;
         }
 
         let cursor = self
@@ -353,13 +424,13 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
         let actions = self
             .state
             .update(
-                Id(0),
+                ID.clone(),
                 IcedSize::new(self.size.w as f32, self.size.h as f32),
                 cursor,
                 &mut self.renderer,
                 &self.theme,
                 &Style {
-                    scale_factor: 1.0, //TODO: why is this
+                    scale_factor: 1.0, // TODO: why is this
                     icon_color: self.theme.cosmic().on_bg_color().into(),
                     text_color: self.theme.cosmic().on_bg_color().into(),
                 },
@@ -368,24 +439,21 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             )
             .1;
 
-        actions
-            .into_iter()
-            .filter_map(|action| {
-                if let Action::Future(future) = action {
-                    let _ = self.scheduler.schedule(future);
-                    None
-                } else {
-                    Some(action)
-                }
-            })
-            .collect::<Vec<_>>()
+        if let Some(action) = actions {
+            if let Some(t) = into_stream(action) {
+                let _ = self.scheduler.schedule(t.into_future().map(|f| match f.0 {
+                    Some(Action::Output(msg)) => Some(msg),
+                    _ => None,
+                }));
+            }
+        }
     }
 }
 
 impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedElement<P> {
     fn enter(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &MotionEvent,
     ) {
@@ -393,27 +461,32 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorEntered));
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
-        internal.cursor_pos = Some(event.location);
-        let _ = internal.update(true);
+        // TODO: Update iced widgets to handle touch using event position, not cursor_pos
+        internal.cursor_pos = Some(event_location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(true);
     }
 
     fn motion(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &MotionEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
-        internal.cursor_pos = Some(event.location);
-        let _ = internal.update(true);
+        internal.cursor_pos = Some(event_location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(true);
     }
 
     fn relative_motion(
@@ -426,7 +499,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
 
     fn button(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &ButtonEvent,
     ) {
@@ -441,7 +514,8 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             ButtonState::Pressed => MouseEvent::ButtonPressed(button),
             ButtonState::Released => MouseEvent::ButtonReleased(button),
         }));
-        let _ = internal.update(true);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(true);
     }
 
     fn axis(
@@ -454,10 +528,10 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::WheelScrolled {
-                delta: if let Some(discrete) = frame.discrete {
+                delta: if let Some(discrete) = frame.v120 {
                     ScrollDelta::Lines {
-                        x: discrete.0 as f32,
-                        y: discrete.1 as f32,
+                        x: discrete.0 as f32 / 120.,
+                        y: discrete.1 as f32 / 120.,
                     }
                 } else {
                     ScrollDelta::Pixels {
@@ -466,7 +540,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
                     }
                 },
             }));
-        let _ = internal.update(true);
+        internal.update(true);
     }
 
     fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) {}
@@ -482,7 +556,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));
-        let _ = internal.update(true);
+        internal.update(true);
     }
 
     fn gesture_swipe_begin(
@@ -539,6 +613,107 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         _: &Seat<crate::state::State>,
         _: &mut crate::state::State,
         _: &GestureHoldEndEvent,
+    ) {
+    }
+}
+
+impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedElement<P> {
+    fn down(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        event: &DownEvent,
+        seq: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(i32::from(event.slot) as u64);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+        internal
+            .state
+            .queue_event(Event::Touch(TouchEvent::FingerPressed { id, position }));
+        internal.touch_map.insert(id, position);
+        internal.cursor_pos = Some(event_location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
+        let _ = internal.update(true);
+    }
+
+    fn up(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        event: &UpEvent,
+        seq: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(i32::from(event.slot) as u64);
+        if let Some(position) = internal.touch_map.remove(&id) {
+            *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
+            internal
+                .state
+                .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
+            let _ = internal.update(true);
+        }
+    }
+
+    fn motion(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        event: &TouchMotionEvent,
+        seq: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(i32::from(event.slot) as u64);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
+        internal
+            .state
+            .queue_event(Event::Touch(TouchEvent::FingerMoved { id, position }));
+        internal.touch_map.insert(id, position);
+        internal.cursor_pos = Some(event_location);
+        let _ = internal.update(true);
+    }
+
+    fn frame(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _seq: Serial,
+    ) {
+    }
+
+    fn cancel(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _seq: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        for (id, position) in std::mem::take(&mut internal.touch_map) {
+            internal
+                .state
+                .queue_event(Event::Touch(TouchEvent::FingerLost { id, position }));
+        }
+        let _ = internal.update(true);
+    }
+
+    fn shape(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &ShapeEvent,
+        _seq: Serial,
+    ) {
+    }
+
+    fn orientation(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _event: &OrientationEvent,
+        _seq: Serial,
     ) {
     }
 }
@@ -611,7 +786,14 @@ impl<P: Program + Send + 'static> IsAlive for IcedElement<P> {
 
 impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn bbox(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_loc_and_size((0, 0), self.0.lock().unwrap().size)
+        let internal = self.0.lock().unwrap();
+        Rectangle::from_size(
+            internal
+                .size
+                .to_f64()
+                .upscale(internal.additional_scale)
+                .to_i32_round(),
+        )
     }
 
     fn is_in_input_region(&self, _point: &Point<f64, Logical>) -> bool {
@@ -620,41 +802,34 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
 
     fn set_activate(&self, activated: bool) {
         let mut internal = self.0.lock().unwrap();
-        internal.state.queue_event(Event::Window(
-            Id(0),
-            if activated {
-                WindowEvent::Focused
-            } else {
-                WindowEvent::Unfocused
-            },
-        ));
+        internal.state.queue_event(Event::Window(if activated {
+            WindowEvent::Focused
+        } else {
+            WindowEvent::Unfocused
+        }));
         let _ = internal.update(true); // TODO
     }
 
     fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
         let mut internal = self.0.lock().unwrap();
-        let scale = output.current_scale().fractional_scale();
-        if !internal.buffers.contains_key(&OrderedFloat(scale)) {
-            let buffer_size = internal
-                .size
+        let scale = output.current_scale().fractional_scale() * internal.additional_scale;
+
+        let internal_size = internal.size;
+        internal.buffers.entry(OrderedFloat(scale)).or_insert({
+            let buffer_size = internal_size
                 .to_f64()
                 .to_buffer(scale, Transform::Normal)
                 .to_i32_round();
-            internal.buffers.insert(
-                OrderedFloat(scale),
-                (
-                    MemoryRenderBuffer::new(
-                        Fourcc::Argb8888,
-                        buffer_size,
-                        1,
-                        Transform::Normal,
-                        None,
-                    ),
-                    None,
-                ),
-            );
-        }
+
+            (
+                MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None),
+                None,
+            )
+        });
+
         internal.outputs.insert(output.clone());
+        std::mem::drop(internal);
+        self.refresh();
     }
 
     fn output_leave(&self, output: &Output) {
@@ -667,20 +842,22 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         RenderZindex::Shell as u8
     }
 
+    #[profiling::function]
     fn refresh(&self) {
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier
         let internal_ref = &mut *internal;
         internal_ref.buffers.retain(|scale, _| {
-            internal_ref
-                .outputs
-                .iter()
-                .any(|o| o.current_scale().fractional_scale() == **scale)
+            internal_ref.outputs.iter().any(|o| {
+                o.current_scale().fractional_scale() * internal_ref.additional_scale == **scale
+            })
         });
         for scale in internal_ref
             .outputs
             .iter()
-            .map(|o| OrderedFloat(o.current_scale().fractional_scale()))
+            .map(|o| {
+                OrderedFloat(o.current_scale().fractional_scale() * internal_ref.additional_scale)
+            })
             .filter(|scale| !internal_ref.buffers.contains_key(scale))
             .collect::<Vec<_>>()
             .into_iter()
@@ -712,7 +889,7 @@ impl<P, R> AsRenderElements<R> for IcedElement<P>
 where
     P: Program + Send + 'static,
     R: Renderer + ImportMem,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: Send + Clone + 'static,
 {
     type RenderElement = MemoryRenderBufferRenderElement<R>;
 
@@ -720,23 +897,26 @@ where
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        mut scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<C> {
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier
         let internal_ref = &mut *internal;
-        let force = if matches!(
-            internal_ref.pending_update,
-            Some(instant) if Instant::now().duration_since(instant) > Duration::from_millis(25)
-        ) {
-            true
-        } else {
-            false
-        };
-        let _ = internal_ref.update(force);
+        if std::mem::replace(&mut internal_ref.pending_realloc, false) {
+            for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
+                let buffer_size = internal_ref
+                    .size
+                    .to_f64()
+                    .to_buffer(**scale, Transform::Normal)
+                    .to_i32_round();
+                buffer.render().resize(buffer_size);
+                *old_primitives = None;
+            }
+        }
 
-        if let Some((buffer, ref mut old_primitives)) =
+        scale = scale * internal_ref.additional_scale;
+        if let Some((buffer, ref mut old_layers)) =
             internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
         {
             let size: Size<i32, BufferCoords> = internal_ref
@@ -744,85 +924,113 @@ where
                 .to_f64()
                 .to_buffer(scale.x, Transform::Normal)
                 .to_i32_round();
-
             if size.w > 0 && size.h > 0 {
-                let IcedRenderer::TinySkia(renderer) = &mut internal_ref.renderer;
                 let state_ref = &internal_ref.state;
                 let mut clip_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
                 let overlay = internal_ref.debug.overlay();
+                let theme = &internal_ref.theme;
 
-                buffer
-                    .render()
-                    .draw(move |buf| {
-                        let mut pixels =
-                            tiny_skia::PixmapMut::from_bytes(buf, size.w as u32, size.h as u32)
-                                .expect("Failed to create pixel map");
+                _ = buffer.render().draw(|buf| {
+                    let mut pixels =
+                        tiny_skia::PixmapMut::from_bytes(buf, size.w as u32, size.h as u32)
+                            .expect("Failed to create pixel map");
 
-                        renderer.with_primitives(|backend, primitives| {
-                            let background_color = state_ref.program().0.background_color();
-                            let bounds = IcedSize::new(size.w as u32, size.h as u32);
-                            let viewport = Viewport::with_physical_size(bounds, scale.x);
-
-                            let mut damage = old_primitives
-                                .as_ref()
-                                .and_then(|(last_primitives, last_color)| {
-                                    (last_color == &background_color)
-                                        .then(|| damage::list(last_primitives, primitives))
-                                })
-                                .unwrap_or_else(|| {
-                                    vec![IcedRectangle::with_size(viewport.logical_size())]
-                                });
-                            damage = damage::group(damage, scale.x as f32, bounds);
-
-                            if !damage.is_empty() {
-                                backend.draw(
-                                    &mut pixels,
-                                    &mut clip_mask,
-                                    primitives,
-                                    &viewport,
-                                    &damage,
-                                    background_color,
-                                    &overlay,
-                                );
-
-                                *old_primitives = Some((primitives.to_vec(), background_color));
-                            }
-
-                            let damage = damage
+                    let background_color = state_ref.program().program.background_color(theme);
+                    let bounds = IcedSize::new(size.w as u32, size.h as u32);
+                    let viewport = Viewport::with_physical_size(bounds, scale.x);
+                    let scale_x = scale.x as f32;
+                    let current_layers = internal_ref.renderer.layers();
+                    let mut damage: Vec<_> = old_layers
+                        .as_ref()
+                        .and_then(|(last_primitives, last_color)| {
+                            (last_color == &background_color).then(|| {
+                                damage::diff(
+                                    &last_primitives,
+                                    current_layers,
+                                    |_| {
+                                        vec![cosmic::iced::Rectangle::new(
+                                            cosmic::iced::Point::default(),
+                                            viewport.logical_size(),
+                                        )]
+                                    },
+                                    Layer::damage,
+                                )
                                 .into_iter()
-                                .map(|x| x.snap())
-                                .map(|damage_rect| {
-                                    Rectangle::from_loc_and_size(
-                                        (damage_rect.x as i32, damage_rect.y as i32),
-                                        (damage_rect.width as i32, damage_rect.height as i32),
-                                    )
+                                .filter(|d| {
+                                    let width = d.width as u32;
+                                    let height = d.height as u32;
+
+                                    width > 1 && height > 1
                                 })
-                                .collect::<Vec<_>>();
-
-                            state_ref
-                                .program()
-                                .0
-                                .foreground(&mut pixels, &damage, scale.x as f32);
-
-                            Result::<_, ()>::Ok(damage)
+                                .collect()
+                            })
                         })
-                    })
-                    .unwrap();
+                        .unwrap_or_else(|| {
+                            vec![cosmic::iced::Rectangle::with_size(viewport.logical_size())]
+                        });
+                    damage = damage::group(
+                        damage,
+                        cosmic::iced::Rectangle::with_size(viewport.logical_size()),
+                    );
+
+                    if !damage.is_empty() {
+                        *old_layers = Some((current_layers.to_vec(), background_color));
+
+                        internal_ref.renderer.draw(
+                            &mut pixels,
+                            &mut clip_mask,
+                            &viewport,
+                            &damage,
+                            background_color,
+                            &overlay,
+                        );
+                    }
+
+                    let damage = damage
+                        .into_iter()
+                        .map(|d| d * scale_x)
+                        .filter_map(|x| x.snap())
+                        .map(|damage_rect| {
+                            Rectangle::new(
+                                (damage_rect.x as i32, damage_rect.y as i32).into(),
+                                (damage_rect.width as i32, damage_rect.height as i32).into(),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    state_ref.program().program.foreground(
+                        &mut pixels,
+                        &damage,
+                        scale.x as f32,
+                        theme,
+                    );
+
+                    Result::<_, ()>::Ok(damage)
+                });
             }
 
-            if let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
+            match MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location.to_f64(),
                 &buffer,
                 Some(alpha),
-                Some(Rectangle::from_loc_and_size(
-                    (0., 0.),
-                    size.to_f64().to_logical(1.0, Transform::Normal),
+                Some(Rectangle::from_size(
+                    size.to_f64()
+                        .to_logical(1., Transform::Normal)
+                        .to_i32_round(),
                 )),
-                Some(internal_ref.size),
+                Some(
+                    internal_ref
+                        .size
+                        .to_f64()
+                        .upscale(internal_ref.additional_scale)
+                        .to_i32_round(),
+                ),
                 Kind::Unspecified,
             ) {
-                return vec![C::from(buffer)];
+                Ok(buffer) => {
+                    return vec![C::from(buffer)];
+                }
+                Err(err) => tracing::warn!("What? {:?}", err),
             }
         }
         Vec::new()

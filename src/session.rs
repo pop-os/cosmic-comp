@@ -19,7 +19,7 @@ use std::{
 };
 use tracing::{error, warn};
 
-use crate::state::State;
+use crate::state::{ClientState, Common, State};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "message")]
@@ -59,7 +59,23 @@ unsafe fn set_cloexec(fd: RawFd) -> rustix::io::Result<()> {
     rustix::io::fcntl_setfd(fd, flags | rustix::io::FdFlags::CLOEXEC)
 }
 
-pub fn setup_socket(handle: LoopHandle<State>, state: &State) -> Result<()> {
+pub fn get_env(common: &Common) -> Result<HashMap<String, String>> {
+    let mut env = HashMap::new();
+    env.insert(
+        String::from("WAYLAND_DISPLAY"),
+        common
+            .socket
+            .clone()
+            .into_string()
+            .map_err(|_| anyhow!("wayland socket is no valid utf-8 string?"))?,
+    );
+    if let Some(display) = common.xwayland_state.as_ref().map(|s| s.display) {
+        env.insert(String::from("DISPLAY"), format!(":{}", display));
+    }
+    Ok(env)
+}
+
+pub fn setup_socket(handle: LoopHandle<State>, common: &Common) -> Result<()> {
     if let Ok(fd_num) = std::env::var("COSMIC_SESSION_SOCK") {
         if let Ok(fd) = fd_num.parse::<RawFd>() {
             let mut session_socket = match unsafe { set_cloexec(fd) } {
@@ -72,19 +88,7 @@ pub fn setup_socket(handle: LoopHandle<State>, state: &State) -> Result<()> {
                 }
             };
 
-            let mut env = HashMap::new();
-            env.insert(
-                String::from("WAYLAND_DISPLAY"),
-                state
-                    .common
-                    .socket
-                    .clone()
-                    .into_string()
-                    .map_err(|_| anyhow!("wayland socket is no valid utf-8 string?"))?,
-            );
-            if let Some(display) = state.common.xwayland_state.as_ref().map(|s| s.display) {
-                env.insert(String::from("DISPLAY"), format!(":{}", display));
-            }
+            let env = get_env(common)?;
             let message = serde_json::to_string(&Message::SetEnv { variables: env })
                 .with_context(|| "Failed to encode environment variables into json")?;
             let bytes = message.into_bytes();
@@ -141,7 +145,11 @@ pub fn setup_socket(handle: LoopHandle<State>, state: &State) -> Result<()> {
                                                         continue;
                                                     }
                                                     let stream = unsafe { UnixStream::from_raw_fd(fd) };
-                                                    if let Err(err) = state.common.display_handle.insert_client(stream, Arc::new(state.new_privileged_client_state())) {
+                                                    let client_state = Arc::new(ClientState {
+                                                        privileged: true,
+                                                        ..state.new_client_state()
+                                                    });
+                                                    if let Err(err) = state.common.display_handle.insert_client(stream, client_state) {
                                                         warn!(?err, "Failed to add privileged client to display");
                                                     }
                                                 }

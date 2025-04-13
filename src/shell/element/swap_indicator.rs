@@ -6,7 +6,7 @@ use crate::{
 use calloop::LoopHandle;
 use cosmic::{
     iced::widget::{container, horizontal_space, row},
-    iced_core::{Alignment, Background, Color, Length},
+    iced_core::{Alignment, Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, text},
     Apply,
@@ -27,40 +27,38 @@ pub struct SwapIndicatorInternal;
 impl Program for SwapIndicatorInternal {
     type Message = ();
 
-    fn view(&self) -> crate::utils::iced::Element<'_, Self::Message> {
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
         row(vec![
             from_name("window-swap-symbolic")
                 .size(32)
                 .prefer_svg(true)
                 .icon()
                 .into(),
-            horizontal_space(16).into(),
-            text(fl!("swap-windows"))
-                .font(cosmic::font::FONT)
-                .size(24)
-                .into(),
+            horizontal_space().width(16).into(),
+            text::title3(fl!("swap-windows")).into(),
         ])
-        .align_items(Alignment::Center)
+        .align_y(Alignment::Center)
         .apply(container)
-        .center_x()
-        .center_y()
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .padding(16)
         .apply(container)
-        .style(theme::Container::custom(|theme| container::Appearance {
+        .class(theme::Container::custom(|theme| container::Style {
             icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),
-            border_radius: 18.0.into(),
-            border_width: 0.0,
-            border_color: Color::TRANSPARENT,
+            border: Border {
+                radius: 18.0.into(),
+                width: 0.0,
+                color: Color::TRANSPARENT,
+            },
+            shadow: Default::default(),
         }))
         .width(Length::Shrink)
         .height(Length::Shrink)
         .apply(container)
-        .height(Length::Fill)
-        .width(Length::Fill)
-        .center_x()
-        .center_y()
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
         .into()
     }
 }

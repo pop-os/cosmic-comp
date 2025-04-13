@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::output::Output;
+use smithay::{output::Output, utils::Point};
 use tracing::{error, warn};
 
 use crate::{
-    config::OutputConfig,
+    config::{OutputConfig, OutputState},
     state::State,
     wayland::protocols::output_configuration::{
         delegate_output_configuration, ModeConfiguration, OutputConfiguration,
@@ -31,13 +31,54 @@ impl State {
     fn output_configuration(
         &mut self,
         test_only: bool,
-        conf: Vec<(Output, OutputConfiguration)>,
+        mut conf: Vec<(Output, OutputConfiguration)>,
     ) -> bool {
         if conf
             .iter()
             .all(|(_, conf)| matches!(conf, OutputConfiguration::Disabled))
         {
             return false; // we don't allow the user to accidentally disable all their outputs
+        }
+
+        // sanitize negative positions
+        {
+            let (offset_x, offset_y) = conf.iter().fold((0, 0), |mut offset, (_, conf)| {
+                if let OutputConfiguration::Enabled {
+                    position: Some(position),
+                    ..
+                } = conf
+                {
+                    if position.x.is_negative() {
+                        offset.0 = offset.0.max(position.x.abs());
+                    }
+                    if position.y.is_negative() {
+                        offset.1 = offset.1.max(position.y.abs());
+                    }
+                }
+                offset
+            });
+
+            if offset_x > 0 || offset_y > 0 {
+                for (output, conf) in conf.iter_mut() {
+                    if let OutputConfiguration::Enabled {
+                        ref mut position, ..
+                    } = conf
+                    {
+                        let current_config = output
+                            .user_data()
+                            .get::<RefCell<OutputConfig>>()
+                            .unwrap()
+                            .borrow();
+
+                        *position = Some(
+                            position.unwrap_or(Point::from((
+                                current_config.position.0 as i32,
+                                current_config.position.1 as i32,
+                            ))) + Point::from((offset_x, offset_y)),
+                        );
+                    }
+                }
+            }
         }
 
         let mut backups = Vec::new();
@@ -51,10 +92,12 @@ impl State {
                 backups.push((output, current_config.clone()));
 
                 if let OutputConfiguration::Enabled {
+                    mirroring,
                     mode,
                     scale,
                     transform,
                     position,
+                    adaptive_sync,
                 } = conf
                 {
                     match mode {
@@ -74,62 +117,89 @@ impl State {
                         current_config.transform = *transform;
                     }
                     if let Some(position) = position {
-                        current_config.position = (*position).into();
+                        current_config.position = (position.x as u32, position.y as u32);
                     }
-                    current_config.enabled = true;
+                    if let Some(vrr) = adaptive_sync {
+                        current_config.vrr = *vrr;
+                    }
+                    if let Some(mirror) = mirroring {
+                        current_config.enabled = OutputState::Mirroring(mirror.name());
+                    } else {
+                        current_config.enabled = OutputState::Enabled;
+                    }
                 } else {
-                    current_config.enabled = false;
+                    current_config.enabled = OutputState::Disabled;
                 }
-            }
-
-            let seats = self.common.seats().cloned().collect::<Vec<_>>();
-            if let Err(err) = self.backend.apply_config_for_output(
-                output,
-                test_only,
-                &mut self.common.shell,
-                seats.iter().cloned(),
-                &self.common.event_loop_handle,
-            ) {
-                warn!(
-                    ?err,
-                    "Failed to apply config to {}. Resetting",
-                    output.name(),
-                );
-                for (output, backup) in backups {
-                    {
-                        let mut current_config = output
-                            .user_data()
-                            .get::<RefCell<OutputConfig>>()
-                            .unwrap()
-                            .borrow_mut();
-                        *current_config = backup;
-                    }
-                    if !test_only {
-                        if let Err(err) = self.backend.apply_config_for_output(
-                            output,
-                            false,
-                            &mut self.common.shell,
-                            seats.iter().cloned(),
-                            &self.common.event_loop_handle,
-                        ) {
-                            error!(?err, "Failed to reset output config for {}.", output.name(),);
-                        }
-                    }
-                }
-                return false;
             }
         }
 
+        let res = self.backend.apply_config_for_outputs(
+            test_only,
+            &self.common.event_loop_handle,
+            self.common.config.dynamic_conf.screen_filter(),
+            self.common.shell.clone(),
+            &mut self.common.workspace_state.update(),
+            &self.common.xdg_activation_state,
+            self.common.startup_done.clone(),
+            &self.common.clock,
+        );
+        if let Err(err) = res {
+            warn!("Failed to apply config. Resetting: {:?}", err);
+            for (output, backup) in backups {
+                {
+                    let mut current_config = output
+                        .user_data()
+                        .get::<RefCell<OutputConfig>>()
+                        .unwrap()
+                        .borrow_mut();
+                    *current_config = backup;
+                }
+            }
+            if !test_only {
+                if let Err(err) = self.backend.apply_config_for_outputs(
+                    false,
+                    &self.common.event_loop_handle,
+                    self.common.config.dynamic_conf.screen_filter(),
+                    self.common.shell.clone(),
+                    &mut self.common.workspace_state.update(),
+                    &self.common.xdg_activation_state,
+                    self.common.startup_done.clone(),
+                    &self.common.clock,
+                ) {
+                    error!("Failed to reset output config: {:?}", err);
+                }
+            }
+            return false;
+        }
+        self.common.refresh();
+
         for output in conf
             .iter()
-            .filter(|(_, c)| matches!(c, OutputConfiguration::Enabled { .. }))
+            .filter(|(_, c)| {
+                matches!(
+                    c,
+                    OutputConfiguration::Enabled {
+                        mirroring: None,
+                        ..
+                    }
+                )
+            })
             .map(|(o, _)| o)
         {
             self.common.output_configuration_state.enable_head(output);
         }
         for output in conf
             .iter()
-            .filter(|(_, c)| matches!(c, OutputConfiguration::Disabled))
+            .filter(|(_, c)| {
+                matches!(
+                    c,
+                    OutputConfiguration::Disabled
+                        | OutputConfiguration::Enabled {
+                            mirroring: Some(_),
+                            ..
+                        }
+                )
+            })
             .map(|(o, _)| o)
         {
             self.common.output_configuration_state.disable_head(output);

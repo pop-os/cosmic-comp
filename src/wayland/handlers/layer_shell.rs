@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::utils::prelude::*;
+use crate::{shell::PendingLayer, utils::prelude::*};
 use smithay::{
     delegate_layer_shell,
     desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
@@ -14,11 +14,9 @@ use smithay::{
     },
 };
 
-use super::screencopy::PendingScreencopyBuffers;
-
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
-        &mut self.common.shell.layer_shell_state
+        &mut self.common.layer_shell_state
     }
 
     fn new_layer_surface(
@@ -28,24 +26,24 @@ impl WlrLayerShellHandler for State {
         _layer: Layer,
         namespace: String,
     ) {
-        let seat = self.common.last_active_seat().clone();
+        let mut shell = self.common.shell.write().unwrap();
+        let seat = shell.seats.last_active().clone();
         let output = wl_output
             .as_ref()
             .and_then(Output::from_resource)
             .unwrap_or_else(|| seat.active_output());
-        self.common.shell.pending_layers.push((
-            LayerSurface::new(surface, namespace),
+        shell.pending_layers.push(PendingLayer {
+            surface: LayerSurface::new(surface, namespace),
             output,
             seat,
-        ));
+        });
     }
 
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
-        self.common.shell.unconstrain_popup(&popup);
+        self.common.shell.read().unwrap().unconstrain_popup(&popup);
 
         if popup.send_configure().is_ok() {
             self.common
-                .shell
                 .popups
                 .track_popup(PopupKind::from(popup))
                 .unwrap();
@@ -53,9 +51,8 @@ impl WlrLayerShellHandler for State {
     }
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
-        let maybe_output = self
-            .common
-            .shell
+        let mut shell = self.common.shell.write().unwrap();
+        let maybe_output = shell
             .outputs()
             .find(|o| {
                 let map = layer_map_for_output(o);
@@ -74,23 +71,9 @@ impl WlrLayerShellHandler for State {
                 map.unmap_layer(&layer);
             }
 
-            for workspace in self.common.shell.workspaces.spaces_mut() {
-                workspace.recalculate();
-            }
+            shell.workspaces.recalculate();
 
-            // collect screencopy sessions needing an update
-            let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
-            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                scheduled_sessions
-                    .get_or_insert_with(Vec::new)
-                    .extend(sessions.borrow_mut().drain(..));
-            }
-
-            self.backend.schedule_render(
-                &self.common.event_loop_handle,
-                &output,
-                scheduled_sessions,
-            );
+            self.backend.schedule_render(&output);
         }
     }
 }

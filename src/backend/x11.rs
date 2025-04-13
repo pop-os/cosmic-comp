@@ -2,13 +2,12 @@
 
 use crate::{
     backend::render,
-    config::OutputConfig,
-    input::Devices,
+    config::{OutputConfig, ScreenFilter},
+    shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
-    wayland::protocols::screencopy::{BufferParams, Session as ScreencopySession},
 };
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
         allocator::{
@@ -16,14 +15,13 @@ use smithay::{
             gbm::{GbmAllocator, GbmBufferFlags},
             vulkan::{ImageUsageFlags, VulkanAllocator},
         },
-        drm::{DrmDeviceFd, DrmNode},
+        drm::{DrmDeviceFd, DrmNode, NodeType},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
             damage::{OutputDamageTracker, RenderOutputResult},
-            gles::GlesRenderbuffer,
             glow::GlowRenderer,
-            Bind, ImportDma, ImportEgl,
+            Bind, ImportDma,
         },
         vulkan::{version::Version, Instance, PhysicalDevice},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
@@ -37,15 +35,12 @@ use smithay::{
         wayland_server::DisplayHandle,
     },
     utils::{DeviceFd, Transform},
-    wayland::dmabuf::DmabufFeedbackBuilder,
+    wayland::{dmabuf::DmabufFeedbackBuilder, presentation::Refresh},
 };
-use std::{cell::RefCell, os::unix::io::OwnedFd, time::Duration};
+use std::{borrow::BorrowMut, cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
 
-#[cfg(feature = "debug")]
-use crate::state::Fps;
-
-use super::render::init_shaders;
+use super::render::{init_shaders, ScreenFilterStorage};
 
 #[derive(Debug)]
 enum Allocator {
@@ -150,9 +145,7 @@ impl X11State {
             render: ping.clone(),
             dirty: false,
             pending: true,
-            screencopy: Vec::new(),
-            #[cfg(feature = "debug")]
-            fps: Fps::new(&mut self.renderer),
+            screen_filter_state: ScreenFilterStorage::default(),
         });
 
         // schedule first render
@@ -160,49 +153,46 @@ impl X11State {
         Ok(output)
     }
 
-    pub fn schedule_render(
-        &mut self,
-        output: &Output,
-        screencopy: Option<Vec<(ScreencopySession, BufferParams)>>,
-    ) {
+    pub fn schedule_render(&mut self, output: &Output) {
         if let Some(surface) = self.surfaces.iter_mut().find(|s| s.output == *output) {
             surface.dirty = true;
-            if let Some(sessions) = screencopy {
-                surface.screencopy.extend(sessions);
-            }
             if !surface.pending {
                 surface.render.ping();
             }
         }
     }
 
-    pub fn apply_config_for_output(
+    pub fn apply_config_for_outputs(
         &mut self,
-        output: &Output,
         test_only: bool,
-    ) -> Result<(), anyhow::Error> {
-        // TODO: if we ever have multiple winit outputs, don't ignore config.enabled
-        // reset size
-        let size = self
-            .surfaces
-            .iter()
-            .find(|s| s.output == *output)
-            .unwrap()
-            .window
-            .size();
-        let mut config = output
+    ) -> Result<Vec<Output>, anyhow::Error> {
+        // TODO: if we ever have multiple winit outputs, don't juse use the first and don't ignore OutputState
+
+        let surface = self.surfaces.first().unwrap();
+        let size = surface.window.size();
+        let mut config = surface
+            .output
             .user_data()
             .get::<RefCell<OutputConfig>>()
             .unwrap()
             .borrow_mut();
+
+        // reset size
         if config.mode.0 != (size.w as i32, size.h as i32) {
             if !test_only {
                 config.mode = ((size.w as i32, size.h as i32), None);
             }
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
-            Ok(())
+            Ok(vec![surface.output.clone()])
         }
+    }
+
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
+        for surface in &mut self.surfaces {
+            surface.screen_filter_state.filter = screen_filter.clone();
+        }
+        Ok(())
     }
 }
 
@@ -210,67 +200,64 @@ impl X11State {
 pub struct Surface {
     window: Window,
     damage_tracker: OutputDamageTracker,
-    screencopy: Vec<(ScreencopySession, BufferParams)>,
     surface: X11Surface,
     output: Output,
     render: ping::Ping,
     dirty: bool,
     pending: bool,
-    #[cfg(feature = "debug")]
-    fps: Fps,
+    screen_filter_state: ScreenFilterStorage,
 }
 
 impl Surface {
     pub fn render_output(&mut self, renderer: &mut GlowRenderer, state: &mut Common) -> Result<()> {
-        let (buffer, age) = self
+        let (mut buffer, age) = self
             .surface
             .buffer()
             .with_context(|| "Failed to allocate buffer")?;
-        match render::render_output::<_, _, GlesRenderbuffer, _>(
+        let mut fb = renderer
+            .bind(&mut buffer)
+            .with_context(|| "Failed to bind dmabuf")?;
+        match render::render_output(
             None,
             renderer,
-            buffer.clone(),
+            &mut fb,
             &mut self.damage_tracker,
             age as usize,
-            state,
+            &state.shell,
+            state.clock.now(),
             &self.output,
             render::CursorMode::NotDefault,
-            if !self.screencopy.is_empty() {
-                Some((buffer, &self.screencopy))
-            } else {
-                None
-            },
-            #[cfg(not(feature = "debug"))]
-            None,
-            #[cfg(feature = "debug")]
-            Some(&mut self.fps),
+            &mut self.screen_filter_state,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
-                self.screencopy.clear();
                 self.surface
                     .submit()
                     .with_context(|| "Failed to submit buffer for display")?;
-                #[cfg(feature = "debug")]
-                self.fps.displayed();
-                state.send_frames(&self.output, &states, |_| None);
+                state.send_frames(&self.output, None);
+                state.update_primary_output(&self.output, &states);
+                state.send_dmabuf_feedback(&self.output, &states, |_| None);
                 if damage.is_some() {
-                    let mut output_presentation_feedback =
-                        state.take_presentation_feedback(&self.output, &states);
+                    let mut output_presentation_feedback = state
+                        .shell
+                        .read()
+                        .unwrap()
+                        .take_presentation_feedback(&self.output, &states);
                     output_presentation_feedback.presented(
                         state.clock.now(),
                         self.output
                             .current_mode()
-                            .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64))
-                            .unwrap_or_default(),
+                            .map(|mode| {
+                                Refresh::Fixed(Duration::from_secs_f64(
+                                    1_000.0 / mode.refresh as f64,
+                                ))
+                            })
+                            .unwrap_or(Refresh::Unknown),
                         0,
                         wp_presentation_feedback::Kind::Vsync,
                     )
                 }
             }
             Err(err) => {
-                for (session, params) in self.screencopy.drain(..) {
-                    state.still_pending(session, params)
-                }
                 self.surface.reset_buffers();
                 anyhow::bail!("Rendering failed: {}", err);
             }
@@ -302,7 +289,7 @@ fn try_vulkan_allocator(node: &DrmNode) -> Option<Allocator> {
 
     let Some(device) = devices
         .filter(|phd| {
-            phd.has_device_extension(smithay::reexports::ash::extensions::ext::PhysicalDeviceDrm::name())
+            phd.has_device_extension(smithay::reexports::ash::ext::physical_device_drm::NAME)
         })
         .find(|phd| {
             phd.primary_node().unwrap() == Some(*node) || phd.render_node().unwrap() == Some(*node)
@@ -349,21 +336,21 @@ pub fn init_backend(
         .find(|device| device.try_get_render_node().ok().flatten() == Some(drm_node))
         .with_context(|| format!("Failed to find EGLDevice for node {}", drm_node))?;
     // Initialize EGL
-    let egl = EGLDisplay::new(device).with_context(|| "Failed to create EGL display")?;
+    let egl = unsafe { EGLDisplay::new(device) }.with_context(|| "Failed to create EGL display")?;
     // Create the OpenGL context
     let context = EGLContext::new(&egl).with_context(|| "Failed to create EGL context")?;
     // Create a renderer
     let mut renderer =
         unsafe { GlowRenderer::new(context) }.with_context(|| "Failed to initialize renderer")?;
 
-    init_shaders(&mut renderer).expect("Failed to initialize renderer");
-    init_egl_client_side(dh, state, &drm_node, &mut renderer)?;
+    init_shaders(renderer.borrow_mut()).context("Failed to initialize renderer")?;
+    init_egl_client_side(dh, state, drm_node, &mut renderer)?;
 
     state.backend = BackendData::X11(X11State {
         handle,
         allocator: try_vulkan_allocator(&drm_node)
             .or_else(|| try_gbm_allocator(fd))
-            .expect("Failed to create allocator for x11"),
+            .context("Failed to create allocator for x11")?,
         _egl: egl,
         renderer,
         surfaces: Vec::new(),
@@ -378,15 +365,20 @@ pub fn init_backend(
         .common
         .output_configuration_state
         .add_heads(std::iter::once(&output));
-    state.common.shell.add_output(&output);
-    let seats = state.common.seats().cloned().collect::<Vec<_>>();
-    state.common.config.read_outputs(
-        &mut state.common.output_configuration_state,
-        &mut state.backend,
-        &mut state.common.shell,
-        seats.iter().cloned(),
-        &state.common.event_loop_handle,
-    );
+    {
+        state.common.add_output(&output);
+        state.common.config.read_outputs(
+            &mut state.common.output_configuration_state,
+            &mut state.backend,
+            &state.common.shell,
+            &state.common.event_loop_handle,
+            &mut state.common.workspace_state.update(),
+            &state.common.xdg_activation_state,
+            state.common.startup_done.clone(),
+            &state.common.clock,
+        );
+        state.common.refresh();
+    }
     state.launch_xwayland(None);
 
     event_loop
@@ -411,10 +403,7 @@ pub fn init_backend(
                     .surfaces
                     .retain(|s| s.window.id() != window_id);
                 for output in outputs_removed.into_iter() {
-                    state
-                        .common
-                        .shell
-                        .remove_output(&output, seats.iter().cloned());
+                    state.common.remove_output(&output);
                 }
             }
             X11Event::Resized {
@@ -469,7 +458,11 @@ pub fn init_backend(
                     }
                 }
             }
-            X11Event::Input(event) => state.process_x11_event(event),
+            X11Event::Input {
+                event,
+                window_id: _,
+            } => state.process_x11_event(event),
+            X11Event::Focus { .. } => {} // TODO: release all keys when losing focus and make sure to go through our keyboard filter code
         })
         .map_err(|_| anyhow::anyhow!("Failed to insert X11 Backend into event loop"))?;
 
@@ -479,27 +472,32 @@ pub fn init_backend(
 fn init_egl_client_side<R>(
     dh: &DisplayHandle,
     state: &mut State,
-    render_node: &DrmNode,
+    render_node: DrmNode,
     renderer: &mut R,
 ) -> Result<()>
 where
-    R: ImportEgl + ImportDma,
+    R: ImportDma,
 {
-    if let Err(err) = renderer.bind_wl_display(dh) {
-        warn!(
-            ?err,
-            "Unable to initialize bind display to EGL. Some older clients may not work correctly."
-        )
-    }
-
     let default_feedback =
         DmabufFeedbackBuilder::new(render_node.dev_id(), renderer.dmabuf_formats())
             .build()
             .unwrap();
-    state
+    let dmabuf_global = state
         .common
         .dmabuf_state
         .create_global_with_default_feedback::<State>(dh, &default_feedback);
+    let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
+        dh,
+        render_node
+            .dev_path_with_type(NodeType::Render)
+            .or_else(|| render_node.dev_path())
+            .ok_or(anyhow!(
+                "Could not determine path for gpu node: {}",
+                render_node
+            ))?,
+        renderer.dmabuf_formats(),
+        &dmabuf_global,
+    );
 
     info!("EGL hardware-acceleration enabled.");
 
@@ -522,7 +520,7 @@ impl State {
                         .unwrap();
 
                     let device = event.device();
-                    for seat in self.common.seats().cloned().collect::<Vec<_>>().iter() {
+                    for seat in self.common.shell.read().unwrap().seats.iter() {
                         let devices = seat.user_data().get::<Devices>().unwrap();
                         if devices.has_device(&device) {
                             seat.set_active_output(&output);
@@ -534,10 +532,10 @@ impl State {
             _ => {}
         };
 
-        self.process_input_event(event, false);
+        self.process_input_event(event);
         // TODO actually figure out the output
-        for output in self.common.shell.outputs() {
-            self.backend.x11().schedule_render(output, None);
+        for output in self.common.shell.read().unwrap().outputs() {
+            self.backend.x11().schedule_render(output);
         }
     }
 }

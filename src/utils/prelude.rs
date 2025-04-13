@@ -1,32 +1,51 @@
-use std::{cell::RefCell, sync::Mutex, time::Duration};
-
-use crate::{
-    backend::render::cursor::{CursorShape, CursorState},
-    input::{ActiveOutput, SeatId},
-};
 use smithay::{
-    desktop::utils::bbox_from_surface_tree,
-    input::{
-        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
-        Seat,
-    },
-    output::Output,
-    utils::{Buffer, IsAlive, Monotonic, Point, Rectangle, Time, Transform},
-    wayland::compositor::with_states,
+    backend::drm::VrrSupport as Support,
+    output::{Output, WeakOutput},
+    utils::{Rectangle, Transform},
 };
 
 pub use super::geometry::*;
-pub use crate::shell::{Shell, Workspace};
+pub use crate::shell::{SeatExt, Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
+use crate::{
+    config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState},
+    shell::zoom::OutputZoomState,
+};
+
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Mutex,
+    },
+};
 
 pub trait OutputExt {
     fn geometry(&self) -> Rectangle<i32, Global>;
+    fn zoomed_geometry(&self) -> Option<Rectangle<i32, Global>>;
+
+    fn adaptive_sync(&self) -> AdaptiveSync;
+    fn set_adaptive_sync(&self, vrr: AdaptiveSync);
+    fn adaptive_sync_support(&self) -> Option<Support>;
+    fn set_adaptive_sync_support(&self, vrr: Option<Support>);
+    fn mirroring(&self) -> Option<Output>;
+    fn set_mirroring(&self, output: Option<Output>);
+
+    fn is_enabled(&self) -> bool;
+    fn config(&self) -> Ref<'_, OutputConfig>;
+    fn config_mut(&self) -> RefMut<'_, OutputConfig>;
+
+    fn edid(&self) -> Option<&EdidProduct>;
 }
+
+struct Vrr(AtomicU8);
+struct VrrSupport(AtomicU8);
+struct Mirroring(Mutex<Option<WeakOutput>>);
 
 impl OutputExt for Output {
     fn geometry(&self) -> Rectangle<i32, Global> {
-        Rectangle::from_loc_and_size(self.current_location(), {
+        Rectangle::new(self.current_location(), {
             Transform::from(self.current_transform())
                 .transform_size(
                     self.current_mode()
@@ -39,103 +58,110 @@ impl OutputExt for Output {
         })
         .as_global()
     }
-}
 
-pub trait SeatExt {
-    fn id(&self) -> usize;
+    fn zoomed_geometry(&self) -> Option<Rectangle<i32, Global>> {
+        let output_geometry = self.geometry();
 
-    fn active_output(&self) -> Output;
-    fn set_active_output(&self, output: &Output);
-    fn cursor_geometry(
-        &self,
-        loc: impl Into<Point<f64, Buffer>>,
-        time: Time<Monotonic>,
-    ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)>;
-}
+        let output_state = self.user_data().get::<Mutex<OutputZoomState>>()?;
+        let mut output_state_ref = output_state.lock().unwrap();
 
-impl SeatExt for Seat<State> {
-    fn id(&self) -> usize {
-        self.user_data().get::<SeatId>().unwrap().0
+        let focal_point = output_state_ref.current_focal_point().to_global(self);
+        let mut zoomed_output_geo = output_geometry.to_f64();
+        zoomed_output_geo.loc -= focal_point;
+        zoomed_output_geo = zoomed_output_geo.downscale(output_state_ref.current_level());
+        zoomed_output_geo.loc += focal_point;
+
+        Some(zoomed_output_geo.to_i32_round())
     }
 
-    fn active_output(&self) -> Output {
+    fn adaptive_sync(&self) -> AdaptiveSync {
         self.user_data()
-            .get::<ActiveOutput>()
-            .map(|x| x.0.borrow().clone())
-            .unwrap()
-    }
-
-    fn set_active_output(&self, output: &Output) {
-        *self
-            .user_data()
-            .get::<ActiveOutput>()
-            .unwrap()
-            .0
-            .borrow_mut() = output.clone();
-    }
-
-    fn cursor_geometry(
-        &self,
-        loc: impl Into<Point<f64, Buffer>>,
-        time: Time<Monotonic>,
-    ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)> {
-        let location = loc.into().to_i32_round();
-
-        let cursor_status = self
-            .user_data()
-            .get::<RefCell<CursorImageStatus>>()
-            .map(|cell| {
-                let mut cursor_status = cell.borrow_mut();
-                if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                    if !surface.alive() {
-                        *cursor_status = CursorImageStatus::default_named();
-                    }
-                }
-                cursor_status.clone()
+            .get::<Vrr>()
+            .map(|vrr| match vrr.0.load(Ordering::SeqCst) {
+                2 => AdaptiveSync::Force,
+                1 => AdaptiveSync::Enabled,
+                _ => AdaptiveSync::Disabled,
             })
-            .unwrap_or(CursorImageStatus::default_named());
+            .unwrap_or(AdaptiveSync::Disabled)
+    }
+    fn set_adaptive_sync(&self, vrr: AdaptiveSync) {
+        let user_data = self.user_data();
+        user_data.insert_if_missing_threadsafe(|| Vrr(AtomicU8::new(0)));
+        user_data.get::<Vrr>().unwrap().0.store(
+            match vrr {
+                AdaptiveSync::Disabled => 0,
+                AdaptiveSync::Enabled => 1,
+                AdaptiveSync::Force => 2,
+            },
+            Ordering::SeqCst,
+        );
+    }
 
-        match cursor_status {
-            CursorImageStatus::Surface(surface) => {
-                let hotspot = with_states(&surface, |states| {
-                    states
-                        .data_map
-                        .get::<Mutex<CursorImageAttributes>>()
-                        .unwrap()
-                        .lock()
-                        .unwrap()
-                        .hotspot
-                });
-                let geo = bbox_from_surface_tree(&surface, (location.x, location.y));
-                let buffer_geo = Rectangle::from_loc_and_size(
-                    (geo.loc.x, geo.loc.y),
-                    geo.size.to_buffer(1, Transform::Normal),
-                );
-                Some((buffer_geo, (hotspot.x, hotspot.y).into()))
-            }
-            CursorImageStatus::Named(CursorIcon::Default) => {
-                let seat_userdata = self.user_data();
-                seat_userdata.insert_if_missing(CursorState::default);
-                let state = seat_userdata.get::<CursorState>().unwrap();
-                let frame = state
-                    .cursors
-                    .get(&CursorShape::Default)
-                    .unwrap()
-                    .get_image(1, Into::<Duration>::into(time).as_millis() as u32);
+    fn adaptive_sync_support(&self) -> Option<Support> {
+        self.user_data()
+            .get::<VrrSupport>()
+            .map(|vrr| match vrr.0.load(Ordering::SeqCst) {
+                0 => None,
+                2 => Some(Support::RequiresModeset),
+                3 => Some(Support::Supported),
+                _ => Some(Support::NotSupported),
+            })
+            .flatten()
+    }
 
-                Some((
-                    Rectangle::from_loc_and_size(
-                        location,
-                        (frame.width as i32, frame.height as i32),
-                    ),
-                    (frame.xhot as i32, frame.yhot as i32).into(),
-                ))
-            }
-            CursorImageStatus::Named(_) => {
-                // TODO: Handle for `cursor_shape_v1` protocol
-                None
-            }
-            CursorImageStatus::Hidden => None,
-        }
+    fn set_adaptive_sync_support(&self, vrr: Option<Support>) {
+        let user_data = self.user_data();
+        user_data.insert_if_missing_threadsafe(|| VrrSupport(AtomicU8::new(0)));
+        user_data.get::<VrrSupport>().unwrap().0.store(
+            match vrr {
+                None => 0,
+                Some(Support::NotSupported) => 1,
+                Some(Support::RequiresModeset) => 2,
+                Some(Support::Supported) => 3,
+            },
+            Ordering::SeqCst,
+        );
+    }
+
+    fn mirroring(&self) -> Option<Output> {
+        self.user_data().get::<Mirroring>().and_then(|mirroring| {
+            mirroring
+                .0
+                .lock()
+                .unwrap()
+                .clone()
+                .and_then(|o| o.upgrade())
+        })
+    }
+    fn set_mirroring(&self, output: Option<Output>) {
+        let user_data = self.user_data();
+        user_data.insert_if_missing_threadsafe(|| Mirroring(Mutex::new(None)));
+        *user_data.get::<Mirroring>().unwrap().0.lock().unwrap() =
+            output.map(|output| output.downgrade());
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.user_data()
+            .get::<RefCell<OutputConfig>>()
+            .map(|conf| conf.borrow().enabled != OutputState::Disabled)
+            .unwrap_or(false)
+    }
+
+    fn config(&self) -> Ref<'_, OutputConfig> {
+        self.user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow()
+    }
+
+    fn config_mut(&self) -> RefMut<'_, OutputConfig> {
+        self.user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow_mut()
+    }
+
+    fn edid(&self) -> Option<&EdidProduct> {
+        self.user_data().get()
     }
 }

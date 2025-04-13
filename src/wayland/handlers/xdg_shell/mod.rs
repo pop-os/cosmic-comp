@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{element::CosmicWindow, CosmicMapped, CosmicSurface, ManagedLayer},
+    shell::{
+        element::CosmicWindow, grabs::ReleaseMode, CosmicMapped, CosmicSurface, ManagedLayer,
+        PendingWindow,
+    },
     utils::prelude::*,
-    wayland::protocols::screencopy::SessionType,
+    wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
 };
 use smithay::{
     delegate_xdg_shell,
     desktop::{
         find_popup_root_surface, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-        PopupUngrabStrategy, Window,
+        PopupUngrabStrategy,
     },
     input::{pointer::Focus, Seat},
     output::Output,
@@ -17,18 +20,20 @@ use smithay::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::{wl_output::WlOutput, wl_seat::WlSeat},
     },
-    utils::Serial,
+    utils::{Logical, Point, Serial},
     wayland::{
+        compositor::with_states,
         seat::WaylandFocus,
         shell::xdg::{
-            PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
+            PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
+            XdgShellState,
         },
     },
 };
 use std::cell::Cell;
 use tracing::warn;
 
-use super::{compositor::client_compositor_state, screencopy::PendingScreencopyBuffers};
+use super::{compositor::client_compositor_state, toplevel_management::minimize_rectangle};
 
 pub mod popup;
 
@@ -36,13 +41,19 @@ pub type PopupGrabData = Cell<Option<PopupGrab<State>>>;
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
-        &mut self.common.shell.xdg_shell_state
+        &mut self.common.xdg_shell_state
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        let seat = self.common.last_active_seat().clone();
-        let window = CosmicSurface::Wayland(Window::new(surface));
-        self.common.shell.pending_windows.push((window, seat, None));
+        let mut shell = self.common.shell.write().unwrap();
+        let seat = shell.seats.last_active().clone();
+        let window = CosmicSurface::from(surface);
+        shell.pending_windows.push(PendingWindow {
+            surface: window,
+            seat,
+            fullscreen: None,
+            maximized: false,
+        });
         // We will position the window after the first commit, when we know its size hints
     }
 
@@ -54,11 +65,14 @@ impl XdgShellHandler for State {
 
         if surface.get_parent_surface().is_some() {
             // let other shells deal with their popups
-            self.common.shell.unconstrain_popup(&surface);
+            self.common
+                .shell
+                .read()
+                .unwrap()
+                .unconstrain_popup(&surface);
 
             if surface.send_configure().is_ok() {
                 self.common
-                    .shell
                     .popups
                     .track_popup(PopupKind::from(surface))
                     .unwrap();
@@ -69,16 +83,18 @@ impl XdgShellHandler for State {
     fn grab(&mut self, surface: PopupSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
         let kind = PopupKind::Xdg(surface);
-        if let Some(root) = find_popup_root_surface(&kind)
-            .ok()
-            .and_then(|root| self.common.shell.element_for_wl_surface(&root))
-        {
-            let target = root.clone().into();
-            let ret = self
-                .common
+        let maybe_root = find_popup_root_surface(&kind).ok().and_then(|root| {
+            self.common
                 .shell
-                .popups
-                .grab_popup(target, kind, &seat, serial);
+                .read()
+                .unwrap()
+                .element_for_surface(&root)
+                .cloned()
+        });
+
+        if let Some(root) = maybe_root {
+            let target = root.into();
+            let ret = self.common.popups.grab_popup(target, kind, &seat, serial);
 
             if let Ok(mut grab) = ret {
                 if let Some(keyboard) = seat.get_keyboard() {
@@ -89,8 +105,14 @@ impl XdgShellHandler for State {
                         grab.ungrab(PopupUngrabStrategy::All);
                         return;
                     }
-                    Common::set_focus(self, grab.current_grab().as_ref(), &seat, Some(serial));
-                    keyboard.set_grab(PopupKeyboardGrab::new(&grab), serial);
+                    Shell::set_focus(
+                        self,
+                        grab.current_grab().as_ref(),
+                        &seat,
+                        Some(serial),
+                        false,
+                    );
+                    keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
                 }
 
                 if let Some(pointer) = seat.get_pointer() {
@@ -127,7 +149,11 @@ impl XdgShellHandler for State {
             state.positioner = positioner;
         });
 
-        self.common.shell.unconstrain_popup(&surface);
+        self.common
+            .shell
+            .read()
+            .unwrap()
+            .unconstrain_popup(&surface);
         surface.send_repositioned(token);
         if let Err(err) = surface.send_configure() {
             warn!(
@@ -139,7 +165,26 @@ impl XdgShellHandler for State {
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
-        Shell::move_request(self, surface.wl_surface(), &seat, serial)
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some((grab, focus)) = shell.move_request(
+            surface.wl_surface(),
+            &seat,
+            serial,
+            ReleaseMode::NoMouseButtons,
+            false,
+            &self.common.config,
+            &self.common.event_loop_handle,
+            true,
+        ) {
+            std::mem::drop(shell);
+            if grab.is_touch_grab() {
+                seat.get_touch().unwrap().set_grab(self, grab, serial);
+            } else {
+                seat.get_pointer()
+                    .unwrap()
+                    .set_grab(self, grab, serial, focus)
+            }
+        }
     }
 
     fn resize_request(
@@ -150,60 +195,121 @@ impl XdgShellHandler for State {
         edges: xdg_toplevel::ResizeEdge,
     ) {
         let seat = Seat::from_resource(&seat).unwrap();
-        Shell::resize_request(self, surface.wl_surface(), &seat, serial, edges.into())
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some((grab, focus)) = shell.resize_request(
+            surface.wl_surface(),
+            &seat,
+            serial,
+            edges.into(),
+            self.common.config.cosmic_conf.edge_snap_threshold,
+            true,
+        ) {
+            std::mem::drop(shell);
+            if grab.is_touch_grab() {
+                seat.get_touch().unwrap().set_grab(self, grab, serial)
+            } else {
+                seat.get_pointer()
+                    .unwrap()
+                    .set_grab(self, grab, serial, focus)
+            }
+        }
+    }
+
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            if !mapped.is_stack()
+                || mapped.active_window().wl_surface().as_deref() == Some(surface.wl_surface())
+            {
+                shell.minimize_request(&mapped)
+            }
+        }
     }
 
     fn maximize_request(&mut self, surface: ToplevelSurface) {
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_wl_surface(surface.wl_surface())
-            .cloned()
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.maximize_request(&mapped, &seat, true)
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
         {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped
-                    .windows()
-                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
-                    .unwrap();
-                workspace.maximize_request(&window)
-            }
+            pending.maximized = true;
         }
     }
 
     fn unmaximize_request(&mut self, surface: ToplevelSurface) {
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_wl_surface(surface.wl_surface())
-            .cloned()
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            shell.unmaximize_request(&mapped);
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
         {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped
-                    .windows()
-                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
-                    .unwrap();
-                workspace.unmaximize_request(&window);
-            }
+            pending.maximized = false;
         }
     }
 
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
-        let active_output = {
-            let seat = self.common.last_active_seat();
-            seat.active_output()
+        let mut shell = self.common.shell.write().unwrap();
+        let seat = shell.seats.last_active().clone();
+        let Some(focused_output) = seat.focused_output() else {
+            return;
         };
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
-            .unwrap_or_else(|| active_output.clone());
+            .unwrap_or_else(|| focused_output.clone());
 
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_wl_surface(surface.wl_surface())
-            .cloned()
-        {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            let from = minimize_rectangle(&output, &mapped.active_window());
+
+            if let Some(set) = shell
+                .workspaces
+                .sets
+                .values_mut()
+                .find(|set| set.sticky_layer.mapped().any(|m| m == &mapped))
+            {
+                let mapped = if mapped
+                    .stack_ref()
+                    .map(|stack| stack.len() > 1)
+                    .unwrap_or(false)
+                {
+                    let stack = mapped.stack_ref().unwrap();
+                    let surface = stack
+                        .surfaces()
+                        .find(|s| s.wl_surface().as_deref() == Some(surface.wl_surface()))
+                        .unwrap();
+                    stack.remove_window(&surface);
+                    CosmicMapped::from(CosmicWindow::new(
+                        surface,
+                        self.common.event_loop_handle.clone(),
+                        self.common.theme.clone(),
+                    ))
+                } else {
+                    set.sticky_layer.unmap(&mapped);
+                    mapped
+                };
+
+                let workspace_handle = shell.active_space(&output).unwrap().handle.clone();
+                for (window, _) in mapped.windows() {
+                    toplevel_enter_output(&window, &output);
+                    toplevel_enter_workspace(&window, &workspace_handle);
+                }
+
+                let workspace = shell.active_space_mut(&output).unwrap();
+                workspace.floating_layer.map(mapped.clone(), None);
+
+                workspace.fullscreen_request(
+                    &mapped.active_window(),
+                    Some((ManagedLayer::Sticky, workspace_handle)),
+                    from,
+                    &seat,
+                );
+            } else if let Some(workspace) = shell.space_for_mut(&mapped) {
                 if workspace.output != output {
                     let (mapped, layer) = if mapped
                         .stack_ref()
@@ -213,7 +319,7 @@ impl XdgShellHandler for State {
                         let stack = mapped.stack_ref().unwrap();
                         let surface = stack
                             .surfaces()
-                            .find(|s| s.wl_surface().as_ref() == Some(surface.wl_surface()))
+                            .find(|s| s.wl_surface().as_deref() == Some(surface.wl_surface()))
                             .unwrap();
                         stack.remove_window(&surface);
                         (
@@ -233,68 +339,57 @@ impl XdgShellHandler for State {
                         (mapped, layer)
                     };
                     let handle = workspace.handle.clone();
-                    std::mem::drop(workspace);
 
-                    let workspace_handle = self.common.shell.active_space(&output).handle.clone();
+                    let workspace_handle = shell.active_space(&output).unwrap().handle.clone();
                     for (window, _) in mapped.windows() {
-                        self.common
-                            .shell
-                            .toplevel_info_state
-                            .toplevel_enter_output(&window, &output);
-                        self.common
-                            .shell
-                            .toplevel_info_state
-                            .toplevel_enter_workspace(&window, &workspace_handle);
+                        toplevel_enter_output(&window, &output);
+                        toplevel_enter_workspace(&window, &workspace_handle);
                     }
 
-                    let workspace = self.common.shell.active_space_mut(&output);
+                    let workspace = shell.active_space_mut(&output).unwrap();
                     workspace.floating_layer.map(mapped.clone(), None);
-                    workspace.fullscreen_request(&mapped.active_window(), Some((layer, handle)));
+
+                    workspace.fullscreen_request(
+                        &mapped.active_window(),
+                        Some((layer, handle)),
+                        from,
+                        &seat,
+                    );
                 } else {
                     let (window, _) = mapped
                         .windows()
-                        .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
+                        .find(|(w, _)| w.wl_surface().as_deref() == Some(surface.wl_surface()))
                         .unwrap();
-                    workspace.fullscreen_request(&window, None)
+                    workspace.fullscreen_request(&window, None, from, &seat)
                 }
             }
-        } else {
-            if let Some(o) = self
-                .common
-                .shell
-                .pending_windows
-                .iter_mut()
-                .find(|(s, _, _)| s.wl_surface().as_ref() == Some(surface.wl_surface()))
-                .map(|(_, _, o)| o)
-            {
-                *o = Some(output);
-            }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
+        {
+            pending.fullscreen = Some(output);
         }
     }
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_wl_surface(surface.wl_surface())
-            .cloned()
-        {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(surface.wl_surface()).cloned() {
+            if let Some(workspace) = shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
                     .windows()
-                    .find(|(w, _)| w.wl_surface().as_ref() == Some(surface.wl_surface()))
+                    .find(|(w, _)| w.wl_surface().as_deref() == Some(surface.wl_surface()))
                     .unwrap();
                 if let Some((layer, previous_workspace)) = workspace.unfullscreen_request(&window) {
                     let old_handle = workspace.handle.clone();
-                    let new_workspace_handle = self
-                        .common
-                        .shell
+                    let new_workspace_handle = shell
+                        .workspaces
                         .space_for_handle(&previous_workspace)
                         .is_some()
                         .then_some(previous_workspace)
                         .unwrap_or(old_handle); // if the workspace doesn't exist anymore, we can still remap on the right layer
 
-                    self.common.shell.remap_unfullscreened_window(
+                    shell.remap_unfullscreened_window(
                         mapped,
                         &old_handle,
                         &new_workspace_handle,
@@ -302,21 +397,36 @@ impl XdgShellHandler for State {
                     );
                 }
             }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
+        {
+            pending.fullscreen.take();
         }
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        let outputs = self
-            .common
-            .shell
-            .visible_outputs_for_surface(surface.wl_surface())
-            .collect::<Vec<_>>();
-        for output in outputs.iter() {
-            self.common.shell.active_space_mut(output).refresh();
-        }
+        let (output, clients) = {
+            let mut shell = self.common.shell.write().unwrap();
+            let seat = shell.seats.last_active().clone();
+            shell.unmap_surface(
+                surface.wl_surface(),
+                &seat,
+                &mut self.common.toplevel_info_state,
+            );
 
-        // animations might be unblocked now
-        let clients = self.common.shell.update_animations();
+            let output = shell
+                .visible_output_for_surface(surface.wl_surface())
+                .cloned();
+            if let Some(output) = output.as_ref() {
+                shell.refresh_active_space(output);
+            }
+
+            // animations might be unblocked now
+            (output, shell.update_animations())
+        };
+
         {
             let dh = self.common.display_handle.clone();
             for client in clients.values() {
@@ -324,32 +434,44 @@ impl XdgShellHandler for State {
             }
         }
 
-        // screencopy
-        let mut scheduled_sessions = self.schedule_workspace_sessions(surface.wl_surface());
-        for output in outputs.into_iter() {
-            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                scheduled_sessions
-                    .get_or_insert_with(Vec::new)
-                    .extend(sessions.borrow_mut().drain(..));
-            }
-            self.backend.schedule_render(
-                &self.common.event_loop_handle,
-                &output,
-                scheduled_sessions.as_ref().map(|sessions| {
-                    sessions
-                        .iter()
-                        .filter(|(s, _)| match s.session_type() {
-                            SessionType::Output(o) | SessionType::Workspace(o, _)
-                                if o == output =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>()
-                }),
-            );
+        if let Some(output) = output.as_ref() {
+            self.backend.schedule_render(&output);
+        }
+    }
+
+    fn show_window_menu(
+        &mut self,
+        surface: ToplevelSurface,
+        seat: WlSeat,
+        serial: Serial,
+        mut location: Point<i32, Logical>,
+    ) {
+        let seat = Seat::from_resource(&seat).unwrap();
+        location -= with_states(surface.wl_surface(), |states| {
+            states
+                .cached_state
+                .get::<SurfaceCachedState>()
+                .current()
+                .geometry
+        })
+        .unwrap_or_default()
+        .loc;
+
+        let shell = self.common.shell.read().unwrap();
+        let res = shell.menu_request(
+            surface.wl_surface(),
+            &seat,
+            serial,
+            location,
+            false,
+            &self.common.config,
+            &self.common.event_loop_handle,
+        );
+        if let Some((grab, focus)) = res {
+            std::mem::drop(shell);
+            seat.get_pointer()
+                .unwrap()
+                .set_grab(self, grab, serial, focus)
         }
     }
 }

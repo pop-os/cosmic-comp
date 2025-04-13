@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::State;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use cosmic_comp_config::NumlockState;
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
 use tracing::{info, warn};
 
@@ -45,17 +46,82 @@ pub fn init_backend_auto(
         let output = state
             .common
             .shell
+            .read()
+            .unwrap()
             .outputs()
             .next()
-            .with_context(|| "Backend initialized without output")?;
-        let initial_seat = crate::input::add_seat(
+            .with_context(|| "Backend initialized without output")
+            .cloned()?;
+        let initial_seat = crate::shell::create_seat(
             dh,
             &mut state.common.seat_state,
-            output,
+            &output,
             &state.common.config,
             "seat-0".into(),
         );
-        state.common.add_seat(initial_seat);
+
+        let keyboard = initial_seat
+            .get_keyboard()
+            .ok_or_else(|| anyhow!("`shell::create_seat` did not setup keyboard"))?;
+
+        state
+            .common
+            .shell
+            .write()
+            .unwrap()
+            .seats
+            .add_seat(initial_seat.clone());
+
+        if state
+            .common
+            .config
+            .cosmic_conf
+            .accessibility_zoom
+            .start_on_login
+        {
+            state.common.shell.write().unwrap().trigger_zoom(
+                &initial_seat,
+                None,
+                1.0 + (state.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.),
+                &state.common.config.cosmic_conf.accessibility_zoom,
+                true,
+                &state.common.event_loop_handle,
+            );
+        }
+
+        let desired_numlock = state
+            .common
+            .config
+            .cosmic_conf
+            .keyboard_config
+            .numlock_state;
+        // Restore numlock state based on config.
+        let toggle_numlock = match desired_numlock {
+            NumlockState::BootOff => keyboard.modifier_state().num_lock,
+            NumlockState::BootOn => !keyboard.modifier_state().num_lock,
+            NumlockState::LastBoot => {
+                keyboard.modifier_state().num_lock
+                    != state.common.config.dynamic_conf.numlock().last_state
+            }
+        };
+
+        // If we're enabling numlock...
+        if toggle_numlock {
+            /// Linux scancode for numlock key.
+            const NUMLOCK_SCANCODE: u32 = 69;
+            crate::config::change_modifier_state(&keyboard, NUMLOCK_SCANCODE, state);
+        }
+        {
+            {
+                state
+                    .common
+                    .startup_done
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                for output in state.common.shell.read().unwrap().outputs() {
+                    state.backend.schedule_render(&output);
+                }
+            }
+        }
     }
     res
 }

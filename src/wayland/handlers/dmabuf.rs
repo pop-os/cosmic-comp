@@ -2,10 +2,12 @@
 
 use crate::state::{BackendData, State};
 use smithay::{
-    backend::{allocator::dmabuf::Dmabuf, renderer::ImportDma},
+    backend::allocator::dmabuf::Dmabuf,
     delegate_dmabuf,
-    wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportError},
+    reexports::wayland_server::Resource,
+    wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
 };
+use tracing::warn;
 
 impl DmabufHandler for State {
     fn dmabuf_state(&mut self) -> &mut DmabufState {
@@ -16,23 +18,38 @@ impl DmabufHandler for State {
         &mut self,
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
-    ) -> Result<(), ImportError> {
-        match &mut self.backend {
-            BackendData::Kms(ref mut state) => state
-                .dmabuf_imported(global, dmabuf)
-                .map_err(|_| ImportError::Failed),
-            BackendData::Winit(ref mut state) => state
-                .backend
-                .renderer()
-                .import_dmabuf(&dmabuf, None)
-                .map(|_| ())
-                .map_err(|_| ImportError::Failed),
-            BackendData::X11(ref mut state) => state
-                .renderer
-                .import_dmabuf(&dmabuf, None)
-                .map(|_| ())
-                .map_err(|_| ImportError::Failed),
-            _ => unreachable!("No backend set when importing dmabuf"),
+        import_notifier: ImportNotifier,
+    ) {
+        match self
+            .backend
+            .dmabuf_imported(import_notifier.client(), global, dmabuf)
+        {
+            Err(err) => {
+                tracing::debug!(?err, "dmabuf import failed");
+                import_notifier.failed()
+            }
+            Ok(Some(node)) => {
+                // kms backend
+                let Ok(buffer) = import_notifier.successful::<State>() else {
+                    return;
+                };
+
+                if let BackendData::Kms(kms_state) = &mut self.backend {
+                    if let Some(device) = kms_state
+                        .drm_devices
+                        .values_mut()
+                        .find(|dev| dev.render_node == node)
+                    {
+                        device.active_buffers.insert(buffer.downgrade());
+                    }
+                    if let Err(err) = kms_state.refresh_used_devices() {
+                        warn!(?err, "Failed to init devices.");
+                    };
+                }
+            }
+            Ok(None) => {
+                let _ = import_notifier.successful::<State>();
+            }
         }
     }
 }

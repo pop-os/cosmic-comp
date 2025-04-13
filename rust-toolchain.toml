@@ -1,2 +1,3 @@
 [toolchain]
-channel = "1.70"
+channel = "1.82"
+components = [ "rust-src" ]

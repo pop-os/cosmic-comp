@@ -1,41 +1,56 @@
-use std::{ffi::OsString, os::unix::io::OwnedFd};
+use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
-    backend::render::cursor::{load_cursor_theme, Cursor, CursorShape},
-    shell::{focus::target::KeyboardFocusTarget, CosmicSurface, Shell},
+    backend::render::cursor::{load_cursor_theme, Cursor},
+    shell::{
+        focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow, Shell,
+    },
     state::State,
     utils::prelude::*,
-    wayland::{handlers::screencopy::PendingScreencopyBuffers, protocols::screencopy::SessionType},
+    wayland::handlers::{
+        toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
+    },
 };
+use cosmic_comp_config::EavesdroppingKeyboardMode;
 use smithay::{
-    backend::drm::DrmNode,
+    backend::{
+        drm::DrmNode,
+        input::{ButtonState, KeyState, Keycode},
+    },
     desktop::space::SpaceElement,
-    reexports::x11rb::protocol::xproto::Window as X11Window,
-    utils::{Logical, Point, Rectangle, Size},
-    wayland::selection::{
-        data_device::{
-            clear_data_device_selection, current_data_device_selection_userdata,
-            request_data_device_client_selection, set_data_device_selection,
+    input::{keyboard::ModifiersState, pointer::CursorIcon},
+    reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
+    utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER},
+    wayland::{
+        selection::{
+            data_device::{
+                clear_data_device_selection, current_data_device_selection_userdata,
+                request_data_device_client_selection, set_data_device_selection,
+            },
+            primary_selection::{
+                clear_primary_selection, current_primary_selection_userdata,
+                request_primary_client_selection, set_primary_selection,
+            },
+            SelectionTarget,
         },
-        primary_selection::{
-            clear_primary_selection, current_primary_selection_userdata,
-            request_primary_client_selection, set_primary_selection,
-        },
-        SelectionTarget,
+        xdg_activation::XdgActivationToken,
     },
     xwayland::{
-        xwm::{Reorder, XwmId},
-        X11Surface, X11Wm, XWayland, XWaylandEvent, XwmHandler,
+        xwm::{Reorder, X11Relatable, XwmId},
+        X11Surface, X11Wm, XWayland, XWaylandClientData, XWaylandEvent, XwmHandler,
     },
 };
 use tracing::{error, trace, warn};
+use xkbcommon::xkb::Keysym;
 
 #[derive(Debug)]
 pub struct XWaylandState {
+    pub client: Client,
     pub xwm: Option<X11Wm>,
     pub display: u32,
-    #[allow(unused)]
-    xwayland: XWayland,
+    pub pressed_keys: Vec<Keycode>,
+    pub pressed_buttons: Vec<u32>,
+    pub last_modifier_state: Option<ModifiersState>,
 }
 
 impl State {
@@ -44,84 +59,469 @@ impl State {
             return;
         }
 
-        let (xwayland, source) = XWayland::new(&self.common.display_handle);
-        let token =
-            match self
-                .common
-                .event_loop_handle
-                .insert_source(source, move |event, _, data| match event {
-                    XWaylandEvent::Ready {
-                        connection,
-                        client,
-                        client_fd: _,
-                        display: _,
-                    } => {
-                        let mut wm = match X11Wm::start_wm(
-                            data.common.event_loop_handle.clone(),
-                            data.common.display_handle.clone(),
-                            connection,
-                            client,
-                        ) {
-                            Ok(wm) => wm,
-                            Err(err) => {
-                                error!(?err, "Failed to start Xwayland WM");
-                                return;
-                            }
-                        };
-
-                        let (theme, size) = load_cursor_theme();
-                        let cursor = Cursor::load(&theme, CursorShape::Default, size);
-                        let image = cursor.get_image(1, 0);
-                        if let Err(err) = wm.set_cursor(
-                            &image.pixels_rgba,
-                            Size::from((image.width as u16, image.height as u16)),
-                            Point::from((image.xhot as u16, image.yhot as u16)),
-                        ) {
-                            warn!(
-                                id = ?wm.id(),
-                                ?err,
-                                "Failed to set default cursor for Xwayland WM",
-                            );
-                        }
-
-                        let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
-                        xwayland_state.xwm = Some(wm);
-                    }
-                    XWaylandEvent::Exited => {
-                        if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
-                            xwayland_state.xwm = None;
-                        }
-                    }
-                }) {
-                Ok(token) => token,
-                Err(err) => {
-                    error!(?err, "Failed to listen for Xwayland");
-                    return;
-                }
-            };
-
-        match xwayland.start(
-            self.common.event_loop_handle.clone(),
+        let (xwayland, client) = match XWayland::spawn(
+            &self.common.display_handle,
             None,
-            //vec![("WAYLAND_DEBUG", "client")].into_iter(),
             std::iter::empty::<(OsString, OsString)>(),
             true,
+            Stdio::null(),
+            Stdio::null(),
             |user_data| {
                 if let Some(node) = render_node {
-                    user_data.insert_if_missing(|| node);
+                    user_data.insert_if_missing_threadsafe(|| node);
                 }
             },
         ) {
-            Ok(display) => {
-                self.common.xwayland_state = Some(XWaylandState {
-                    xwayland,
-                    xwm: None,
-                    display,
-                });
-            }
+            Ok((xwayland, client)) => (xwayland, client),
             Err(err) => {
                 error!(?err, "Failed to start Xwayland.");
-                self.common.event_loop_handle.remove(token);
+                self.notify_ready();
+                return;
+            }
+        };
+
+        match self
+            .common
+            .event_loop_handle
+            .insert_source(xwayland, move |event, _, data| match event {
+                XWaylandEvent::Ready {
+                    x11_socket,
+                    display_number,
+                } => {
+                    data.common.xwayland_state = Some(XWaylandState {
+                        client: client.clone(),
+                        xwm: None,
+                        display: display_number,
+                        pressed_keys: Vec::new(),
+                        pressed_buttons: Vec::new(),
+                        last_modifier_state: None,
+                    });
+
+                    let mut wm = match X11Wm::start_wm(
+                        data.common.event_loop_handle.clone(),
+                        x11_socket,
+                        client.clone(),
+                    ) {
+                        Ok(wm) => wm,
+                        Err(err) => {
+                            error!(?err, "Failed to start Xwayland WM");
+                            return;
+                        }
+                    };
+
+                    let (theme, size) = load_cursor_theme();
+                    let cursor = Cursor::load(&theme, CursorIcon::Default, size);
+                    let image = cursor.get_image(1, 0);
+                    if let Err(err) = wm.set_cursor(
+                        &image.pixels_rgba,
+                        Size::from((image.width as u16, image.height as u16)),
+                        Point::from((image.xhot as u16, image.yhot as u16)),
+                    ) {
+                        warn!(
+                            id = ?wm.id(),
+                            ?err,
+                            "Failed to set default cursor for Xwayland WM",
+                        );
+                    }
+
+                    let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
+                    xwayland_state.xwm = Some(wm);
+                    data.notify_ready();
+
+                    data.common.update_xwayland_scale();
+                }
+                XWaylandEvent::Error => {
+                    if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
+                        xwayland_state.xwm = None;
+                    }
+                    data.notify_ready();
+                }
+            }) {
+            Ok(_token) => {}
+            Err(err) => {
+                error!(?err, "Failed to listen for Xwayland");
+                self.notify_ready();
+                return;
+            }
+        }
+    }
+}
+
+impl Common {
+    fn has_x_keyboard_focus(&self, xwmid: XwmId) -> bool {
+        let keyboard = self
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .get_keyboard()
+            .unwrap();
+
+        keyboard
+            .current_focus()
+            .is_some_and(|target| target.is_xwm(xwmid))
+    }
+
+    fn has_x_pointer_focus(&self, xwmid: XwmId) -> bool {
+        let pointer = self
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .get_pointer()
+            .unwrap();
+
+        if let Some(x_client) = self.xwayland_state.as_ref().and_then(|xstate| {
+            xstate
+                .xwm
+                .as_ref()
+                .is_some_and(|xwm| xwm.id() == xwmid)
+                .then_some(&xstate.client)
+        }) {
+            pointer
+                .current_focus()
+                .is_some_and(|target| target.is_client(x_client))
+        } else {
+            false
+        }
+    }
+
+    pub fn xwayland_notify_focus_change(
+        &mut self,
+        target: Option<KeyboardFocusTarget>,
+        serial: Serial,
+    ) {
+        if let Some(xwm_id) = self
+            .xwayland_state
+            .as_ref()
+            .and_then(|xstate| xstate.xwm.as_ref())
+            .map(|xwm| xwm.id())
+        {
+            if target
+                .as_ref()
+                .is_some_and(|target| matches!(target, KeyboardFocusTarget::LockSurface(_)))
+                || (!self.has_x_keyboard_focus(xwm_id)
+                    && target.as_ref().is_some_and(|target| target.is_xwm(xwm_id)))
+            {
+                self.xwayland_reset_eavesdropping(serial);
+            }
+        }
+    }
+
+    pub fn xwayland_reset_eavesdropping(&mut self, serial: Serial) {
+        let seat = self.shell.read().unwrap().seats.last_active().clone();
+        let keyboard = seat.get_keyboard().unwrap();
+        let pointer = seat.get_pointer().unwrap();
+
+        let xstate = self.xwayland_state.as_mut().unwrap();
+        xstate.last_modifier_state.take();
+        for key in xstate.pressed_keys.drain(..).rev() {
+            for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
+                wl_keyboard.key(serial.into(), 0, key.raw() - 8, KeyState::Released.into());
+            }
+        }
+        for button in xstate.pressed_buttons.drain(..).rev() {
+            for wl_pointer in pointer.client_pointers(&xstate.client) {
+                wl_pointer.button(serial.into(), 0, button, ButtonState::Released.into());
+            }
+        }
+    }
+
+    pub fn xwayland_notify_key_event(
+        &mut self,
+        sym: Keysym,
+        code: Keycode,
+        state: KeyState,
+        serial: Serial,
+        time: u32,
+    ) {
+        let config = self.config.cosmic_conf.xwayland_eavesdropping.keyboard;
+        if config == EavesdroppingKeyboardMode::None {
+            return;
+        }
+
+        if self.xwayland_state.as_ref().is_none_or(|xstate| {
+            xstate
+                .xwm
+                .as_ref()
+                .is_none_or(|xwm| self.has_x_keyboard_focus(xwm.id()))
+        }) {
+            return;
+        }
+
+        let keyboard = self
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .get_keyboard()
+            .unwrap();
+        let modifiers = keyboard.modifier_state();
+        let is_modifier = sym.is_modifier_key();
+
+        let xstate = self.xwayland_state.as_mut().unwrap();
+        if state == KeyState::Pressed {
+            match config {
+                EavesdroppingKeyboardMode::Modifiers => {
+                    if !is_modifier {
+                        return;
+                    }
+                }
+                EavesdroppingKeyboardMode::Combinations => {
+                    // don't forward alpha-numeric keys, just because shift is held, but forward shift itself
+                    if !is_modifier && !(modifiers.alt || modifiers.ctrl || modifiers.logo) {
+                        return;
+                    }
+                }
+                _ => {}
+            }
+
+            xstate.pressed_keys.push(code);
+        } else {
+            let mut removed = false;
+            xstate.pressed_keys.retain(|c| {
+                if *c == code {
+                    removed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if !removed {
+                // Don't forward released events, we don't have a record off.
+                return;
+            }
+        }
+
+        tracing::trace!("Forwaring key {} {:?} to xwayland", code.raw() - 8, state);
+        for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
+            wl_keyboard.key(serial.into(), time, code.raw() - 8, state.into());
+            if xstate.last_modifier_state != Some(modifiers) {
+                xstate.last_modifier_state = Some(modifiers);
+                wl_keyboard.modifiers(
+                    serial.into(),
+                    modifiers.serialized.depressed,
+                    modifiers.serialized.latched,
+                    modifiers.serialized.locked,
+                    modifiers.serialized.layout_effective,
+                );
+            }
+        }
+    }
+
+    pub fn xwayland_notify_pointer_button_event(
+        &mut self,
+        button: u32,
+        state: ButtonState,
+        serial: Serial,
+        time: u32,
+    ) {
+        if !self.config.cosmic_conf.xwayland_eavesdropping.pointer {
+            return;
+        }
+
+        let pointer = self
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .get_pointer()
+            .unwrap();
+
+        if self.xwayland_state.as_ref().is_none_or(|xstate| {
+            xstate
+                .xwm
+                .as_ref()
+                .is_none_or(|xwm| self.has_x_pointer_focus(xwm.id()))
+        }) {
+            return;
+        }
+
+        let xstate = self.xwayland_state.as_mut().unwrap();
+        if state == ButtonState::Pressed {
+            xstate.pressed_buttons.push(button);
+        } else {
+            let mut removed = false;
+            xstate.pressed_buttons.retain(|b| {
+                if *b == button {
+                    removed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if !removed {
+                // Don't forward released events, we don't have a record off.
+                // This can happen if `xwayland_reset_eavesdropping` was called in between
+                return;
+            }
+        }
+
+        tracing::trace!("Forwaring ptr button {} {:?} to Xwayland", button, state);
+        for wl_pointer in pointer.client_pointers(&xstate.client) {
+            wl_pointer.button(serial.into(), time, button, state.into());
+        }
+    }
+
+    pub fn update_x11_stacking_order(&mut self) {
+        let shell = self.shell.read().unwrap();
+        let active_output = shell.seats.last_active().active_output();
+        if let Some(xwm) = self
+            .xwayland_state
+            .as_mut()
+            .and_then(|state| state.xwm.as_mut())
+        {
+            // front to back, given that is how the workspace enumerates
+            let order = shell
+                .workspaces
+                .sets
+                .iter()
+                .filter(|(output, _)| *output == &active_output)
+                .chain(
+                    shell
+                        .workspaces
+                        .sets
+                        .iter()
+                        .filter(|(output, _)| *output != &active_output),
+                )
+                .flat_map(|(_, set)| {
+                    set.sticky_layer
+                        .mapped()
+                        .flat_map(|mapped| {
+                            let active = mapped.active_window();
+                            std::iter::once(active.clone()).chain(
+                                mapped
+                                    .is_stack()
+                                    .then(move || {
+                                        mapped
+                                            .windows()
+                                            .map(|(s, _)| s)
+                                            .filter(move |s| s != &active)
+                                    })
+                                    .into_iter()
+                                    .flatten(),
+                            )
+                        })
+                        .chain(
+                            set.workspaces
+                                .iter()
+                                .enumerate()
+                                .filter(|(i, _)| *i == set.active)
+                                .chain(
+                                    set.workspaces
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(i, _)| *i != set.active),
+                                )
+                                .flat_map(|(_, workspace)| {
+                                    workspace.get_fullscreen().cloned().into_iter().chain(
+                                        workspace
+                                            .mapped()
+                                            .chain(
+                                                workspace
+                                                    .minimized_windows
+                                                    .iter()
+                                                    .map(|m| &m.window),
+                                            )
+                                            .flat_map(|mapped| {
+                                                let active = mapped.active_window();
+                                                std::iter::once(active.clone()).chain(
+                                                    mapped
+                                                        .is_stack()
+                                                        .then(move || {
+                                                            mapped
+                                                                .windows()
+                                                                .map(|(s, _)| s)
+                                                                .filter(move |s| s != &active)
+                                                        })
+                                                        .into_iter()
+                                                        .flatten(),
+                                                )
+                                            }),
+                                    )
+                                }),
+                        )
+                })
+                .collect::<Vec<_>>();
+
+            // we don't include the popup elements, which contain the OR windows, because we are not supposed to restack them.
+            // Which is also why we match upwards, to not disturb elements at the top.
+            //
+            // But this also means we need to match across all outputs and workspaces at once, to be sure nothing that shouldn't be on top of us is.
+            if let Err(err) = xwm.update_stacking_order_upwards(order.iter().rev()) {
+                warn!(wm_id = ?xwm.id(), ?err, "Failed to update Xwm stacking order.");
+            }
+        }
+    }
+
+    pub fn update_xwayland_scale(&mut self) {
+        let new_scale = if self.config.cosmic_conf.descale_xwayland {
+            let shell = self.shell.read().unwrap();
+            shell
+                .outputs()
+                .map(|o| o.current_scale().integer_scale())
+                .max()
+                .unwrap_or(1)
+        } else {
+            1
+        };
+
+        // compare with current scale
+        if Some(new_scale) != self.xwayland_scale {
+            if let Some(xwayland) = self.xwayland_state.as_mut() {
+                // backup geometries
+                let geometries = self
+                    .shell
+                    .read()
+                    .unwrap()
+                    .mapped()
+                    .flat_map(|m| m.windows().map(|(s, _)| s))
+                    .filter_map(|s| s.0.x11_surface().map(|x| (x.clone(), x.geometry())))
+                    .collect::<Vec<_>>();
+
+                // update xorg dpi
+                if let Some(xwm) = xwayland.xwm.as_mut() {
+                    let dpi = new_scale.abs() * 96 * 1024;
+                    if let Err(err) = xwm.set_xsettings(
+                        [
+                            ("Xft/DPI".into(), dpi.into()),
+                            ("Gdk/UnscaledDPI".into(), (dpi / new_scale).into()),
+                            ("Gdk/WindowScalingFactor".into(), new_scale.into()),
+                        ]
+                        .into_iter(),
+                    ) {
+                        warn!(wm_id = ?xwm.id(), ?err, "Failed to update XSETTINGS.");
+                    }
+                }
+
+                // update client scale
+                xwayland
+                    .client
+                    .get_data::<XWaylandClientData>()
+                    .unwrap()
+                    .compositor_state
+                    .set_client_scale(new_scale as u32);
+
+                // update wl/xdg_outputs
+                for output in self.shell.read().unwrap().outputs() {
+                    output.change_current_state(None, None, None, None);
+                }
+
+                // update geometries
+                for (surface, geometry) in geometries.iter() {
+                    if let Err(err) = surface.configure(*geometry) {
+                        warn!(?err, surface = ?surface.window_id(), "Failed to update geometry after scale change");
+                    }
+                }
+                self.update_x11_stacking_order();
+
+                self.xwayland_scale = Some(new_scale);
             }
         }
     }
@@ -145,118 +545,109 @@ impl XwmHandler for State {
             warn!(?window, ?err, "Failed to send Xwayland Mapped-Event",);
         }
 
-        let surface = CosmicSurface::X11(window.clone());
-        if self.common.shell.element_for_surface(&surface).is_some() {
+        let mut shell = self.common.shell.write().unwrap();
+        let startup_id = window.startup_id();
+        if shell.element_for_surface(&window).is_some() {
             return;
         }
 
-        let seat = self.common.last_active_seat().clone();
-        self.common
-            .shell
-            .pending_windows
-            .push((surface, seat, None));
+        let seat = shell.seats.last_active().clone();
+        if let Some(context) = startup_id
+            .map(XdgActivationToken::from)
+            .and_then(|token| self.common.xdg_activation_state.data_for_token(&token))
+            .and_then(|data| data.user_data.get::<ActivationContext>())
+        {
+            shell.pending_activations.insert(
+                crate::shell::ActivationKey::X11(window.window_id()),
+                context.clone(),
+            );
+        }
+
+        let surface = CosmicSurface::from(window);
+        shell.pending_windows.push(PendingWindow {
+            surface,
+            seat,
+            fullscreen: None,
+            maximized: false,
+        });
     }
 
     fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
-        if let Some((window, _, _)) = self
-            .common
-            .shell
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(window) = shell
             .pending_windows
             .iter()
-            .find(|(window, _, _)| {
-                if let CosmicSurface::X11(window) = window {
-                    window == &surface
-                } else {
-                    false
-                }
-            })
-            .cloned()
+            .find(|pending| pending.surface.x11_surface() == Some(&surface))
+            .map(|pending| pending.surface.clone())
         {
-            Shell::map_window(self, &window);
+            if !shell
+                .pending_activations
+                .contains_key(&crate::shell::ActivationKey::X11(surface.window_id()))
+            {
+                if let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id()) {
+                    if let Some(context) = self
+                        .common
+                        .xdg_activation_state
+                        .data_for_token(&XdgActivationToken::from(startup_id))
+                        .and_then(|data| data.user_data.get::<ActivationContext>())
+                    {
+                        shell.pending_activations.insert(
+                            crate::shell::ActivationKey::X11(surface.window_id()),
+                            context.clone(),
+                        );
+                    }
+                }
+            }
+            let res = shell.map_window(
+                &window,
+                &mut self.common.toplevel_info_state,
+                &mut self.common.workspace_state,
+                &self.common.event_loop_handle,
+            );
+            if let Some(target) = res {
+                let seat = shell.seats.last_active().clone();
+                std::mem::drop(shell);
+                Shell::set_focus(self, Some(&target), &seat, None, false);
+            }
         }
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        if self
-            .common
-            .shell
+        let mut shell = self.common.shell.write().unwrap();
+        if shell
             .override_redirect_windows
             .iter()
             .any(|or| or == &window)
         {
             return;
         }
-        Shell::map_override_redirect(self, window)
+        shell.map_override_redirect(window)
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window.clone());
+        let mut shell = self.common.shell.write().unwrap();
         if window.is_override_redirect() {
-            self.common
-                .shell
-                .override_redirect_windows
-                .retain(|or| or != &window);
-        } else if let Some((element, space)) = self
-            .common
-            .shell
-            .element_for_surface(&surface)
-            .cloned()
-            .and_then(|element| {
-                self.common
-                    .shell
-                    .space_for_mut(&element)
-                    .map(|space| (element, space))
-            })
-        {
-            if element.is_stack() && element.stack_ref().unwrap().len() >= 2 {
-                element.stack_ref().unwrap().remove_window(&surface);
-            } else {
-                space.unmap(&element);
-            }
+            shell.override_redirect_windows.retain(|or| or != &window);
+        } else {
+            let seat = shell.seats.last_active().clone();
+            shell.unmap_surface(&window, &seat, &mut self.common.toplevel_info_state);
         }
 
         let outputs = if let Some(wl_surface) = window.wl_surface() {
-            self.common
-                .shell
-                .visible_outputs_for_surface(&wl_surface)
+            shell
+                .visible_output_for_surface(&wl_surface)
+                .into_iter()
+                .cloned()
                 .collect::<Vec<_>>()
         } else {
-            self.common.shell.outputs().cloned().collect::<Vec<_>>()
+            shell.outputs().cloned().collect::<Vec<_>>()
         };
         for output in outputs.iter() {
-            self.common.shell.active_space_mut(output).refresh();
+            shell.refresh_active_space(output);
         }
 
-        // screencopy
-        let mut scheduled_sessions = window
-            .wl_surface()
-            .map(|wl_surface| self.schedule_workspace_sessions(&wl_surface))
-            .unwrap_or_default();
-
         for output in outputs.into_iter() {
-            if let Some(sessions) = output.user_data().get::<PendingScreencopyBuffers>() {
-                scheduled_sessions
-                    .get_or_insert_with(Vec::new)
-                    .extend(sessions.borrow_mut().drain(..));
-            }
-            self.backend.schedule_render(
-                &self.common.event_loop_handle,
-                &output,
-                scheduled_sessions.as_ref().map(|sessions| {
-                    sessions
-                        .iter()
-                        .filter(|(s, _)| match s.session_type() {
-                            SessionType::Output(o) | SessionType::Workspace(o, _)
-                                if o == output =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>()
-                }),
-            );
+            self.backend.schedule_render(&output);
         }
     }
 
@@ -271,26 +662,49 @@ impl XwmHandler for State {
         _reorder: Option<Reorder>,
     ) {
         // We only allow floating X11 windows to resize themselves. Nothing else
-        let mut current_geo = window.geometry();
-        if let Some(mapped) = self
-            .common
-            .shell
-            .element_for_surface(&CosmicSurface::X11(window.clone()))
+        let shell = self.common.shell.read().unwrap();
+
+        if let Some(mapped) = shell
+            .element_for_surface(&window)
+            .filter(|mapped| !mapped.is_minimized())
         {
-            let space = self.common.shell.space_for(mapped).unwrap();
-            if space.is_floating(mapped) {
-                mapped.set_geometry(
-                    Rectangle::from_loc_and_size(
-                        current_geo.loc,
-                        (
-                            w.map(|w| w as i32).unwrap_or(current_geo.size.w),
-                            h.map(|h| h as i32).unwrap_or(current_geo.size.h),
-                        ),
-                    )
-                    .as_global(),
+            let current_geo = if let Some(workspace) = shell.space_for(mapped) {
+                workspace
+                    .element_geometry(mapped)
+                    .filter(|_| workspace.is_floating(mapped))
+                    .map(|geo| geo.to_global(workspace.output()))
+            } else if let Some((output, set)) = shell
+                .workspaces
+                .sets
+                .iter()
+                .find(|(_, set)| set.sticky_layer.mapped().any(|m| m == mapped))
+            {
+                Some(
+                    set.sticky_layer
+                        .element_geometry(mapped)
+                        .unwrap()
+                        .to_global(&output),
                 )
+            } else {
+                None
+            };
+
+            if let Some(current_geo) = current_geo {
+                let ssd_height = mapped.ssd_height(false).unwrap_or(0);
+                mapped.set_geometry(Rectangle::new(
+                    current_geo.loc,
+                    (
+                        w.map(|w| w as i32).unwrap_or(current_geo.size.w),
+                        h.map(|h| h as i32 + ssd_height)
+                            .unwrap_or(current_geo.size.h),
+                    )
+                        .into(),
+                ))
+            } else {
+                let _ = window.configure(None); // ack and force old state
             }
         } else {
+            let mut current_geo = window.geometry();
             if let Some(x) = x {
                 current_geo.loc.x = x;
             }
@@ -316,8 +730,9 @@ impl XwmHandler for State {
         above: Option<X11Window>,
     ) {
         if window.is_override_redirect() {
+            let mut shell = self.common.shell.write().unwrap();
             if let Some(id) = above {
-                let or_windows = &mut self.common.shell.override_redirect_windows;
+                let or_windows = &mut shell.override_redirect_windows;
                 if let Some(own_pos) = or_windows.iter().position(|or| or == &window) {
                     let compare_pos = or_windows
                         .iter()
@@ -331,7 +746,7 @@ impl XwmHandler for State {
             }
 
             let geo = window.geometry().as_global();
-            for (output, overlap) in self.common.shell.outputs().cloned().map(|o| {
+            for (output, overlap) in shell.outputs().cloned().map(|o| {
                 let intersection = o.geometry().intersection(geo);
                 (o, intersection)
             }) {
@@ -352,55 +767,161 @@ impl XwmHandler for State {
         resize_edge: smithay::xwayland::xwm::ResizeEdge,
     ) {
         if let Some(wl_surface) = window.wl_surface() {
-            let seat = self.common.last_active_seat().clone();
-            Shell::resize_request(self, &wl_surface, &seat, None, resize_edge.into())
+            let mut shell = self.common.shell.write().unwrap();
+            let seat = shell.seats.last_active().clone();
+            if let Some((grab, focus)) = shell.resize_request(
+                &wl_surface,
+                &seat,
+                None,
+                resize_edge.into(),
+                self.common.config.cosmic_conf.edge_snap_threshold,
+                true,
+            ) {
+                std::mem::drop(shell);
+                if grab.is_touch_grab() {
+                    seat.get_touch()
+                        .unwrap()
+                        .set_grab(self, grab, SERIAL_COUNTER.next_serial())
+                } else {
+                    seat.get_pointer().unwrap().set_grab(
+                        self,
+                        grab,
+                        SERIAL_COUNTER.next_serial(),
+                        focus,
+                    )
+                }
+            }
         }
     }
 
     fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
         if let Some(wl_surface) = window.wl_surface() {
-            let seat = self.common.last_active_seat().clone();
-            Shell::move_request(self, &wl_surface, &seat, None)
-        }
-    }
-
-    fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.maximize_request(&window);
+            let mut shell = self.common.shell.write().unwrap();
+            let seat = shell.seats.last_active().clone();
+            if let Some((grab, focus)) = shell.move_request(
+                &wl_surface,
+                &seat,
+                None,
+                ReleaseMode::NoMouseButtons,
+                false,
+                &self.common.config,
+                &self.common.event_loop_handle,
+                true,
+            ) {
+                std::mem::drop(shell);
+                if grab.is_touch_grab() {
+                    seat.get_touch()
+                        .unwrap()
+                        .set_grab(self, grab, SERIAL_COUNTER.next_serial())
+                } else {
+                    seat.get_pointer().unwrap().set_grab(
+                        self,
+                        grab,
+                        SERIAL_COUNTER.next_serial(),
+                        focus,
+                    )
+                }
             }
         }
     }
 
+    fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.maximize_request(&mapped, &seat, true);
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.maximized = true;
+        }
+    }
+
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
-                workspace.unmaximize_request(&window);
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
+            shell.unmaximize_request(&mapped);
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.maximized = false;
+        }
+    }
+
+    fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
+            if !mapped.is_stack() || mapped.active_window().is_window(&window) {
+                shell.minimize_request(&mapped);
+            }
+        }
+    }
+
+    fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
+            let seat = shell.seats.last_active().clone();
+            shell.unminimize_request(&mapped, &seat);
+            if mapped.is_stack() {
+                let maybe_surface = mapped.windows().find(|(w, _)| w.is_window(&window));
+                if let Some((surface, _)) = maybe_surface {
+                    mapped.stack_ref().unwrap().set_active(&surface);
+                }
             }
         }
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                workspace.fullscreen_request(&surface, None)
+        let mut shell = self.common.shell.write().unwrap();
+        let seat = shell.seats.last_active().clone();
+        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
+            if let Some((output, handle)) = shell
+                .space_for(&mapped)
+                .map(|workspace| (workspace.output.clone(), workspace.handle.clone()))
+            {
+                if let Some((surface, _)) = mapped
+                    .windows()
+                    .find(|(w, _)| w.x11_surface() == Some(&window))
+                {
+                    let from = minimize_rectangle(&output, &surface);
+                    shell
+                        .workspaces
+                        .space_for_handle_mut(&handle)
+                        .unwrap()
+                        .fullscreen_request(&surface, None, from, &seat);
+                }
             }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            let output = seat.active_output();
+            pending.fullscreen = Some(output);
         }
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let surface = CosmicSurface::X11(window);
-        if let Some(mapped) = self.common.shell.element_for_surface(&surface).cloned() {
-            if let Some(workspace) = self.common.shell.space_for_mut(&mapped) {
-                let (window, _) = mapped.windows().find(|(w, _)| w == &surface).unwrap();
+        let mut shell = self.common.shell.write().unwrap();
+        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
+            if let Some(workspace) = shell.space_for_mut(&mapped) {
+                let (window, _) = mapped
+                    .windows()
+                    .find(|(w, _)| w.x11_surface() == Some(&window))
+                    .unwrap();
                 let previous = workspace.unfullscreen_request(&window);
                 assert!(previous.is_none());
             }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.fullscreen.take();
         }
     }
 
@@ -411,10 +932,17 @@ impl XwmHandler for State {
         mime_type: String,
         fd: OwnedFd,
     ) {
-        let seat = self.common.last_active_seat();
+        let seat = self
+            .common
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .clone();
         match selection {
             SelectionTarget::Clipboard => {
-                if let Err(err) = request_data_device_client_selection(seat, mime_type, fd) {
+                if let Err(err) = request_data_device_client_selection(&seat, mime_type, fd) {
                     error!(
                         ?err,
                         "Failed to request current wayland clipboard for Xwayland.",
@@ -422,7 +950,7 @@ impl XwmHandler for State {
                 }
             }
             SelectionTarget::Primary => {
-                if let Err(err) = request_primary_client_selection(seat, mime_type, fd) {
+                if let Err(err) = request_primary_client_selection(&seat, mime_type, fd) {
                     error!(
                         ?err,
                         "Failed to request current wayland primary selection for Xwayland.",
@@ -433,27 +961,33 @@ impl XwmHandler for State {
     }
 
     fn allow_selection_access(&mut self, xwm: XwmId, _selection: SelectionTarget) -> bool {
-        self.common.is_x_focused(xwm)
+        self.common.has_x_keyboard_focus(xwm)
     }
 
     fn new_selection(&mut self, xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         trace!(?selection, ?mime_types, "Got Selection from Xwayland",);
 
-        if self.common.is_x_focused(xwm) {
-            let seat = self.common.last_active_seat();
-            match selection {
-                SelectionTarget::Clipboard => {
-                    set_data_device_selection(&self.common.display_handle, &seat, mime_types, xwm)
-                }
-                SelectionTarget::Primary => {
-                    set_primary_selection(&self.common.display_handle, &seat, mime_types, xwm)
-                }
+        let seat = self
+            .common
+            .shell
+            .read()
+            .unwrap()
+            .seats
+            .last_active()
+            .clone();
+        match selection {
+            SelectionTarget::Clipboard => {
+                set_data_device_selection(&self.common.display_handle, &seat, mime_types, xwm)
+            }
+            SelectionTarget::Primary => {
+                set_primary_selection(&self.common.display_handle, &seat, mime_types, xwm)
             }
         }
     }
 
     fn cleared_selection(&mut self, xwm: XwmId, selection: SelectionTarget) {
-        for seat in self.common.seats() {
+        let shell = self.common.shell.read().unwrap();
+        for seat in shell.seats.iter() {
             match selection {
                 SelectionTarget::Clipboard => {
                     if current_data_device_selection_userdata(seat).as_deref() == Some(&xwm) {
@@ -468,18 +1002,9 @@ impl XwmHandler for State {
             }
         }
     }
-}
 
-impl Common {
-    fn is_x_focused(&self, xwm: XwmId) -> bool {
-        if let Some(keyboard) = self.last_active_seat().get_keyboard() {
-            if let Some(KeyboardFocusTarget::Element(mapped)) = keyboard.current_focus() {
-                if let CosmicSurface::X11(surface) = mapped.active_window() {
-                    return surface.xwm_id().unwrap() == xwm;
-                }
-            }
-        }
-
-        false
+    fn disconnected(&mut self, _xwm: XwmId) {
+        let xwayland_state = self.common.xwayland_state.as_mut().unwrap();
+        xwayland_state.xwm = None;
     }
 }

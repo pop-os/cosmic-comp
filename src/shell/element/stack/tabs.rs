@@ -1,6 +1,5 @@
 use super::tab::{Tab, TabBackgroundTheme, TabMessage, TabRuleTheme, MIN_ACTIVE_TAB_WIDTH};
 use cosmic::{
-    font::Font,
     iced::{id::Id, widget, Element},
     iced_core::{
         event,
@@ -9,21 +8,17 @@ use cosmic::{
         widget::{
             operation::{
                 scrollable::{AbsoluteOffset, RelativeOffset},
-                Operation, OperationOutputWrapper, Scrollable,
+                Operation, Scrollable,
             },
-            text::StyleSheet as TextStyleSheet,
             tree::{self, Tree},
             Widget,
         },
-        Background, Clipboard, Color, Length, Point, Rectangle, Shell, Size, Vector,
-    },
-    iced_style::{
-        button::StyleSheet as ButtonStyleSheet, container::StyleSheet as ContainerStyleSheet,
-        rule::StyleSheet as RuleStyleSheet,
+        Background, Border, Clipboard, Color, Length, Point, Rectangle, Renderer, Shell, Size,
+        Vector,
     },
     iced_widget::container::draw_background,
     theme,
-    widget::{icon::from_name, Icon},
+    widget::{container::Catalog, icon::from_name},
     Apply,
 };
 use keyframe::{
@@ -35,12 +30,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub struct Tabs<'a, Message, Renderer>
-where
-    Renderer: cosmic::iced_core::Renderer,
-    Renderer::Theme: RuleStyleSheet,
-{
-    elements: Vec<Element<'a, Message, Renderer>>,
+pub struct Tabs<'a, Message> {
+    elements: Vec<cosmic::Element<'a, Message>>,
     id: Option<Id>,
     height: Length,
     width: Length,
@@ -53,6 +44,7 @@ struct ScrollAnimationState {
     start_time: Instant,
     start: Offset,
     end: Offset,
+    extra: Offset,
 }
 
 #[derive(Debug, Clone)]
@@ -83,8 +75,23 @@ impl Scrollable for State {
             start_time: Instant::now(),
             start: self.offset_x,
             end: new_offset,
+            extra: Offset::Absolute(0.),
         });
         self.offset_x = new_offset;
+    }
+
+    fn scroll_by(
+        &mut self,
+        offset: AbsoluteOffset,
+        _bounds: Rectangle,
+        _content_bounds: Rectangle,
+    ) {
+        self.scroll_animation = Some(ScrollAnimationState {
+            start_time: Instant::now(),
+            start: self.offset_x,
+            end: self.offset_x,
+            extra: Offset::Absolute(offset.x.max(0.0)),
+        });
     }
 }
 
@@ -118,106 +125,84 @@ impl Offset {
 const SCROLL_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 const TAB_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 
-impl<'a, Message, Renderer> Tabs<'a, Message, Renderer>
+impl<'a, Message> Tabs<'a, Message>
 where
-    Renderer: cosmic::iced_core::Renderer + 'a,
-    Renderer: cosmic::iced_core::text::Renderer<Font = Font>,
-    Renderer::Theme: ButtonStyleSheet<Style = theme::iced::Button>,
-    Renderer::Theme: ContainerStyleSheet<Style = theme::Container>,
-    Renderer::Theme: RuleStyleSheet<Style = theme::Rule>,
-    Renderer::Theme: TextStyleSheet,
-    Message: TabMessage + 'a,
-    widget::Button<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
-    widget::Container<'a, Message, Renderer>: Into<Element<'a, Message, Renderer>>,
-    Icon: Into<Element<'a, Message, Renderer>>,
+    Message: TabMessage + 'static,
 {
     pub fn new(
-        tabs: impl IntoIterator<Item = Tab<Message>>,
+        tabs: impl ExactSizeIterator<Item = Tab<Message>>,
         active: usize,
         activated: bool,
         group_focused: bool,
     ) -> Self {
-        let mut tabs = tabs
-            .into_iter()
-            .enumerate()
-            .map(|(i, tab)| {
-                let rule = if activated {
-                    TabRuleTheme::ActiveActivated
-                } else {
-                    TabRuleTheme::ActiveDeactivated
-                };
+        let tabs = tabs.into_iter().enumerate().map(|(i, tab)| {
+            let rule = if activated {
+                TabRuleTheme::ActiveActivated
+            } else {
+                TabRuleTheme::ActiveDeactivated
+            };
 
-                let tab = if i == active {
-                    tab.rule_style(rule)
-                        .background_style(if activated {
-                            TabBackgroundTheme::ActiveActivated
-                        } else {
-                            TabBackgroundTheme::ActiveDeactivated
-                        })
-                        .font(cosmic::font::FONT_SEMIBOLD)
-                        .active()
-                } else if i.checked_sub(1) == Some(active) {
-                    tab.rule_style(rule).non_active()
-                } else {
-                    tab.non_active()
-                };
-
-                Element::new(tab.internal(i))
-            })
-            .collect::<Vec<_>>();
-
-        tabs.push(
-            widget::vertical_rule(4)
-                .style(if tabs.len() - 1 == active {
-                    if activated {
-                        TabRuleTheme::ActiveActivated
+            let tab = if i == active {
+                tab.rule_style(rule)
+                    .background_style(if activated {
+                        TabBackgroundTheme::ActiveActivated
                     } else {
-                        TabRuleTheme::ActiveDeactivated
-                    }
-                } else {
-                    TabRuleTheme::Default
-                })
-                .into(),
-        );
+                        TabBackgroundTheme::ActiveDeactivated
+                    })
+                    .font(cosmic::font::semibold())
+                    .active()
+            } else if i.checked_sub(1) == Some(active) {
+                tab.rule_style(rule).non_active()
+            } else {
+                tab.non_active()
+            };
+
+            Element::new(tab.internal(i))
+        });
+
+        let tabs_rule = widget::vertical_rule(4).class(if tabs.len() - 1 == active {
+            if activated {
+                TabRuleTheme::ActiveActivated
+            } else {
+                TabRuleTheme::ActiveDeactivated
+            }
+        } else {
+            TabRuleTheme::Default
+        });
+
+        let rule_style = if group_focused {
+            TabRuleTheme::ActiveActivated
+        } else {
+            TabRuleTheme::Default
+        };
+
+        let prev_button = from_name("go-previous-symbolic")
+            .size(16)
+            .prefer_svg(true)
+            .icon()
+            .apply(widget::button)
+            .class(theme::iced::Button::Text)
+            .on_press(Message::scroll_back());
+
+        let next_button = from_name("go-next-symbolic")
+            .size(16)
+            .prefer_svg(true)
+            .icon()
+            .apply(widget::button)
+            .class(theme::iced::Button::Text)
+            .on_press(Message::scroll_further());
+
+        let mut elements = Vec::with_capacity(tabs.len() + 5);
+
+        elements.push(widget::vertical_rule(4).class(rule_style).into());
+        elements.push(prev_button.into());
+        elements.extend(tabs);
+        elements.push(tabs_rule.into());
+        elements.push(next_button.into());
+        elements.push(widget::vertical_rule(4).class(rule_style).into());
 
         Tabs {
-            elements: vec![
-                widget::vertical_rule(4)
-                    .style(if group_focused {
-                        TabRuleTheme::ActiveActivated
-                    } else {
-                        TabRuleTheme::Default
-                    })
-                    .into(),
-                from_name("go-previous-symbolic")
-                    .size(16)
-                    .prefer_svg(true)
-                    .icon()
-                    .apply(widget::button)
-                    .style(theme::iced::Button::Text)
-                    .on_press(Message::scroll_back())
-                    .into(),
-            ]
-            .into_iter()
-            .chain(tabs)
-            .chain(vec![
-                from_name("go-next-symbolic")
-                    .size(16)
-                    .prefer_svg(true)
-                    .icon()
-                    .apply(widget::button)
-                    .style(theme::iced::Button::Text)
-                    .on_press(Message::scroll_further())
-                    .into(),
-                widget::vertical_rule(4)
-                    .style(if group_focused {
-                        TabRuleTheme::ActiveActivated
-                    } else {
-                        TabRuleTheme::Default
-                    })
-                    .into(),
-            ])
-            .collect(),
+            elements,
             id: None,
             width: Length::Fill,
             height: Length::Shrink,
@@ -269,6 +254,7 @@ impl State {
 
             Vector::new(
                 animation.start.absolute(bounds.width, content_bounds.width)
+                    + animation.extra.absolute(bounds.width, content_bounds.width) * percentage
                     + (animation.end.absolute(bounds.width, content_bounds.width)
                         - animation.start.absolute(bounds.width, content_bounds.width))
                         * percentage,
@@ -322,17 +308,12 @@ impl State {
     }
 }
 
-impl<'a, Message, Renderer> Widget<Message, Renderer> for Tabs<'a, Message, Renderer>
+impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for Tabs<'a, Message>
 where
-    Renderer: cosmic::iced_core::Renderer,
-    Renderer::Theme: ContainerStyleSheet<Style = theme::Container> + RuleStyleSheet,
     Message: TabMessage,
 {
-    fn width(&self) -> Length {
-        self.width
-    }
-    fn height(&self) -> Length {
-        self.height
+    fn size(&self) -> Size<Length> {
+        Size::new(self.width, self.height)
     }
 
     fn id(&self) -> Option<Id> {
@@ -348,18 +329,19 @@ where
     }
 
     fn state(&self) -> tree::State {
-        tree::State::Some(Box::new(State::default()))
+        tree::State::Some(Box::<State>::default())
     }
 
     fn children(&self) -> Vec<Tree> {
-        self.elements.iter().map(|elem| Tree::new(elem)).collect()
+        self.elements.iter().map(Tree::new).collect()
     }
 
     fn diff(&mut self, tree: &mut Tree) {
-        tree.diff_children(&mut self.elements)
+        tree.diff_children(&mut self.elements);
     }
 
-    fn layout(&self, renderer: &Renderer, limits: &Limits) -> Node {
+    #[allow(clippy::too_many_lines)]
+    fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
         let limits = limits.width(self.width).height(self.height);
 
         // calculate the smallest possible size
@@ -372,18 +354,19 @@ where
 
         let mut nodes = self.elements[2..self.elements.len() - 2]
             .iter()
-            .map(|tab| tab.as_widget().layout(renderer, &child_limits))
+            .zip(tree.children.iter_mut().skip(2))
+            .map(|(tab, tab_tree)| tab.as_widget().layout(tab_tree, renderer, &child_limits))
             .collect::<Vec<_>>();
 
         // sum up
         let min_size = nodes
             .iter()
-            .map(|node| node.size())
+            .map(Node::size)
             .fold(Size::new(0., 0.), |a, b| Size {
                 width: a.width + b.width,
                 height: a.height.max(b.height),
             });
-        let size = limits.resolve(min_size);
+        let size = limits.resolve(self.width, self.height, min_size);
 
         if min_size.width <= size.width {
             // we don't need to scroll
@@ -397,10 +380,13 @@ where
                     cosmic::iced_core::layout::flex::Axis::Horizontal,
                     renderer,
                     &limits,
+                    self.width,
+                    self.height,
                     0.into(),
                     0.,
                     cosmic::iced::Alignment::Center,
                     &self.elements[2..self.elements.len() - 2],
+                    &mut tree.children[2..self.elements.len() - 2],
                 )
                 .children()
                 .to_vec()
@@ -412,7 +398,8 @@ where
 
                 let mut nodes = self.elements[2..self.elements.len() - 3]
                     .iter()
-                    .map(|tab| {
+                    .zip(tree.children[2..].iter_mut())
+                    .map(|(tab, tab_tree)| {
                         let child_limits = Limits::new(
                             Size::new(min_width, limits.min().height),
                             Size::new(f32::INFINITY, limits.max().height),
@@ -420,16 +407,15 @@ where
                         .width(Length::Shrink)
                         .height(Length::Shrink);
 
-                        let mut node = tab.as_widget().layout(renderer, &child_limits);
-                        node.move_to(Point::new(offset, 0.));
+                        let mut node = tab.as_widget().layout(tab_tree, renderer, &child_limits);
+                        node = node.move_to(Point::new(offset, 0.));
                         offset += node.bounds().width;
                         node
                     })
                     .collect::<Vec<_>>();
                 nodes.push({
-                    let mut node = Node::new(Size::new(4., limits.max().height));
-                    node.move_to(Point::new(offset, 0.));
-                    node
+                    let node = Node::new(Size::new(4., limits.max().height));
+                    node.move_to(Point::new(offset, 0.))
                 });
                 nodes
             };
@@ -453,7 +439,7 @@ where
             // we scroll, so use the computed min size, but add scroll buttons.
             let mut offset = 30.;
             for node in &mut nodes {
-                node.move_to(Point::new(offset, 0.));
+                *node = node.clone().move_to(Point::new(offset, 0.));
                 offset += node.bounds().width;
             }
             let last_position = Point::new(size.width - 34., 0.);
@@ -466,7 +452,7 @@ where
                         Size::new(16., 16.),
                         vec![Node::new(Size::new(16., 16.))],
                     );
-                    node.move_to(Point::new(9., (size.height - 16.) / 2.));
+                    node = node.move_to(Point::new(9., (size.height - 16.) / 2.));
                     node
                 }]
                 .into_iter()
@@ -474,7 +460,7 @@ where
                 .chain(vec![
                     {
                         let mut node = Node::new(Size::new(4., size.height));
-                        node.move_to(last_position);
+                        node = node.move_to(last_position);
                         node
                     },
                     {
@@ -482,12 +468,13 @@ where
                             Size::new(16., 16.),
                             vec![Node::new(Size::new(16., 16.))],
                         );
-                        node.move_to(last_position + Vector::new(9., (size.height - 16.) / 2.));
+                        node =
+                            node.move_to(last_position + Vector::new(9., (size.height - 16.) / 2.));
                         node
                     },
                     {
                         let mut node = Node::new(Size::new(4., size.height));
-                        node.move_to(last_position + Vector::new(30., 0.));
+                        node = node.move_to(last_position + Vector::new(30., 0.));
                         node
                     },
                 ])
@@ -496,11 +483,12 @@ where
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn draw(
         &self,
         tree: &Tree,
-        renderer: &mut Renderer,
-        theme: &<Renderer as cosmic::iced_core::Renderer>::Theme,
+        renderer: &mut cosmic::Renderer,
+        theme: &cosmic::Theme,
         style: &renderer::Style,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
@@ -518,17 +506,20 @@ where
                 height: b.bounds().height,
             });
 
-        let background_style = ContainerStyleSheet::appearance(
+        let background_style = Catalog::style(
             theme,
-            &theme::Container::custom(|theme| widget::container::Appearance {
+            &theme::Container::custom(|theme| widget::container::Style {
                 icon_color: None,
                 text_color: None,
-                background: Some(Background::Color(Color::from(
-                    theme.cosmic().palette.neutral_3,
+                background: Some(Background::Color(super::tab::primary_container_color(
+                    theme.cosmic(),
                 ))),
-                border_radius: 0.0.into(),
-                border_width: 0.0,
-                border_color: Color::TRANSPARENT,
+                border: Border {
+                    radius: 0.0.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
             }),
         );
         draw_background(renderer, &background_style, bounds);
@@ -634,8 +625,8 @@ where
                                     &offset_viewport,
                                 );
                             },
-                        )
-                    })
+                        );
+                    });
                 }
             });
         });
@@ -690,11 +681,13 @@ where
         &self,
         tree: &mut Tree,
         layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn Operation<OperationOutputWrapper<Message>>,
+        renderer: &cosmic::Renderer,
+        operation: &mut dyn Operation<()>,
     ) {
         let state = tree.state.downcast_mut::<State>();
         let bounds = layout.bounds();
+        let content_layout = layout.children().next().unwrap();
+        let content_bounds = content_layout.bounds();
 
         state.cleanup_old_animations();
 
@@ -702,6 +695,7 @@ where
             state,
             self.id.as_ref(),
             bounds,
+            content_bounds,
             Vector { x: 0.0, y: 0.0 }, /* seemingly unused */
         );
 
@@ -714,17 +708,18 @@ where
                     child
                         .as_widget()
                         .operate(state, layout, renderer, operation);
-                })
+                });
         });
     }
 
+    #[allow(clippy::too_many_lines)]
     fn on_event(
         &mut self,
         tree: &mut Tree,
         event: event::Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
@@ -772,10 +767,10 @@ where
                         return Some(Difference::Movement);
                     };
                     (a_bounds != b_bounds).then(|| {
-                        if a_bounds.position() != b_bounds.position() {
-                            Difference::Movement
-                        } else {
+                        if a_bounds.position() == b_bounds.position() {
                             Difference::Focus
+                        } else {
+                            Difference::Movement
                         }
                     })
                 })
@@ -821,7 +816,7 @@ where
                 let current_start = offset.x;
                 let current_end = current_start + scroll_width;
 
-                assert!((right_offset - left_offset) <= (current_end - current_start));
+                //assert!((right_offset - left_offset) <= (current_end - current_start));
                 if (left_offset - current_start).is_sign_negative()
                     || (current_end - right_offset).is_sign_negative()
                 {
@@ -843,6 +838,7 @@ where
                         start_time: Instant::now(),
                         start: Offset::Absolute(offset.x),
                         end: Offset::Absolute(new_offset.x),
+                        extra: Offset::Absolute(0.),
                     });
                     state.offset_x = Offset::Absolute(new_offset.x);
                 }
@@ -854,12 +850,7 @@ where
         let mut internal_shell = Shell::new(&mut messages);
 
         let len = self.elements.len();
-        let result = if scrolling
-            && cursor
-                .position()
-                .map(|pos| pos.x < bounds.x)
-                .unwrap_or(false)
-        {
+        let result = if scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
             self.elements[0..2]
                 .iter_mut()
                 .zip(&mut tree.children)
@@ -880,8 +871,7 @@ where
         } else if scrolling
             && cursor
                 .position()
-                .map(|pos| pos.x >= bounds.x + bounds.width)
-                .unwrap_or(false)
+                .is_some_and(|pos| pos.x >= bounds.x + bounds.width)
         {
             self.elements[len - 3..len]
                 .iter_mut()
@@ -925,7 +915,6 @@ where
                 .fold(event::Status::Ignored, event::Status::merge)
         };
 
-        std::mem::drop(internal_shell);
         for mut message in messages {
             if let Some(offset) = message.populate_scroll(AbsoluteOffset {
                 x: state.offset_x.absolute(bounds.width, content_bounds.width),
@@ -947,7 +936,7 @@ where
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         viewport: &Rectangle,
-        renderer: &Renderer,
+        renderer: &cosmic::Renderer,
     ) -> mouse::Interaction {
         let state = tree.state.downcast_ref::<State>();
 
@@ -969,12 +958,7 @@ where
             ..bounds
         };
 
-        if scrolling
-            && cursor
-                .position()
-                .map(|pos| pos.x < bounds.x)
-                .unwrap_or(false)
-        {
+        if scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
             self.elements[0..2]
                 .iter()
                 .zip(&tree.children)
@@ -988,8 +972,7 @@ where
         } else if scrolling
             && cursor
                 .position()
-                .map(|pos| pos.x >= bounds.x + bounds.width)
-                .unwrap_or(false)
+                .is_some_and(|pos| pos.x >= bounds.x + bounds.width)
         {
             self.elements[self.elements.len() - 3..self.elements.len()]
                 .iter()
@@ -1029,8 +1012,9 @@ where
         &'b mut self,
         tree: &'b mut Tree,
         layout: Layout<'_>,
-        renderer: &Renderer,
-    ) -> Option<overlay::Element<'b, Message, Renderer>> {
-        overlay::from_children(&mut self.elements, tree, layout, renderer)
+        renderer: &cosmic::Renderer,
+        translation: cosmic::iced::Vector,
+    ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
+        overlay::from_children(&mut self.elements, tree, layout, renderer, translation)
     }
 }

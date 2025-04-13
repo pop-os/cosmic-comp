@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::utils::user_data::UserDataMap;
+use smithay::utils::{user_data::UserDataMap, Rectangle};
 
 use crate::{
     shell::CosmicSurface,
     state::State,
+    utils::prelude::Global,
     wayland::protocols::toplevel_info::{
         delegate_toplevel_info, ToplevelInfoHandler, ToplevelInfoState, Window,
     },
@@ -14,10 +15,10 @@ impl ToplevelInfoHandler for State {
     type Window = CosmicSurface;
 
     fn toplevel_info_state(&self) -> &ToplevelInfoState<State, Self::Window> {
-        &self.common.shell.toplevel_info_state
+        &self.common.toplevel_info_state
     }
     fn toplevel_info_state_mut(&mut self) -> &mut ToplevelInfoState<State, Self::Window> {
-        &mut self.common.shell.toplevel_info_state
+        &mut self.common.toplevel_info_state
     }
 }
 
@@ -31,19 +32,31 @@ impl Window for CosmicSurface {
     }
 
     fn is_activated(&self) -> bool {
-        CosmicSurface::is_activated(self, false)
+        !self.is_minimized() && CosmicSurface::is_activated(self, true)
     }
 
     fn is_maximized(&self) -> bool {
-        CosmicSurface::is_maximized(self, false)
+        !self.is_minimized() && CosmicSurface::is_maximized(self, false)
     }
 
     fn is_fullscreen(&self) -> bool {
-        CosmicSurface::is_fullscreen(self, false)
+        !self.is_minimized() && CosmicSurface::is_fullscreen(self, false)
     }
 
     fn is_minimized(&self) -> bool {
-        false // TODO
+        CosmicSurface::is_minimized(self)
+    }
+
+    fn is_sticky(&self) -> bool {
+        CosmicSurface::is_sticky(self)
+    }
+
+    fn is_resizing(&self) -> bool {
+        CosmicSurface::is_resizing(self, true).unwrap_or(false)
+    }
+
+    fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {
+        CosmicSurface::global_geometry(self)
     }
 
     fn user_data(&self) -> &UserDataMap {

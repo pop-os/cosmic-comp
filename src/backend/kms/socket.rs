@@ -3,7 +3,7 @@
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::{
-        allocator::Format,
+        allocator::format::FormatSet,
         drm::{DrmNode, NodeType},
     },
     reexports::{
@@ -14,12 +14,11 @@ use smithay::{
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal},
         socket::ListeningSocketSource,
     },
-    xwayland::XWaylandClientData,
 };
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use crate::state::{ClientState, State};
+use crate::state::{advertised_node_for_client, ClientState, State};
 
 #[derive(Debug)]
 pub struct Socket {
@@ -33,9 +32,8 @@ impl State {
         &mut self,
         dh: &DisplayHandle,
         render_node: DrmNode,
-        formats: impl Iterator<Item = Format>,
+        formats: FormatSet,
     ) -> Result<Socket> {
-        let formats = formats.collect::<Vec<_>>();
         let socket_name = format!(
             "{}-{}",
             &self.common.socket.to_string_lossy(),
@@ -48,17 +46,7 @@ impl State {
         );
 
         // initialize globals
-        let filter = move |client: &Client| {
-            if let Some(normal_client) = client.get_data::<ClientState>() {
-                let dev_id = normal_client.drm_node.unwrap();
-                return dev_id == render_node;
-            }
-            if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
-                let dev_id = xwayland_client.user_data().get::<DrmNode>().unwrap();
-                return *dev_id == render_node;
-            }
-            false
-        };
+        let filter = move |client: &Client| advertised_node_for_client(client) == Some(render_node);
 
         let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), formats.clone())
             .build()
@@ -96,7 +84,10 @@ impl State {
             .insert_source(listener, move |client_stream, _, state: &mut State| {
                 if let Err(err) = state.common.display_handle.insert_client(
                     client_stream,
-                    Arc::new(state.new_client_state_with_node(render_node)),
+                    Arc::new(ClientState {
+                        advertised_drm_node: Some(render_node),
+                        ..state.new_client_state()
+                    }),
                 ) {
                     warn!(
                         socket_name = socket_name_clone,

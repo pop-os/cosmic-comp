@@ -10,12 +10,14 @@ Build-Depends:
     libfontconfig-dev,
     libgbm-dev,
     libinput-dev,
+    libpixman-1-dev,
     libseat-dev,
     libsystemd-dev,
     libudev-dev,
     libwayland-dev,
     libxcb1-dev,
     libxkbcommon-dev,
+    libdisplay-info-dev,
     rustc (>=1.57),
 Standards-Version: 4.1.1
 Homepage: https://github.com/pop-os/cosmic-comp
@@ -27,6 +29,7 @@ Depends:
     ${shlibs:Depends},
     libegl1,
     libwayland-server0,
+    libdisplay-info1,
 Recommends:
     cosmic-session,
     libgl1-mesa-dri

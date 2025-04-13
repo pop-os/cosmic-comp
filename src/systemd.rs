@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::State;
+use crate::state::Common;
 use libsystemd::daemon::{booted, notify, NotifyState};
 use std::process::Command;
 use tracing::{error, warn};
 
-pub fn ready(state: &State) {
+pub fn ready(common: &Common) {
     if booted() {
         match Command::new("systemctl")
             .args(["--user", "import-environment", "WAYLAND_DISPLAY", "DISPLAY"])
-            .env("WAYLAND_DISPLAY", &state.common.socket)
+            .env("WAYLAND_DISPLAY", &common.socket)
             .env(
                 "DISPLAY",
-                &state
-                    .common
+                &common
                     .xwayland_state
                     .as_ref()
                     .map(|s| format!(":{}", s.display))
