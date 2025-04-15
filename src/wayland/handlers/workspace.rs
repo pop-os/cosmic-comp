@@ -85,7 +85,9 @@ impl WorkspaceHandler for State {
                     other_workspace,
                     axis,
                 } => {
-                    // TODO protocol error if axis doesn't match coordinates?
+                    if axis != 0 {
+                        continue;
+                    }
                     let mut shell = self.common.shell.write().unwrap();
                     let mut update = self.common.workspace_state.update();
                     shell.workspaces.move_workspace(
@@ -100,7 +102,9 @@ impl WorkspaceHandler for State {
                     other_workspace,
                     axis,
                 } => {
-                    // TODO protocol error if axis doesn't match coordinates?
+                    if axis != 0 {
+                        continue;
+                    }
                     let mut shell = self.common.shell.write().unwrap();
                     let mut update = self.common.workspace_state.update();
                     shell.workspaces.move_workspace(
