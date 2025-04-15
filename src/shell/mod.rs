@@ -150,6 +150,10 @@ impl OverviewMode {
         }
     }
 
+    pub fn is_active(&self) -> bool {
+        matches!(self, OverviewMode::Started(_, _) | OverviewMode::Active(_))
+    }
+
     pub fn active_trigger(&self) -> Option<&Trigger> {
         if let OverviewMode::Started(trigger, _) | OverviewMode::Active(trigger) = self {
             Some(trigger)
@@ -2942,6 +2946,10 @@ impl Shell {
         evlh: &LoopHandle<'static, State>,
         client_initiated: bool,
     ) -> Option<(MoveGrab, Focus)> {
+        if self.overview_mode().0.is_active() {
+            return None;
+        }
+
         let serial = serial.into();
 
         let mut start_data =
