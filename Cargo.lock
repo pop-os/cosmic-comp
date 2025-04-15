@@ -821,6 +821,7 @@ dependencies = [
  "cosmic-config",
  "cosmic-protocols",
  "cosmic-settings-config",
+ "cosmic-text",
  "egui",
  "egui_plot",
  "i18n-embed",

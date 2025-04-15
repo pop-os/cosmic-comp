@@ -19,6 +19,7 @@ cosmic-comp-config = {path = "cosmic-comp-config"}
 cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
 cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", rev = "e706814", default-features = false, features = ["server"]}
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
+cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = ["shape-run-cache"] }
 libdisplay-info = "0.2.0"
 egui = {version = "0.30.0", optional = true}
 egui_plot = {version = "0.30.0", optional = true}

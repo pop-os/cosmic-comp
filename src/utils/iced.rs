@@ -7,7 +7,7 @@ use std::{
 
 use cosmic::{
     iced::{
-        advanced::widget::Tree,
+        advanced::{graphics::text::font_system, widget::Tree},
         event::Event,
         futures::{FutureExt, StreamExt},
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
@@ -1006,6 +1006,12 @@ where
 
                     Result::<_, ()>::Ok(damage)
                 });
+
+                // trim the shape cache
+                {
+                    let mut font_system = font_system().write().unwrap();
+                    font_system.raw().shape_run_cache.trim(1024);
+                }
             }
 
             match MemoryRenderBufferRenderElement::from_buffer(
