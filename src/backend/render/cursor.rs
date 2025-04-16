@@ -219,7 +219,7 @@ impl CursorStateInner {
     }
 }
 
-pub fn load_cursor_theme() -> (CursorTheme, u32) {
+pub fn load_cursor_env() -> (String, u32) {
     let name = std::env::var("XCURSOR_THEME")
         .ok()
         .unwrap_or_else(|| "default".into());
@@ -227,6 +227,11 @@ pub fn load_cursor_theme() -> (CursorTheme, u32) {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(24);
+    (name, size)
+}
+
+pub fn load_cursor_theme() -> (CursorTheme, u32) {
+    let (name, size) = load_cursor_env();
     (CursorTheme::load(&name), size)
 }
 
