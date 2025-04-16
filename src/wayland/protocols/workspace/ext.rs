@@ -20,9 +20,16 @@ use smithay::{
 use std::{collections::HashSet, sync::Mutex};
 
 use super::{
-    Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceGlobalData,
-    WorkspaceGroup, WorkspaceGroupHandle, WorkspaceHandler, WorkspaceState,
+    Request, Workspace, WorkspaceCapabilities, WorkspaceGlobalData, WorkspaceGroup,
+    WorkspaceGroupHandle, WorkspaceHandler, WorkspaceState,
 };
+
+#[derive(Debug, Default)]
+pub struct WorkspaceManagerDataInner {
+    pub(super) requests: Vec<Request>,
+}
+
+pub type WorkspaceManagerData = Mutex<WorkspaceManagerDataInner>;
 
 #[derive(Default)]
 pub struct WorkspaceGroupDataInner {
@@ -64,7 +71,7 @@ where
         data_init: &mut DataInit<'_, D>,
     ) {
         let state = state.workspace_state_mut();
-        let instance = data_init.init(resource, ());
+        let instance = data_init.init(resource, WorkspaceManagerData::default());
         for group in &mut state.groups {
             send_group_to_client::<D>(dh, &instance, group);
         }
@@ -77,29 +84,24 @@ where
     }
 }
 
-impl<D> Dispatch<ExtWorkspaceManagerV1, (), D> for WorkspaceState<D>
+impl<D> Dispatch<ExtWorkspaceManagerV1, WorkspaceManagerData, D> for WorkspaceState<D>
 where
     D: WorkspaceHandler,
 {
     fn request(
         state: &mut D,
-        client: &Client,
+        _client: &Client,
         obj: &ExtWorkspaceManagerV1,
         request: ext_workspace_manager_v1::Request,
-        _data: &(),
+        data: &WorkspaceManagerData,
         dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
         match request {
             ext_workspace_manager_v1::Request::Commit => {
                 if state.workspace_state().ext_instances.contains(obj) {
-                    let mut client_state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
-                        .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.commit_requests(dh, std::mem::take(&mut client_state.requests));
+                    let mut data = data.lock().unwrap();
+                    state.commit_requests(dh, std::mem::take(&mut data.requests));
                 }
             }
             ext_workspace_manager_v1::Request::Stop => {
@@ -114,7 +116,12 @@ where
         }
     }
 
-    fn destroyed(state: &mut D, _client: ClientId, resource: &ExtWorkspaceManagerV1, _data: &()) {
+    fn destroyed(
+        state: &mut D,
+        _client: ClientId,
+        resource: &ExtWorkspaceManagerV1,
+        _data: &WorkspaceManagerData,
+    ) {
         state
             .workspace_state_mut()
             .ext_instances
@@ -128,10 +135,10 @@ where
 {
     fn request(
         state: &mut D,
-        client: &Client,
+        _client: &Client,
         obj: &ExtWorkspaceGroupHandleV1,
         request: ext_workspace_group_handle_v1::Request,
-        _data: &WorkspaceGroupData,
+        data: &WorkspaceGroupData,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
@@ -144,16 +151,17 @@ where
                     .find(|g| g.ext_instances.contains(obj))
                     .map(|g| g.id)
                 {
-                    let mut state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
-                        .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.requests.push(Request::Create {
-                        in_group: WorkspaceGroupHandle { id },
-                        name: workspace,
-                    });
+                    if let Ok(manager) = data.manager.upgrade() {
+                        let mut state = manager
+                            .data::<WorkspaceManagerData>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::Create {
+                            in_group: WorkspaceGroupHandle { id },
+                            name: workspace,
+                        });
+                    }
                 }
             }
             ext_workspace_group_handle_v1::Request::Destroy => {
@@ -183,10 +191,10 @@ where
 {
     fn request(
         state: &mut D,
-        client: &Client,
+        _client: &Client,
         obj: &ExtWorkspaceHandleV1,
         request: ext_workspace_handle_v1::Request,
-        _data: &WorkspaceData,
+        data: &WorkspaceData,
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
@@ -195,39 +203,42 @@ where
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(obj)
                 {
-                    let mut state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
-                        .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.requests.push(Request::Activate(workspace_handle));
+                    if let Ok(manager) = data.manager.upgrade() {
+                        let mut state = manager
+                            .data::<WorkspaceManagerData>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::Activate(workspace_handle));
+                    }
                 }
             }
             ext_workspace_handle_v1::Request::Deactivate => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(obj)
                 {
-                    let mut state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
-                        .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.requests.push(Request::Deactivate(workspace_handle));
+                    if let Ok(manager) = data.manager.upgrade() {
+                        let mut state = manager
+                            .data::<WorkspaceManagerData>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::Deactivate(workspace_handle));
+                    }
                 }
             }
             ext_workspace_handle_v1::Request::Remove => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(obj)
                 {
-                    let mut state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
-                        .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.requests.push(Request::Remove(workspace_handle));
+                    if let Ok(manager) = data.manager.upgrade() {
+                        let mut state = manager
+                            .data::<WorkspaceManagerData>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::Remove(workspace_handle));
+                    }
                 }
             }
             ext_workspace_handle_v1::Request::Assign { workspace_group } => {
@@ -241,16 +252,17 @@ where
                         .find(|g| g.ext_instances.contains(&workspace_group))
                         .map(|g| g.id)
                     {
-                        let mut state = client
-                            .get_data::<<D as WorkspaceHandler>::Client>()
-                            .unwrap()
-                            .workspace_state()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::Assign {
-                            workspace: workspace_handle,
-                            group: WorkspaceGroupHandle { id: group_id },
-                        });
+                        if let Ok(manager) = data.manager.upgrade() {
+                            let mut state = manager
+                                .data::<WorkspaceManagerData>()
+                                .unwrap()
+                                .lock()
+                                .unwrap();
+                            state.requests.push(Request::Assign {
+                                workspace: workspace_handle,
+                                group: WorkspaceGroupHandle { id: group_id },
+                            });
+                        }
                     }
                 }
             }
