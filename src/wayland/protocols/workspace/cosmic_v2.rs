@@ -7,8 +7,7 @@ use cosmic_protocols::workspace::v2::server::{
 use smithay::reexports::{
     wayland_protocols::ext::workspace::v1::server::ext_workspace_handle_v1::ExtWorkspaceHandleV1,
     wayland_server::{
-        backend::ClientData, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New,
-        Resource, Weak,
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
     },
 };
 use std::sync::Mutex;
@@ -31,12 +30,7 @@ pub struct CosmicWorkspaceV2Data {
 
 impl<D> GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData, D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     fn bind(
         _state: &mut D,
@@ -56,12 +50,7 @@ where
 
 impl<D> Dispatch<ZcosmicWorkspaceManagerV2, (), D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     fn request(
         state: &mut D,
@@ -117,12 +106,7 @@ where
 
 impl<D> Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data, D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     fn request(
         state: &mut D,

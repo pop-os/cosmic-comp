@@ -49,16 +49,7 @@ bitflags::bitflags! {
 #[derive(Debug)]
 pub struct WorkspaceState<D>
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     dh: DisplayHandle,
     ext_global: GlobalId,
@@ -69,8 +60,7 @@ where
 }
 pub struct WorkspaceUpdateGuard<'a, D>(&'a mut WorkspaceState<D>)
 where
-    D: WorkspaceHandler + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static;
+    D: WorkspaceHandler;
 
 crate::utils::id_gen!(next_group_id, GROUP_ID, GROUP_IDS);
 crate::utils::id_gen!(next_workspace_id, WORKSPACE_ID, WORKSPACE_IDS);
@@ -189,16 +179,7 @@ pub trait WorkspaceClientHandler {
 
 impl<D> WorkspaceState<D>
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     pub fn new<F>(dh: &DisplayHandle, client_filter: F) -> WorkspaceState<D>
     where
@@ -366,15 +347,7 @@ where
 
 impl<'a, D> WorkspaceUpdateGuard<'a, D>
 where
-    D: Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     pub fn create_workspace_group(&mut self) -> WorkspaceGroupHandle {
         let id = next_group_id();
@@ -609,16 +582,7 @@ where
 
 impl<'a, D> Drop for WorkspaceUpdateGuard<'a, D>
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV2, ()>
-        + Dispatch<ZcosmicWorkspaceHandleV2, CosmicWorkspaceV2Data>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     fn drop(&mut self) {
         self.0.done();
