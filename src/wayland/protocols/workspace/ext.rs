@@ -2,23 +2,37 @@
 
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::ZcosmicWorkspaceHandleV2;
 
-use smithay::reexports::wayland_server::{
-    backend::ClientId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
-    Weak,
+use smithay::{
+    output::Output,
+    reexports::{
+        wayland_protocols::ext::workspace::v1::server::{
+            ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1, GroupCapabilities},
+            ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
+            ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
+        },
+        wayland_server::{
+            backend::ClientId, protocol::wl_output::WlOutput, Client, DataInit, Dispatch,
+            DisplayHandle, GlobalDispatch, New, Resource, Weak,
+        },
+    },
 };
 
-use std::sync::Mutex;
+use std::{collections::HashSet, sync::Mutex};
 
 use super::{
     Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceGlobalData,
-    WorkspaceGroup, WorkspaceGroupData, WorkspaceGroupHandle, WorkspaceHandler, WorkspaceState,
+    WorkspaceGroup, WorkspaceGroupHandle, WorkspaceHandler, WorkspaceState,
 };
 
-use smithay::reexports::wayland_protocols::ext::workspace::v1::server::{
-    ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
-    ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
-    ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
-};
+#[derive(Default)]
+pub struct WorkspaceGroupDataInner {
+    outputs: Vec<Output>,
+    wl_outputs: HashSet<WlOutput>,
+    capabilities: Option<GroupCapabilities>,
+    workspace_count: usize,
+}
+
+pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
 
 #[derive(Default)]
 pub struct WorkspaceDataInner {

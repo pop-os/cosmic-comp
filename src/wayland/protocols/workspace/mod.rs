@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashSet, sync::Mutex};
+use std::sync::Mutex;
 
 use smithay::{
     output::Output,
     reexports::{
         wayland_protocols::ext::workspace::v1::server::{
-            ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1,
+            ext_workspace_group_handle_v1::{ExtWorkspaceGroupHandleV1, GroupCapabilities},
             ext_workspace_handle_v1::{self, ExtWorkspaceHandleV1},
             ext_workspace_manager_v1::ExtWorkspaceManagerV1,
         },
         wayland_server::{
             backend::{ClientData, GlobalId, ObjectId},
-            protocol::wl_output::WlOutput,
             Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak,
         },
     },
@@ -27,9 +26,7 @@ use cosmic_protocols::workspace::v2::server::{
 mod cosmic_v2;
 pub use cosmic_v2::CosmicWorkspaceV2Data;
 mod ext;
-pub use ext::WorkspaceData;
-
-pub use smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::GroupCapabilities;
+pub use ext::{WorkspaceData, WorkspaceGroupData};
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -92,16 +89,6 @@ impl Default for WorkspaceGroup {
 pub struct WorkspaceGroupHandle {
     id: usize,
 }
-
-#[derive(Default)]
-pub struct WorkspaceGroupDataInner {
-    outputs: Vec<Output>,
-    wl_outputs: HashSet<WlOutput>,
-    capabilities: Option<GroupCapabilities>,
-    workspace_count: usize,
-}
-
-pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
 
 #[derive(Debug)]
 pub struct Workspace {
