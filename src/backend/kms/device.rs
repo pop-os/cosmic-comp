@@ -44,7 +44,7 @@ use tracing::{error, info, warn};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    fmt,
+    fmt::{self, Write},
     path::{Path, PathBuf},
     sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
 };
@@ -737,7 +737,25 @@ fn create_output_for_conn(drm: &mut DrmDevice, conn: connector::Handle) -> Resul
     let conn_info = drm
         .get_connector(conn, false)
         .with_context(|| "Failed to query connector info")?;
-    let interface = drm_helpers::interface_name(drm, conn)?;
+    let interface = if let Some((parent_interface, ports)) = drm_helpers::mst_path(drm, conn)
+        .and_then(|(parent_conn, ports)| {
+            Some((drm_helpers::interface_name(drm, parent_conn).ok()?, ports))
+        }) {
+        // For MST connectors, use parent connector name, hypen, then comma seperated ports
+        let mut interface = parent_interface;
+        interface.push('-');
+        let mut first = true;
+        for port in ports {
+            if !first {
+                interface.push(',');
+            }
+            write!(&mut interface, "{}", port).unwrap();
+            first = false;
+        }
+        interface
+    } else {
+        drm_helpers::interface_name(drm, conn)?
+    };
     let edid_info = drm_helpers::edid_info(drm, conn)
         .inspect_err(|err| warn!(?err, "failed to get EDID for {}", interface))
         .ok();
