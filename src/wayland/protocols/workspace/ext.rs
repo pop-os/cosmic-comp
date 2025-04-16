@@ -3,8 +3,8 @@
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::ZcosmicWorkspaceHandleV2;
 
 use smithay::reexports::wayland_server::{
-    backend::{ClientData, ClientId},
-    Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
+    backend::ClientId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+    Weak,
 };
 
 use std::sync::Mutex;
@@ -33,13 +33,7 @@ pub type WorkspaceData = Mutex<WorkspaceDataInner>;
 
 impl<D> GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     fn bind(
         state: &mut D,
@@ -65,13 +59,7 @@ where
 
 impl<D> Dispatch<ExtWorkspaceManagerV1, (), D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     fn request(
         state: &mut D,
@@ -116,13 +104,7 @@ where
 
 impl<D> Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData, D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     fn request(
         state: &mut D,
@@ -177,13 +159,7 @@ where
 
 impl<D> Dispatch<ExtWorkspaceHandleV1, WorkspaceData, D> for WorkspaceState<D>
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     fn request(
         state: &mut D,
@@ -289,13 +265,7 @@ pub(super) fn send_group_to_client<D>(
     group: &mut WorkspaceGroup,
 ) -> bool
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     let (_, instance) = match group.ext_instances.iter_mut().find(|(m, _)| m == mngr) {
         Some(i) => i,
@@ -374,13 +344,7 @@ fn send_workspace_to_client<D>(
     workspace: &mut Workspace,
 ) -> bool
 where
-    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
-        + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
-        + WorkspaceHandler
-        + 'static,
-    <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
+    D: WorkspaceHandler,
 {
     let (_, instance) = match workspace.ext_instances.iter_mut().find(|(m, _)| m == mngr) {
         Some(i) => i,
