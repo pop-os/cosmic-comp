@@ -1,7 +1,7 @@
 use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
-    backend::render::cursor::{load_cursor_theme, Cursor},
+    backend::render::cursor::{load_cursor_env, load_cursor_theme, Cursor},
     shell::{
         focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow, Shell,
     },
@@ -595,6 +595,8 @@ impl Common {
                     .filter_map(|s| s.0.x11_surface().map(|x| (x.clone(), x.geometry())))
                     .collect::<Vec<_>>();
 
+                let (_, cursor_size) = load_cursor_env();
+
                 // update xorg dpi
                 if let Some(xwm) = xwayland.xwm.as_mut() {
                     let dpi = new_scale * 96. * 1024.;
@@ -602,12 +604,20 @@ impl Common {
                         [
                             ("Xft/DPI".into(), (dpi.round() as i32).into()),
                             (
+                                "Xcursor/size".into(),
+                                ((new_scale * cursor_size as f64).round() as i32).into(),
+                            ),
+                            (
                                 "Gdk/UnscaledDPI".into(),
                                 ((dpi / new_scale).round() as i32).into(),
                             ),
                             (
                                 "Gdk/WindowScalingFactor".into(),
                                 (new_scale.round() as i32).into(),
+                            ),
+                            (
+                                "Gtk/CursorThemeSize".into(),
+                                ((new_scale * cursor_size as f64).round() as i32).into(),
                             ),
                         ]
                         .into_iter(),
