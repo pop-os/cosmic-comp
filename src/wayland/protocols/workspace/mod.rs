@@ -19,20 +19,11 @@ use smithay::{
 };
 use wayland_backend::protocol::WEnum;
 
-use cosmic_protocols::workspace::{
-    v1::server::{
-        zcosmic_workspace_group_handle_v1::ZcosmicWorkspaceGroupHandleV1,
-        zcosmic_workspace_handle_v1::ZcosmicWorkspaceHandleV1,
-        zcosmic_workspace_manager_v1::ZcosmicWorkspaceManagerV1,
-    },
-    v2::server::{
-        zcosmic_workspace_handle_v2::{self, ZcosmicWorkspaceHandleV2},
-        zcosmic_workspace_manager_v2::ZcosmicWorkspaceManagerV2,
-    },
+use cosmic_protocols::workspace::v2::server::{
+    zcosmic_workspace_handle_v2::{self, ZcosmicWorkspaceHandleV2},
+    zcosmic_workspace_manager_v2::ZcosmicWorkspaceManagerV2,
 };
 
-mod cosmic;
-pub use cosmic::CosmicWorkspaceV1Data;
 mod cosmic_v2;
 pub use cosmic_v2::CosmicWorkspaceV2Data;
 mod ext;
@@ -58,11 +49,7 @@ bitflags::bitflags! {
 #[derive(Debug)]
 pub struct WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
-        + GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
@@ -74,22 +61,15 @@ where
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static,
 {
     dh: DisplayHandle,
-    cosmic_global: GlobalId,
     ext_global: GlobalId,
     cosmic_v2_global: GlobalId,
-    instances: Vec<ZcosmicWorkspaceManagerV1>,
     ext_instances: Vec<ExtWorkspaceManagerV1>,
     groups: Vec<WorkspaceGroup>,
     _marker: std::marker::PhantomData<D>,
 }
 pub struct WorkspaceUpdateGuard<'a, D>(&'a mut WorkspaceState<D>)
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
-        + WorkspaceHandler
-        + 'static,
+    D: WorkspaceHandler + 'static,
     <D as WorkspaceHandler>::Client: ClientData + WorkspaceClientHandler + 'static;
 
 crate::utils::id_gen!(next_group_id, GROUP_ID, GROUP_IDS);
@@ -98,10 +78,6 @@ crate::utils::id_gen!(next_workspace_id, WORKSPACE_ID, WORKSPACE_IDS);
 #[derive(Debug)]
 pub struct WorkspaceGroup {
     id: usize,
-    instances: Vec<(
-        Weak<ZcosmicWorkspaceManagerV1>,
-        ZcosmicWorkspaceGroupHandleV1,
-    )>,
     ext_instances: Vec<(Weak<ExtWorkspaceManagerV1>, ExtWorkspaceGroupHandleV1)>,
     workspaces: Vec<Workspace>,
 
@@ -113,7 +89,6 @@ impl Default for WorkspaceGroup {
     fn default() -> Self {
         Self {
             id: 0,
-            instances: Vec::new(),
             ext_instances: Vec::new(),
             workspaces: Vec::new(),
 
@@ -141,7 +116,6 @@ pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
 #[derive(Debug)]
 pub struct Workspace {
     id: usize,
-    instances: Vec<(Weak<ZcosmicWorkspaceManagerV1>, ZcosmicWorkspaceHandleV1)>,
     ext_instances: Vec<(Weak<ExtWorkspaceManagerV1>, ExtWorkspaceHandleV1)>,
 
     name: String,
@@ -159,11 +133,7 @@ pub struct WorkspaceHandle {
 
 pub trait WorkspaceHandler
 where
-    Self: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
-        + GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+    Self: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
@@ -219,11 +189,7 @@ pub trait WorkspaceClientHandler {
 
 impl<D> WorkspaceState<D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
-        + GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
@@ -238,13 +204,6 @@ where
     where
         F: for<'a> Fn(&'a Client) -> bool + Clone + Send + Sync + 'static,
     {
-        let cosmic_global = dh.create_global::<D, ZcosmicWorkspaceManagerV1, _>(
-            2,
-            WorkspaceGlobalData {
-                filter: Box::new(client_filter.clone()),
-            },
-        );
-
         let ext_global = dh.create_global::<D, ExtWorkspaceManagerV1, _>(
             1,
             WorkspaceGlobalData {
@@ -261,10 +220,8 @@ where
 
         WorkspaceState {
             dh: dh.clone(),
-            cosmic_global,
             ext_global,
             cosmic_v2_global,
-            instances: Vec::new(),
             ext_instances: Vec::new(),
             groups: Vec::new(),
             _marker: std::marker::PhantomData,
@@ -350,57 +307,6 @@ where
         })
     }
 
-    pub fn group_handle(
-        &self,
-        group: &ZcosmicWorkspaceGroupHandleV1,
-    ) -> Option<WorkspaceGroupHandle> {
-        self.groups
-            .iter()
-            .find(|g| g.instances.iter().any(|(_, i)| i == group))
-            .map(|g| WorkspaceGroupHandle { id: g.id })
-    }
-
-    pub fn workspace_handle(
-        &self,
-        workspace: &ZcosmicWorkspaceHandleV1,
-    ) -> Option<WorkspaceHandle> {
-        self.groups
-            .iter()
-            .find_map(|g| {
-                g.workspaces
-                    .iter()
-                    .find(|w| w.instances.iter().any(|(_, i)| i == workspace))
-            })
-            .map(|w| WorkspaceHandle { id: w.id })
-    }
-
-    pub fn raw_group_handles<'a>(
-        &'a self,
-        group: &'a WorkspaceGroupHandle,
-        client: &'a ObjectId,
-    ) -> impl Iterator<Item = &ZcosmicWorkspaceGroupHandleV1> + 'a {
-        self.groups
-            .iter()
-            .filter(|g| g.id == group.id)
-            .flat_map(|g| &g.instances)
-            .map(|(_, i)| i)
-            .filter(|i| i.id().same_client_as(client))
-    }
-
-    pub fn raw_workspace_handles<'a>(
-        &'a self,
-        workspace: &'a WorkspaceHandle,
-        client: &'a ObjectId,
-    ) -> impl Iterator<Item = &ZcosmicWorkspaceHandleV1> + 'a {
-        self.groups
-            .iter()
-            .find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id))
-            .into_iter()
-            .flat_map(|w| &w.instances)
-            .map(|(_, i)| i)
-            .filter(|i| i.id().same_client_as(client))
-    }
-
     pub fn raw_ext_workspace_handles<'a>(
         &'a self,
         workspace: &'a WorkspaceHandle,
@@ -421,13 +327,6 @@ where
 
     fn done(&mut self) {
         let mut changed = false;
-        for instance in &self.instances {
-            for mut group in &mut self.groups {
-                if cosmic::send_group_to_client::<D>(&self.dh, instance, &mut group) {
-                    changed = true;
-                }
-            }
-        }
         for instance in &self.ext_instances {
             for mut group in &mut self.groups {
                 if ext::send_group_to_client::<D>(&self.dh, instance, &mut group) {
@@ -436,27 +335,10 @@ where
             }
         }
         if changed {
-            for instance in &self.instances {
-                instance.done();
-            }
             for instance in &self.ext_instances {
                 instance.done();
             }
         }
-    }
-
-    pub fn get_workspace_handle(
-        &self,
-        handle: &ZcosmicWorkspaceHandleV1,
-    ) -> Option<WorkspaceHandle> {
-        self.groups
-            .iter()
-            .find_map(|g| {
-                g.workspaces
-                    .iter()
-                    .find(|w| w.instances.iter().any(|(_, i)| i == handle))
-            })
-            .map(|w| WorkspaceHandle { id: w.id })
     }
 
     pub fn get_ext_workspace_handle(
@@ -473,10 +355,6 @@ where
             .map(|w| WorkspaceHandle { id: w.id })
     }
 
-    pub fn cosmic_global_id(&self) -> GlobalId {
-        self.cosmic_global.clone()
-    }
-
     pub fn ext_global_id(&self) -> GlobalId {
         self.ext_global.clone()
     }
@@ -488,11 +366,7 @@ where
 
 impl<'a, D> WorkspaceUpdateGuard<'a, D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
+    D: Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
@@ -523,7 +397,6 @@ where
             let workspace = Workspace {
                 id,
                 tiling,
-                instances: Default::default(),
                 ext_instances: Default::default(),
                 name: Default::default(),
                 capabilities: WorkspaceCapabilities::empty(),
@@ -553,9 +426,6 @@ where
         }
 
         if let Some(group) = self.0.groups.iter().find(|g| g.id == group.id) {
-            for (_, instance) in &group.instances {
-                instance.remove();
-            }
             for (_, instance) in &group.ext_instances {
                 instance.removed();
             }
@@ -567,9 +437,6 @@ where
     pub fn remove_workspace(&mut self, workspace: WorkspaceHandle) {
         for group in &mut self.0.groups {
             if let Some(workspace) = group.workspaces.iter().find(|w| w.id == workspace.id) {
-                for (_, instance) in &workspace.instances {
-                    instance.remove();
-                }
                 for (manager, instance) in &workspace.ext_instances {
                     for (group_manager, group_instance) in &group.ext_instances {
                         if manager == group_manager {
@@ -742,11 +609,7 @@ where
 
 impl<'a, D> Drop for WorkspaceUpdateGuard<'a, D>
 where
-    D: GlobalDispatch<ZcosmicWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ZcosmicWorkspaceManagerV1, ()>
-        + Dispatch<ZcosmicWorkspaceGroupHandleV1, WorkspaceGroupData>
-        + Dispatch<ZcosmicWorkspaceHandleV1, CosmicWorkspaceV1Data>
-        + GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
+    D: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
         + Dispatch<ExtWorkspaceManagerV1, ()>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
@@ -764,19 +627,6 @@ where
 
 macro_rules! delegate_workspace {
     ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
-        smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::workspace::v1::server::zcosmic_workspace_manager_v1::ZcosmicWorkspaceManagerV1: $crate::wayland::protocols::workspace::WorkspaceGlobalData
-        ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
-        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::workspace::v1::server::zcosmic_workspace_manager_v1::ZcosmicWorkspaceManagerV1: ()
-        ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
-        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::workspace::v1::server::zcosmic_workspace_group_handle_v1::ZcosmicWorkspaceGroupHandleV1: $crate::wayland::protocols::workspace::WorkspaceGroupData
-        ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
-        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::workspace::v1::server::zcosmic_workspace_handle_v1::ZcosmicWorkspaceHandleV1: $crate::wayland::protocols::workspace::CosmicWorkspaceV1Data
-        ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
-
         smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_manager_v1::ExtWorkspaceManagerV1: $crate::wayland::protocols::workspace::WorkspaceGlobalData
         ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
