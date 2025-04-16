@@ -127,14 +127,13 @@ render_elements! {
 pub fn draw_surface_cursor<R>(
     renderer: &mut R,
     surface: &wl_surface::WlSurface,
-    location: impl Into<Point<i32, Logical>>,
+    location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
 ) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
 where
     R: Renderer + ImportAll,
     R::TextureId: Clone + 'static,
 {
-    let position = location.into();
     let scale = scale.into();
     let h = with_states(&surface, |states| {
         states
@@ -150,7 +149,7 @@ where
     render_elements_from_surface_tree(
         renderer,
         surface,
-        position.to_physical_precise_round(scale),
+        location.to_physical(scale).to_i32_round(),
         scale,
         1.0,
         Kind::Cursor,
@@ -164,7 +163,7 @@ where
 pub fn draw_dnd_icon<R>(
     renderer: &mut R,
     surface: &wl_surface::WlSurface,
-    location: impl Into<Point<i32, Logical>>,
+    location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
 ) -> Vec<WaylandSurfaceRenderElement<R>>
 where
@@ -181,7 +180,7 @@ where
     render_elements_from_surface_tree(
         renderer,
         surface,
-        location.into().to_physical_precise_round(scale),
+        location.to_physical(scale).to_i32_round(),
         scale,
         1.0,
         Kind::Unspecified,
