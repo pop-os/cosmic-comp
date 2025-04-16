@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::sync::Mutex;
-
 use smithay::{
     output::Output,
     reexports::{
@@ -11,7 +9,7 @@ use smithay::{
             ext_workspace_manager_v1::ExtWorkspaceManagerV1,
         },
         wayland_server::{
-            backend::{ClientData, GlobalId, ObjectId},
+            backend::{GlobalId, ObjectId},
             Client, Dispatch, DisplayHandle, GlobalDispatch, Resource,
         },
     },
@@ -26,7 +24,7 @@ use cosmic_protocols::workspace::v2::server::{
 mod cosmic_v2;
 pub use cosmic_v2::CosmicWorkspaceV2Data;
 mod ext;
-pub use ext::{WorkspaceData, WorkspaceGroupData};
+pub use ext::{WorkspaceData, WorkspaceGroupData, WorkspaceManagerData};
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -111,7 +109,7 @@ pub struct WorkspaceHandle {
 pub trait WorkspaceHandler
 where
     Self: GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData>
-        + Dispatch<ExtWorkspaceManagerV1, ()>
+        + Dispatch<ExtWorkspaceManagerV1, WorkspaceManagerData>
         + Dispatch<ExtWorkspaceGroupHandleV1, WorkspaceGroupData>
         + Dispatch<ExtWorkspaceHandleV1, WorkspaceData>
         + GlobalDispatch<ZcosmicWorkspaceManagerV2, WorkspaceGlobalData>
@@ -120,8 +118,6 @@ where
         + Sized
         + 'static,
 {
-    type Client: ClientData + WorkspaceClientHandler + 'static;
-
     fn workspace_state(&self) -> &WorkspaceState<Self>;
     fn workspace_state_mut(&mut self) -> &mut WorkspaceState<Self>;
     fn commit_requests(&mut self, dh: &DisplayHandle, requests: Vec<Request>);
@@ -152,16 +148,6 @@ pub enum Request {
         workspace: WorkspaceHandle,
         group: WorkspaceGroupHandle,
     },
-}
-
-#[derive(Debug, Default)]
-pub struct WorkspaceClientStateInner {
-    requests: Vec<Request>,
-}
-pub type WorkspaceClientState = Mutex<WorkspaceClientStateInner>;
-
-pub trait WorkspaceClientHandler {
-    fn workspace_state(&self) -> &WorkspaceClientState;
 }
 
 impl<D> WorkspaceState<D>
@@ -580,7 +566,7 @@ macro_rules! delegate_workspace {
             smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_manager_v1::ExtWorkspaceManagerV1: $crate::wayland::protocols::workspace::WorkspaceGlobalData
         ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_manager_v1::ExtWorkspaceManagerV1: ()
+            smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_manager_v1::ExtWorkspaceManagerV1: $crate::wayland::protocols::workspace::WorkspaceManagerData
         ] => $crate::wayland::protocols::workspace::WorkspaceState<Self>);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             smithay::reexports::wayland_protocols::ext::workspace::v1::server::ext_workspace_group_handle_v1::ExtWorkspaceGroupHandleV1: $crate::wayland::protocols::workspace::WorkspaceGroupData

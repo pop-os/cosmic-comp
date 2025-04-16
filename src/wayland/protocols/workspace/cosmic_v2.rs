@@ -13,8 +13,8 @@ use smithay::reexports::{
 use std::sync::Mutex;
 
 use super::{
-    Request, Workspace, WorkspaceCapabilities, WorkspaceClientHandler, WorkspaceData,
-    WorkspaceGlobalData, WorkspaceHandler, WorkspaceState,
+    Request, Workspace, WorkspaceCapabilities, WorkspaceData, WorkspaceGlobalData,
+    WorkspaceHandler, WorkspaceManagerData, WorkspaceState,
 };
 
 #[derive(Default)]
@@ -113,7 +113,7 @@ where
 {
     fn request(
         state: &mut D,
-        client: &Client,
+        _client: &Client,
         _obj: &ZcosmicWorkspaceHandleV2,
         request: zcosmic_workspace_handle_v2::Request,
         data: &CosmicWorkspaceV2Data,
@@ -128,16 +128,19 @@ where
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
                 {
-                    let mut state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
-                        .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.requests.push(Request::Rename {
-                        workspace: workspace_handle,
-                        name,
-                    });
+                    if let Ok(manager) =
+                        workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
+                    {
+                        let mut state = manager
+                            .data::<WorkspaceManagerData>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::Rename {
+                            workspace: workspace_handle,
+                            name,
+                        });
+                    }
                 }
             }
             zcosmic_workspace_handle_v2::Request::SetTilingState {
@@ -146,16 +149,19 @@ where
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
                 {
-                    let mut state = client
-                        .get_data::<<D as WorkspaceHandler>::Client>()
-                        .unwrap()
-                        .workspace_state()
-                        .lock()
-                        .unwrap();
-                    state.requests.push(Request::SetTilingState {
-                        workspace: workspace_handle,
-                        state: tiling_state,
-                    });
+                    if let Ok(manager) =
+                        workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
+                    {
+                        let mut state = manager
+                            .data::<WorkspaceManagerData>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
+                        state.requests.push(Request::SetTilingState {
+                            workspace: workspace_handle,
+                            state: tiling_state,
+                        });
+                    }
                 }
             }
             zcosmic_workspace_handle_v2::Request::Destroy => {}
