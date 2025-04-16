@@ -644,8 +644,11 @@ impl WorkspaceSet {
             .iter()
             .enumerate()
             .map(|(i, workspace)| {
-                let previous_is_empty =
-                    i > 0 && self.workspaces.get(i - 1).map_or(false, |w| w.is_empty());
+                let previous_is_empty = i > 0
+                    && self
+                        .workspaces
+                        .get(i - 1)
+                        .map_or(false, |w| w.is_empty() && !w.pinned);
                 let keep = if workspace.can_auto_remove(xdg_activation_state) {
                     // Keep empty workspace if it's active, or it's the last workspace,
                     // and the previous worspace is not both active and empty.
