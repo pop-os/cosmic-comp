@@ -32,7 +32,10 @@ pub struct WorkspaceGroupDataInner {
     workspace_count: usize,
 }
 
-pub type WorkspaceGroupData = Mutex<WorkspaceGroupDataInner>;
+pub struct WorkspaceGroupData {
+    inner: Mutex<WorkspaceGroupDataInner>,
+    pub(super) manager: Weak<ExtWorkspaceManagerV1>,
+}
 
 #[derive(Default)]
 pub struct WorkspaceDataInner {
@@ -43,7 +46,10 @@ pub struct WorkspaceDataInner {
     pub(super) cosmic_v2_handle: Option<Weak<ZcosmicWorkspaceHandleV2>>,
 }
 
-pub type WorkspaceData = Mutex<WorkspaceDataInner>;
+pub struct WorkspaceData {
+    pub(super) inner: Mutex<WorkspaceDataInner>,
+    pub(super) manager: Weak<ExtWorkspaceManagerV1>,
+}
 
 impl<D> GlobalDispatch<ExtWorkspaceManagerV1, WorkspaceGlobalData, D> for WorkspaceState<D>
 where
@@ -135,7 +141,7 @@ where
                     .workspace_state()
                     .groups
                     .iter()
-                    .find(|g| g.ext_instances.iter().any(|(_, i)| i == obj))
+                    .find(|g| g.ext_instances.contains(obj))
                     .map(|g| g.id)
                 {
                     let mut state = client
@@ -152,7 +158,7 @@ where
             }
             ext_workspace_group_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
-                    group.ext_instances.retain(|(_, i)| i != obj)
+                    group.ext_instances.retain(|i| i != obj)
                 }
             }
             _ => {}
@@ -166,7 +172,7 @@ where
         _data: &WorkspaceGroupData,
     ) {
         for group in &mut state.workspace_state_mut().groups {
-            group.ext_instances.retain(|(_, i)| i != resource)
+            group.ext_instances.retain(|i| i != resource)
         }
     }
 }
@@ -232,7 +238,7 @@ where
                         .workspace_state()
                         .groups
                         .iter()
-                        .find(|g| g.ext_instances.iter().any(|(_, i)| *i == workspace_group))
+                        .find(|g| g.ext_instances.contains(&workspace_group))
                         .map(|g| g.id)
                     {
                         let mut state = client
@@ -251,7 +257,7 @@ where
             ext_workspace_handle_v1::Request::Destroy => {
                 for group in &mut state.workspace_state_mut().groups {
                     for workspace in &mut group.workspaces {
-                        workspace.ext_instances.retain(|(_, i)| i != obj)
+                        workspace.ext_instances.retain(|i| i != obj)
                     }
                 }
             }
@@ -267,7 +273,7 @@ where
     ) {
         for group in &mut state.workspace_state_mut().groups {
             for workspace in &mut group.workspaces {
-                workspace.ext_instances.retain(|(_, i)| i != resource)
+                workspace.ext_instances.retain(|i| i != resource)
             }
         }
     }
@@ -281,17 +287,24 @@ pub(super) fn send_group_to_client<D>(
 where
     D: WorkspaceHandler,
 {
-    let (_, instance) = match group.ext_instances.iter_mut().find(|(m, _)| m == mngr) {
+    let instance = match group
+        .ext_instances
+        .iter_mut()
+        .find(|i| i.data::<WorkspaceGroupData>().unwrap().manager == *mngr)
+    {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.id()) {
                 if let Ok(handle) = client.create_resource::<ExtWorkspaceGroupHandleV1, _, D>(
                     dh,
                     mngr.version(),
-                    WorkspaceGroupData::default(),
+                    WorkspaceGroupData {
+                        inner: Mutex::new(WorkspaceGroupDataInner::default()),
+                        manager: mngr.downgrade(),
+                    },
                 ) {
                     mngr.workspace_group(&handle);
-                    group.ext_instances.push((mngr.downgrade(), handle));
+                    group.ext_instances.push(handle);
                     group.ext_instances.last_mut().unwrap()
                 } else {
                     return false;
@@ -305,6 +318,7 @@ where
     let mut handle_state = instance
         .data::<WorkspaceGroupData>()
         .unwrap()
+        .inner
         .lock()
         .unwrap();
     let mut changed = false;
@@ -360,21 +374,28 @@ fn send_workspace_to_client<D>(
 where
     D: WorkspaceHandler,
 {
-    let (_, instance) = match workspace.ext_instances.iter_mut().find(|(m, _)| m == mngr) {
+    let instance = match workspace
+        .ext_instances
+        .iter_mut()
+        .find(|i| i.data::<WorkspaceData>().unwrap().manager == *mngr)
+    {
         Some(i) => i,
         None => {
             if let Ok(client) = dh.get_client(mngr.id()) {
                 if let Ok(handle) = client.create_resource::<ExtWorkspaceHandleV1, _, D>(
                     dh,
                     mngr.version(),
-                    WorkspaceData::default(),
+                    WorkspaceData {
+                        inner: Mutex::new(WorkspaceDataInner::default()),
+                        manager: mngr.downgrade(),
+                    },
                 ) {
                     mngr.workspace(&handle);
                     group.workspace_enter(&handle);
                     if let Some(id) = workspace.ext_id.clone() {
                         handle.id(id);
                     }
-                    workspace.ext_instances.push((mngr.downgrade(), handle));
+                    workspace.ext_instances.push(handle);
                     workspace.ext_instances.last_mut().unwrap()
                 } else {
                     return false;
@@ -386,7 +407,12 @@ where
     };
     let instance = instance.clone();
 
-    let mut handle_state = instance.data::<WorkspaceData>().unwrap().lock().unwrap();
+    let mut handle_state = instance
+        .data::<WorkspaceData>()
+        .unwrap()
+        .inner
+        .lock()
+        .unwrap();
     let mut changed = false;
 
     if handle_state.name != workspace.name {

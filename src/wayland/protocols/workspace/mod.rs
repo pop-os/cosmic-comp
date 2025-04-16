@@ -12,7 +12,7 @@ use smithay::{
         },
         wayland_server::{
             backend::{ClientData, GlobalId, ObjectId},
-            Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak,
+            Client, Dispatch, DisplayHandle, GlobalDispatch, Resource,
         },
     },
 };
@@ -65,7 +65,7 @@ crate::utils::id_gen!(next_workspace_id, WORKSPACE_ID, WORKSPACE_IDS);
 #[derive(Debug)]
 pub struct WorkspaceGroup {
     id: usize,
-    ext_instances: Vec<(Weak<ExtWorkspaceManagerV1>, ExtWorkspaceGroupHandleV1)>,
+    ext_instances: Vec<ExtWorkspaceGroupHandleV1>,
     workspaces: Vec<Workspace>,
 
     outputs: Vec<Output>,
@@ -93,7 +93,7 @@ pub struct WorkspaceGroupHandle {
 #[derive(Debug)]
 pub struct Workspace {
     id: usize,
-    ext_instances: Vec<(Weak<ExtWorkspaceManagerV1>, ExtWorkspaceHandleV1)>,
+    ext_instances: Vec<ExtWorkspaceHandleV1>,
 
     name: String,
     capabilities: WorkspaceCapabilities,
@@ -285,7 +285,6 @@ where
             .find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id))
             .into_iter()
             .flat_map(|w| &w.ext_instances)
-            .map(|(_, i)| i)
             .filter(|i| Resource::id(*i).same_client_as(client))
     }
 
@@ -315,11 +314,8 @@ where
     ) -> Option<WorkspaceHandle> {
         self.groups
             .iter()
-            .find_map(|g| {
-                g.workspaces
-                    .iter()
-                    .find(|w| w.ext_instances.iter().any(|(_, i)| i == handle))
-            })
+            .flat_map(|g| &g.workspaces)
+            .find(|w| w.ext_instances.contains(handle))
             .map(|w| WorkspaceHandle { id: w.id })
     }
 
@@ -386,7 +382,7 @@ where
         }
 
         if let Some(group) = self.0.groups.iter().find(|g| g.id == group.id) {
-            for (_, instance) in &group.ext_instances {
+            for instance in &group.ext_instances {
                 instance.removed();
             }
         }
@@ -397,9 +393,11 @@ where
     pub fn remove_workspace(&mut self, workspace: WorkspaceHandle) {
         for group in &mut self.0.groups {
             if let Some(workspace) = group.workspaces.iter().find(|w| w.id == workspace.id) {
-                for (manager, instance) in &workspace.ext_instances {
-                    for (group_manager, group_instance) in &group.ext_instances {
-                        if manager == group_manager {
+                for instance in &workspace.ext_instances {
+                    let manager = &instance.data::<WorkspaceData>().unwrap().manager;
+                    for group_instance in &group.ext_instances {
+                        if *manager == group_instance.data::<WorkspaceGroupData>().unwrap().manager
+                        {
                             group_instance.workspace_leave(instance);
                         }
                     }

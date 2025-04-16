@@ -74,24 +74,27 @@ where
                     },
                 );
                 if let Some(data) = workspace.data::<WorkspaceData>() {
-                    let mut data = data.lock().unwrap();
-                    if data.cosmic_v2_handle.as_ref().is_some_and(|x| x.is_alive()) {
+                    let mut inner = data.inner.lock().unwrap();
+                    if inner
+                        .cosmic_v2_handle
+                        .as_ref()
+                        .is_some_and(|x| x.is_alive())
+                    {
                         obj.post_error(
                             zcosmic_workspace_manager_v2::Error::WorkspaceExists,
                             "zcosmic_workspace_handle_v2 already exists for ext_workspace_handle_v1",
                         );
                         return;
                     }
-                    data.cosmic_v2_handle = Some(cosmic_workspace.downgrade());
-                    if let Some((workspace, ext_mngr, _)) = state
+                    inner.cosmic_v2_handle = Some(cosmic_workspace.downgrade());
+                    if let Some(workspace) = state
                         .workspace_state()
                         .groups
                         .iter()
                         .flat_map(|g| &g.workspaces)
-                        .flat_map(|w| w.ext_instances.iter().map(move |(mngr, i)| (w, mngr, i)))
-                        .find(|(_, _, i)| **i == workspace)
+                        .find(|w| w.ext_instances.contains(&workspace))
                     {
-                        if let Ok(ext_mngr) = ext_mngr.upgrade() {
+                        if let Ok(ext_mngr) = data.manager.upgrade() {
                             send_workspace_to_client(&cosmic_workspace, workspace);
                             ext_mngr.done();
                         }
