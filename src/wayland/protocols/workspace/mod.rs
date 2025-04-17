@@ -395,6 +395,53 @@ where
         WORKSPACE_IDS.lock().unwrap().remove(&workspace.id);
     }
 
+    pub fn move_workspace_to_group(
+        &mut self,
+        group_handle: WorkspaceGroupHandle,
+        workspace_handle: WorkspaceHandle,
+    ) {
+        // Get index of new group
+        let Some(group_idx) = self.0.groups.iter().position(|g| g.id == group_handle.id) else {
+            // If the new group doesn't exist, we shouldn't remove the workspace from its old group
+            return;
+        };
+
+        // Find old group index, and remove the workspace
+        let Some((old_group_idx, workspace)) =
+            self.0.groups.iter_mut().enumerate().find_map(|(i, group)| {
+                let idx = group
+                    .workspaces
+                    .iter()
+                    .position(|w| w.id == workspace_handle.id)?;
+                let workspace = group.workspaces.remove(idx);
+                Some((i, workspace))
+            })
+        else {
+            // Workspace not found in any group
+            return;
+        };
+
+        // Send `workspace_leave` for ever instance with old group, and `workspace_enter` for new
+        // one.
+        let old_group = &self.0.groups[old_group_idx];
+        let new_group = &self.0.groups[group_idx];
+        for instance in &workspace.ext_instances {
+            let manager = &instance.data::<WorkspaceData>().unwrap().manager;
+            for group_instance in &old_group.ext_instances {
+                if *manager == group_instance.data::<WorkspaceGroupData>().unwrap().manager {
+                    group_instance.workspace_leave(instance);
+                }
+            }
+            for group_instance in &new_group.ext_instances {
+                if *manager == group_instance.data::<WorkspaceGroupData>().unwrap().manager {
+                    group_instance.workspace_enter(instance);
+                }
+            }
+        }
+
+        self.0.groups[group_idx].workspaces.push(workspace);
+    }
+
     pub fn workspace_belongs_to_group(
         &self,
         group: &WorkspaceGroupHandle,
