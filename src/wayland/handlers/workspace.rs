@@ -2,24 +2,15 @@
 
 use crate::{
     shell::WorkspaceDelta,
-    state::ClientState,
     utils::prelude::*,
     wayland::protocols::workspace::{
-        delegate_workspace, Request, WorkspaceClientHandler, WorkspaceClientState,
-        WorkspaceHandler, WorkspaceState,
+        delegate_workspace, Request, WorkspaceHandler, WorkspaceState,
     },
 };
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
 use smithay::reexports::wayland_server::DisplayHandle;
 
-impl WorkspaceClientHandler for ClientState {
-    fn workspace_state(&self) -> &WorkspaceClientState {
-        &self.workspace_client_state
-    }
-}
-
 impl WorkspaceHandler for State {
-    type Client = ClientState;
     fn workspace_state(&self) -> &WorkspaceState<Self> {
         &self.common.workspace_state
     }

@@ -373,43 +373,6 @@ fn create_workspace(
     Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
 }
 
-fn move_workspace_to_group(
-    workspace: &mut Workspace,
-    group: &WorkspaceGroupHandle,
-    workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) {
-    let old_workspace_handle = workspace.handle;
-    workspace.handle = workspace_state
-        .create_workspace(
-            group,
-            if workspace.tiling_enabled {
-                TilingState::TilingEnabled
-            } else {
-                TilingState::FloatingOnly
-            },
-            // TODO Set id for persistent workspaces
-            None,
-        )
-        .unwrap();
-    workspace_state.set_workspace_capabilities(
-        &workspace.handle,
-        WorkspaceCapabilities::Activate | WorkspaceCapabilities::SetTilingState,
-    );
-    for window in workspace.mapped() {
-        for (surface, _) in window.windows() {
-            toplevel_leave_workspace(&surface, &old_workspace_handle);
-            toplevel_enter_workspace(&surface, &workspace.handle);
-        }
-    }
-    for window in workspace.minimized_windows.iter() {
-        for (surface, _) in window.window.windows() {
-            toplevel_leave_workspace(&surface, &old_workspace_handle);
-            toplevel_enter_workspace(&surface, &workspace.handle);
-        }
-    }
-    workspace_state.remove_workspace(old_workspace_handle);
-}
-
 /* We will probably need this again at some point
 fn merge_workspaces(
     mut workspace: Workspace,
@@ -734,7 +697,8 @@ impl Workspaces {
 
         // Add `moved_workspaces` to set, and update output and index of workspaces
         for workspace in &mut moved_workspaces {
-            move_workspace_to_group(workspace, &set.group, workspace_state);
+            workspace_state.remove_workspace_state(&workspace.handle, WState::Active);
+            workspace_state.move_workspace_to_group(set.group, workspace.handle);
         }
         set.workspaces.extend(moved_workspaces);
         if set.workspaces.is_empty() {
@@ -791,7 +755,8 @@ impl Workspaces {
                         workspace_state.remove_workspace(workspace.handle);
                     } else {
                         // update workspace protocol state
-                        move_workspace_to_group(&mut workspace, &workspace_group, workspace_state);
+                        workspace_state.remove_workspace_state(&workspace.handle, WState::Active);
+                        workspace_state.move_workspace_to_group(workspace_group, workspace.handle);
 
                         // update mapping
                         workspace.set_output(&new_output, false);
@@ -862,7 +827,8 @@ impl Workspaces {
             .and_then(|set| set.remove_workspace(workspace_state, handle))
         {
             let new_set = self.sets.get_mut(to).unwrap();
-            move_workspace_to_group(&mut workspace, &new_set.group, workspace_state);
+            workspace_state.remove_workspace_state(&workspace.handle, WState::Active);
+            workspace_state.move_workspace_to_group(new_set.group, workspace.handle);
             workspace.set_output(to, true);
             workspace.refresh();
             new_set.workspaces.insert(new_set.active + 1, workspace);
