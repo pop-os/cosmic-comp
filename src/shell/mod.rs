@@ -373,16 +373,6 @@ fn create_workspace(
     Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
 }
 
-/*
-fn move_workspace_to_group(
-    workspace: &mut Workspace,
-    group: &WorkspaceGroupHandle,
-    workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) {
-    workspace_state.move_workspace_to_group(*group, workspace.handle);
-}
-*/
-
 /* We will probably need this again at some point
 fn merge_workspaces(
     mut workspace: Workspace,
@@ -707,6 +697,7 @@ impl Workspaces {
 
         // Add `moved_workspaces` to set, and update output and index of workspaces
         for workspace in &mut moved_workspaces {
+            workspace_state.remove_workspace_state(&workspace.handle, WState::Active);
             workspace_state.move_workspace_to_group(set.group, workspace.handle);
         }
         set.workspaces.extend(moved_workspaces);
@@ -764,6 +755,7 @@ impl Workspaces {
                         workspace_state.remove_workspace(workspace.handle);
                     } else {
                         // update workspace protocol state
+                        workspace_state.remove_workspace_state(&workspace.handle, WState::Active);
                         workspace_state.move_workspace_to_group(workspace_group, workspace.handle);
 
                         // update mapping
@@ -835,6 +827,7 @@ impl Workspaces {
             .and_then(|set| set.remove_workspace(workspace_state, handle))
         {
             let new_set = self.sets.get_mut(to).unwrap();
+            workspace_state.remove_workspace_state(&workspace.handle, WState::Active);
             workspace_state.move_workspace_to_group(new_set.group, workspace.handle);
             workspace.set_output(to, true);
             workspace.refresh();
