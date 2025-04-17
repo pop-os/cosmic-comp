@@ -1,5 +1,6 @@
 use crate::{
     backend::render::cursor::CursorState,
+    hooks::Decorations,
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -78,6 +79,7 @@ pub struct CosmicWindowInternal {
     /// TODO: This needs to be per seat
     pointer_entered: Arc<AtomicU8>,
     last_title: Arc<Mutex<String>>,
+    hooks: crate::hooks::Hooks,
 }
 
 impl fmt::Debug for CosmicWindowInternal {
@@ -184,6 +186,7 @@ impl CosmicWindow {
         window: impl Into<CosmicSurface>,
         handle: LoopHandle<'static, crate::state::State>,
         theme: cosmic::Theme,
+        hooks: crate::hooks::Hooks,
     ) -> CosmicWindow {
         let window = window.into();
         let width = window.geometry().size.w;
@@ -194,6 +197,7 @@ impl CosmicWindow {
                 activated: Arc::new(AtomicBool::new(false)),
                 pointer_entered: Arc::new(AtomicU8::new(0)),
                 last_title: Arc::new(Mutex::new(last_title)),
+                hooks,
             },
             (width, SSD_HEIGHT),
             handle,
@@ -546,12 +550,21 @@ impl Program for CosmicWindowInternal {
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
+        self.hooks.window_decorations.view(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct DefaultDecorations;
+
+impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
+    fn view(&self, win: &CosmicWindowInternal) -> cosmic::Element<'_, Message> {
         let mut header = cosmic::widget::header_bar()
             .start(cosmic::widget::horizontal_space().width(32))
-            .title(self.last_title.lock().unwrap().clone())
+            .title(win.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
             .on_close(Message::Close)
-            .focused(self.window.is_activated(false))
+            .focused(win.window.is_activated(false))
             .on_double_click(Message::Maximize)
             .on_right_click(Message::Menu);
 

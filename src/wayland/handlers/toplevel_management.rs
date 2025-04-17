@@ -130,6 +130,7 @@ impl ToplevelManagementHandler for State {
                         window.clone(),
                         self.common.event_loop_handle.clone(),
                         self.common.theme.clone(),
+                        self.common.hooks.clone(),
                     )
                     .into();
                     if from_workspace.tiling_enabled {

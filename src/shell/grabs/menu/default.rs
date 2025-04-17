@@ -111,6 +111,7 @@ pub fn tab_items(
                     surface,
                     state.common.event_loop_handle.clone(),
                     state.common.theme.clone(),
+                    state.common.hooks.clone(),
                 )
                 .into();
 

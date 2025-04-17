@@ -206,6 +206,7 @@ pub struct Common {
 
     pub kiosk_child: Option<Child>,
     pub theme: cosmic::Theme,
+    pub hooks: crate::hooks::Hooks,
 
     // wayland state
     pub compositor_state: CompositorState,
@@ -505,6 +506,7 @@ impl State {
         socket: OsString,
         handle: LoopHandle<'static, State>,
         signal: LoopSignal,
+        hooks: crate::hooks::Hooks,
     ) -> State {
         let requested_languages = DesktopLanguageRequester::requested_languages();
         i18n_embed::select(&*LANG_LOADER, &Localizations, &requested_languages)
@@ -570,7 +572,7 @@ impl State {
                 DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
             });
 
-        let shell = Arc::new(RwLock::new(Shell::new(&config)));
+        let shell = Arc::new(RwLock::new(Shell::new(&config, hooks.clone())));
 
         let layer_shell_state =
             WlrLayerShellState::new_with_filter::<State, _>(dh, client_is_privileged);
@@ -628,6 +630,7 @@ impl State {
 
                 kiosk_child: None,
                 theme: cosmic::theme::system_preference(),
+                hooks,
 
                 compositor_state,
                 data_device_state,

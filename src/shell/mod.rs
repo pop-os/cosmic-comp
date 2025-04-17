@@ -265,6 +265,7 @@ pub struct Shell {
     pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,
 
     theme: cosmic::Theme,
+    hooks: crate::hooks::Hooks,
     pub active_hint: bool,
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
@@ -338,6 +339,7 @@ pub struct WorkspaceSet {
     tiling_enabled: bool,
     output: Output,
     theme: cosmic::Theme,
+    hooks: crate::hooks::Hooks,
     pub sticky_layer: FloatingLayout,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub workspaces: Vec<Workspace>,
@@ -350,6 +352,7 @@ fn create_workspace(
     active: bool,
     tiling: bool,
     theme: cosmic::Theme,
+    hooks: crate::hooks::Hooks,
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
@@ -370,7 +373,7 @@ fn create_workspace(
         &workspace_handle,
         WorkspaceCapabilities::Activate | WorkspaceCapabilities::SetTilingState,
     );
-    Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
+    Workspace::new(workspace_handle, output.clone(), tiling, theme, hooks)
 }
 
 fn move_workspace_to_group(
@@ -442,9 +445,10 @@ impl WorkspaceSet {
         output: &Output,
         tiling_enabled: bool,
         theme: cosmic::Theme,
+        hooks: crate::hooks::Hooks,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
-        let sticky_layer = FloatingLayout::new(theme.clone(), output);
+        let sticky_layer = FloatingLayout::new(theme.clone(), hooks.clone(), output);
 
         WorkspaceSet {
             previously_active: None,
@@ -452,6 +456,7 @@ impl WorkspaceSet {
             group: group_handle,
             tiling_enabled,
             theme,
+            hooks,
             sticky_layer,
             minimized_windows: Vec::new(),
             workspaces: Vec::new(),
@@ -566,6 +571,7 @@ impl WorkspaceSet {
             false,
             self.tiling_enabled,
             self.theme.clone(),
+            self.hooks.clone(),
         );
         workspace_set_idx(
             state,
@@ -687,10 +693,11 @@ pub struct Workspaces {
     autotile: bool,
     autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
+    hooks: crate::hooks::Hooks,
 }
 
 impl Workspaces {
-    pub fn new(config: &Config, theme: cosmic::Theme) -> Workspaces {
+    pub fn new(config: &Config, theme: cosmic::Theme, hooks: crate::hooks::Hooks) -> Workspaces {
         Workspaces {
             sets: IndexMap::new(),
             backup_set: None,
@@ -699,6 +706,7 @@ impl Workspaces {
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
+            hooks,
         }
     }
 
@@ -719,7 +727,13 @@ impl Workspaces {
                 set
             })
             .unwrap_or_else(|| {
-                WorkspaceSet::new(workspace_state, &output, self.autotile, self.theme.clone())
+                WorkspaceSet::new(
+                    workspace_state,
+                    &output,
+                    self.autotile,
+                    self.theme.clone(),
+                    self.hooks.clone(),
+                )
             });
         workspace_state.add_group_output(&set.group, &output);
 
@@ -925,6 +939,7 @@ impl Workspaces {
                                     false,
                                     config.cosmic_conf.autotile,
                                     self.theme.clone(),
+                                    self.hooks.clone(),
                                 ),
                             );
                         }
@@ -1351,13 +1366,13 @@ impl Common {
 }
 
 impl Shell {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &Config, hooks: crate::hooks::Hooks) -> Self {
         let theme = cosmic::theme::system_preference();
 
         let tiling_exceptions = layout::TilingExceptions::new(config.tiling_exceptions.iter());
 
         Shell {
-            workspaces: Workspaces::new(config, theme.clone()),
+            workspaces: Workspaces::new(config, theme.clone(), hooks.clone()),
             seats: Seats::new(),
 
             pending_windows: Vec::new(),
@@ -1368,6 +1383,7 @@ impl Shell {
             previous_workspace_idx: None,
 
             theme,
+            hooks,
             active_hint: config.cosmic_conf.active_hint,
             overview_mode: OverviewMode::None,
             swap_indicator: None,
@@ -2371,6 +2387,7 @@ impl Shell {
             window.clone(),
             evlh.clone(),
             self.theme.clone(),
+            self.hooks.clone(),
         ));
         #[cfg(feature = "debug")]
         {
@@ -2972,8 +2989,13 @@ impl Shell {
             .unwrap();
 
         let mapped = if move_out_of_stack {
-            let new_mapped: CosmicMapped =
-                CosmicWindow::new(window.clone(), evlh.clone(), self.theme.clone()).into();
+            let new_mapped: CosmicMapped = CosmicWindow::new(
+                window.clone(),
+                evlh.clone(),
+                self.theme.clone(),
+                self.hooks.clone(),
+            )
+            .into();
             start_data.set_focus(new_mapped.focus_under((0., 0.).into(), WindowSurfaceType::ALL));
             new_mapped
         } else {
@@ -3374,13 +3396,15 @@ impl Shell {
                 seat,
                 ManagedLayer::Sticky,
                 self.theme.clone(),
+                self.hooks.clone(),
             )
         } else {
             let theme = self.theme.clone();
+            let hooks = self.hooks.clone();
             let workspace = self.active_space_mut(&output).unwrap();
             workspace
                 .floating_layer
-                .move_current_element(direction, seat, ManagedLayer::Floating, theme)
+                .move_current_element(direction, seat, ManagedLayer::Floating, theme, hooks)
                 .or_else(|| workspace.tiling_layer.move_current_node(direction, seat))
         }
     }

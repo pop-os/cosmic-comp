@@ -288,6 +288,7 @@ impl XdgShellHandler for State {
                         surface,
                         self.common.event_loop_handle.clone(),
                         self.common.theme.clone(),
+                        self.common.hooks.clone(),
                     ))
                 } else {
                     set.sticky_layer.unmap(&mapped);
@@ -327,6 +328,7 @@ impl XdgShellHandler for State {
                                 surface,
                                 self.common.event_loop_handle.clone(),
                                 self.common.theme.clone(),
+                                self.common.hooks.clone(),
                             )),
                             if workspace.is_tiled(&mapped) {
                                 ManagedLayer::Tiling

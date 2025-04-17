@@ -551,6 +551,7 @@ impl CosmicMapped {
         &mut self,
         (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
+        hooks: crate::hooks::Hooks,
     ) {
         match &self.element {
             CosmicMappedInternal::Window(window) => {
@@ -558,7 +559,7 @@ impl CosmicMapped {
                 let activated = surface.is_activated(true);
                 let handle = window.loop_handle();
 
-                let stack = CosmicStack::new(std::iter::once(surface), handle, theme);
+                let stack = CosmicStack::new(std::iter::once(surface), handle, theme, hooks);
                 if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
                     stack.set_geometry(geo.to_global(&output));
                 }
@@ -578,11 +579,12 @@ impl CosmicMapped {
         surface: CosmicSurface,
         (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
+        hooks: crate::hooks::Hooks,
     ) {
         let handle = self.loop_handle();
         surface.try_force_undecorated(false);
         surface.set_tiled(false);
-        let window = CosmicWindow::new(surface, handle, theme);
+        let window = CosmicWindow::new(surface, handle, theme, hooks);
 
         if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
             window.set_geometry(geo.to_global(&output));

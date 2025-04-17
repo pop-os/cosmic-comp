@@ -58,6 +58,7 @@ pub struct FloatingLayout {
     hovered_stack: Option<(CosmicMapped, Rectangle<i32, Local>)>,
     dirty: AtomicBool,
     pub theme: cosmic::Theme,
+    hooks: crate::hooks::Hooks,
 }
 
 #[derive(Debug)]
@@ -262,9 +263,14 @@ impl TiledCorners {
 }
 
 impl FloatingLayout {
-    pub fn new(theme: cosmic::Theme, output: &Output) -> FloatingLayout {
+    pub fn new(
+        theme: cosmic::Theme,
+        hooks: crate::hooks::Hooks,
+        output: &Output,
+    ) -> FloatingLayout {
         let mut layout = Self {
             theme,
+            hooks,
             ..Default::default()
         };
         layout.space.map_output(output, (0, 0));
@@ -1020,7 +1026,11 @@ impl FloatingLayout {
         if mapped.is_window() {
             // if it is just a window
             self.space.unmap_elem(&mapped);
-            mapped.convert_to_stack((&output, mapped.bbox()), self.theme.clone());
+            mapped.convert_to_stack(
+                (&output, mapped.bbox()),
+                self.theme.clone(),
+                self.hooks.clone(),
+            );
             self.map_internal(
                 mapped.clone(),
                 Some(location.as_local()),
@@ -1037,7 +1047,12 @@ impl FloatingLayout {
 
             self.space.unmap_elem(&mapped);
             let handle = mapped.loop_handle();
-            mapped.convert_to_surface(first, (&output, mapped.bbox()), self.theme.clone());
+            mapped.convert_to_surface(
+                first,
+                (&output, mapped.bbox()),
+                self.theme.clone(),
+                self.hooks.clone(),
+            );
             let mut new_elements = vec![mapped.clone()];
 
             // map the rest
@@ -1049,6 +1064,7 @@ impl FloatingLayout {
                     other,
                     handle.clone(),
                     self.theme.clone(),
+                    self.hooks.clone(),
                 ));
                 window.output_enter(&output, window.bbox());
 
@@ -1094,13 +1110,14 @@ impl FloatingLayout {
         seat: &Seat<State>,
         layer: ManagedLayer,
         theme: &cosmic::Theme,
+        hooks: &crate::hooks::Hooks,
         element: &CosmicMapped,
     ) -> MoveResult {
         match element.handle_move(direction) {
             StackMoveResult::Handled => MoveResult::Done,
             StackMoveResult::MoveOut(surface, loop_handle) => {
                 let mapped: CosmicMapped =
-                    CosmicWindow::new(surface, loop_handle, theme.clone()).into();
+                    CosmicWindow::new(surface, loop_handle, theme.clone(), hooks.clone()).into();
                 let output = seat.active_output();
                 let pos = self.space.element_geometry(element).unwrap().loc
                     + match direction {
@@ -1261,6 +1278,7 @@ impl FloatingLayout {
         seat: &Seat<State>,
         layer: ManagedLayer,
         theme: cosmic::Theme,
+        hooks: crate::hooks::Hooks,
     ) -> MoveResult {
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return MoveResult::None;
@@ -1284,7 +1302,7 @@ impl FloatingLayout {
             return MoveResult::None;
         };
 
-        self.move_element(direction, seat, layer, &theme, &focused.clone())
+        self.move_element(direction, seat, layer, &theme, &hooks, &focused.clone())
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
