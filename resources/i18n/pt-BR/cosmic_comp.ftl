@@ -1,7 +1,7 @@
 a11y-zoom-move-continuously = A visualização se move continuamente com o ponteiro
 a11y-zoom-move-onedge = A visualização se move quando o ponteiro atinge a borda
 a11y-zoom-move-centered = A visualização se move para manter o ponteiro centralizado
-a11y-zoom-settings = Configurações do ampliador...
+a11y-zoom-settings = Configurações do ampliador de tela...
 grow-window = Aumentar
 shrink-window = Diminuir
 swap-windows = Trocar janelas
@@ -18,7 +18,7 @@ window-menu-move-next-workspace = Mover para a próxima área de trabalho
 window-menu-stack = Empilhar janelas
 window-menu-unstack-all = Desempilhar janelas
 window-menu-unstack = Desempilhar janela
-window-menu-sticky = Fixar janela
+window-menu-sticky = Manter a janela sempre na frente
 window-menu-close = Fechar
 window-menu-close-all = Fechar todas as janelas
 window-menu-resize-edge-top = Para cima
