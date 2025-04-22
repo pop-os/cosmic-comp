@@ -835,6 +835,7 @@ impl Drop for MoveGrab {
                                 grab_state.window.geometry().size.as_global(),
                             ));
                             let theme = shell.theme.clone();
+                            let hooks = shell.hooks.clone();
                             let workspace = shell.active_space_mut(&output).unwrap();
                             let (window, location) = workspace.floating_layer.drop_window(
                                 grab_state.window,
@@ -871,6 +872,7 @@ impl Drop for MoveGrab {
                                                 &seat,
                                                 ManagedLayer::Floating,
                                                 &theme,
+                                                &hooks,
                                                 &window,
                                             );
                                         }

@@ -266,9 +266,10 @@ impl Workspace {
         output: Output,
         tiling_enabled: bool,
         theme: cosmic::Theme,
+        hooks: crate::hooks::Hooks,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
-        let floating_layer = FloatingLayout::new(theme, &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), hooks.clone(), &output);
+        let floating_layer = FloatingLayout::new(theme, hooks, &output);
         let output_match = OutputMatch::for_output(&output);
 
         Workspace {
