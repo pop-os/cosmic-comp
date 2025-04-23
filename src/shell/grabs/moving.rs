@@ -11,7 +11,7 @@ use crate::{
         },
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         layout::floating::TiledCorners,
-        CosmicMapped, CosmicSurface, Direction, ManagedLayer,
+        CosmicMapped, CosmicSurface, Direction, ManagedLayer, WindowSurface,
     },
     utils::prelude::*,
     wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
@@ -490,7 +490,32 @@ impl PointerGrab<State> for MoveGrab {
         event: &MotionEvent,
     ) {
         self.update_location(state, event.location);
-
+        {
+            let mut borrow = self
+                .seat
+                .user_data()
+                .get::<SeatMoveGrabState>()
+                .map(|s| s.lock().unwrap());
+            if let Some(grab_state) = borrow.as_mut().and_then(|s| s.as_mut()) {
+                // this is the global location
+                let location =
+                    grab_state.window_offset.as_global().to_f64() + grab_state.location.as_global();
+                for (window, offset) in self.window.windows() {
+                    match window.0.underlying_surface() {
+                        WindowSurface::Wayland(toplevel) => {
+                            update_reactive_popups(
+                                toplevel,
+                                // round() is used for consistency with fractional scaling
+                                (location + offset.as_global().to_f64()).to_i32_round(),
+                                self.window_outputs.iter(),
+                            );
+                        }
+                        // X11 surfaces have access to the global coordinate space unlike wayland clients, so they do the re-adjustment themselves.
+                        _ => {}
+                    }
+                }
+            }
+        }
         // While the grab is active, no client has pointer focus
         handle.motion(state, None, event);
         if !self.window.alive() {
