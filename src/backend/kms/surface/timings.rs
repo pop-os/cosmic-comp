@@ -1,15 +1,19 @@
 use std::{collections::VecDeque, num::NonZeroU64, time::Duration};
 
-use smithay::utils::{Clock, Monotonic, Time};
+use smithay::{
+    backend::drm::DrmNode,
+    utils::{Clock, Monotonic, Time},
+};
 use tracing::{debug, error};
 
-const FRAME_TIME_BUFFER: Duration = Duration::from_millis(1);
-const FRAME_TIME_WINDOW: usize = 3;
+const BASE_SAFETY_MARGIN: Duration = Duration::from_millis(3);
+const SAMPLE_TIME_WINDOW: usize = 5;
 
 pub struct Timings {
     refresh_interval_ns: Option<NonZeroU64>,
     min_refresh_interval_ns: Option<NonZeroU64>,
     vrr: bool,
+    vendor: Option<u32>,
 
     pub pending_frame: Option<PendingFrame>,
     pub previous_frames: VecDeque<Frame>,
@@ -37,6 +41,10 @@ impl Frame {
         self.render_duration_elements + self.render_duration_draw
     }
 
+    fn submit_time(&self) -> Duration {
+        Time::elapsed(&self.render_start, self.presentation_submitted)
+    }
+
     fn frame_time(&self) -> Duration {
         Time::elapsed(&self.render_start, self.presentation_presented)
     }
@@ -49,6 +57,7 @@ impl Timings {
         refresh_interval: Option<Duration>,
         min_interval: Option<Duration>,
         vrr: bool,
+        node: DrmNode,
     ) -> Self {
         let refresh_interval_ns = if let Some(interval) = &refresh_interval {
             assert_eq!(interval.as_secs(), 0);
@@ -64,10 +73,20 @@ impl Timings {
             None
         };
 
+        let vendor = if let Ok(vendor) = std::fs::read_to_string(format!(
+            "/sys/class/drm/renderD{}/device/vendor",
+            node.minor()
+        )) {
+            u32::from_str_radix(&vendor.trim()[2..], 16).ok()
+        } else {
+            None
+        };
+
         Self {
             refresh_interval_ns,
             min_refresh_interval_ns,
             vrr,
+            vendor,
 
             pending_frame: None,
             previous_frames: VecDeque::new(),
@@ -209,6 +228,22 @@ impl Timings {
             / (self.previous_frames.len() as u32)
     }
 
+    pub fn avg_submittime(&self, window: usize) -> Option<Duration> {
+        if self.previous_frames.len() < window || window == 0 {
+            return None;
+        }
+
+        Some(
+            self.previous_frames
+                .iter()
+                .rev()
+                .take(window)
+                .map(|f| f.submit_time())
+                .try_fold(Duration::ZERO, |acc, x| acc.checked_add(x))?
+                / (window.min(self.previous_frames.len()) as u32),
+        )
+    }
+
     pub fn avg_frametime(&self, window: usize) -> Option<Duration> {
         if self.previous_frames.len() < window || window == 0 {
             return None;
@@ -308,15 +343,28 @@ impl Timings {
     }
 
     pub fn next_render_time(&self, clock: &Clock<Monotonic>) -> Duration {
+        let Some(refresh_interval) = self.refresh_interval_ns else {
+            return Duration::ZERO; // we don't know what to expect, so render immediately.
+        };
+
+        const MIN_MARGIN: Duration = Duration::from_millis(3);
+        let baseline = MIN_MARGIN.max(Duration::from_nanos(refresh_interval.get() / 2));
+
         let estimated_presentation_time = self.next_presentation_time(clock);
         if estimated_presentation_time.is_zero() {
             return Duration::ZERO;
         }
 
-        let Some(avg_frametime) = self.avg_frametime(FRAME_TIME_WINDOW) else {
+        // HACK: Nvidia returns `page_flip`/`commit` early, so we have no information to optimize latency on submission.
+        if self.vendor == Some(0x10de) {
             return Duration::ZERO;
+        }
+
+        let Some(avg_submittime) = self.avg_submittime(SAMPLE_TIME_WINDOW) else {
+            return estimated_presentation_time.saturating_sub(baseline + BASE_SAFETY_MARGIN);
         };
 
-        estimated_presentation_time.saturating_sub(avg_frametime + FRAME_TIME_BUFFER)
+        let margin = avg_submittime + BASE_SAFETY_MARGIN;
+        estimated_presentation_time.saturating_sub(margin)
     }
 }

@@ -523,7 +523,7 @@ fn surface_thread(
         vrr_mode: AdaptiveSync::Disabled,
 
         state: QueueState::Idle,
-        timings: Timings::new(None, None, false),
+        timings: Timings::new(None, None, false, target_node),
         frame_callback_seq: 0,
         thread_sender,
 
