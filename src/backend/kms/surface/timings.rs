@@ -219,14 +219,18 @@ impl Timings {
     }
 
     pub fn avg_rendertime(&self) -> Duration {
-        if self.previous_frames.is_empty() {
-            return Duration::ZERO;
-        }
-        self.previous_frames
+        let Some(sum_rendertime) = self
+            .previous_frames
             .iter()
             .map(|f| f.render_time())
-            .sum::<Duration>()
-            / (self.previous_frames.len() as u32)
+            .try_fold(Duration::ZERO, |acc, x| acc.checked_add(x))
+        else {
+            return Duration::ZERO;
+        };
+
+        sum_rendertime
+            .checked_div(self.previous_frames.len() as u32)
+            .unwrap_or(Duration::ZERO)
     }
 
     pub fn avg_submittime(&self, window: usize) -> Option<Duration> {
@@ -269,9 +273,12 @@ impl Timings {
             (Some(Frame { render_start, .. }), Some(end_frame)) => {
                 Time::elapsed(render_start, end_frame.render_start.clone()) + end_frame.frame_time()
             }
-            _ => Duration::ZERO,
+            _ => {
+                return 0.0;
+            }
         }
         .as_secs_f64();
+
         1.0 / (secs / self.previous_frames.len() as f64)
     }
 
