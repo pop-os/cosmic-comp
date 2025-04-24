@@ -320,9 +320,9 @@ impl Timings {
         }
     }
 
-    pub fn past_min_presentation_time(&self, clock: &Clock<Monotonic>) -> bool {
+    pub fn past_min_render_time(&self, clock: &Clock<Monotonic>) -> bool {
         let now: Duration = clock.now().into();
-        let Some(refresh_interval_ns) = self.min_refresh_interval_ns else {
+        let Some(min_refresh_interval_ns) = self.min_refresh_interval_ns else {
             return true;
         };
         let Some(last_presentation_time): Option<Duration> = self
@@ -333,13 +333,29 @@ impl Timings {
             return true;
         };
 
-        let refresh_interval_ns = refresh_interval_ns.get();
+        let min_refresh_interval_ns = min_refresh_interval_ns.get();
         if now <= last_presentation_time {
             return false;
         }
 
-        let next = last_presentation_time + Duration::from_nanos(refresh_interval_ns);
-        now >= next
+        const MIN_MARGIN: Duration = Duration::from_millis(3);
+        let baseline = if let Some(refresh_interval_ns) = self.refresh_interval_ns {
+            MIN_MARGIN.max(Duration::from_nanos(refresh_interval_ns.get() / 2))
+        } else {
+            MIN_MARGIN
+        };
+
+        let next_presentation_time =
+            last_presentation_time + Duration::from_nanos(min_refresh_interval_ns);
+        let deadline = next_presentation_time.saturating_sub(
+            if let Some(avg_submittime) = self.avg_submittime(SAMPLE_TIME_WINDOW) {
+                avg_submittime
+            } else {
+                baseline
+            } + BASE_SAFETY_MARGIN,
+        );
+
+        now >= deadline
     }
 
     pub fn next_render_time(&self, clock: &Clock<Monotonic>) -> Duration {
