@@ -51,7 +51,7 @@ impl Frame {
 }
 
 impl Timings {
-    const WINDOW_SIZE: usize = 360;
+    const CLEANUP: usize = 360;
 
     pub fn new(
         refresh_interval: Option<Duration>,
@@ -171,8 +171,9 @@ impl Timings {
                 );
             }
             self.previous_frames.push_back(new_frame);
-            while self.previous_frames.len() > Self::WINDOW_SIZE {
-                self.previous_frames.pop_front();
+
+            if let Some(overflow) = self.previous_frames.len().checked_sub(Self::CLEANUP * 2) {
+                self.previous_frames = self.previous_frames.split_off(overflow + Self::CLEANUP);
             }
         }
     }
