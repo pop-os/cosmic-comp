@@ -572,15 +572,16 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let shell_guard = shell.read().unwrap();
     #[cfg(feature = "debug")]
     let mut debug_elements = {
         let output_geo = output.geometry();
+        let shell_guard = shell.read().unwrap();
         let seats = shell_guard.seats.iter().cloned().collect::<Vec<_>>();
+        let debug_active = shell_guard.debug_active;
+        std::mem::drop(shell_guard);
         let scale = output.current_scale().fractional_scale();
 
         if let Some((state, timings)) = _fps {
-            let debug_active = shell_guard.debug_active;
             vec![fps_ui(
                 _gpu,
                 debug_active,
@@ -601,6 +602,7 @@ where
         }
     };
 
+    let shell_guard = shell.read().unwrap();
     let Some((previous_workspace, workspace)) = shell_guard.workspaces.active(output) else {
         #[cfg(not(feature = "debug"))]
         return Ok(Vec::new());
