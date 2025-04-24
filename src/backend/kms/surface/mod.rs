@@ -1008,14 +1008,12 @@ impl SurfaceThreadState {
         .map_err(|err| {
             anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
         })?;
-        let additional_frame_flags = if vrr
-            && has_active_fullscreen
-            && !self.timings.past_min_presentation_time(&self.clock)
-        {
-            FrameFlags::SKIP_CURSOR_ONLY_UPDATES
-        } else {
-            FrameFlags::empty()
-        };
+        let additional_frame_flags =
+            if vrr && has_active_fullscreen && !self.timings.past_min_render_time(&self.clock) {
+                FrameFlags::SKIP_CURSOR_ONLY_UPDATES
+            } else {
+                FrameFlags::empty()
+            };
         self.timings.set_vrr(vrr);
         self.timings.elements_done(&self.clock);
 
