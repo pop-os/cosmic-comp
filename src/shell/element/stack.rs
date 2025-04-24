@@ -381,7 +381,6 @@ impl CosmicStack {
         if update {
             self.0
                 .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
-            self.0.force_update();
         }
 
         result
@@ -436,7 +435,6 @@ impl CosmicStack {
         if !matches!(result, MoveResult::Default) {
             self.0
                 .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
-            self.0.force_update();
         }
 
         result
@@ -1208,7 +1206,6 @@ impl SpaceElement for CosmicStack {
         })
     }
     fn refresh(&self) {
-        SpaceElement::refresh(&self.0);
         self.0.with_program(|p| {
             let mut windows = p.windows.lock().unwrap();
 
@@ -1245,6 +1242,7 @@ impl SpaceElement for CosmicStack {
                 SpaceElement::refresh(w)
             });
         });
+        SpaceElement::refresh(&self.0);
     }
 }
 
