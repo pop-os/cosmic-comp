@@ -49,6 +49,7 @@ tiny-skia = "0.11"
 tracing = { version = "0.1.37", features = ["max_level_debug", "release_max_level_info"] }
 tracing-journald = "0.3.0"
 tracing-subscriber = {version = "0.3.16", features = ["env-filter", "tracing-log"]}
+tracy-client = { version = "0.18.0", default-features = false }
 wayland-backend = "0.3.3"
 wayland-scanner = "0.31.1"
 xcursor = "0.3.3"
@@ -100,7 +101,7 @@ rev = "e720136"
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
 systemd = ["libsystemd"]
-profile-with-tracy = ["profiling/profile-with-tracy"]
+profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
 
 [profile.dev.package.tiny-skia]
 opt-level = 2

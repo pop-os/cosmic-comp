@@ -146,6 +146,17 @@ pub struct SurfaceThreadState {
 
     #[cfg(feature = "debug")]
     egui: EguiState,
+
+    last_sequence: Option<u32>,
+    /// Tracy frame that goes from vblank to vblank.
+    vblank_frame: Option<tracy_client::Frame>,
+    /// Frame name for the VBlank frame.
+    vblank_frame_name: tracy_client::FrameName,
+    /// Plot name for the time since presentation plot.
+    time_since_presentation_plot_name: tracy_client::PlotName,
+    /// Plot name for the presentation misprediction plot.
+    presentation_misprediction_plot_name: tracy_client::PlotName,
+    sequence_delta_plot_name: tracy_client::PlotName,
 }
 
 pub type GbmDrmOutput = DrmOutput<
@@ -154,6 +165,7 @@ pub type GbmDrmOutput = DrmOutput<
     Option<(
         OutputPresentationFeedback,
         Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Duration,
     )>,
     DrmDeviceFd,
 >;
@@ -469,7 +481,8 @@ fn surface_thread(
     thread_receiver: Channel<ThreadCommand>,
     startup_done: Arc<AtomicBool>,
 ) -> Result<()> {
-    profiling::register_thread!(&format!("Surface Thread {}", output.name()));
+    let name = output.name();
+    profiling::register_thread!(&format!("Surface Thread {}", name));
 
     let mut event_loop = EventLoop::try_new().unwrap();
 
@@ -491,6 +504,14 @@ fn surface_thread(
         state.context().set_visuals(visuals);
         state
     };
+
+    let vblank_frame_name = tracy_client::FrameName::new_leak(format!("vblank on {name}"));
+    let time_since_presentation_plot_name =
+        tracy_client::PlotName::new_leak(format!("{name} time since presentation, ms"));
+    let presentation_misprediction_plot_name =
+        tracy_client::PlotName::new_leak(format!("{name} presentation misprediction, ms"));
+    let sequence_delta_plot_name =
+        tracy_client::PlotName::new_leak(format!("{name} sequence delta"));
 
     let mut state = SurfaceThreadState {
         api,
@@ -516,6 +537,13 @@ fn surface_thread(
         clock: Clock::new(),
         #[cfg(feature = "debug")]
         egui,
+
+        last_sequence: None,
+        vblank_frame: None,
+        vblank_frame_name,
+        time_since_presentation_plot_name,
+        presentation_misprediction_plot_name,
+        sequence_delta_plot_name,
     };
 
     let signal = event_loop.get_signal();
@@ -716,9 +744,46 @@ impl SurfaceThreadState {
         };
         let sequence = metadata.as_ref().map(|data| data.sequence).unwrap_or(0);
 
+        // finish tracy frame
+        let _ = self.vblank_frame.take();
+
         // mark last frame completed
-        if let Ok(Some(Some((mut feedback, frames)))) = compositor.frame_submitted() {
+        if let Ok(Some(Some((mut feedback, frames, estimated_presentation_time)))) =
+            compositor.frame_submitted()
+        {
             if self.mirroring.is_none() {
+                let name = self.output.name();
+                let message = if let Some(presentation_time) = presentation_time {
+                    let misprediction_s =
+                        presentation_time.as_secs_f64() - estimated_presentation_time.as_secs_f64();
+                    tracy_client::Client::running().unwrap().plot(
+                        self.presentation_misprediction_plot_name,
+                        misprediction_s * 1000.,
+                    );
+
+                    let now = Duration::from(now);
+                    if presentation_time > now {
+                        let diff = presentation_time - now;
+                        tracy_client::Client::running().unwrap().plot(
+                            self.time_since_presentation_plot_name,
+                            -diff.as_secs_f64() * 1000.,
+                        );
+                        format!("vblank on {name}, presentation is {diff:?} later")
+                    } else {
+                        let diff = now - presentation_time;
+                        tracy_client::Client::running().unwrap().plot(
+                            self.time_since_presentation_plot_name,
+                            diff.as_secs_f64() * 1000.,
+                        );
+                        format!("vblank on {name}, presentation was {diff:?} ago")
+                    }
+                } else {
+                    format!("vblank on {name}, presentation time unknown")
+                };
+                tracy_client::Client::running()
+                    .unwrap()
+                    .message(&message, 0);
+
                 let (clock, flags) = if let Some(tp) = presentation_time {
                     (
                         tp.into(),
@@ -751,6 +816,14 @@ impl SurfaceThreadState {
                     None => Refresh::Unknown,
                 };
 
+                if let Some(last_sequence) = self.last_sequence {
+                    let delta = sequence as f64 - last_sequence as f64;
+                    tracy_client::Client::running()
+                        .unwrap()
+                        .plot(self.sequence_delta_plot_name, delta);
+                }
+                self.last_sequence = Some(sequence);
+
                 feedback.presented(clock, refresh, sequence as u64, flags);
 
                 self.timings.presented(clock);
@@ -770,6 +843,11 @@ impl SurfaceThreadState {
         };
 
         if redraw_needed || self.shell.read().unwrap().animations_going() {
+            let vblank_frame = tracy_client::Client::running()
+                .unwrap()
+                .non_continuous_frame(self.vblank_frame_name);
+            self.vblank_frame = Some(vblank_frame);
+
             self.queue_redraw(false);
         } else {
             self.send_frame_callbacks();
@@ -1332,6 +1410,7 @@ impl SurfaceThreadState {
                             .unwrap()
                             .take_presentation_feedback(&self.output, &frame_result.states),
                         rx,
+                        estimated_presentation,
                     ))
                 } else {
                     None
@@ -1628,6 +1707,9 @@ impl SurfaceThreadState {
                                 self.send_frame_callbacks();
                             }
                         } else {
+                            // we don't expect a vblank
+                            let _ = self.vblank_frame.take();
+
                             self.queue_estimated_vblank(
                                 estimated_presentation,
                                 // Make sure we redraw to reevaluate, if we intentionally missed content

@@ -47,6 +47,7 @@ use std::{
     fmt,
     path::{Path, PathBuf},
     sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
+    time::Duration,
 };
 
 use super::{drm_helpers, socket::Socket, surface::Surface};
@@ -64,6 +65,7 @@ pub type GbmDrmOutputManager = DrmOutputManager<
     Option<(
         OutputPresentationFeedback,
         Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Duration,
     )>,
     DrmDeviceFd,
 >;
