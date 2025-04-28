@@ -19,6 +19,7 @@ use smithay::{
         },
         drm::{
             compositor::{FrameError, FrameFlags},
+            exporter::gbm::GbmFramebufferExporter,
             output::DrmOutputManager,
             DrmDevice, DrmDeviceFd, DrmEvent, DrmNode,
         },
@@ -61,7 +62,7 @@ pub struct EGLInternals {
 
 pub type GbmDrmOutputManager = DrmOutputManager<
     GbmAllocator<DrmDeviceFd>,
-    GbmDevice<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
         Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
@@ -221,7 +222,7 @@ impl State {
                 gbm.clone(),
                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
             ),
-            gbm.clone(),
+            GbmFramebufferExporter::new(gbm.clone()),
             Some(gbm.clone()),
             [
                 Fourcc::Abgr2101010,
