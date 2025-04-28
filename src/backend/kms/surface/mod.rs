@@ -22,13 +22,10 @@ use anyhow::{Context, Result};
 use calloop::channel::Channel;
 use smithay::{
     backend::{
-        allocator::{
-            format::FormatSet,
-            gbm::{GbmAllocator, GbmDevice},
-            Fourcc,
-        },
+        allocator::{format::FormatSet, gbm::GbmAllocator, Fourcc},
         drm::{
             compositor::{BlitFrameResultError, FrameError, FrameFlags, PrimaryPlaneElement},
+            exporter::gbm::GbmFramebufferExporter,
             output::DrmOutput,
             DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
         },
@@ -161,7 +158,7 @@ pub struct SurfaceThreadState {
 
 pub type GbmDrmOutput = DrmOutput<
     GbmAllocator<DrmDeviceFd>,
-    GbmDevice<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
         Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
