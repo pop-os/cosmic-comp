@@ -974,10 +974,8 @@ impl SurfaceThreadState {
 
         self.timings.start_render(&self.clock);
 
-        let mut vrr = match self.vrr_mode {
-            AdaptiveSync::Force => true,
-            _ => false,
-        };
+        let mut additional_frame_flags = FrameFlags::empty();
+        let mut remove_frame_flags = FrameFlags::empty();
 
         let has_active_fullscreen = {
             let shell = self.shell.read().unwrap();
@@ -987,6 +985,16 @@ impl SurfaceThreadState {
             } else {
                 false
             }
+        };
+
+        if has_active_fullscreen {
+            // skip overlay plane assign if we have a fullscreen surface to save on tests
+            remove_frame_flags |= FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
+        }
+
+        let mut vrr = match self.vrr_mode {
+            AdaptiveSync::Force => true,
+            _ => false,
         };
 
         if self.vrr_mode == AdaptiveSync::Enabled {
@@ -1008,12 +1016,10 @@ impl SurfaceThreadState {
         .map_err(|err| {
             anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
         })?;
-        let additional_frame_flags =
-            if vrr && has_active_fullscreen && !self.timings.past_min_render_time(&self.clock) {
-                FrameFlags::SKIP_CURSOR_ONLY_UPDATES
-            } else {
-                FrameFlags::empty()
-            };
+
+        if vrr && has_active_fullscreen && !self.timings.past_min_render_time(&self.clock) {
+            additional_frame_flags |= FrameFlags::SKIP_CURSOR_ONLY_UPDATES;
+        };
         self.timings.set_vrr(vrr);
         self.timings.elements_done(&self.clock);
 
@@ -1382,7 +1388,9 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &elements,
                 [0.0, 0.0, 0.0, 0.0],
-                self.frame_flags.union(additional_frame_flags),
+                self.frame_flags
+                    .union(additional_frame_flags)
+                    .difference(remove_frame_flags),
             )
         } else {
             if let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr)) {
@@ -1392,7 +1400,9 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &elements,
                 CLEAR_COLOR, // TODO use a theme neutral color
-                self.frame_flags.union(additional_frame_flags),
+                self.frame_flags
+                    .union(additional_frame_flags)
+                    .difference(remove_frame_flags),
             )
         };
         self.timings.draw_done(&self.clock);
