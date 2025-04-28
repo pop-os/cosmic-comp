@@ -1011,7 +1011,7 @@ pub struct PostprocessState {
 }
 
 impl PostprocessState {
-    pub fn new_with_renderer<R: Renderer + Offscreen<GlesTexture>>(
+    pub fn new_with_renderer<R: AsGlowRenderer + Offscreen<GlesTexture>>(
         renderer: &mut R,
         format: Fourcc,
         output_config: PostprocessOutputConfig,
@@ -1022,7 +1022,7 @@ impl PostprocessState {
 
         let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
         let texture_buffer = TextureRenderBuffer::from_texture(
-            renderer,
+            renderer.glow_renderer(),
             texture,
             1,
             Transform::Normal,
@@ -1042,7 +1042,7 @@ impl PostprocessState {
         })
     }
 
-    pub fn track_cursor<R: Renderer + Offscreen<GlesTexture>>(
+    pub fn track_cursor<R: AsGlowRenderer + Offscreen<GlesTexture>>(
         &mut self,
         renderer: &mut R,
         format: Fourcc,
@@ -1069,8 +1069,13 @@ impl PostprocessState {
 
         let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
 
-        let texture_buffer =
-            TextureRenderBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
+        let texture_buffer = TextureRenderBuffer::from_texture(
+            renderer.glow_renderer(),
+            texture,
+            1,
+            Transform::Normal,
+            None,
+        );
 
         let damage_tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
 
