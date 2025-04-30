@@ -11,7 +11,7 @@ use crate::{
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
+        handlers::screencopy::{submit_buffer, DropableFrame, FrameHolder, SessionData},
         protocols::screencopy::{
             FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession,
         },
@@ -161,7 +161,7 @@ pub type GbmDrmOutput = DrmOutput<
     GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
-        Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Receiver<(DropableFrame, Vec<Rectangle<i32, BufferCoords>>)>,
         Duration,
     )>,
     DrmDeviceFd,
@@ -825,8 +825,12 @@ impl SurfaceThreadState {
 
                 self.timings.presented(clock);
 
-                while let Ok((frame, damage)) = frames.recv() {
-                    frame.success(self.output.current_transform(), damage, clock);
+                while let Ok((mut frame, damage)) = frames.recv() {
+                    frame
+                        .0
+                        .take()
+                        .unwrap()
+                        .success(self.output.current_transform(), damage, clock);
                 }
             }
         }
@@ -1667,7 +1671,7 @@ impl SurfaceThreadState {
                                     if frame_result.is_empty {
                                         frame.success(transform, damage, self.clock.now());
                                     } else {
-                                        let _ = tx.send((frame, damage));
+                                        let _ = tx.send((DropableFrame(Some(frame)), damage));
                                     }
                                 }
                                 Ok(None) => {}

@@ -37,7 +37,9 @@ mod render;
 mod user_data;
 pub use self::render::*;
 use self::user_data::*;
-pub use self::user_data::{FrameHolder, ScreencopySessions, SessionData, SessionHolder};
+pub use self::user_data::{
+    DropableFrame, FrameHolder, ScreencopySessions, SessionData, SessionHolder,
+};
 
 impl ScreencopyHandler for State {
     fn screencopy_state(&mut self) -> &mut ScreencopyState {

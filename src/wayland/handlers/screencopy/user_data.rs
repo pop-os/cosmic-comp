@@ -334,7 +334,7 @@ impl Drop for DropableCursorSession {
 }
 
 #[derive(Debug)]
-pub struct DropableFrame(Option<Frame>);
+pub struct DropableFrame(pub Option<Frame>);
 impl Deref for DropableFrame {
     type Target = Frame;
     fn deref(&self) -> &Self::Target {

@@ -5,7 +5,7 @@ use crate::{
     config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState, ScreenFilter},
     shell::Shell,
     utils::prelude::*,
-    wayland::protocols::screencopy::Frame as ScreencopyFrame,
+    wayland::handlers::screencopy::DropableFrame,
 };
 
 use anyhow::{Context, Result};
@@ -65,7 +65,7 @@ pub type GbmDrmOutputManager = DrmOutputManager<
     GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
-        Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Receiver<(DropableFrame, Vec<Rectangle<i32, BufferCoords>>)>,
         Duration,
     )>,
     DrmDeviceFd,
