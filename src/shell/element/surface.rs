@@ -109,7 +109,7 @@ impl CosmicSurface {
                     .clone()
                     .unwrap_or_default()
             }),
-            WindowSurface::X11(surface) => surface.title(),
+            WindowSurface::X11(surface) => surface.title().replace('\0', ""),
         }
     }
 
@@ -126,7 +126,7 @@ impl CosmicSurface {
                     .clone()
                     .unwrap_or_default()
             }),
-            WindowSurface::X11(surface) => surface.class(),
+            WindowSurface::X11(surface) => surface.class().replace('\0', ""),
         }
     }
 
