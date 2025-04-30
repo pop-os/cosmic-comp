@@ -1,4 +1,5 @@
 use std::{
+    ops,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -37,8 +38,8 @@ use super::image_capture_source::ImageCaptureSourceData;
 #[derive(Debug)]
 pub struct ScreencopyState {
     global: GlobalId,
-    known_sessions: Vec<Session>,
-    known_cursor_sessions: Vec<CursorSession>,
+    known_sessions: Vec<SessionRef>,
+    known_cursor_sessions: Vec<CursorSessionRef>,
 }
 
 impl ScreencopyState {
@@ -85,13 +86,13 @@ pub struct DmabufConstraints {
 }
 
 #[derive(Debug, Clone)]
-pub struct Session {
+pub struct SessionRef {
     obj: ExtImageCopyCaptureSessionV1,
     inner: Arc<Mutex<SessionInner>>,
     user_data: Arc<UserDataMap>,
 }
 
-impl PartialEq for Session {
+impl PartialEq for SessionRef {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
     }
@@ -103,7 +104,7 @@ struct SessionInner {
     constraints: Option<BufferConstraints>,
     draw_cursors: bool,
     source: ImageCaptureSourceData,
-    active_frames: Vec<Frame>,
+    active_frames: Vec<FrameRef>,
 }
 
 impl SessionInner {
@@ -118,13 +119,13 @@ impl SessionInner {
     }
 }
 
-impl IsAlive for Session {
+impl IsAlive for SessionRef {
     fn alive(&self) -> bool {
         self.obj.is_alive()
     }
 }
 
-impl Session {
+impl SessionRef {
     pub fn update_constraints(&self, constraints: BufferConstraints) {
         let mut inner = self.inner.lock().unwrap();
 
@@ -168,16 +169,38 @@ impl Session {
     pub fn user_data(&self) -> &UserDataMap {
         &*self.user_data
     }
+}
 
-    pub fn stop(self) {
-        let mut inner = self.inner.lock().unwrap();
+#[derive(Debug)]
+pub struct Session(SessionRef);
+
+impl ops::Deref for Session {
+    type Target = SessionRef;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl PartialEq<SessionRef> for Session {
+    fn eq(&self, other: &SessionRef) -> bool {
+        self.0 == *other
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let mut inner = self.0.inner.lock().unwrap();
 
         if !self.obj.is_alive() || inner.stopped {
             return;
         }
 
         for frame in inner.active_frames.drain(..) {
-            frame.fail(FailureReason::Stopped);
+            frame
+                .inner
+                .lock()
+                .unwrap()
+                .fail(&frame.obj, FailureReason::Stopped);
         }
 
         self.obj.stopped();
@@ -186,14 +209,20 @@ impl Session {
     }
 }
 
+impl Session {
+    pub fn stop(self) {
+        let _ = self;
+    }
+}
+
 #[derive(Debug, Clone)]
-pub struct CursorSession {
+pub struct CursorSessionRef {
     obj: ExtImageCopyCaptureCursorSessionV1,
     inner: Arc<Mutex<CursorSessionInner>>,
     user_data: Arc<UserDataMap>,
 }
 
-impl PartialEq for CursorSession {
+impl PartialEq for CursorSessionRef {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
     }
@@ -207,7 +236,7 @@ struct CursorSessionInner {
     source: ImageCaptureSourceData,
     position: Option<Point<i32, BufferCoords>>,
     hotspot: Point<i32, BufferCoords>,
-    active_frames: Vec<Frame>,
+    active_frames: Vec<FrameRef>,
 }
 
 impl CursorSessionInner {
@@ -224,13 +253,13 @@ impl CursorSessionInner {
     }
 }
 
-impl IsAlive for CursorSession {
+impl IsAlive for CursorSessionRef {
     fn alive(&self) -> bool {
         self.obj.is_alive()
     }
 }
 
-impl CursorSession {
+impl CursorSessionRef {
     pub fn update_constraints(&self, constrains: BufferConstraints) {
         let mut inner = self.inner.lock().unwrap();
 
@@ -319,11 +348,29 @@ impl CursorSession {
     pub fn user_data(&self) -> &UserDataMap {
         &*self.user_data
     }
+}
 
-    pub fn stop(self) {
-        let mut inner = self.inner.lock().unwrap();
+#[derive(Debug)]
+pub struct CursorSession(CursorSessionRef);
 
-        if !self.obj.is_alive() || inner.stopped {
+impl ops::Deref for CursorSession {
+    type Target = CursorSessionRef;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl PartialEq<CursorSessionRef> for CursorSession {
+    fn eq(&self, other: &CursorSessionRef) -> bool {
+        self.0 == *other
+    }
+}
+
+impl Drop for CursorSession {
+    fn drop(&mut self) {
+        let mut inner = self.0.inner.lock().unwrap();
+
+        if !self.0.obj.is_alive() || inner.stopped {
             return;
         }
 
@@ -333,26 +380,37 @@ impl CursorSession {
         inner.constraints.take();
 
         for frame in inner.active_frames.drain(..) {
-            frame.fail(FailureReason::Stopped);
+            frame
+                .inner
+                .lock()
+                .unwrap()
+                .fail(&frame.obj, FailureReason::Stopped);
         }
 
         inner.stopped = true;
     }
 }
 
-#[derive(Debug)]
-pub struct Frame {
+impl CursorSession {
+    pub fn stop(self) {
+        let _ = self;
+    }
+}
+
+/// Un-owned reference to a frame
+#[derive(Clone, Debug)]
+pub struct FrameRef {
     obj: ExtImageCopyCaptureFrameV1,
     inner: Arc<Mutex<FrameInner>>,
 }
 
-impl PartialEq for Frame {
+impl PartialEq for FrameRef {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
     }
 }
 
-impl Frame {
+impl FrameRef {
     pub fn buffer(&self) -> WlBuffer {
         self.inner.lock().unwrap().buffer.clone().unwrap()
     }
@@ -364,7 +422,26 @@ impl Frame {
     pub fn has_failed(&self) -> bool {
         self.inner.lock().unwrap().failed.is_some()
     }
+}
 
+#[derive(Debug, PartialEq)]
+pub struct Frame(FrameRef);
+
+impl ops::Deref for Frame {
+    type Target = FrameRef;
+
+    fn deref(&self) -> &FrameRef {
+        &self.0
+    }
+}
+
+impl PartialEq<FrameRef> for Frame {
+    fn eq(&self, other: &FrameRef) -> bool {
+        self.0 == *other
+    }
+}
+
+impl Frame {
     pub fn success(
         self,
         transform: impl Into<Transform>,
@@ -372,7 +449,7 @@ impl Frame {
         presented: impl Into<Duration>,
     ) {
         {
-            let inner = self.inner.lock().unwrap();
+            let inner = self.0.inner.lock().unwrap();
             if !inner.capture_requested || inner.failed.is_some() {
                 return;
             }
@@ -390,12 +467,22 @@ impl Frame {
         let tv_nsec = time.subsec_nanos();
         self.obj.presentation_time(tv_sec_hi, tv_sec_lo, tv_nsec);
 
-        self.inner.lock().unwrap().ready = true;
+        self.0.inner.lock().unwrap().ready = true;
         self.obj.ready()
     }
 
     pub fn fail(self, reason: FailureReason) {
-        self.inner.lock().unwrap().fail(&self.obj, reason);
+        self.0.inner.lock().unwrap().fail(&self.obj, reason);
+    }
+}
+
+impl Drop for Frame {
+    fn drop(&mut self) {
+        // Send `fail` is `sucesss` or `fail` not already called
+        self.inner
+            .lock()
+            .unwrap()
+            .fail(&self.obj, FailureReason::Unknown);
     }
 }
 
@@ -404,7 +491,7 @@ struct FrameInner {
     constraints: Option<BufferConstraints>,
     buffer: Option<WlBuffer>,
     damage: Vec<Rectangle<i32, BufferCoords>>,
-    // `SessionInner` contains a `Vec<Frame>`, so use a weak reference here to
+    // `SessionInner` contains a `Vec<FrameRef>`, so use a weak reference here to
     // avoid a cycle.
     obj: Weak<ExtImageCopyCaptureSessionV1>,
     capture_requested: bool,
@@ -451,14 +538,14 @@ pub trait ScreencopyHandler {
     fn new_session(&mut self, session: Session);
     fn new_cursor_session(&mut self, session: CursorSession);
 
-    fn frame(&mut self, session: Session, frame: Frame);
-    fn cursor_frame(&mut self, session: CursorSession, frame: Frame);
+    fn frame(&mut self, session: SessionRef, frame: Frame);
+    fn cursor_frame(&mut self, session: CursorSessionRef, frame: Frame);
 
-    fn frame_aborted(&mut self, frame: Frame);
-    fn session_destroyed(&mut self, session: Session) {
+    fn frame_aborted(&mut self, frame_handle: FrameRef);
+    fn session_destroyed(&mut self, session: SessionRef) {
         let _ = session;
     }
-    fn cursor_session_destroyed(&mut self, session: CursorSession) {
+    fn cursor_session_destroyed(&mut self, session: CursorSessionRef) {
         let _ = session;
     }
 }
@@ -546,7 +633,7 @@ where
                                 },
                             );
 
-                            let session = Session {
+                            let session = SessionRef {
                                 obj,
                                 inner: session_data,
                                 user_data: Arc::new(UserDataMap::new()),
@@ -556,7 +643,7 @@ where
                                 .screencopy_state()
                                 .known_sessions
                                 .push(session.clone());
-                            state.new_session(session);
+                            state.new_session(Session(session));
                             return;
                         }
                     }
@@ -572,11 +659,11 @@ where
                         inner: session_data.clone(),
                     },
                 );
-                let session = Session {
+                let session = Session(SessionRef {
                     obj,
                     inner: session_data,
                     user_data: Arc::new(UserDataMap::new()),
-                };
+                });
                 session.stop();
             }
             ext_image_copy_capture_manager_v1::Request::CreatePointerCursorSession {
@@ -598,7 +685,7 @@ where
                                 },
                             );
 
-                            let session = CursorSession {
+                            let session = CursorSessionRef {
                                 obj,
                                 inner: session_data,
                                 user_data: Arc::new(UserDataMap::new()),
@@ -608,7 +695,7 @@ where
                                 .screencopy_state()
                                 .known_cursor_sessions
                                 .push(session.clone());
-                            state.new_cursor_session(session);
+                            state.new_cursor_session(CursorSession(session));
                             return;
                         }
                     }
@@ -623,11 +710,11 @@ where
                         inner: session_data.clone(),
                     },
                 );
-                let session = CursorSession {
+                let session = CursorSession(CursorSessionRef {
                     obj,
                     inner: session_data,
                     user_data: Arc::new(UserDataMap::new()),
-                };
+                });
                 session.stop();
             }
             _ => {}
@@ -675,7 +762,7 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .push(Frame { obj, inner });
+                    .push(FrameRef { obj, inner });
             }
             _ => {}
         }
@@ -808,7 +895,7 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .push(Frame { obj, inner });
+                    .push(FrameRef { obj, inner });
             }
             _ => {}
         }
@@ -877,155 +964,32 @@ where
                     .push(Rectangle::new((x, y).into(), (width, height).into()));
             }
             ext_image_copy_capture_frame_v1::Request::Capture => {
-                let mut inner = data.inner.lock().unwrap();
+                {
+                    let inner = data.inner.lock().unwrap();
 
-                if inner.capture_requested {
-                    resource.post_error(
-                        ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
-                        "Frame was captured previously",
-                    );
-                }
-
-                if inner.buffer.is_none() {
-                    resource.post_error(
-                        ext_image_copy_capture_frame_v1::Error::NoBuffer,
-                        "Attempting to capture frame without a buffer",
-                    );
-                }
-
-                inner.capture_requested = true;
-
-                if let Some(reason) = inner.failed {
-                    inner.fail(resource, reason);
-                    return;
-                }
-
-                if let Some(constraints) = inner.constraints.as_ref() {
-                    let buffer = inner.buffer.as_ref().unwrap();
-                    match buffer_type(buffer) {
-                        Some(BufferType::Dma) => {
-                            let Some(dma_constraints) = constraints.dma.as_ref() else {
-                                debug!("dma buffer not specified for screencopy");
-                                inner.fail(resource, FailureReason::BufferConstraints);
-                                return;
-                            };
-
-                            let dmabuf = match get_dmabuf(buffer) {
-                                Ok(buf) => buf,
-                                Err(err) => {
-                                    debug!(?err, "Error accessing dma buffer for screencopy");
-                                    inner.fail(resource, FailureReason::Stopped);
-                                    return;
-                                }
-                            };
-
-                            let buffer_size = dmabuf.size();
-                            if buffer_size.w < constraints.size.w
-                                || buffer_size.h < constraints.size.h
-                            {
-                                debug!(?buffer_size, ?constraints.size, "buffer too small for screencopy");
-                                inner.fail(&resource, FailureReason::BufferConstraints);
-                                return;
-                            }
-
-                            let format = dmabuf.format();
-                            if dma_constraints
-                                .formats
-                                .iter()
-                                .find(|(fourcc, _)| *fourcc == format.code)
-                                .filter(|(_, modifiers)| modifiers.contains(&format.modifier))
-                                .is_none()
-                            {
-                                debug!(
-                                    ?format,
-                                    ?dma_constraints,
-                                    "unsupported buffer format for screencopy"
-                                );
-                                inner.fail(&resource, FailureReason::BufferConstraints);
-                                return;
-                            }
-                        }
-                        Some(BufferType::Shm) => {
-                            let buffer_data = match with_buffer_contents(buffer, |_, _, data| data)
-                            {
-                                Ok(data) => data,
-                                Err(err) => {
-                                    debug!(?err, "Error accessing shm buffer for screencopy");
-                                    inner.fail(&resource, FailureReason::Unknown);
-                                    return;
-                                }
-                            };
-
-                            if buffer_data.width < constraints.size.w
-                                || buffer_data.height < constraints.size.h
-                            {
-                                debug!(?buffer_data, ?constraints.size, "buffer too small for screencopy");
-                                inner.fail(&resource, FailureReason::BufferConstraints);
-                                return;
-                            }
-
-                            if !constraints.shm.contains(&buffer_data.format) {
-                                debug!(?buffer_data.format, ?constraints.shm, "unsupported buffer format for screencopy");
-                                inner.fail(&resource, FailureReason::BufferConstraints);
-                                return;
-                            }
-                        }
-                        x => {
-                            debug!(?x, "Attempt to screencopy with unsupported buffer type");
-                            inner.fail(&resource, FailureReason::BufferConstraints);
-                            return;
-                        }
+                    if inner.capture_requested {
+                        resource.post_error(
+                            ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
+                            "Frame was captured previously",
+                        );
+                        return;
                     }
-                } else {
-                    inner.fail(&resource, FailureReason::Unknown);
-                    return;
+
+                    if inner.buffer.is_none() {
+                        resource.post_error(
+                            ext_image_copy_capture_frame_v1::Error::NoBuffer,
+                            "Attempting to capture frame without a buffer",
+                        );
+                        return;
+                    }
                 }
 
-                let frame = Frame {
+                let frame = Frame(FrameRef {
                     obj: resource.clone(),
                     inner: data.inner.clone(),
-                };
-
-                let scpy = state.screencopy_state();
-                if let Some(session) = scpy
-                    .known_sessions
-                    .iter()
-                    .find(|session| session.obj == inner.obj)
-                    .map(|s| Session {
-                        obj: s.obj.clone(),
-                        inner: s.inner.clone(),
-                        user_data: s.user_data.clone(),
-                    })
-                {
-                    if session.inner.lock().unwrap().stopped {
-                        inner.fail(&resource, FailureReason::Stopped);
-                        return;
-                    }
-
-                    std::mem::drop(inner);
-                    state.frame(session, frame);
-                } else if let Some(session) = scpy
-                    .known_cursor_sessions
-                    .iter()
-                    .find(|session| {
-                        session.inner.lock().unwrap().session.as_ref()
-                            == inner.obj.upgrade().ok().as_ref()
-                    })
-                    .map(|s| CursorSession {
-                        obj: s.obj.clone(),
-                        inner: s.inner.clone(),
-                        user_data: s.user_data.clone(),
-                    })
-                {
-                    if session.inner.lock().unwrap().stopped {
-                        inner.fail(&resource, FailureReason::Stopped);
-                        return;
-                    }
-
-                    std::mem::drop(inner);
-                    state.cursor_frame(session, frame);
-                } else {
-                    inner.fail(&resource, FailureReason::Unknown);
+                });
+                if let Err(reason) = capture_frame(state, frame) {
+                    data.inner.lock().unwrap().fail(resource, reason);
                 }
             }
             _ => {}
@@ -1038,6 +1002,10 @@ where
         resource: &ExtImageCopyCaptureFrameV1,
         data: &FrameData,
     ) {
+        let frame_ref = FrameRef {
+            obj: resource.clone(),
+            inner: data.inner.clone(),
+        };
         {
             let scpy = state.screencopy_state();
             for session in &mut scpy.known_sessions {
@@ -1046,7 +1014,7 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .retain(|frame| frame.obj != *resource);
+                    .retain(|i| *i != frame_ref);
             }
             for cursor_session in &mut scpy.known_cursor_sessions {
                 cursor_session
@@ -1054,14 +1022,121 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .retain(|frame| frame.obj != *resource);
+                    .retain(|i| *i != frame_ref);
             }
         }
-        let frame = Frame {
-            obj: resource.clone(),
-            inner: data.inner.clone(),
-        };
-        state.frame_aborted(frame);
+        state.frame_aborted(frame_ref);
+    }
+}
+
+fn capture_frame<D: ScreencopyHandler>(state: &mut D, frame: Frame) -> Result<(), FailureReason> {
+    let mut inner = frame.0.inner.lock().unwrap();
+
+    inner.capture_requested = true;
+
+    if let Some(reason) = inner.failed {
+        return Err(reason);
+    }
+
+    if let Some(constraints) = inner.constraints.as_ref() {
+        let buffer = inner.buffer.as_ref().unwrap();
+        match buffer_type(buffer) {
+            Some(BufferType::Dma) => {
+                let Some(dma_constraints) = constraints.dma.as_ref() else {
+                    debug!("dma buffer not specified for screencopy");
+                    return Err(FailureReason::BufferConstraints);
+                };
+
+                let dmabuf = match get_dmabuf(buffer) {
+                    Ok(buf) => buf,
+                    Err(err) => {
+                        debug!(?err, "Error accessing dma buffer for screencopy");
+                        return Err(FailureReason::Stopped);
+                    }
+                };
+
+                let buffer_size = dmabuf.size();
+                if buffer_size.w < constraints.size.w || buffer_size.h < constraints.size.h {
+                    debug!(?buffer_size, ?constraints.size, "buffer too small for screencopy");
+                    return Err(FailureReason::BufferConstraints);
+                }
+
+                let format = dmabuf.format();
+                if dma_constraints
+                    .formats
+                    .iter()
+                    .find(|(fourcc, _)| *fourcc == format.code)
+                    .filter(|(_, modifiers)| modifiers.contains(&format.modifier))
+                    .is_none()
+                {
+                    debug!(
+                        ?format,
+                        ?dma_constraints,
+                        "unsupported buffer format for screencopy"
+                    );
+                    return Err(FailureReason::BufferConstraints);
+                }
+            }
+            Some(BufferType::Shm) => {
+                let buffer_data = match with_buffer_contents(buffer, |_, _, data| data) {
+                    Ok(data) => data,
+                    Err(err) => {
+                        debug!(?err, "Error accessing shm buffer for screencopy");
+                        return Err(FailureReason::Unknown);
+                    }
+                };
+
+                if buffer_data.width < constraints.size.w || buffer_data.height < constraints.size.h
+                {
+                    debug!(?buffer_data, ?constraints.size, "buffer too small for screencopy");
+                    return Err(FailureReason::BufferConstraints);
+                }
+
+                if !constraints.shm.contains(&buffer_data.format) {
+                    debug!(?buffer_data.format, ?constraints.shm, "unsupported buffer format for screencopy");
+                    return Err(FailureReason::BufferConstraints);
+                }
+            }
+            x => {
+                debug!(?x, "Attempt to screencopy with unsupported buffer type");
+                return Err(FailureReason::BufferConstraints);
+            }
+        }
+    } else {
+        return Err(FailureReason::Unknown);
+    }
+
+    let scpy = state.screencopy_state();
+    if let Some(session) = scpy
+        .known_sessions
+        .iter()
+        .find(|session| session.obj == inner.obj)
+        .cloned()
+    {
+        if session.inner.lock().unwrap().stopped {
+            return Err(FailureReason::Stopped);
+        }
+
+        std::mem::drop(inner);
+        state.frame(session, frame);
+        Ok(())
+    } else if let Some(session) = scpy
+        .known_cursor_sessions
+        .iter()
+        .find(|session| {
+            session.inner.lock().unwrap().session.as_ref() == inner.obj.upgrade().ok().as_ref()
+        })
+        .cloned()
+    {
+        if session.inner.lock().unwrap().stopped {
+            return Err(FailureReason::Stopped);
+        }
+
+        std::mem::drop(inner);
+        state.cursor_frame(session, frame);
+        Ok(())
+    } else {
+        Err(FailureReason::Unknown)
     }
 }
 

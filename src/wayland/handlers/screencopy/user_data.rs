@@ -1,9 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-    sync::Mutex,
-};
+use std::{cell::RefCell, collections::HashMap, sync::Mutex};
 
 use smithay::{
     backend::renderer::{damage::OutputDamageTracker, utils::CommitCounter},
@@ -13,11 +8,13 @@ use smithay::{
 
 use crate::{
     shell::{CosmicSurface, Workspace},
-    wayland::protocols::screencopy::{CursorSession, FailureReason, Frame, Session},
+    wayland::protocols::screencopy::{
+        CursorSession, CursorSessionRef, Frame, FrameRef, Session, SessionRef,
+    },
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
-type PendingScreencopyBuffers = Mutex<Vec<(Session, DropableFrame)>>;
+type PendingScreencopyBuffers = Mutex<Vec<(SessionRef, Frame)>>;
 
 pub type SessionData = Mutex<SessionUserData>;
 
@@ -58,24 +55,24 @@ impl SessionUserData {
 
 #[derive(Debug, Default)]
 pub struct ScreencopySessions {
-    sessions: Vec<DropableSession>,
-    cursor_sessions: Vec<DropableCursorSession>,
+    sessions: Vec<Session>,
+    cursor_sessions: Vec<CursorSession>,
 }
 
 pub trait SessionHolder {
     fn add_session(&mut self, session: Session);
-    fn remove_session(&mut self, session: Session);
-    fn sessions(&self) -> Vec<Session>;
+    fn remove_session(&mut self, session: &SessionRef);
+    fn sessions(&self) -> Vec<SessionRef>;
 
     fn add_cursor_session(&mut self, session: CursorSession);
-    fn remove_cursor_session(&mut self, session: CursorSession);
-    fn cursor_sessions(&self) -> Vec<CursorSession>;
+    fn remove_cursor_session(&mut self, session: &CursorSessionRef);
+    fn cursor_sessions(&self) -> Vec<CursorSessionRef>;
 }
 
 pub trait FrameHolder {
-    fn add_frame(&mut self, session: Session, frame: Frame);
-    fn remove_frame(&mut self, frame: &Frame);
-    fn take_pending_frames(&self) -> Vec<(Session, Frame)>;
+    fn add_frame(&mut self, session: SessionRef, frame: Frame);
+    fn remove_frame(&mut self, frame: &FrameRef);
+    fn take_pending_frames(&self) -> Vec<(SessionRef, Frame)>;
 }
 
 impl SessionHolder for Output {
@@ -87,19 +84,19 @@ impl SessionHolder for Output {
             .unwrap()
             .borrow_mut()
             .sessions
-            .push(DropableSession(Some(session)));
+            .push(session);
     }
 
-    fn remove_session(&mut self, session: Session) {
+    fn remove_session(&mut self, session: &SessionRef) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
             .borrow_mut()
             .sessions
-            .retain(|s| *s != session);
+            .retain(|s| s != session);
     }
 
-    fn sessions(&self) -> Vec<Session> {
+    fn sessions(&self) -> Vec<SessionRef> {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .map_or(Vec::new(), |sessions| {
@@ -107,7 +104,7 @@ impl SessionHolder for Output {
                     .borrow()
                     .sessions
                     .iter()
-                    .flat_map(|s| s.0.clone())
+                    .map(|s| (*s).clone())
                     .collect()
             })
     }
@@ -120,19 +117,19 @@ impl SessionHolder for Output {
             .unwrap()
             .borrow_mut()
             .cursor_sessions
-            .push(DropableCursorSession(Some(session)));
+            .push(session);
     }
 
-    fn remove_cursor_session(&mut self, session: CursorSession) {
+    fn remove_cursor_session(&mut self, session: &CursorSessionRef) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
             .borrow_mut()
             .cursor_sessions
-            .retain(|s| *s != session);
+            .retain(|s| s != session);
     }
 
-    fn cursor_sessions(&self) -> Vec<CursorSession> {
+    fn cursor_sessions(&self) -> Vec<CursorSessionRef> {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .map_or(Vec::new(), |sessions| {
@@ -140,14 +137,14 @@ impl SessionHolder for Output {
                     .borrow()
                     .cursor_sessions
                     .iter()
-                    .flat_map(|s| s.0.clone())
+                    .map(|s| (*s).clone())
                     .collect()
             })
     }
 }
 
 impl FrameHolder for Output {
-    fn add_frame(&mut self, session: Session, frame: Frame) {
+    fn add_frame(&mut self, session: SessionRef, frame: Frame) {
         self.user_data()
             .insert_if_missing_threadsafe(PendingScreencopyBuffers::default);
         self.user_data()
@@ -155,61 +152,49 @@ impl FrameHolder for Output {
             .unwrap()
             .lock()
             .unwrap()
-            .push((session, DropableFrame(Some(frame))));
+            .push((session, frame));
     }
-    fn remove_frame(&mut self, frame: &Frame) {
+    fn remove_frame(&mut self, frame: &FrameRef) {
         if let Some(pending) = self.user_data().get::<PendingScreencopyBuffers>() {
             pending.lock().unwrap().retain(|(_, f)| f != frame);
         }
     }
-    fn take_pending_frames(&self) -> Vec<(Session, Frame)> {
+    fn take_pending_frames(&self) -> Vec<(SessionRef, Frame)> {
         self.user_data()
             .get::<PendingScreencopyBuffers>()
-            .map(|pending| {
-                pending
-                    .lock()
-                    .unwrap()
-                    .split_off(0)
-                    .into_iter()
-                    .map(|(s, mut f)| (s, f.0.take().unwrap()))
-                    .collect()
-            })
+            .map(|pending| std::mem::take(&mut *pending.lock().unwrap()))
             .unwrap_or_default()
     }
 }
 
 impl SessionHolder for Workspace {
     fn add_session(&mut self, session: Session) {
-        self.screencopy
-            .sessions
-            .push(DropableSession(Some(session)));
+        self.screencopy.sessions.push(session);
     }
 
-    fn remove_session(&mut self, session: Session) {
-        self.screencopy.sessions.retain(|s| *s != session);
+    fn remove_session(&mut self, session: &SessionRef) {
+        self.screencopy.sessions.retain(|s| s != session);
     }
-    fn sessions(&self) -> Vec<Session> {
+    fn sessions(&self) -> Vec<SessionRef> {
         self.screencopy
             .sessions
             .iter()
-            .flat_map(|s| s.0.clone())
+            .map(|s| (*s).clone())
             .collect()
     }
 
     fn add_cursor_session(&mut self, session: CursorSession) {
-        self.screencopy
-            .cursor_sessions
-            .push(DropableCursorSession(Some(session)));
+        self.screencopy.cursor_sessions.push(session);
     }
 
-    fn remove_cursor_session(&mut self, session: CursorSession) {
-        self.screencopy.cursor_sessions.retain(|s| *s != session);
+    fn remove_cursor_session(&mut self, session: &CursorSessionRef) {
+        self.screencopy.cursor_sessions.retain(|s| s != session);
     }
-    fn cursor_sessions(&self) -> Vec<CursorSession> {
+    fn cursor_sessions(&self) -> Vec<CursorSessionRef> {
         self.screencopy
             .cursor_sessions
             .iter()
-            .flat_map(|s| s.0.clone())
+            .map(|s| (*s).clone())
             .collect()
     }
 }
@@ -223,18 +208,18 @@ impl SessionHolder for CosmicSurface {
             .unwrap()
             .borrow_mut()
             .sessions
-            .push(DropableSession(Some(session)));
+            .push(session);
     }
 
-    fn remove_session(&mut self, session: Session) {
+    fn remove_session(&mut self, session: &SessionRef) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
             .borrow_mut()
             .sessions
-            .retain(|s| *s != session);
+            .retain(|s| s != session);
     }
-    fn sessions(&self) -> Vec<Session> {
+    fn sessions(&self) -> Vec<SessionRef> {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .map_or(Vec::new(), |sessions| {
@@ -242,7 +227,7 @@ impl SessionHolder for CosmicSurface {
                     .borrow()
                     .sessions
                     .iter()
-                    .flat_map(|s| s.0.clone())
+                    .map(|s| (*s).clone())
                     .collect()
             })
     }
@@ -255,19 +240,19 @@ impl SessionHolder for CosmicSurface {
             .unwrap()
             .borrow_mut()
             .cursor_sessions
-            .push(DropableCursorSession(Some(session)));
+            .push(session);
     }
 
-    fn remove_cursor_session(&mut self, session: CursorSession) {
+    fn remove_cursor_session(&mut self, session: &CursorSessionRef) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
             .borrow_mut()
             .cursor_sessions
-            .retain(|s| *s != session);
+            .retain(|s| s != session);
     }
 
-    fn cursor_sessions(&self) -> Vec<CursorSession> {
+    fn cursor_sessions(&self) -> Vec<CursorSessionRef> {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .map_or(Vec::new(), |sessions| {
@@ -275,86 +260,8 @@ impl SessionHolder for CosmicSurface {
                     .borrow()
                     .cursor_sessions
                     .iter()
-                    .flat_map(|s| s.0.clone())
+                    .map(|s| (*s).clone())
                     .collect()
             })
-    }
-}
-
-#[derive(Debug)]
-struct DropableSession(Option<Session>);
-impl Deref for DropableSession {
-    type Target = Session;
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
-    }
-}
-impl DerefMut for DropableSession {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
-    }
-}
-impl PartialEq<Session> for DropableSession {
-    fn eq(&self, other: &Session) -> bool {
-        self.0.as_ref().map(|s| s == other).unwrap_or(false)
-    }
-}
-impl Drop for DropableSession {
-    fn drop(&mut self) {
-        if let Some(s) = self.0.take() {
-            s.stop();
-        }
-    }
-}
-
-#[derive(Debug)]
-struct DropableCursorSession(Option<CursorSession>);
-impl Deref for DropableCursorSession {
-    type Target = CursorSession;
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
-    }
-}
-impl DerefMut for DropableCursorSession {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
-    }
-}
-impl PartialEq<CursorSession> for DropableCursorSession {
-    fn eq(&self, other: &CursorSession) -> bool {
-        self.0.as_ref().map(|s| s == other).unwrap_or(false)
-    }
-}
-impl Drop for DropableCursorSession {
-    fn drop(&mut self) {
-        if let Some(s) = self.0.take() {
-            s.stop();
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct DropableFrame(Option<Frame>);
-impl Deref for DropableFrame {
-    type Target = Frame;
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
-    }
-}
-impl DerefMut for DropableFrame {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
-    }
-}
-impl PartialEq<Frame> for DropableFrame {
-    fn eq(&self, other: &Frame) -> bool {
-        self.0.as_ref().map(|f| f == other).unwrap_or(false)
-    }
-}
-impl Drop for DropableFrame {
-    fn drop(&mut self) {
-        if let Some(f) = self.0.take() {
-            f.fail(FailureReason::Unknown);
-        }
     }
 }
