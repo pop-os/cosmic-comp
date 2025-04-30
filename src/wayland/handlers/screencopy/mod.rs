@@ -27,8 +27,9 @@ use crate::{
     wayland::protocols::{
         image_capture_source::ImageCaptureSourceData,
         screencopy::{
-            delegate_screencopy, BufferConstraints, CursorSession, DmabufConstraints, Frame,
-            ScreencopyHandler, ScreencopyState, Session,
+            delegate_screencopy, BufferConstraints, CursorSession, CursorSessionRef,
+            DmabufConstraints, Frame, FrameRef, ScreencopyHandler, ScreencopyState, Session,
+            SessionRef,
         },
     },
 };
@@ -165,7 +166,6 @@ impl ScreencopyHandler for State {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
-                    session.stop();
                     return;
                 };
 
@@ -196,7 +196,6 @@ impl ScreencopyHandler for State {
             ImageCaptureSourceData::Workspace(handle) => {
                 let mut shell = self.common.shell.write().unwrap();
                 let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
-                    session.stop();
                     return;
                 };
 
@@ -252,11 +251,10 @@ impl ScreencopyHandler for State {
         }
     }
 
-    fn frame(&mut self, session: Session, frame: Frame) {
+    fn frame(&mut self, session: SessionRef, frame: Frame) {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
-                    session.stop(); // will fail the frame as well
                     return;
                 };
 
@@ -273,7 +271,7 @@ impl ScreencopyHandler for State {
         }
     }
 
-    fn cursor_frame(&mut self, session: CursorSession, frame: Frame) {
+    fn cursor_frame(&mut self, session: CursorSessionRef, frame: Frame) {
         if !session.has_cursor() {
             frame.success(Transform::Normal, Vec::new(), self.common.clock.now());
             return;
@@ -290,18 +288,18 @@ impl ScreencopyHandler for State {
         render_cursor_to_buffer(self, &session, frame, &seat);
     }
 
-    fn frame_aborted(&mut self, frame: Frame) {
+    fn frame_aborted(&mut self, frame: FrameRef) {
         let shell = self.common.shell.read().unwrap();
         for mut output in shell.outputs().cloned() {
-            output.remove_frame(&frame)
+            output.remove_frame(&frame);
         }
     }
 
-    fn session_destroyed(&mut self, session: Session) {
+    fn session_destroyed(&mut self, session: SessionRef) {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
-                    output.remove_session(session);
+                    output.remove_session(&session);
                 }
             }
             ImageCaptureSourceData::Workspace(handle) => {
@@ -313,19 +311,19 @@ impl ScreencopyHandler for State {
                     .workspaces
                     .space_for_handle_mut(&handle)
                 {
-                    workspace.remove_session(session)
+                    workspace.remove_session(&session)
                 }
             }
-            ImageCaptureSourceData::Toplevel(mut toplevel) => toplevel.remove_session(session),
+            ImageCaptureSourceData::Toplevel(mut toplevel) => toplevel.remove_session(&session),
             ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 
-    fn cursor_session_destroyed(&mut self, session: CursorSession) {
+    fn cursor_session_destroyed(&mut self, session: CursorSessionRef) {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
-                    output.remove_cursor_session(session);
+                    output.remove_cursor_session(&session);
                 }
             }
             ImageCaptureSourceData::Workspace(handle) => {
@@ -337,11 +335,11 @@ impl ScreencopyHandler for State {
                     .workspaces
                     .space_for_handle_mut(&handle)
                 {
-                    workspace.remove_cursor_session(session)
+                    workspace.remove_cursor_session(&session)
                 }
             }
             ImageCaptureSourceData::Toplevel(mut toplevel) => {
-                toplevel.remove_cursor_session(session)
+                toplevel.remove_cursor_session(&session)
             }
             ImageCaptureSourceData::Destroyed => unreachable!(),
         }
