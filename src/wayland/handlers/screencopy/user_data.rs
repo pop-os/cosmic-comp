@@ -3,12 +3,14 @@ use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
     sync::Mutex,
+    time::Duration,
 };
 
 use smithay::{
     backend::renderer::{damage::OutputDamageTracker, utils::CommitCounter},
     output::Output,
     reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource, Weak},
+    utils::{Buffer as BufferCoords, Rectangle, Transform},
 };
 
 use crate::{
@@ -73,9 +75,9 @@ pub trait SessionHolder {
 }
 
 pub trait FrameHolder {
-    fn add_frame(&mut self, session: Session, frame: Frame);
+    fn add_frame(&mut self, session: Session, frame: DropableFrame);
     fn remove_frame(&mut self, frame: &Frame);
-    fn take_pending_frames(&self) -> Vec<(Session, Frame)>;
+    fn take_pending_frames(&self) -> Vec<(Session, DropableFrame)>;
 }
 
 impl SessionHolder for Output {
@@ -147,7 +149,7 @@ impl SessionHolder for Output {
 }
 
 impl FrameHolder for Output {
-    fn add_frame(&mut self, session: Session, frame: Frame) {
+    fn add_frame(&mut self, session: Session, frame: DropableFrame) {
         self.user_data()
             .insert_if_missing_threadsafe(PendingScreencopyBuffers::default);
         self.user_data()
@@ -155,25 +157,17 @@ impl FrameHolder for Output {
             .unwrap()
             .lock()
             .unwrap()
-            .push((session, DropableFrame(Some(frame))));
+            .push((session, frame));
     }
     fn remove_frame(&mut self, frame: &Frame) {
         if let Some(pending) = self.user_data().get::<PendingScreencopyBuffers>() {
             pending.lock().unwrap().retain(|(_, f)| f != frame);
         }
     }
-    fn take_pending_frames(&self) -> Vec<(Session, Frame)> {
+    fn take_pending_frames(&self) -> Vec<(Session, DropableFrame)> {
         self.user_data()
             .get::<PendingScreencopyBuffers>()
-            .map(|pending| {
-                pending
-                    .lock()
-                    .unwrap()
-                    .split_off(0)
-                    .into_iter()
-                    .map(|(s, mut f)| (s, f.0.take().unwrap()))
-                    .collect()
-            })
+            .map(|pending| std::mem::take(&mut *pending.lock().unwrap()))
             .unwrap_or_default()
     }
 }
@@ -335,6 +329,19 @@ impl Drop for DropableCursorSession {
 
 #[derive(Debug)]
 pub struct DropableFrame(pub Option<Frame>);
+impl DropableFrame {
+    pub fn success(
+        mut self,
+        transform: impl Into<Transform>,
+        damage: impl Into<Option<Vec<Rectangle<i32, BufferCoords>>>>,
+        presented: impl Into<Duration>,
+    ) {
+        self.0.take().unwrap().success(transform, damage, presented);
+    }
+    pub fn fail(mut self, reason: FailureReason) {
+        self.0.take().unwrap().fail(reason);
+    }
+}
 impl Deref for DropableFrame {
     type Target = Frame;
     fn deref(&self) -> &Self::Target {

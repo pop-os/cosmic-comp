@@ -12,9 +12,7 @@ use crate::{
     utils::prelude::*,
     wayland::{
         handlers::screencopy::{submit_buffer, DropableFrame, FrameHolder, SessionData},
-        protocols::screencopy::{
-            FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession,
-        },
+        protocols::screencopy::{FailureReason, Session as ScreencopySession},
     },
 };
 
@@ -1029,7 +1027,7 @@ impl SurfaceThreadState {
         let mut has_cursor_mode_none = false;
         let frames: Vec<(
             ScreencopySession,
-            ScreencopyFrame,
+            DropableFrame,
             Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
         )> = self
             .mirroring
@@ -1671,7 +1669,7 @@ impl SurfaceThreadState {
                                     if frame_result.is_empty {
                                         frame.success(transform, damage, self.clock.now());
                                     } else {
-                                        let _ = tx.send((DropableFrame(Some(frame)), damage));
+                                        let _ = tx.send((frame, damage));
                                     }
                                 }
                                 Ok(None) => {}

@@ -43,10 +43,11 @@ use crate::{
     utils::prelude::SeatExt,
     wayland::{
         handlers::screencopy::{
-            constraints_for_output, constraints_for_toplevel, SessionData, SessionUserData,
+            constraints_for_output, constraints_for_toplevel, DropableFrame, SessionData,
+            SessionUserData,
         },
         protocols::{
-            screencopy::{BufferConstraints, CursorSession, FailureReason, Frame, Session},
+            screencopy::{BufferConstraints, CursorSession, FailureReason, Session},
             workspace::WorkspaceHandle,
         },
     },
@@ -55,13 +56,13 @@ use crate::{
 use super::super::data_device::get_dnd_icon;
 
 pub fn submit_buffer<R>(
-    frame: Frame,
+    frame: DropableFrame,
     renderer: &mut R,
     offscreen: Option<&mut R::Framebuffer<'_>>,
     transform: Transform,
     damage: Option<&[Rectangle<i32, Physical>]>,
     sync: SyncPoint,
-) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, R::Error>
+) -> Result<Option<(DropableFrame, Vec<Rectangle<i32, BufferCoords>>)>, R::Error>
 where
     R: ExportMem,
     R::Error: FromGlesError,
@@ -139,10 +140,10 @@ where
 pub fn render_session<F, R, T>(
     renderer: &mut R,
     session: &SessionData,
-    frame: Frame,
+    frame: DropableFrame,
     transform: Transform,
     render_fn: F,
-) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<R::Error>>
+) -> Result<Option<(DropableFrame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<R::Error>>
 where
     R: ExportMem + Offscreen<T>,
     R::Error: FromGlesError,
@@ -206,7 +207,7 @@ where
 pub fn render_workspace_to_buffer(
     state: &mut State,
     session: Session,
-    frame: Frame,
+    frame: DropableFrame,
     handle: WorkspaceHandle,
 ) {
     let shell = state.common.shell.read().unwrap();
@@ -440,7 +441,7 @@ smithay::render_elements! {
 pub fn render_window_to_buffer(
     state: &mut State,
     session: Session,
-    frame: Frame,
+    frame: DropableFrame,
     toplevel: &CosmicSurface,
 ) {
     if !toplevel.alive() {
@@ -664,7 +665,7 @@ pub fn render_window_to_buffer(
 pub fn render_cursor_to_buffer(
     state: &mut State,
     session: &CursorSession,
-    frame: Frame,
+    frame: DropableFrame,
     seat: &Seat<State>,
 ) {
     let buffer = frame.buffer();

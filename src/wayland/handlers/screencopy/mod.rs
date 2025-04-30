@@ -255,6 +255,7 @@ impl ScreencopyHandler for State {
     }
 
     fn frame(&mut self, session: Session, frame: Frame) {
+        let frame = DropableFrame(Some(frame));
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
@@ -276,6 +277,7 @@ impl ScreencopyHandler for State {
     }
 
     fn cursor_frame(&mut self, session: CursorSession, frame: Frame) {
+        let frame = DropableFrame(Some(frame));
         if !session.has_cursor() {
             frame.success(Transform::Normal, Vec::new(), self.common.clock.now());
             return;
