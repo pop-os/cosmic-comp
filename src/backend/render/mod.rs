@@ -137,6 +137,13 @@ pub enum Usage {
     PotentialGroupIndicator,
     SnappingIndicator,
     Border,
+    SecurityContextIndicator,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SecurityContextIndicatorSettings {
+    pub border_color: [f32; 3],
+    pub border_size: u8,
 }
 
 #[derive(Clone)]
