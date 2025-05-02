@@ -53,6 +53,7 @@ pub struct CosmicCompConfig {
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
     pub accessibility_zoom: ZoomConfig,
+    pub security_context: SecurityContextConfig,
 }
 
 impl Default for CosmicCompConfig {
@@ -87,6 +88,7 @@ impl Default for CosmicCompConfig {
             xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
+            security_context: SecurityContextConfig::default(),
         }
     }
 }
@@ -185,4 +187,26 @@ pub enum XwaylandDescaling {
     Disabled,
     #[default]
     Fractional,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SecurityContextRule {
+    pub app_id: String,
+    pub sandbox_engine: String,
+    pub border_color: [f32; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct SecurityContextConfig {
+    pub border_size: u8,
+    pub rules: Vec<SecurityContextRule>,
+}
+
+impl Default for SecurityContextConfig {
+    fn default() -> SecurityContextConfig {
+        SecurityContextConfig {
+            border_size: 4,
+            rules: Vec::new(),
+        }
+    }
 }

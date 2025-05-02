@@ -127,6 +127,13 @@ pub enum Usage {
     FocusIndicator,
     PotentialGroupIndicator,
     SnappingIndicator,
+    SecurityContextIndicator,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SecurityContextIndicatorSettings {
+    pub border_color: [f32; 3],
+    pub border_size: u8,
 }
 
 #[derive(Clone)]
@@ -207,6 +214,30 @@ impl IndicatorShader {
             element_geo,
             thickness,
             thickness * 2,
+            alpha,
+            active_window_hint,
+        )
+    }
+
+    pub fn focus_element_with_radius<R: AsGlowRenderer>(
+        renderer: &R,
+        key: impl Into<Key>,
+        mut element_geo: Rectangle<i32, Local>,
+        thickness: u8,
+        alpha: f32,
+        active_window_hint: [f32; 3],
+        radius: u8,
+    ) -> PixelShaderElement {
+        let t = thickness as i32;
+        element_geo.loc -= (t, t).into();
+        element_geo.size += (t * 2, t * 2).into();
+
+        IndicatorShader::element(
+            renderer,
+            key,
+            element_geo,
+            thickness,
+            radius,
             alpha,
             active_window_hint,
         )
