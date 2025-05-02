@@ -1,7 +1,7 @@
 use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
-    backend::render::cursor::{load_cursor_theme, Cursor},
+    backend::render::cursor::{load_cursor_env, load_cursor_theme, Cursor},
     shell::{
         focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow, Shell,
     },
@@ -11,16 +11,28 @@ use crate::{
         toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
     },
 };
-use cosmic_comp_config::EavesdroppingKeyboardMode;
+use cosmic_comp_config::{EavesdroppingKeyboardMode, XwaylandDescaling};
 use smithay::{
     backend::{
+        allocator::Fourcc,
         drm::DrmNode,
         input::{ButtonState, KeyState, Keycode},
+        renderer::{
+            element::{
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+                Kind,
+            },
+            pixman::{PixmanError, PixmanRenderer},
+            utils::draw_render_elements,
+            Bind, Frame, Offscreen, Renderer,
+        },
     },
     desktop::space::SpaceElement,
     input::{keyboard::ModifiersState, pointer::CursorIcon},
     reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
-    utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER},
+    utils::{
+        Buffer as BufferCoords, Logical, Point, Rectangle, Serial, Size, Transform, SERIAL_COUNTER,
+    },
     wayland::{
         selection::{
             data_device::{
@@ -41,6 +53,7 @@ use smithay::{
     },
 };
 use tracing::{error, trace, warn};
+use xcursor::parser::Image;
 use xkbcommon::xkb::Keysym;
 
 #[derive(Debug)]
@@ -97,7 +110,7 @@ impl State {
                         last_modifier_state: None,
                     });
 
-                    let mut wm = match X11Wm::start_wm(
+                    let wm = match X11Wm::start_wm(
                         data.common.event_loop_handle.clone(),
                         x11_socket,
                         client.clone(),
@@ -109,26 +122,13 @@ impl State {
                         }
                     };
 
-                    let (theme, size) = load_cursor_theme();
-                    let cursor = Cursor::load(&theme, CursorIcon::Default, size);
-                    let image = cursor.get_image(1, 0);
-                    if let Err(err) = wm.set_cursor(
-                        &image.pixels_rgba,
-                        Size::from((image.width as u16, image.height as u16)),
-                        Point::from((image.xhot as u16, image.yhot as u16)),
-                    ) {
-                        warn!(
-                            id = ?wm.id(),
-                            ?err,
-                            "Failed to set default cursor for Xwayland WM",
-                        );
-                    }
-
                     let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
                     xwayland_state.xwm = Some(wm);
+                    xwayland_state.reload_cursor(1.);
                     data.notify_ready();
 
                     data.common.update_xwayland_scale();
+                    data.common.update_xwayland_primary_output();
                 }
                 XWaylandEvent::Error => {
                     if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
@@ -142,6 +142,102 @@ impl State {
                 error!(?err, "Failed to listen for Xwayland");
                 self.notify_ready();
                 return;
+            }
+        }
+    }
+}
+
+fn scale_cursor(
+    scale: f64,
+    cursor_size: u32,
+    image: &Image,
+) -> Result<(Vec<u8>, Size<u16, Logical>, Point<u16, Logical>), PixmanError> {
+    let mut renderer = PixmanRenderer::new()?;
+    let image_scale = (image.size / cursor_size).max(1);
+    let pixel_size = (cursor_size as f64 * scale).round() as i32;
+    let buffer_size = Size::<i32, BufferCoords>::from((pixel_size, pixel_size));
+    let output_size = buffer_size.to_logical(1, Transform::Normal).to_physical(1);
+
+    let image_buffer = MemoryRenderBuffer::from_slice(
+        &image.pixels_rgba,
+        Fourcc::Abgr8888,
+        (image.width as i32, image.height as i32),
+        image_scale as i32,
+        Transform::Normal,
+        None,
+    );
+    let element = MemoryRenderBufferRenderElement::from_buffer(
+        &mut renderer,
+        (0., 0.),
+        &image_buffer,
+        None,
+        None,
+        None,
+        Kind::Unspecified,
+    )?;
+
+    let mut buffer = renderer.create_buffer(Fourcc::Abgr8888, buffer_size)?;
+    let mut fb = renderer.bind(&mut buffer)?;
+    let mut frame = renderer.render(&mut fb, output_size, Transform::Normal)?;
+    draw_render_elements(
+        &mut frame,
+        scale,
+        &[element],
+        &[Rectangle::new((0, 0).into(), output_size)],
+    )?;
+    let sync = frame.finish()?;
+    while let Err(_) = sync.wait() {}
+
+    let len = (buffer_size.w * buffer_size.h * 4) as usize;
+    let mut data = Vec::with_capacity(len);
+    assert_eq!(buffer.stride(), (buffer_size.w * 4) as usize);
+    data.extend_from_slice(unsafe { std::slice::from_raw_parts(buffer.data() as *mut u8, len) });
+
+    let hotspot = Point::<i32, BufferCoords>::from((image.xhot as i32, image.yhot as i32))
+        .to_f64()
+        .to_logical(
+            image_scale as f64,
+            Transform::Normal,
+            &Size::from((image.width as f64, image.height as f64)),
+        )
+        .to_buffer(
+            scale,
+            Transform::Normal,
+            &output_size.to_logical(1).to_f64(),
+        )
+        .to_i32_round::<i32>();
+    Ok((
+        data,
+        Size::from((buffer_size.w as u16, buffer_size.h as u16)),
+        Point::from((hotspot.x as u16, hotspot.y as u16)),
+    ))
+}
+
+impl XWaylandState {
+    pub fn reload_cursor(&mut self, scale: f64) {
+        if let Some(wm) = self.xwm.as_mut() {
+            let (theme, size) = load_cursor_theme();
+            let cursor = Cursor::load(&theme, CursorIcon::Default, size);
+            let image = cursor.get_image(scale.ceil() as u32, 0);
+
+            let (pixels_rgba, size, hotspot) = match scale_cursor(scale, size, &image) {
+                Ok(x) => x,
+                Err(err) => {
+                    warn!("Failed to scale Xwayland cursor image: {}", err);
+                    (
+                        image.pixels_rgba,
+                        Size::from((image.width as u16, image.height as u16)),
+                        Point::from((image.xhot as u16, image.yhot as u16)),
+                    )
+                }
+            };
+
+            if let Err(err) = wm.set_cursor(&pixels_rgba, size, hotspot) {
+                warn!(
+                    id = ?wm.id(),
+                    ?err,
+                    "Failed to set default cursor for Xwayland WM",
+                );
             }
         }
     }
@@ -461,15 +557,29 @@ impl Common {
     }
 
     pub fn update_xwayland_scale(&mut self) {
-        let new_scale = if self.config.cosmic_conf.descale_xwayland {
-            let shell = self.shell.read().unwrap();
-            shell
-                .outputs()
-                .map(|o| o.current_scale().integer_scale())
-                .max()
-                .unwrap_or(1)
-        } else {
-            1
+        let new_scale = match self.config.cosmic_conf.descale_xwayland {
+            XwaylandDescaling::Disabled => 1.,
+            XwaylandDescaling::Enabled => {
+                let shell = self.shell.read().unwrap();
+                shell
+                    .outputs()
+                    .map(|o| o.current_scale().integer_scale())
+                    .max()
+                    .unwrap_or(1) as f64
+            }
+            XwaylandDescaling::Fractional => {
+                let shell = self.shell.read().unwrap();
+                let val =
+                    if let Some(output) = shell.outputs().find(|o| o.config().xwayland_primary) {
+                        output.current_scale().fractional_scale().max(1f64)
+                    } else {
+                        shell
+                            .outputs()
+                            .map(|o| o.current_scale().fractional_scale())
+                            .fold(1f64, |acc, val| acc.max(val))
+                    };
+                val
+            }
         };
 
         // compare with current scale
@@ -485,14 +595,30 @@ impl Common {
                     .filter_map(|s| s.0.x11_surface().map(|x| (x.clone(), x.geometry())))
                     .collect::<Vec<_>>();
 
+                let (_, cursor_size) = load_cursor_env();
+
                 // update xorg dpi
                 if let Some(xwm) = xwayland.xwm.as_mut() {
-                    let dpi = new_scale.abs() * 96 * 1024;
+                    let dpi = new_scale * 96. * 1024.;
                     if let Err(err) = xwm.set_xsettings(
                         [
-                            ("Xft/DPI".into(), dpi.into()),
-                            ("Gdk/UnscaledDPI".into(), (dpi / new_scale).into()),
-                            ("Gdk/WindowScalingFactor".into(), new_scale.into()),
+                            ("Xft/DPI".into(), (dpi.round() as i32).into()),
+                            (
+                                "Xcursor/size".into(),
+                                ((new_scale * cursor_size as f64).round() as i32).into(),
+                            ),
+                            (
+                                "Gdk/UnscaledDPI".into(),
+                                ((dpi / new_scale).round() as i32).into(),
+                            ),
+                            (
+                                "Gdk/WindowScalingFactor".into(),
+                                (new_scale.round() as i32).into(),
+                            ),
+                            (
+                                "Gtk/CursorThemeSize".into(),
+                                ((new_scale * cursor_size as f64).round() as i32).into(),
+                            ),
                         ]
                         .into_iter(),
                     ) {
@@ -500,13 +626,16 @@ impl Common {
                     }
                 }
 
+                // update cursor
+                xwayland.reload_cursor(new_scale);
+
                 // update client scale
                 xwayland
                     .client
                     .get_data::<XWaylandClientData>()
                     .unwrap()
                     .compositor_state
-                    .set_client_scale(new_scale as u32);
+                    .set_client_scale(new_scale);
 
                 // update wl/xdg_outputs
                 for output in self.shell.read().unwrap().outputs() {
@@ -524,6 +653,27 @@ impl Common {
                 self.xwayland_scale = Some(new_scale);
             }
         }
+    }
+
+    pub fn update_xwayland_primary_output(&mut self) {
+        let mut xwayland_primary_output = None;
+        for output in self.output_configuration_state.outputs() {
+            if output.config().xwayland_primary {
+                xwayland_primary_output = Some(output);
+                break;
+            }
+        }
+
+        if let Some(xstate) = self.xwayland_state.as_mut() {
+            if let Some(xwm) = xstate.xwm.as_mut() {
+                if let Err(err) = xwm.set_randr_primary_output(xwayland_primary_output.as_ref()) {
+                    warn!("Failed to set xwayland primary output: {}", err);
+                    return;
+                };
+            }
+        }
+
+        self.output_configuration_state.update();
     }
 }
 
@@ -1001,6 +1151,18 @@ impl XwmHandler for State {
                 }
             }
         }
+    }
+
+    fn randr_primary_output_change(&mut self, _xwm: XwmId, output_name: Option<String>) {
+        for output in self.common.output_configuration_state.outputs() {
+            output.config_mut().xwayland_primary =
+                output_name.as_deref().is_some_and(|o| o == output.name());
+        }
+        self.common.output_configuration_state.update();
+        self.common.update_xwayland_scale();
+        self.common
+            .config
+            .write_outputs(self.common.output_configuration_state.outputs());
     }
 
     fn disconnected(&mut self, _xwm: XwmId) {

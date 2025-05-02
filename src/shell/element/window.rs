@@ -635,9 +635,12 @@ impl SpaceElement for CosmicWindow {
     }
     #[profiling::function]
     fn refresh(&self) {
-        SpaceElement::refresh(&self.0);
         if self.0.with_program(|p| {
             SpaceElement::refresh(&p.window);
+            if !p.has_ssd(true) {
+                return false;
+            }
+
             let title = p.window.title();
             let mut last_title = p.last_title.lock().unwrap();
             if *last_title != title {
@@ -648,6 +651,8 @@ impl SpaceElement for CosmicWindow {
             }
         }) {
             self.0.force_update();
+        } else {
+            SpaceElement::refresh(&self.0);
         }
     }
 }

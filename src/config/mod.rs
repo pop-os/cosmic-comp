@@ -43,9 +43,10 @@ pub use key_bindings::{Action, PrivateAction};
 mod types;
 pub use self::types::*;
 use cosmic::config::CosmicTk;
+pub use cosmic_comp_config::output::EdidProduct;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
-    XkbConfig, XwaylandEavesdropping, ZoomConfig,
+    XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -90,29 +91,6 @@ impl From<Output> for OutputInfo {
             connector: o.name(),
             make: physical.make,
             model: physical.model,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EdidProduct {
-    pub manufacturer: [char; 3],
-    pub product: u16,
-    pub serial: Option<u32>,
-    pub manufacture_week: i32,
-    pub manufacture_year: i32,
-    pub model_year: Option<i32>,
-}
-
-impl From<libdisplay_info::edid::VendorProduct> for EdidProduct {
-    fn from(vp: libdisplay_info::edid::VendorProduct) -> Self {
-        Self {
-            manufacturer: vp.manufacturer,
-            product: vp.product,
-            serial: vp.serial,
-            manufacture_week: vp.manufacture_week,
-            manufacture_year: vp.manufacture_year,
-            model_year: vp.model_year,
         }
     }
 }
@@ -163,6 +141,8 @@ pub struct OutputConfig {
     pub enabled: OutputState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bpc: Option<u32>,
+    #[serde(default)]
+    pub xwayland_primary: bool,
 }
 
 impl Default for OutputConfig {
@@ -175,6 +155,7 @@ impl Default for OutputConfig {
             position: (0, 0),
             enabled: OutputState::Enabled,
             max_bpc: None,
+            xwayland_primary: false,
         }
     }
 }
@@ -590,6 +571,12 @@ impl Config {
         } else {
             // we don't have a config, so lets generate somewhat sane positions
             let mut w = 0;
+            if !outputs.iter().any(|o| o.config().xwayland_primary) {
+                // if we don't have a primary output for xwayland from a previous config, pick one
+                if let Some(primary) = outputs.iter().find(|o| o.mirroring().is_none()) {
+                    primary.config_mut().xwayland_primary = true;
+                }
+            }
             for output in outputs.iter().filter(|o| o.mirroring().is_none()) {
                 {
                     let mut config = output.config_mut();
@@ -917,7 +904,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
             }
             "descale_xwayland" => {
-                let new = get_config::<bool>(&config, "descale_xwayland");
+                let new = get_config::<XwaylandDescaling>(&config, "descale_xwayland");
                 if new != state.common.config.cosmic_conf.descale_xwayland {
                     state.common.config.cosmic_conf.descale_xwayland = new;
                     state.common.update_xwayland_scale();

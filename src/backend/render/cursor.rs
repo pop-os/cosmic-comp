@@ -20,7 +20,8 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface,
     render_elements,
     utils::{
-        Buffer as BufferCoords, IsAlive, Logical, Monotonic, Point, Scale, Size, Time, Transform,
+        Buffer as BufferCoords, IsAlive, Logical, Monotonic, Physical, Point, Scale, Size, Time,
+        Transform,
     },
     wayland::compositor::{get_role, with_states},
 };
@@ -126,14 +127,13 @@ render_elements! {
 pub fn draw_surface_cursor<R>(
     renderer: &mut R,
     surface: &wl_surface::WlSurface,
-    location: impl Into<Point<i32, Logical>>,
+    location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
+) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
 where
     R: Renderer + ImportAll,
     R::TextureId: Clone + 'static,
 {
-    let position = location.into();
     let scale = scale.into();
     let h = with_states(&surface, |states| {
         states
@@ -143,17 +143,13 @@ where
             .lock()
             .unwrap()
             .hotspot
-            .to_buffer(
-                1,
-                Transform::Normal,
-                &Size::from((1, 1)), /* Size doesn't matter for Transform::Normal */
-            )
+            .to_physical_precise_round(scale)
     });
 
     render_elements_from_surface_tree(
         renderer,
         surface,
-        position.to_physical_precise_round(scale),
+        location.to_physical(scale).to_i32_round(),
         scale,
         1.0,
         Kind::Cursor,
@@ -167,7 +163,7 @@ where
 pub fn draw_dnd_icon<R>(
     renderer: &mut R,
     surface: &wl_surface::WlSurface,
-    location: impl Into<Point<i32, Logical>>,
+    location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
 ) -> Vec<WaylandSurfaceRenderElement<R>>
 where
@@ -184,7 +180,7 @@ where
     render_elements_from_surface_tree(
         renderer,
         surface,
-        location.into().to_physical_precise_round(scale),
+        location.to_physical(scale).to_i32_round(),
         scale,
         1.0,
         Kind::Unspecified,
@@ -223,7 +219,7 @@ impl CursorStateInner {
     }
 }
 
-pub fn load_cursor_theme() -> (CursorTheme, u32) {
+pub fn load_cursor_env() -> (String, u32) {
     let name = std::env::var("XCURSOR_THEME")
         .ok()
         .unwrap_or_else(|| "default".into());
@@ -231,6 +227,11 @@ pub fn load_cursor_theme() -> (CursorTheme, u32) {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(24);
+    (name, size)
+}
+
+pub fn load_cursor_theme() -> (CursorTheme, u32) {
+    let (name, size) = load_cursor_env();
     (CursorTheme::load(&name), size)
 }
 
@@ -259,7 +260,7 @@ pub fn draw_cursor<R>(
     buffer_scale: f64,
     time: Time<Monotonic>,
     draw_default: bool,
-) -> Vec<(CursorRenderElement<R>, Point<i32, BufferCoords>)>
+) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
 where
     R: Renderer + ImportMem + ImportAll,
     R::TextureId: Send + Clone + 'static,
@@ -320,7 +321,12 @@ where
             }
         };
 
-        let hotspot = Point::<i32, BufferCoords>::from((frame.xhot as i32, frame.yhot as i32));
+        let hotspot = Point::<i32, BufferCoords>::from((frame.xhot as i32, frame.yhot as i32))
+            .to_logical(
+                actual_scale as i32,
+                Transform::Normal,
+                &Size::from((frame.width as i32, frame.height as i32)),
+            );
         state.current_image = Some(frame);
 
         return vec![(
@@ -336,10 +342,10 @@ where
                 )
                 .expect("Failed to import cursor bitmap"),
             ),
-            hotspot,
+            hotspot.to_physical_precise_round(scale),
         )];
     } else if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        return draw_surface_cursor(renderer, wl_surface, location.to_i32_round(), scale);
+        return draw_surface_cursor(renderer, wl_surface, location, scale);
     } else {
         Vec::new()
     }

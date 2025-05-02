@@ -572,15 +572,16 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let shell_guard = shell.read().unwrap();
     #[cfg(feature = "debug")]
     let mut debug_elements = {
         let output_geo = output.geometry();
+        let shell_guard = shell.read().unwrap();
         let seats = shell_guard.seats.iter().cloned().collect::<Vec<_>>();
+        let debug_active = shell_guard.debug_active;
+        std::mem::drop(shell_guard);
         let scale = output.current_scale().fractional_scale();
 
         if let Some((state, timings)) = _fps {
-            let debug_active = shell_guard.debug_active;
             vec![fps_ui(
                 _gpu,
                 debug_active,
@@ -601,6 +602,7 @@ where
         }
     };
 
+    let shell_guard = shell.read().unwrap();
     let Some((previous_workspace, workspace)) = shell_guard.workspaces.active(output) else {
         #[cfg(not(feature = "debug"))]
         return Ok(Vec::new());
@@ -1009,7 +1011,7 @@ pub struct PostprocessState {
 }
 
 impl PostprocessState {
-    pub fn new_with_renderer<R: Renderer + Offscreen<GlesTexture>>(
+    pub fn new_with_renderer<R: AsGlowRenderer + Offscreen<GlesTexture>>(
         renderer: &mut R,
         format: Fourcc,
         output_config: PostprocessOutputConfig,
@@ -1020,7 +1022,7 @@ impl PostprocessState {
 
         let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
         let texture_buffer = TextureRenderBuffer::from_texture(
-            renderer,
+            renderer.glow_renderer(),
             texture,
             1,
             Transform::Normal,
@@ -1040,7 +1042,7 @@ impl PostprocessState {
         })
     }
 
-    pub fn track_cursor<R: Renderer + Offscreen<GlesTexture>>(
+    pub fn track_cursor<R: AsGlowRenderer + Offscreen<GlesTexture>>(
         &mut self,
         renderer: &mut R,
         format: Fourcc,
@@ -1067,8 +1069,13 @@ impl PostprocessState {
 
         let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
 
-        let texture_buffer =
-            TextureRenderBuffer::from_texture(renderer, texture, 1, Transform::Normal, None);
+        let texture_buffer = TextureRenderBuffer::from_texture(
+            renderer.glow_renderer(),
+            texture,
+            1,
+            Transform::Normal,
+            None,
+        );
 
         let damage_tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
 

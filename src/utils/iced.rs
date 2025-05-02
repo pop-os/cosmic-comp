@@ -7,7 +7,7 @@ use std::{
 
 use cosmic::{
     iced::{
-        advanced::widget::Tree,
+        advanced::{graphics::text::font_system, widget::Tree},
         event::Event,
         futures::{FutureExt, StreamExt},
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
@@ -376,7 +376,6 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         for (_buffer, ref mut old_primitives) in internal.buffers.values_mut() {
             *old_primitives = None;
         }
-        internal.update(true);
     }
 
     pub fn current_size(&self) -> Size<i32, Logical> {
@@ -405,13 +404,12 @@ impl<P: Program + Send + 'static + Clone> IcedElement<P> {
 
 impl<P: Program + Send + 'static> IcedElementInternal<P> {
     #[profiling::function]
-    fn update(&mut self, mut force: bool) {
+    fn update(&mut self, force: bool) {
         while let Ok(Some(message)) = self.rx.try_recv() {
             self.state.queue_message(message);
-            force = true;
         }
 
-        if !force {
+        if self.state.is_queue_empty() && !force {
             return;
         }
 
@@ -469,7 +467,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         // TODO: Update iced widgets to handle touch using event position, not cursor_pos
         internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-        internal.update(true);
+        internal.update(false);
     }
 
     fn motion(
@@ -486,7 +484,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-        internal.update(true);
+        internal.update(false);
     }
 
     fn relative_motion(
@@ -515,7 +513,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             ButtonState::Released => MouseEvent::ButtonReleased(button),
         }));
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-        internal.update(true);
+        internal.update(false);
     }
 
     fn axis(
@@ -540,7 +538,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
                     }
                 },
             }));
-        internal.update(true);
+        internal.update(false);
     }
 
     fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) {}
@@ -556,7 +554,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));
-        internal.update(true);
+        internal.update(false);
     }
 
     fn gesture_swipe_begin(
@@ -635,7 +633,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
         internal.touch_map.insert(id, position);
         internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
-        let _ = internal.update(true);
+        let _ = internal.update(false);
     }
 
     fn up(
@@ -652,7 +650,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
             internal
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
-            let _ = internal.update(true);
+            let _ = internal.update(false);
         }
     }
 
@@ -673,7 +671,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
             .queue_event(Event::Touch(TouchEvent::FingerMoved { id, position }));
         internal.touch_map.insert(id, position);
         internal.cursor_pos = Some(event_location);
-        let _ = internal.update(true);
+        let _ = internal.update(false);
     }
 
     fn frame(
@@ -696,7 +694,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLost { id, position }));
         }
-        let _ = internal.update(true);
+        let _ = internal.update(false);
     }
 
     fn shape(
@@ -774,7 +772,7 @@ impl<P: Program + Send + 'static> KeyboardTarget<crate::state::State> for IcedEl
         internal
             .state
             .queue_event(Event::Keyboard(KeyboardEvent::ModifiersChanged(mods)));
-        let _ = internal.update(true);
+        let _ = internal.update(false);
     }
 }
 
@@ -807,7 +805,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         } else {
             WindowEvent::Unfocused
         }));
-        let _ = internal.update(true); // TODO
+        let _ = internal.update(false);
     }
 
     fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
@@ -881,7 +879,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                 ),
             );
         }
-        internal.update(true);
+        internal.update(false);
     }
 }
 
@@ -1006,6 +1004,12 @@ where
 
                     Result::<_, ()>::Ok(damage)
                 });
+
+                // trim the shape cache
+                {
+                    let mut font_system = font_system().write().unwrap();
+                    font_system.raw().shape_run_cache.trim(1024);
+                }
             }
 
             match MemoryRenderBufferRenderElement::from_buffer(

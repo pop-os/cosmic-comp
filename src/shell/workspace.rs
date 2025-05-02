@@ -4,7 +4,6 @@ use crate::{
         element::{AsGlowRenderer, FromGlesError},
         BackdropShader,
     },
-    config::EdidProduct,
     shell::{
         layout::{floating::FloatingLayout, tiling::TilingLayout},
         OverviewMode, ANIMATION_DURATION,
@@ -19,6 +18,7 @@ use crate::{
         },
     },
 };
+use cosmic_comp_config::workspace::{OutputMatch, PinnedWorkspace};
 
 use cosmic::theme::CosmicTheme;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
@@ -74,30 +74,30 @@ use super::{
 
 const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OutputMatch {
-    name: String,
-    edid: Option<EdidProduct>,
+// For stable workspace id, generate random 24-bit integer, as a hex string
+// Must be compared with existing workspaces work uniqueness.
+// TODO: Assign an id to any workspace that is pinned
+pub fn random_id() -> String {
+    let id = rand::random_range(0..(2 << 24));
+    format!("{:x}", id)
 }
 
-impl OutputMatch {
-    fn for_output(output: &Output) -> Self {
-        Self {
-            name: output.name(),
-            edid: output.edid().cloned(),
-        }
+fn output_match_for_output(output: &Output) -> OutputMatch {
+    OutputMatch {
+        name: output.name(),
+        edid: output.edid().cloned(),
     }
+}
 
-    // If `disambguate` is true, check that edid *and* connector name match.
-    // Otherwise, match only edid (if it exists)
-    fn matches(&self, output: &Output, disambiguate: bool) -> bool {
-        if self.edid.as_ref() != output.edid() {
-            false
-        } else if disambiguate || self.edid.is_none() {
-            self.name == output.name()
-        } else {
-            true
-        }
+// If `disambguate` is true, check that edid *and* connector name match.
+// Otherwise, match only edid (if it exists)
+fn output_matches(output_match: &OutputMatch, output: &Output, disambiguate: bool) -> bool {
+    if output_match.edid.as_ref() != output.edid() {
+        false
+    } else if disambiguate || output_match.edid.is_none() {
+        output_match.name == output.name()
+    } else {
+        true
     }
 }
 
@@ -109,6 +109,7 @@ pub struct Workspace {
     pub minimized_windows: Vec<MinimizedWindow>,
     pub tiling_enabled: bool,
     pub fullscreen: Option<FullscreenSurface>,
+    pub pinned: bool,
 
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
@@ -269,7 +270,7 @@ impl Workspace {
     ) -> Workspace {
         let tiling_layer = TilingLayout::new(theme.clone(), &output);
         let floating_layer = FloatingLayout::new(theme, &output);
-        let output_match = OutputMatch::for_output(&output);
+        let output_match = output_match_for_output(&output);
 
         Workspace {
             output,
@@ -278,6 +279,7 @@ impl Workspace {
             tiling_enabled,
             minimized_windows: Vec::new(),
             fullscreen: None,
+            pinned: false,
             handle,
             focus_stack: FocusStacks::default(),
             screencopy: ScreencopySessions::default(),
@@ -288,6 +290,55 @@ impl Workspace {
             },
             backdrop_id: Id::new(),
             dirty: AtomicBool::new(false),
+        }
+    }
+
+    pub fn from_pinned(
+        pinned: &PinnedWorkspace,
+        handle: WorkspaceHandle,
+        output: Output,
+        theme: cosmic::Theme,
+    ) -> Self {
+        let tiling_layer = TilingLayout::new(theme.clone(), &output);
+        let floating_layer = FloatingLayout::new(theme, &output);
+        let output_match = output_match_for_output(&output);
+
+        Workspace {
+            output,
+            tiling_layer,
+            floating_layer,
+            tiling_enabled: pinned.tiling_enabled,
+            minimized_windows: Vec::new(),
+            fullscreen: None,
+            pinned: true,
+            handle,
+            focus_stack: FocusStacks::default(),
+            screencopy: ScreencopySessions::default(),
+            output_stack: {
+                let mut queue = VecDeque::new();
+                queue.push_back(pinned.output.clone());
+                if output_match != pinned.output {
+                    queue.push_back(output_match);
+                }
+                queue
+            },
+            backdrop_id: Id::new(),
+            dirty: AtomicBool::new(false),
+        }
+    }
+
+    pub fn to_pinned(&self) -> Option<PinnedWorkspace> {
+        let output = self.explicit_output().clone();
+        if self.pinned {
+            Some(PinnedWorkspace {
+                output: cosmic_comp_config::workspace::OutputMatch {
+                    name: output.name,
+                    edid: output.edid,
+                },
+                tiling_enabled: self.tiling_enabled,
+            })
+        } else {
+            None
         }
     }
 
@@ -316,9 +367,9 @@ impl Workspace {
     }
 
     // Auto-removal of workspaces is allowed if empty, unless blocked by an
-    // unused and unexpired activation token.
+    // unused and unexpired activation token, or pinned.
     pub fn can_auto_remove(&self, xdg_activation_state: &XdgActivationState) -> bool {
-        self.is_empty() && !self.has_activation_token(xdg_activation_state)
+        self.is_empty() && !self.has_activation_token(xdg_activation_state) && !self.pinned
     }
 
     pub fn refresh_focus_stack(&mut self) {
@@ -389,6 +440,11 @@ impl Workspace {
         &self.output
     }
 
+    /// Output workspace was originally created on, or explicitly moved to by the user
+    fn explicit_output(&self) -> &OutputMatch {
+        self.output_stack.front().unwrap()
+    }
+
     // Set output the workspace is on
     //
     // If `explicit` is `true`, the user has explicitly moved the workspace
@@ -414,21 +470,21 @@ impl Workspace {
         if let Some(pos) = self
             .output_stack
             .iter()
-            .position(|i| i.matches(output, true))
+            .position(|i| output_matches(i, output, true))
         {
             // Matched edid and connector name
             self.output_stack.truncate(pos + 1);
         } else if let Some(pos) = self
             .output_stack
             .iter()
-            .position(|i| i.matches(output, false))
+            .position(|i| output_matches(i, output, false))
         {
             // Matched edid but not connector name; truncate entries that don't match edid,
             // but keep old entry in case we see two outputs with the same edid.
             self.output_stack.truncate(pos + 1);
-            self.output_stack.push_back(OutputMatch::for_output(output));
+            self.output_stack.push_back(output_match_for_output(output));
         } else {
-            self.output_stack.push_back(OutputMatch::for_output(output));
+            self.output_stack.push_back(output_match_for_output(output));
         }
         self.output = output.clone();
     }
@@ -440,7 +496,7 @@ impl Workspace {
             .is_some_and(|edid| self.output().edid() == Some(edid));
         self.output_stack
             .iter()
-            .any(|i| i.matches(output, disambiguate))
+            .any(|i| output_matches(i, output, disambiguate))
     }
 
     pub fn unmap(&mut self, mapped: &CosmicMapped) -> Option<ManagedState> {

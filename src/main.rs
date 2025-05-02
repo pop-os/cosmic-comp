@@ -127,9 +127,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     logger::init_logger()?;
     info!("Cosmic starting up!");
 
-    #[cfg(feature = "profile-with-tracy")]
-    profiling::tracy_client::Client::start();
     profiling::register_thread!("Main Thread");
+    #[cfg(feature = "profile-with-tracy")]
+    tracy_client::Client::start();
 
     utils::rlimit::increase_nofile_limit();
 

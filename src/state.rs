@@ -24,7 +24,7 @@ use crate::{
             screencopy::ScreencopyState,
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
-            workspace::{WorkspaceClientState, WorkspaceState, WorkspaceUpdateGuard},
+            workspace::{WorkspaceState, WorkspaceUpdateGuard},
         },
     },
     xwayland::XWaylandState,
@@ -141,7 +141,6 @@ macro_rules! fl {
 
 pub struct ClientState {
     pub compositor_client_state: CompositorClientState,
-    pub workspace_client_state: WorkspaceClientState,
     pub advertised_drm_node: Option<DrmNode>,
     pub privileged: bool,
     pub evls: LoopSignal,
@@ -243,7 +242,7 @@ pub struct Common {
     pub xdg_activation_state: XdgActivationState,
     pub xdg_foreign_state: XdgForeignState,
     pub workspace_state: WorkspaceState<State>,
-    pub xwayland_scale: Option<i32>,
+    pub xwayland_scale: Option<f64>,
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
@@ -382,7 +381,10 @@ impl BackendData {
         // Update layout for changes in resolution, scale, orientation
         shell.workspaces.recalculate();
 
-        loop_handle.insert_idle(|state| state.common.update_xwayland_scale());
+        loop_handle.insert_idle(move |state| {
+            state.common.update_xwayland_scale();
+            state.common.update_xwayland_primary_output();
+        });
 
         Ok(())
     }
@@ -676,7 +678,6 @@ impl State {
     pub fn new_client_state(&self) -> ClientState {
         ClientState {
             compositor_client_state: CompositorClientState::default(),
-            workspace_client_state: WorkspaceClientState::default(),
             advertised_drm_node: match &self.backend {
                 BackendData::Kms(kms_state) => kms_state.primary_node,
                 _ => None,
