@@ -823,12 +823,8 @@ impl SurfaceThreadState {
 
                 self.timings.presented(clock);
 
-                while let Ok((mut frame, damage)) = frames.recv() {
-                    frame
-                        .0
-                        .take()
-                        .unwrap()
-                        .success(self.output.current_transform(), damage, clock);
+                while let Ok((frame, damage)) = frames.recv() {
+                    frame.success(self.output.current_transform(), damage, clock);
                 }
             }
         }
