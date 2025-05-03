@@ -21,7 +21,7 @@ use crate::{
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
-type PendingScreencopyBuffers = Mutex<Vec<(Session, DropableFrame)>>;
+type PendingScreencopyBuffers = Mutex<Vec<(Session, Frame)>>;
 
 pub type SessionData = Mutex<SessionUserData>;
 
@@ -77,9 +77,9 @@ pub trait SessionHolder {
 }
 
 pub trait FrameHolder {
-    fn add_frame(&mut self, session: Session, frame: DropableFrame);
+    fn add_frame(&mut self, session: Session, frame: Frame);
     fn remove_frame(&mut self, frame: &ExtImageCopyCaptureFrameV1);
-    fn take_pending_frames(&self) -> Vec<(Session, DropableFrame)>;
+    fn take_pending_frames(&self) -> Vec<(Session, Frame)>;
 }
 
 impl SessionHolder for Output {
@@ -151,7 +151,7 @@ impl SessionHolder for Output {
 }
 
 impl FrameHolder for Output {
-    fn add_frame(&mut self, session: Session, frame: DropableFrame) {
+    fn add_frame(&mut self, session: Session, frame: Frame) {
         self.user_data()
             .insert_if_missing_threadsafe(PendingScreencopyBuffers::default);
         self.user_data()
@@ -166,7 +166,7 @@ impl FrameHolder for Output {
             pending.lock().unwrap().retain(|(_, f)| f.handle() != frame);
         }
     }
-    fn take_pending_frames(&self) -> Vec<(Session, DropableFrame)> {
+    fn take_pending_frames(&self) -> Vec<(Session, Frame)> {
         self.user_data()
             .get::<PendingScreencopyBuffers>()
             .map(|pending| std::mem::take(&mut *pending.lock().unwrap()))
@@ -328,46 +328,3 @@ impl Drop for DropableCursorSession {
         }
     }
 }
-
-pub type DropableFrame = Frame;
-
-/*
-#[derive(Debug)]
-pub struct DropableFrame(pub Option<Frame>);
-impl DropableFrame {
-    pub fn success(
-        mut self,
-        transform: impl Into<Transform>,
-        damage: impl Into<Option<Vec<Rectangle<i32, BufferCoords>>>>,
-        presented: impl Into<Duration>,
-    ) {
-        self.0.take().unwrap().success(transform, damage, presented);
-    }
-    pub fn fail(mut self, reason: FailureReason) {
-        self.0.take().unwrap().fail(reason);
-    }
-}
-impl Deref for DropableFrame {
-    type Target = Frame;
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
-    }
-}
-impl DerefMut for DropableFrame {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
-    }
-}
-impl PartialEq<Frame> for DropableFrame {
-    fn eq(&self, other: &Frame) -> bool {
-        self.0.as_ref().map(|f| f == other).unwrap_or(false)
-    }
-}
-impl Drop for DropableFrame {
-    fn drop(&mut self) {
-        if let Some(f) = self.0.take() {
-            f.fail(FailureReason::Unknown);
-        }
-    }
-}
-*/

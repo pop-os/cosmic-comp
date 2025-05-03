@@ -11,8 +11,10 @@ use crate::{
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::{submit_buffer, DropableFrame, FrameHolder, SessionData},
-        protocols::screencopy::{FailureReason, Session as ScreencopySession},
+        handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
+        protocols::screencopy::{
+            FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession,
+        },
     },
 };
 
@@ -159,7 +161,7 @@ pub type GbmDrmOutput = DrmOutput<
     GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
-        Receiver<(DropableFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
         Duration,
     )>,
     DrmDeviceFd,
@@ -1023,7 +1025,7 @@ impl SurfaceThreadState {
         let mut has_cursor_mode_none = false;
         let frames: Vec<(
             ScreencopySession,
-            DropableFrame,
+            ScreencopyFrame,
             Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
         )> = self
             .mirroring
