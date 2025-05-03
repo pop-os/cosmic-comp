@@ -4,11 +4,11 @@ use std::{
 };
 
 pub use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
-    ext_image_copy_capture_frame_v1::FailureReason,
+    ext_image_copy_capture_frame_v1::{ExtImageCopyCaptureFrameV1, FailureReason},
 };
 use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
     ext_image_copy_capture_cursor_session_v1::{self, ExtImageCopyCaptureCursorSessionV1},
-    ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1},
+    ext_image_copy_capture_frame_v1,
     ext_image_copy_capture_manager_v1::{self, ExtImageCopyCaptureManagerV1},
     ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
 };
@@ -103,7 +103,8 @@ struct SessionInner {
     constraints: Option<BufferConstraints>,
     draw_cursors: bool,
     source: ImageCaptureSourceData,
-    active_frames: Vec<Frame>,
+    // TODO better type
+    active_frames: Vec<(ExtImageCopyCaptureFrameV1, Arc<Mutex<FrameInner>>)>,
 }
 
 impl SessionInner {
@@ -176,8 +177,8 @@ impl Session {
             return;
         }
 
-        for frame in inner.active_frames.drain(..) {
-            frame.fail(FailureReason::Stopped);
+        for (i, frame) in inner.active_frames.drain(..) {
+            frame.lock().unwrap().fail(&i, FailureReason::Stopped);
         }
 
         self.obj.stopped();
@@ -207,7 +208,7 @@ struct CursorSessionInner {
     source: ImageCaptureSourceData,
     position: Option<Point<i32, BufferCoords>>,
     hotspot: Point<i32, BufferCoords>,
-    active_frames: Vec<Frame>,
+    active_frames: Vec<(ExtImageCopyCaptureFrameV1, Arc<Mutex<FrameInner>>)>,
 }
 
 impl CursorSessionInner {
@@ -332,8 +333,8 @@ impl CursorSession {
         }
         inner.constraints.take();
 
-        for frame in inner.active_frames.drain(..) {
-            frame.fail(FailureReason::Stopped);
+        for (i, frame) in inner.active_frames.drain(..) {
+            frame.lock().unwrap().fail(&i, FailureReason::Stopped);
         }
 
         inner.stopped = true;
@@ -353,6 +354,11 @@ impl PartialEq for Frame {
 }
 
 impl Frame {
+    // TODO handle not right name?
+    pub fn handle(&self) -> &ExtImageCopyCaptureFrameV1 {
+        &self.obj
+    }
+
     pub fn buffer(&self) -> WlBuffer {
         self.inner.lock().unwrap().buffer.clone().unwrap()
     }
@@ -396,6 +402,16 @@ impl Frame {
 
     pub fn fail(self, reason: FailureReason) {
         self.inner.lock().unwrap().fail(&self.obj, reason);
+    }
+}
+
+impl Drop for Frame {
+    fn drop(&mut self) {
+        // Send `fail` is `sucesss` or `fail` not already called
+        self.inner
+            .lock()
+            .unwrap()
+            .fail(&self.obj, FailureReason::Unknown);
     }
 }
 
@@ -454,7 +470,7 @@ pub trait ScreencopyHandler {
     fn frame(&mut self, session: Session, frame: Frame);
     fn cursor_frame(&mut self, session: CursorSession, frame: Frame);
 
-    fn frame_aborted(&mut self, frame: Frame);
+    fn frame_aborted(&mut self, frame_handle: &ExtImageCopyCaptureFrameV1);
     fn session_destroyed(&mut self, session: Session) {
         let _ = session;
     }
@@ -671,11 +687,7 @@ where
                         inner: inner.clone(),
                     },
                 );
-                data.inner
-                    .lock()
-                    .unwrap()
-                    .active_frames
-                    .push(Frame { obj, inner });
+                data.inner.lock().unwrap().active_frames.push((obj, inner));
             }
             _ => {}
         }
@@ -804,11 +816,7 @@ where
                         inner: inner.clone(),
                     },
                 );
-                data.inner
-                    .lock()
-                    .unwrap()
-                    .active_frames
-                    .push(Frame { obj, inner });
+                data.inner.lock().unwrap().active_frames.push((obj, inner));
             }
             _ => {}
         }
@@ -1046,7 +1054,7 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .retain(|frame| frame.obj != *resource);
+                    .retain(|(i, _)| i != resource);
             }
             for cursor_session in &mut scpy.known_cursor_sessions {
                 cursor_session
@@ -1054,14 +1062,10 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .retain(|frame| frame.obj != *resource);
+                    .retain(|(i, _)| i != resource);
             }
         }
-        let frame = Frame {
-            obj: resource.clone(),
-            inner: data.inner.clone(),
-        };
-        state.frame_aborted(frame);
+        state.frame_aborted(resource);
     }
 }
 

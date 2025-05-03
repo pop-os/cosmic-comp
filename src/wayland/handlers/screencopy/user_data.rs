@@ -15,7 +15,9 @@ use smithay::{
 
 use crate::{
     shell::{CosmicSurface, Workspace},
-    wayland::protocols::screencopy::{CursorSession, FailureReason, Frame, Session},
+    wayland::protocols::screencopy::{
+        CursorSession, ExtImageCopyCaptureFrameV1, FailureReason, Frame, Session,
+    },
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
@@ -76,7 +78,7 @@ pub trait SessionHolder {
 
 pub trait FrameHolder {
     fn add_frame(&mut self, session: Session, frame: DropableFrame);
-    fn remove_frame(&mut self, frame: &Frame);
+    fn remove_frame(&mut self, frame: &ExtImageCopyCaptureFrameV1);
     fn take_pending_frames(&self) -> Vec<(Session, DropableFrame)>;
 }
 
@@ -159,9 +161,9 @@ impl FrameHolder for Output {
             .unwrap()
             .push((session, frame));
     }
-    fn remove_frame(&mut self, frame: &Frame) {
+    fn remove_frame(&mut self, frame: &ExtImageCopyCaptureFrameV1) {
         if let Some(pending) = self.user_data().get::<PendingScreencopyBuffers>() {
-            pending.lock().unwrap().retain(|(_, f)| f != frame);
+            pending.lock().unwrap().retain(|(_, f)| f.handle() != frame);
         }
     }
     fn take_pending_frames(&self) -> Vec<(Session, DropableFrame)> {
@@ -327,6 +329,9 @@ impl Drop for DropableCursorSession {
     }
 }
 
+pub type DropableFrame = Frame;
+
+/*
 #[derive(Debug)]
 pub struct DropableFrame(pub Option<Frame>);
 impl DropableFrame {
@@ -365,3 +370,4 @@ impl Drop for DropableFrame {
         }
     }
 }
+*/
