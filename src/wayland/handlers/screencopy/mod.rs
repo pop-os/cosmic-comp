@@ -256,8 +256,6 @@ impl ScreencopyHandler for State {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
-                    // XXX not needed since it will already be dropped?
-                    // session.stop(); // will fail the frame as well
                     return;
                 };
 

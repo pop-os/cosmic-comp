@@ -211,7 +211,6 @@ pub fn render_workspace_to_buffer(
 ) {
     let shell = state.common.shell.read().unwrap();
     let Some(workspace) = shell.workspaces.space_for_handle(&handle) else {
-        // XXX not needed? session.stop();
         return;
     };
 
