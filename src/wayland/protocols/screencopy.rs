@@ -5,11 +5,11 @@ use std::{
 };
 
 pub use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
-    ext_image_copy_capture_frame_v1::{ExtImageCopyCaptureFrameV1, FailureReason},
+    ext_image_copy_capture_frame_v1::FailureReason,
 };
 use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
     ext_image_copy_capture_cursor_session_v1::{self, ExtImageCopyCaptureCursorSessionV1},
-    ext_image_copy_capture_frame_v1,
+    ext_image_copy_capture_frame_v1::{self, ExtImageCopyCaptureFrameV1},
     ext_image_copy_capture_manager_v1::{self, ExtImageCopyCaptureManagerV1},
     ext_image_copy_capture_session_v1::{self, ExtImageCopyCaptureSessionV1},
 };
@@ -492,7 +492,7 @@ pub trait ScreencopyHandler {
     fn frame(&mut self, session: Session, frame: Frame);
     fn cursor_frame(&mut self, session: CursorSession, frame: Frame);
 
-    fn frame_aborted(&mut self, frame_handle: &ExtImageCopyCaptureFrameV1);
+    fn frame_aborted(&mut self, frame_handle: FrameRef);
     fn session_destroyed(&mut self, session: Session) {
         let _ = session;
     }
@@ -1095,7 +1095,10 @@ where
                     .retain(|i| i.handle() != resource);
             }
         }
-        state.frame_aborted(resource);
+        state.frame_aborted(FrameRef {
+            obj: resource.clone(),
+            inner: data.inner.clone(),
+        });
     }
 }
 

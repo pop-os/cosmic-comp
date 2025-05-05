@@ -13,7 +13,7 @@ use smithay::{
 
 use crate::{
     shell::{CosmicSurface, Workspace},
-    wayland::protocols::screencopy::{CursorSession, ExtImageCopyCaptureFrameV1, Frame, Session},
+    wayland::protocols::screencopy::{CursorSession, Frame, FrameRef, Session},
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
@@ -74,7 +74,7 @@ pub trait SessionHolder {
 
 pub trait FrameHolder {
     fn add_frame(&mut self, session: Session, frame: Frame);
-    fn remove_frame(&mut self, frame: &ExtImageCopyCaptureFrameV1);
+    fn remove_frame(&mut self, frame: &FrameRef);
     fn take_pending_frames(&self) -> Vec<(Session, Frame)>;
 }
 
@@ -157,9 +157,12 @@ impl FrameHolder for Output {
             .unwrap()
             .push((session, frame));
     }
-    fn remove_frame(&mut self, frame: &ExtImageCopyCaptureFrameV1) {
+    fn remove_frame(&mut self, frame: &FrameRef) {
         if let Some(pending) = self.user_data().get::<PendingScreencopyBuffers>() {
-            pending.lock().unwrap().retain(|(_, f)| f.handle() != frame);
+            pending
+                .lock()
+                .unwrap()
+                .retain(|(_, f)| f.handle() != frame.handle());
         }
     }
     fn take_pending_frames(&self) -> Vec<(Session, Frame)> {
