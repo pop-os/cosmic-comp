@@ -512,7 +512,7 @@ pub trait ScreencopyHandler {
         source: &ImageCaptureSourceData,
     ) -> Option<BufferConstraints>;
 
-    fn new_session(&mut self, session: Session);
+    fn new_session(&mut self, session: DropableSession);
     fn new_cursor_session(&mut self, session: CursorSession);
 
     fn frame(&mut self, session: Session, frame: Frame);
@@ -620,7 +620,7 @@ where
                                 .screencopy_state()
                                 .known_sessions
                                 .push(session.clone());
-                            state.new_session(session);
+                            state.new_session(DropableSession(Some(session)));
                             return;
                         }
                     }

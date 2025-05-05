@@ -85,11 +85,11 @@ impl ScreencopyHandler for State {
         })
     }
 
-    fn new_session(&mut self, session: Session) {
+    fn new_session(&mut self, session: DropableSession) {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
-                    session.stop();
+                    session.0.clone().unwrap().stop(); // XXX
                     return;
                 };
 
@@ -99,12 +99,12 @@ impl ScreencopyHandler for State {
                     )))
                 });
 
-                output.add_session(DropableSession(Some(session)));
+                output.add_session(session);
             }
             ImageCaptureSourceData::Workspace(handle) => {
                 let mut shell = self.common.shell.write().unwrap();
                 let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
-                    session.stop();
+                    session.0.clone().unwrap().stop(); // XXX
                     return;
                 };
 
@@ -113,7 +113,7 @@ impl ScreencopyHandler for State {
                         workspace.output(),
                     )))
                 });
-                workspace.add_session(DropableSession(Some(session)));
+                workspace.add_session(session);
             }
             ImageCaptureSourceData::Toplevel(mut toplevel) => {
                 let size = toplevel.geometry().size.to_physical(1);
@@ -124,7 +124,7 @@ impl ScreencopyHandler for State {
                         Transform::Normal,
                     )))
                 });
-                toplevel.add_session(DropableSession(Some(session)));
+                toplevel.add_session(session);
             }
             ImageCaptureSourceData::Destroyed => unreachable!(),
         }
