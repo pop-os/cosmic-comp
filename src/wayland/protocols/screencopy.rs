@@ -192,31 +192,30 @@ impl PartialEq<Session> for DropableSession {
 impl Drop for DropableSession {
     fn drop(&mut self) {
         if self.0.is_some() {
-            // XXX
-            DropableSession(self.0.clone()).stop();
+            let mut inner = self.0.as_ref().unwrap().inner.lock().unwrap();
+
+            if !self.obj.is_alive() || inner.stopped {
+                return;
+            }
+
+            for frame in inner.active_frames.drain(..) {
+                frame
+                    .inner
+                    .lock()
+                    .unwrap()
+                    .fail(&frame.obj, FailureReason::Stopped);
+            }
+
+            self.obj.stopped();
+            inner.constraints.take();
+            inner.stopped = true;
         }
     }
 }
 
 impl DropableSession {
     pub fn stop(self) {
-        let mut inner = self.0.as_ref().unwrap().inner.lock().unwrap();
-
-        if !self.obj.is_alive() || inner.stopped {
-            return;
-        }
-
-        for frame in inner.active_frames.drain(..) {
-            frame
-                .inner
-                .lock()
-                .unwrap()
-                .fail(&frame.obj, FailureReason::Stopped);
-        }
-
-        self.obj.stopped();
-        inner.constraints.take();
-        inner.stopped = true;
+        let _ = self;
     }
 }
 
