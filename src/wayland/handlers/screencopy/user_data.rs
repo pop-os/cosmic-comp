@@ -3,21 +3,17 @@ use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
     sync::Mutex,
-    time::Duration,
 };
 
 use smithay::{
     backend::renderer::{damage::OutputDamageTracker, utils::CommitCounter},
     output::Output,
     reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource, Weak},
-    utils::{Buffer as BufferCoords, Rectangle, Transform},
 };
 
 use crate::{
     shell::{CosmicSurface, Workspace},
-    wayland::protocols::screencopy::{
-        CursorSession, ExtImageCopyCaptureFrameV1, FailureReason, Frame, Session,
-    },
+    wayland::protocols::screencopy::{CursorSession, ExtImageCopyCaptureFrameV1, Frame, Session},
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
