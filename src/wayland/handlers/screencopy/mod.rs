@@ -27,8 +27,8 @@ use crate::{
     wayland::protocols::{
         image_capture_source::ImageCaptureSourceData,
         screencopy::{
-            delegate_screencopy, BufferConstraints, CursorSession, DmabufConstraints,
-            DropableSession, Frame, FrameRef, ScreencopyHandler, ScreencopyState, SessionRef,
+            delegate_screencopy, BufferConstraints, CursorSession, DmabufConstraints, Frame,
+            FrameRef, ScreencopyHandler, ScreencopyState, Session, SessionRef,
         },
     },
 };
@@ -85,7 +85,7 @@ impl ScreencopyHandler for State {
         })
     }
 
-    fn new_session(&mut self, session: DropableSession) {
+    fn new_session(&mut self, session: Session) {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {

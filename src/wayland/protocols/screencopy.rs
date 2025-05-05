@@ -172,24 +172,24 @@ impl SessionRef {
 }
 
 #[derive(Debug)]
-pub struct DropableSession(pub SessionRef);
-impl ops::Deref for DropableSession {
+pub struct Session(pub SessionRef);
+impl ops::Deref for Session {
     type Target = SessionRef;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl ops::DerefMut for DropableSession {
+impl ops::DerefMut for Session {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
-impl PartialEq<SessionRef> for DropableSession {
+impl PartialEq<SessionRef> for Session {
     fn eq(&self, other: &SessionRef) -> bool {
         self.0 == *other
     }
 }
-impl Drop for DropableSession {
+impl Drop for Session {
     fn drop(&mut self) {
         let mut inner = self.0.inner.lock().unwrap();
 
@@ -211,7 +211,7 @@ impl Drop for DropableSession {
     }
 }
 
-impl DropableSession {
+impl Session {
     pub fn stop(self) {
         let _ = self;
     }
@@ -512,7 +512,7 @@ pub trait ScreencopyHandler {
         source: &ImageCaptureSourceData,
     ) -> Option<BufferConstraints>;
 
-    fn new_session(&mut self, session: DropableSession);
+    fn new_session(&mut self, session: Session);
     fn new_cursor_session(&mut self, session: CursorSession);
 
     fn frame(&mut self, session: SessionRef, frame: Frame);
@@ -620,7 +620,7 @@ where
                                 .screencopy_state()
                                 .known_sessions
                                 .push(session.clone());
-                            state.new_session(DropableSession(session));
+                            state.new_session(Session(session));
                             return;
                         }
                     }
@@ -636,7 +636,7 @@ where
                         inner: session_data.clone(),
                     },
                 );
-                let session = DropableSession(SessionRef {
+                let session = Session(SessionRef {
                     obj,
                     inner: session_data,
                     user_data: Arc::new(UserDataMap::new()),

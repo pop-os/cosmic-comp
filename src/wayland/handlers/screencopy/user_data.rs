@@ -13,7 +13,7 @@ use smithay::{
 
 use crate::{
     shell::{CosmicSurface, Workspace},
-    wayland::protocols::screencopy::{CursorSession, DropableSession, Frame, FrameRef, SessionRef},
+    wayland::protocols::screencopy::{CursorSession, Frame, FrameRef, Session, SessionRef},
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
@@ -58,12 +58,12 @@ impl SessionUserData {
 
 #[derive(Debug, Default)]
 pub struct ScreencopySessions {
-    sessions: Vec<DropableSession>,
+    sessions: Vec<Session>,
     cursor_sessions: Vec<DropableCursorSession>,
 }
 
 pub trait SessionHolder {
-    fn add_session(&mut self, session: DropableSession);
+    fn add_session(&mut self, session: Session);
     fn remove_session(&mut self, session: &SessionRef);
     fn sessions(&self) -> Vec<SessionRef>;
 
@@ -79,7 +79,7 @@ pub trait FrameHolder {
 }
 
 impl SessionHolder for Output {
-    fn add_session(&mut self, session: DropableSession) {
+    fn add_session(&mut self, session: Session) {
         self.user_data()
             .insert_if_missing(ScreencopySessionsData::default);
         self.user_data()
@@ -174,7 +174,7 @@ impl FrameHolder for Output {
 }
 
 impl SessionHolder for Workspace {
-    fn add_session(&mut self, session: DropableSession) {
+    fn add_session(&mut self, session: Session) {
         self.screencopy.sessions.push(session);
     }
 
@@ -208,7 +208,7 @@ impl SessionHolder for Workspace {
 }
 
 impl SessionHolder for CosmicSurface {
-    fn add_session(&mut self, session: DropableSession) {
+    fn add_session(&mut self, session: Session) {
         self.user_data()
             .insert_if_missing(ScreencopySessionsData::default);
         self.user_data()
