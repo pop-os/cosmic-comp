@@ -169,26 +169,6 @@ impl Session {
     pub fn user_data(&self) -> &UserDataMap {
         &*self.user_data
     }
-
-    pub fn stop(self) {
-        let mut inner = self.inner.lock().unwrap();
-
-        if !self.obj.is_alive() || inner.stopped {
-            return;
-        }
-
-        for frame in inner.active_frames.drain(..) {
-            frame
-                .inner
-                .lock()
-                .unwrap()
-                .fail(&frame.obj, FailureReason::Stopped);
-        }
-
-        self.obj.stopped();
-        inner.constraints.take();
-        inner.stopped = true;
-    }
 }
 
 #[derive(Debug)]
@@ -211,9 +191,32 @@ impl PartialEq<Session> for DropableSession {
 }
 impl Drop for DropableSession {
     fn drop(&mut self) {
-        if let Some(s) = self.0.take() {
-            s.stop();
+        if self.0.is_some() {
+            // XXX
+            DropableSession(self.0.clone()).stop();
         }
+    }
+}
+
+impl DropableSession {
+    pub fn stop(self) {
+        let mut inner = self.0.as_ref().unwrap().inner.lock().unwrap();
+
+        if !self.obj.is_alive() || inner.stopped {
+            return;
+        }
+
+        for frame in inner.active_frames.drain(..) {
+            frame
+                .inner
+                .lock()
+                .unwrap()
+                .fail(&frame.obj, FailureReason::Stopped);
+        }
+
+        self.obj.stopped();
+        inner.constraints.take();
+        inner.stopped = true;
     }
 }
 
@@ -636,11 +639,11 @@ where
                         inner: session_data.clone(),
                     },
                 );
-                let session = Session {
+                let session = DropableSession(Some(Session {
                     obj,
                     inner: session_data,
                     user_data: Arc::new(UserDataMap::new()),
-                };
+                }));
                 session.stop();
             }
             ext_image_copy_capture_manager_v1::Request::CreatePointerCursorSession {

@@ -89,7 +89,7 @@ impl ScreencopyHandler for State {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
-                    session.0.clone().unwrap().stop(); // XXX
+                    session.stop();
                     return;
                 };
 
@@ -104,7 +104,7 @@ impl ScreencopyHandler for State {
             ImageCaptureSourceData::Workspace(handle) => {
                 let mut shell = self.common.shell.write().unwrap();
                 let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
-                    session.0.clone().unwrap().stop(); // XXX
+                    session.stop();
                     return;
                 };
 
@@ -256,7 +256,8 @@ impl ScreencopyHandler for State {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
-                    session.stop(); // will fail the frame as well
+                    // XXX not needed since it will already be dropped?
+                    // session.stop(); // will fail the frame as well
                     return;
                 };
 
@@ -301,7 +302,7 @@ impl ScreencopyHandler for State {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
-                    output.remove_session(session);
+                    output.remove_session(&session);
                 }
             }
             ImageCaptureSourceData::Workspace(handle) => {
@@ -313,10 +314,10 @@ impl ScreencopyHandler for State {
                     .workspaces
                     .space_for_handle_mut(&handle)
                 {
-                    workspace.remove_session(session)
+                    workspace.remove_session(&session)
                 }
             }
-            ImageCaptureSourceData::Toplevel(mut toplevel) => toplevel.remove_session(session),
+            ImageCaptureSourceData::Toplevel(mut toplevel) => toplevel.remove_session(&session),
             ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }

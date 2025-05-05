@@ -52,7 +52,7 @@ use crate::{
     },
 };
 
-use super::super::data_device::get_dnd_icon;
+use super::{super::data_device::get_dnd_icon, user_data::SessionHolder};
 
 pub fn submit_buffer<R>(
     frame: Frame,
@@ -211,11 +211,11 @@ pub fn render_workspace_to_buffer(
 ) {
     let shell = state.common.shell.read().unwrap();
     let Some(workspace) = shell.workspaces.space_for_handle(&handle) else {
-        session.stop();
+        // XXX not needed? session.stop();
         return;
     };
 
-    let output = workspace.output().clone();
+    let mut output = workspace.output().clone();
     let idx = shell.workspaces.idx_for_handle(&output, &handle).unwrap();
     std::mem::drop(shell);
 
@@ -227,7 +227,7 @@ pub fn render_workspace_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if mode != Some(buffer_size) {
         let Some(constraints) = constraints_for_output(&output, &mut state.backend) else {
-            session.stop();
+            output.remove_session(&session);
             return;
         };
         session.update_constraints(constraints);
@@ -444,7 +444,7 @@ pub fn render_window_to_buffer(
     toplevel: &CosmicSurface,
 ) {
     if !toplevel.alive() {
-        session.stop();
+        toplevel.clone().remove_session(&session);
         return;
     }
 
@@ -453,7 +453,7 @@ pub fn render_window_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if buffer_size != geometry.size.to_buffer(1, Transform::Normal) {
         let Some(constraints) = constraints_for_toplevel(toplevel, &mut state.backend) else {
-            session.stop();
+            toplevel.clone().remove_session(&session);
             return;
         };
         session.update_constraints(constraints);

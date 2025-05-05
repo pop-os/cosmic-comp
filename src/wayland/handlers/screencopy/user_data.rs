@@ -64,7 +64,7 @@ pub struct ScreencopySessions {
 
 pub trait SessionHolder {
     fn add_session(&mut self, session: DropableSession);
-    fn remove_session(&mut self, session: Session);
+    fn remove_session(&mut self, session: &Session);
     fn sessions(&self) -> Vec<Session>;
 
     fn add_cursor_session(&mut self, session: CursorSession);
@@ -90,13 +90,13 @@ impl SessionHolder for Output {
             .push(session);
     }
 
-    fn remove_session(&mut self, session: Session) {
+    fn remove_session(&mut self, session: &Session) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
             .borrow_mut()
             .sessions
-            .retain(|s| *s != session);
+            .retain(|s| s != session);
     }
 
     fn sessions(&self) -> Vec<Session> {
@@ -178,8 +178,8 @@ impl SessionHolder for Workspace {
         self.screencopy.sessions.push(session);
     }
 
-    fn remove_session(&mut self, session: Session) {
-        self.screencopy.sessions.retain(|s| *s != session);
+    fn remove_session(&mut self, session: &Session) {
+        self.screencopy.sessions.retain(|s| s != session);
     }
     fn sessions(&self) -> Vec<Session> {
         self.screencopy
@@ -219,13 +219,13 @@ impl SessionHolder for CosmicSurface {
             .push(session);
     }
 
-    fn remove_session(&mut self, session: Session) {
+    fn remove_session(&mut self, session: &Session) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
             .borrow_mut()
             .sessions
-            .retain(|s| *s != session);
+            .retain(|s| s != session);
     }
     fn sessions(&self) -> Vec<Session> {
         self.user_data()
