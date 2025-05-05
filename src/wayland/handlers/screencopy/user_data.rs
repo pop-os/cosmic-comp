@@ -107,7 +107,7 @@ impl SessionHolder for Output {
                     .borrow()
                     .sessions
                     .iter()
-                    .flat_map(|s| s.0.clone())
+                    .map(|s| s.0.clone())
                     .collect()
             })
     }
@@ -185,7 +185,7 @@ impl SessionHolder for Workspace {
         self.screencopy
             .sessions
             .iter()
-            .flat_map(|s| s.0.clone())
+            .map(|s| s.0.clone())
             .collect()
     }
 
@@ -235,7 +235,7 @@ impl SessionHolder for CosmicSurface {
                     .borrow()
                     .sessions
                     .iter()
-                    .flat_map(|s| s.0.clone())
+                    .map(|s| s.0.clone())
                     .collect()
             })
     }

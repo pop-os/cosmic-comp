@@ -172,44 +172,42 @@ impl Session {
 }
 
 #[derive(Debug)]
-pub struct DropableSession(pub Option<Session>);
+pub struct DropableSession(pub Session);
 impl ops::Deref for DropableSession {
     type Target = Session;
     fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
+        &self.0
     }
 }
 impl ops::DerefMut for DropableSession {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
+        &mut self.0
     }
 }
 impl PartialEq<Session> for DropableSession {
     fn eq(&self, other: &Session) -> bool {
-        self.0.as_ref().map(|s| s == other).unwrap_or(false)
+        self.0 == *other
     }
 }
 impl Drop for DropableSession {
     fn drop(&mut self) {
-        if self.0.is_some() {
-            let mut inner = self.0.as_ref().unwrap().inner.lock().unwrap();
+        let mut inner = self.0.inner.lock().unwrap();
 
-            if !self.obj.is_alive() || inner.stopped {
-                return;
-            }
-
-            for frame in inner.active_frames.drain(..) {
-                frame
-                    .inner
-                    .lock()
-                    .unwrap()
-                    .fail(&frame.obj, FailureReason::Stopped);
-            }
-
-            self.obj.stopped();
-            inner.constraints.take();
-            inner.stopped = true;
+        if !self.obj.is_alive() || inner.stopped {
+            return;
         }
+
+        for frame in inner.active_frames.drain(..) {
+            frame
+                .inner
+                .lock()
+                .unwrap()
+                .fail(&frame.obj, FailureReason::Stopped);
+        }
+
+        self.obj.stopped();
+        inner.constraints.take();
+        inner.stopped = true;
     }
 }
 
@@ -622,7 +620,7 @@ where
                                 .screencopy_state()
                                 .known_sessions
                                 .push(session.clone());
-                            state.new_session(DropableSession(Some(session)));
+                            state.new_session(DropableSession(session));
                             return;
                         }
                     }
@@ -638,11 +636,11 @@ where
                         inner: session_data.clone(),
                     },
                 );
-                let session = DropableSession(Some(Session {
+                let session = DropableSession(Session {
                     obj,
                     inner: session_data,
                     user_data: Arc::new(UserDataMap::new()),
-                }));
+                });
                 session.stop();
             }
             ext_image_copy_capture_manager_v1::Request::CreatePointerCursorSession {
