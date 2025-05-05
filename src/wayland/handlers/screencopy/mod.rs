@@ -27,8 +27,8 @@ use crate::{
     wayland::protocols::{
         image_capture_source::ImageCaptureSourceData,
         screencopy::{
-            delegate_screencopy, BufferConstraints, CursorSession, DmabufConstraints, Frame,
-            FrameRef, ScreencopyHandler, ScreencopyState, Session,
+            delegate_screencopy, BufferConstraints, CursorSession, DmabufConstraints,
+            DropableSession, Frame, FrameRef, ScreencopyHandler, ScreencopyState, Session,
         },
     },
 };
@@ -99,7 +99,7 @@ impl ScreencopyHandler for State {
                     )))
                 });
 
-                output.add_session(session);
+                output.add_session(DropableSession(Some(session)));
             }
             ImageCaptureSourceData::Workspace(handle) => {
                 let mut shell = self.common.shell.write().unwrap();
@@ -113,7 +113,7 @@ impl ScreencopyHandler for State {
                         workspace.output(),
                     )))
                 });
-                workspace.add_session(session);
+                workspace.add_session(DropableSession(Some(session)));
             }
             ImageCaptureSourceData::Toplevel(mut toplevel) => {
                 let size = toplevel.geometry().size.to_physical(1);
@@ -124,7 +124,7 @@ impl ScreencopyHandler for State {
                         Transform::Normal,
                     )))
                 });
-                toplevel.add_session(session);
+                toplevel.add_session(DropableSession(Some(session)));
             }
             ImageCaptureSourceData::Destroyed => unreachable!(),
         }

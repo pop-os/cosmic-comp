@@ -13,7 +13,7 @@ use smithay::{
 
 use crate::{
     shell::{CosmicSurface, Workspace},
-    wayland::protocols::screencopy::{CursorSession, Frame, FrameRef, Session},
+    wayland::protocols::screencopy::{CursorSession, DropableSession, Frame, FrameRef, Session},
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
@@ -63,7 +63,7 @@ pub struct ScreencopySessions {
 }
 
 pub trait SessionHolder {
-    fn add_session(&mut self, session: Session);
+    fn add_session(&mut self, session: DropableSession);
     fn remove_session(&mut self, session: Session);
     fn sessions(&self) -> Vec<Session>;
 
@@ -79,7 +79,7 @@ pub trait FrameHolder {
 }
 
 impl SessionHolder for Output {
-    fn add_session(&mut self, session: Session) {
+    fn add_session(&mut self, session: DropableSession) {
         self.user_data()
             .insert_if_missing(ScreencopySessionsData::default);
         self.user_data()
@@ -87,7 +87,7 @@ impl SessionHolder for Output {
             .unwrap()
             .borrow_mut()
             .sessions
-            .push(DropableSession(Some(session)));
+            .push(session);
     }
 
     fn remove_session(&mut self, session: Session) {
@@ -174,10 +174,8 @@ impl FrameHolder for Output {
 }
 
 impl SessionHolder for Workspace {
-    fn add_session(&mut self, session: Session) {
-        self.screencopy
-            .sessions
-            .push(DropableSession(Some(session)));
+    fn add_session(&mut self, session: DropableSession) {
+        self.screencopy.sessions.push(session);
     }
 
     fn remove_session(&mut self, session: Session) {
@@ -210,7 +208,7 @@ impl SessionHolder for Workspace {
 }
 
 impl SessionHolder for CosmicSurface {
-    fn add_session(&mut self, session: Session) {
+    fn add_session(&mut self, session: DropableSession) {
         self.user_data()
             .insert_if_missing(ScreencopySessionsData::default);
         self.user_data()
@@ -218,7 +216,7 @@ impl SessionHolder for CosmicSurface {
             .unwrap()
             .borrow_mut()
             .sessions
-            .push(DropableSession(Some(session)));
+            .push(session);
     }
 
     fn remove_session(&mut self, session: Session) {
@@ -273,32 +271,6 @@ impl SessionHolder for CosmicSurface {
                     .flat_map(|s| s.0.clone())
                     .collect()
             })
-    }
-}
-
-#[derive(Debug)]
-struct DropableSession(Option<Session>);
-impl Deref for DropableSession {
-    type Target = Session;
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
-    }
-}
-impl DerefMut for DropableSession {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
-    }
-}
-impl PartialEq<Session> for DropableSession {
-    fn eq(&self, other: &Session) -> bool {
-        self.0.as_ref().map(|s| s == other).unwrap_or(false)
-    }
-}
-impl Drop for DropableSession {
-    fn drop(&mut self) {
-        if let Some(s) = self.0.take() {
-            s.stop();
-        }
     }
 }
 

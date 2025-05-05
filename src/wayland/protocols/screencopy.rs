@@ -191,6 +191,32 @@ impl Session {
     }
 }
 
+#[derive(Debug)]
+pub struct DropableSession(pub Option<Session>);
+impl ops::Deref for DropableSession {
+    type Target = Session;
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref().unwrap()
+    }
+}
+impl ops::DerefMut for DropableSession {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.as_mut().unwrap()
+    }
+}
+impl PartialEq<Session> for DropableSession {
+    fn eq(&self, other: &Session) -> bool {
+        self.0.as_ref().map(|s| s == other).unwrap_or(false)
+    }
+}
+impl Drop for DropableSession {
+    fn drop(&mut self) {
+        if let Some(s) = self.0.take() {
+            s.stop();
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CursorSession {
     obj: ExtImageCopyCaptureCursorSessionV1,
