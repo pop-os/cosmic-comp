@@ -28,7 +28,7 @@ use crate::{
         image_capture_source::ImageCaptureSourceData,
         screencopy::{
             delegate_screencopy, BufferConstraints, CursorSession, DmabufConstraints,
-            DropableSession, Frame, FrameRef, ScreencopyHandler, ScreencopyState, Session,
+            DropableSession, Frame, FrameRef, ScreencopyHandler, ScreencopyState, SessionRef,
         },
     },
 };
@@ -252,7 +252,7 @@ impl ScreencopyHandler for State {
         }
     }
 
-    fn frame(&mut self, session: Session, frame: Frame) {
+    fn frame(&mut self, session: SessionRef, frame: Frame) {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
@@ -298,7 +298,7 @@ impl ScreencopyHandler for State {
         }
     }
 
-    fn session_destroyed(&mut self, session: Session) {
+    fn session_destroyed(&mut self, session: SessionRef) {
         match session.source() {
             ImageCaptureSourceData::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {

@@ -38,7 +38,7 @@ use super::image_capture_source::ImageCaptureSourceData;
 #[derive(Debug)]
 pub struct ScreencopyState {
     global: GlobalId,
-    known_sessions: Vec<Session>,
+    known_sessions: Vec<SessionRef>,
     known_cursor_sessions: Vec<CursorSession>,
 }
 
@@ -86,13 +86,13 @@ pub struct DmabufConstraints {
 }
 
 #[derive(Debug, Clone)]
-pub struct Session {
+pub struct SessionRef {
     obj: ExtImageCopyCaptureSessionV1,
     inner: Arc<Mutex<SessionInner>>,
     user_data: Arc<UserDataMap>,
 }
 
-impl PartialEq for Session {
+impl PartialEq for SessionRef {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
     }
@@ -119,13 +119,13 @@ impl SessionInner {
     }
 }
 
-impl IsAlive for Session {
+impl IsAlive for SessionRef {
     fn alive(&self) -> bool {
         self.obj.is_alive()
     }
 }
 
-impl Session {
+impl SessionRef {
     pub fn update_constraints(&self, constraints: BufferConstraints) {
         let mut inner = self.inner.lock().unwrap();
 
@@ -172,9 +172,9 @@ impl Session {
 }
 
 #[derive(Debug)]
-pub struct DropableSession(pub Session);
+pub struct DropableSession(pub SessionRef);
 impl ops::Deref for DropableSession {
-    type Target = Session;
+    type Target = SessionRef;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -184,8 +184,8 @@ impl ops::DerefMut for DropableSession {
         &mut self.0
     }
 }
-impl PartialEq<Session> for DropableSession {
-    fn eq(&self, other: &Session) -> bool {
+impl PartialEq<SessionRef> for DropableSession {
+    fn eq(&self, other: &SessionRef) -> bool {
         self.0 == *other
     }
 }
@@ -515,11 +515,11 @@ pub trait ScreencopyHandler {
     fn new_session(&mut self, session: DropableSession);
     fn new_cursor_session(&mut self, session: CursorSession);
 
-    fn frame(&mut self, session: Session, frame: Frame);
+    fn frame(&mut self, session: SessionRef, frame: Frame);
     fn cursor_frame(&mut self, session: CursorSession, frame: Frame);
 
     fn frame_aborted(&mut self, frame_handle: FrameRef);
-    fn session_destroyed(&mut self, session: Session) {
+    fn session_destroyed(&mut self, session: SessionRef) {
         let _ = session;
     }
     fn cursor_session_destroyed(&mut self, session: CursorSession) {
@@ -610,7 +610,7 @@ where
                                 },
                             );
 
-                            let session = Session {
+                            let session = SessionRef {
                                 obj,
                                 inner: session_data,
                                 user_data: Arc::new(UserDataMap::new()),
@@ -636,7 +636,7 @@ where
                         inner: session_data.clone(),
                     },
                 );
-                let session = DropableSession(Session {
+                let session = DropableSession(SessionRef {
                     obj,
                     inner: session_data,
                     user_data: Arc::new(UserDataMap::new()),
@@ -1055,7 +1055,7 @@ where
                     .known_sessions
                     .iter()
                     .find(|session| session.obj == inner.obj)
-                    .map(|s| Session {
+                    .map(|s| SessionRef {
                         obj: s.obj.clone(),
                         inner: s.inner.clone(),
                         user_data: s.user_data.clone(),

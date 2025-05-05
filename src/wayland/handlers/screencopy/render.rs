@@ -46,7 +46,7 @@ use crate::{
             constraints_for_output, constraints_for_toplevel, SessionData, SessionUserData,
         },
         protocols::{
-            screencopy::{BufferConstraints, CursorSession, FailureReason, Frame, Session},
+            screencopy::{BufferConstraints, CursorSession, FailureReason, Frame, SessionRef},
             workspace::WorkspaceHandle,
         },
     },
@@ -205,7 +205,7 @@ where
 
 pub fn render_workspace_to_buffer(
     state: &mut State,
-    session: Session,
+    session: SessionRef,
     frame: Frame,
     handle: WorkspaceHandle,
 ) {
@@ -439,7 +439,7 @@ smithay::render_elements! {
 
 pub fn render_window_to_buffer(
     state: &mut State,
-    session: Session,
+    session: SessionRef,
     frame: Frame,
     toplevel: &CosmicSurface,
 ) {

@@ -13,11 +13,11 @@ use smithay::{
 
 use crate::{
     shell::{CosmicSurface, Workspace},
-    wayland::protocols::screencopy::{CursorSession, DropableSession, Frame, FrameRef, Session},
+    wayland::protocols::screencopy::{CursorSession, DropableSession, Frame, FrameRef, SessionRef},
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
-type PendingScreencopyBuffers = Mutex<Vec<(Session, Frame)>>;
+type PendingScreencopyBuffers = Mutex<Vec<(SessionRef, Frame)>>;
 
 pub type SessionData = Mutex<SessionUserData>;
 
@@ -64,8 +64,8 @@ pub struct ScreencopySessions {
 
 pub trait SessionHolder {
     fn add_session(&mut self, session: DropableSession);
-    fn remove_session(&mut self, session: &Session);
-    fn sessions(&self) -> Vec<Session>;
+    fn remove_session(&mut self, session: &SessionRef);
+    fn sessions(&self) -> Vec<SessionRef>;
 
     fn add_cursor_session(&mut self, session: CursorSession);
     fn remove_cursor_session(&mut self, session: CursorSession);
@@ -73,9 +73,9 @@ pub trait SessionHolder {
 }
 
 pub trait FrameHolder {
-    fn add_frame(&mut self, session: Session, frame: Frame);
+    fn add_frame(&mut self, session: SessionRef, frame: Frame);
     fn remove_frame(&mut self, frame: &FrameRef);
-    fn take_pending_frames(&self) -> Vec<(Session, Frame)>;
+    fn take_pending_frames(&self) -> Vec<(SessionRef, Frame)>;
 }
 
 impl SessionHolder for Output {
@@ -90,7 +90,7 @@ impl SessionHolder for Output {
             .push(session);
     }
 
-    fn remove_session(&mut self, session: &Session) {
+    fn remove_session(&mut self, session: &SessionRef) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
@@ -99,7 +99,7 @@ impl SessionHolder for Output {
             .retain(|s| s != session);
     }
 
-    fn sessions(&self) -> Vec<Session> {
+    fn sessions(&self) -> Vec<SessionRef> {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .map_or(Vec::new(), |sessions| {
@@ -147,7 +147,7 @@ impl SessionHolder for Output {
 }
 
 impl FrameHolder for Output {
-    fn add_frame(&mut self, session: Session, frame: Frame) {
+    fn add_frame(&mut self, session: SessionRef, frame: Frame) {
         self.user_data()
             .insert_if_missing_threadsafe(PendingScreencopyBuffers::default);
         self.user_data()
@@ -165,7 +165,7 @@ impl FrameHolder for Output {
                 .retain(|(_, f)| f.handle() != frame.handle());
         }
     }
-    fn take_pending_frames(&self) -> Vec<(Session, Frame)> {
+    fn take_pending_frames(&self) -> Vec<(SessionRef, Frame)> {
         self.user_data()
             .get::<PendingScreencopyBuffers>()
             .map(|pending| std::mem::take(&mut *pending.lock().unwrap()))
@@ -178,10 +178,10 @@ impl SessionHolder for Workspace {
         self.screencopy.sessions.push(session);
     }
 
-    fn remove_session(&mut self, session: &Session) {
+    fn remove_session(&mut self, session: &SessionRef) {
         self.screencopy.sessions.retain(|s| s != session);
     }
-    fn sessions(&self) -> Vec<Session> {
+    fn sessions(&self) -> Vec<SessionRef> {
         self.screencopy
             .sessions
             .iter()
@@ -219,7 +219,7 @@ impl SessionHolder for CosmicSurface {
             .push(session);
     }
 
-    fn remove_session(&mut self, session: &Session) {
+    fn remove_session(&mut self, session: &SessionRef) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
@@ -227,7 +227,7 @@ impl SessionHolder for CosmicSurface {
             .sessions
             .retain(|s| s != session);
     }
-    fn sessions(&self) -> Vec<Session> {
+    fn sessions(&self) -> Vec<SessionRef> {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .map_or(Vec::new(), |sessions| {
