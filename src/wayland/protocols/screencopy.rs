@@ -1,4 +1,5 @@
 use std::{
+    ops,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -103,8 +104,7 @@ struct SessionInner {
     constraints: Option<BufferConstraints>,
     draw_cursors: bool,
     source: ImageCaptureSourceData,
-    // TODO better type
-    active_frames: Vec<(ExtImageCopyCaptureFrameV1, Arc<Mutex<FrameInner>>)>,
+    active_frames: Vec<FrameRef>,
 }
 
 impl SessionInner {
@@ -177,8 +177,12 @@ impl Session {
             return;
         }
 
-        for (i, frame) in inner.active_frames.drain(..) {
-            frame.lock().unwrap().fail(&i, FailureReason::Stopped);
+        for frame in inner.active_frames.drain(..) {
+            frame
+                .inner
+                .lock()
+                .unwrap()
+                .fail(&frame.obj, FailureReason::Stopped);
         }
 
         self.obj.stopped();
@@ -208,7 +212,7 @@ struct CursorSessionInner {
     source: ImageCaptureSourceData,
     position: Option<Point<i32, BufferCoords>>,
     hotspot: Point<i32, BufferCoords>,
-    active_frames: Vec<(ExtImageCopyCaptureFrameV1, Arc<Mutex<FrameInner>>)>,
+    active_frames: Vec<FrameRef>,
 }
 
 impl CursorSessionInner {
@@ -333,27 +337,32 @@ impl CursorSession {
         }
         inner.constraints.take();
 
-        for (i, frame) in inner.active_frames.drain(..) {
-            frame.lock().unwrap().fail(&i, FailureReason::Stopped);
+        for frame in inner.active_frames.drain(..) {
+            frame
+                .inner
+                .lock()
+                .unwrap()
+                .fail(&frame.obj, FailureReason::Stopped);
         }
 
         inner.stopped = true;
     }
 }
 
-#[derive(Debug)]
-pub struct Frame {
+/// Un-owned reference to a frame
+#[derive(Clone, Debug)]
+pub struct FrameRef {
     obj: ExtImageCopyCaptureFrameV1,
     inner: Arc<Mutex<FrameInner>>,
 }
 
-impl PartialEq for Frame {
+impl PartialEq for FrameRef {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
     }
 }
 
-impl Frame {
+impl FrameRef {
     // TODO handle not right name?
     pub fn handle(&self) -> &ExtImageCopyCaptureFrameV1 {
         &self.obj
@@ -370,7 +379,20 @@ impl Frame {
     pub fn has_failed(&self) -> bool {
         self.inner.lock().unwrap().failed.is_some()
     }
+}
 
+#[derive(Debug, PartialEq)]
+pub struct Frame(FrameRef);
+
+impl ops::Deref for Frame {
+    type Target = FrameRef;
+
+    fn deref(&self) -> &FrameRef {
+        &self.0
+    }
+}
+
+impl Frame {
     pub fn success(
         self,
         transform: impl Into<Transform>,
@@ -378,7 +400,7 @@ impl Frame {
         presented: impl Into<Duration>,
     ) {
         {
-            let inner = self.inner.lock().unwrap();
+            let inner = self.0.inner.lock().unwrap();
             if !inner.capture_requested || inner.failed.is_some() {
                 return;
             }
@@ -396,12 +418,12 @@ impl Frame {
         let tv_nsec = time.subsec_nanos();
         self.obj.presentation_time(tv_sec_hi, tv_sec_lo, tv_nsec);
 
-        self.inner.lock().unwrap().ready = true;
+        self.0.inner.lock().unwrap().ready = true;
         self.obj.ready()
     }
 
     pub fn fail(self, reason: FailureReason) {
-        self.inner.lock().unwrap().fail(&self.obj, reason);
+        self.0.inner.lock().unwrap().fail(&self.obj, reason);
     }
 }
 
@@ -420,7 +442,7 @@ struct FrameInner {
     constraints: Option<BufferConstraints>,
     buffer: Option<WlBuffer>,
     damage: Vec<Rectangle<i32, BufferCoords>>,
-    // `SessionInner` contains a `Vec<Frame>`, so use a weak reference here to
+    // `SessionInner` contains a `Vec<FrameRef>`, so use a weak reference here to
     // avoid a cycle.
     obj: Weak<ExtImageCopyCaptureSessionV1>,
     capture_requested: bool,
@@ -687,7 +709,11 @@ where
                         inner: inner.clone(),
                     },
                 );
-                data.inner.lock().unwrap().active_frames.push((obj, inner));
+                data.inner
+                    .lock()
+                    .unwrap()
+                    .active_frames
+                    .push(FrameRef { obj, inner });
             }
             _ => {}
         }
@@ -816,7 +842,11 @@ where
                         inner: inner.clone(),
                     },
                 );
-                data.inner.lock().unwrap().active_frames.push((obj, inner));
+                data.inner
+                    .lock()
+                    .unwrap()
+                    .active_frames
+                    .push(FrameRef { obj, inner });
             }
             _ => {}
         }
@@ -989,10 +1019,10 @@ where
                     return;
                 }
 
-                let frame = Frame {
+                let frame = Frame(FrameRef {
                     obj: resource.clone(),
                     inner: data.inner.clone(),
-                };
+                });
 
                 let scpy = state.screencopy_state();
                 if let Some(session) = scpy
@@ -1054,7 +1084,7 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .retain(|(i, _)| i != resource);
+                    .retain(|i| i.handle() != resource);
             }
             for cursor_session in &mut scpy.known_cursor_sessions {
                 cursor_session
@@ -1062,7 +1092,7 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .retain(|(i, _)| i != resource);
+                    .retain(|i| i.handle() != resource);
             }
         }
         state.frame_aborted(resource);
