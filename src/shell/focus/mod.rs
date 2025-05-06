@@ -2,7 +2,7 @@ use crate::{
     shell::{element::CosmicMapped, Shell},
     state::Common,
     utils::prelude::*,
-    wayland::handlers::xdg_shell::PopupGrabData,
+    wayland::handlers::{xdg_shell::PopupGrabData, xwayland_keyboard_grab::XWaylandGrabSeatData},
 };
 use indexmap::IndexSet;
 use smithay::{
@@ -464,6 +464,18 @@ fn focus_target_is_valid(
         return matches!(target, KeyboardFocusTarget::LockSurface(_));
     }
 
+    let xwayland_grab = seat
+        .user_data()
+        .get_or_insert(XWaylandGrabSeatData::default)
+        .grab
+        .lock()
+        .unwrap();
+    if let Some((surface, grab)) = &*xwayland_grab {
+        if grab.grab().is_alive() {
+            return target == KeyboardFocusTarget::XWaylandGrab(surface.clone());
+        }
+    }
+
     // If an exclusive layer shell surface exists (on any output), only exclusive
     // shell surfaces can have focus, on the highest layer with exclusive surfaces.
     if let Some(layer) = exclusive_layer_surface_layer(shell) {
@@ -533,6 +545,7 @@ fn focus_target_is_valid(
         }
         KeyboardFocusTarget::Popup(_) => true,
         KeyboardFocusTarget::LockSurface(_) => false,
+        KeyboardFocusTarget::XWaylandGrab(_) => false,
     }
 }
 
@@ -541,12 +554,21 @@ fn update_focus_target(
     seat: &Seat<State>,
     output: &Output,
 ) -> Option<KeyboardFocusTarget> {
+    let mut xwayland_grab = seat
+        .user_data()
+        .get_or_insert(XWaylandGrabSeatData::default)
+        .grab
+        .lock()
+        .unwrap();
+    xwayland_grab.take_if(|(_, g)| !g.grab().is_alive());
     if let Some(session_lock) = &shell.session_lock {
         session_lock
             .surfaces
             .get(output)
             .cloned()
             .map(KeyboardFocusTarget::from)
+    } else if let Some((surface, _)) = &*xwayland_grab {
+        Some(KeyboardFocusTarget::XWaylandGrab(surface.clone()))
     } else if let Some(layer) = exclusive_layer_surface_layer(shell) {
         layer_map_for_output(output)
             .layers()
