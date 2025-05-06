@@ -53,6 +53,7 @@ use smithay::{
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
         xdg_activation::XdgActivationState,
+        xwayland_keyboard_grab::XWaylandKeyboardGrab,
     },
     xwayland::X11Surface,
 };
@@ -266,6 +267,7 @@ pub struct Shell {
     pub session_lock: Option<SessionLock>,
     pub seats: Seats,
     pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,
+    pub xwayland_keyboard_grab: Option<XWaylandKeyboardGrab<State>>,
 
     theme: cosmic::Theme,
     pub active_hint: bool,
@@ -1474,6 +1476,7 @@ impl Shell {
             override_redirect_windows: Vec::new(),
             session_lock: None,
             previous_workspace_idx: None,
+            xwayland_keyboard_grab: None,
 
             theme,
             active_hint: config.cosmic_conf.active_hint,
@@ -1661,7 +1664,25 @@ impl Shell {
             }?;
 
             focus_target = KeyboardFocusTarget::Element(new_target);
-        };
+        } else if let KeyboardFocusTarget::XWaylandGrab(surface) = &focus_target {
+            if let Some(new_target) = self.element_for_surface(surface) {
+                focus_target = KeyboardFocusTarget::Element(new_target.clone());
+            } else if let Some(or) = self
+                .override_redirect_windows
+                .iter()
+                .find(|w| w.wl_surface().as_ref() == Some(surface))
+            {
+                // Find output the override redirect window overlaps the most with
+                let or_geo = or.geometry().as_global();
+                let (output, _) = self
+                    .outputs()
+                    .filter_map(|o| Some((o, o.geometry().intersection(or_geo)?)))
+                    .max_by_key(|(_, intersection)| intersection.size.w * intersection.size.h)?;
+                return Some(output.clone());
+            } else {
+                return None;
+            }
+        }
 
         match focus_target {
             KeyboardFocusTarget::Element(elem) => {
@@ -1726,6 +1747,7 @@ impl Shell {
                 .iter()
                 .find_map(|(output, s)| (s == &surface).then_some(output))
                 .cloned(),
+            KeyboardFocusTarget::XWaylandGrab(_) => unreachable!(),
             KeyboardFocusTarget::Popup(_) => unreachable!(),
         }
     }
