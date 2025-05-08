@@ -964,156 +964,11 @@ where
                     .push(Rectangle::new((x, y).into(), (width, height).into()));
             }
             ext_image_copy_capture_frame_v1::Request::Capture => {
-                let mut inner = data.inner.lock().unwrap();
-
-                if inner.capture_requested {
-                    resource.post_error(
-                        ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
-                        "Frame was captured previously",
-                    );
-                }
-
-                if inner.buffer.is_none() {
-                    resource.post_error(
-                        ext_image_copy_capture_frame_v1::Error::NoBuffer,
-                        "Attempting to capture frame without a buffer",
-                    );
-                }
-
-                inner.capture_requested = true;
-
-                if let Some(reason) = inner.failed {
-                    inner.fail(resource, reason);
-                    return;
-                }
-
-                if let Some(constraints) = inner.constraints.as_ref() {
-                    let buffer = inner.buffer.as_ref().unwrap();
-                    match buffer_type(buffer) {
-                        Some(BufferType::Dma) => {
-                            let Some(dma_constraints) = constraints.dma.as_ref() else {
-                                debug!("dma buffer not specified for screencopy");
-                                inner.fail(resource, FailureReason::BufferConstraints);
-                                return;
-                            };
-
-                            let dmabuf = match get_dmabuf(buffer) {
-                                Ok(buf) => buf,
-                                Err(err) => {
-                                    debug!(?err, "Error accessing dma buffer for screencopy");
-                                    inner.fail(resource, FailureReason::Stopped);
-                                    return;
-                                }
-                            };
-
-                            let buffer_size = dmabuf.size();
-                            if buffer_size.w < constraints.size.w
-                                || buffer_size.h < constraints.size.h
-                            {
-                                debug!(?buffer_size, ?constraints.size, "buffer too small for screencopy");
-                                inner.fail(&resource, FailureReason::BufferConstraints);
-                                return;
-                            }
-
-                            let format = dmabuf.format();
-                            if dma_constraints
-                                .formats
-                                .iter()
-                                .find(|(fourcc, _)| *fourcc == format.code)
-                                .filter(|(_, modifiers)| modifiers.contains(&format.modifier))
-                                .is_none()
-                            {
-                                debug!(
-                                    ?format,
-                                    ?dma_constraints,
-                                    "unsupported buffer format for screencopy"
-                                );
-                                inner.fail(&resource, FailureReason::BufferConstraints);
-                                return;
-                            }
-                        }
-                        Some(BufferType::Shm) => {
-                            let buffer_data = match with_buffer_contents(buffer, |_, _, data| data)
-                            {
-                                Ok(data) => data,
-                                Err(err) => {
-                                    debug!(?err, "Error accessing shm buffer for screencopy");
-                                    inner.fail(&resource, FailureReason::Unknown);
-                                    return;
-                                }
-                            };
-
-                            if buffer_data.width < constraints.size.w
-                                || buffer_data.height < constraints.size.h
-                            {
-                                debug!(?buffer_data, ?constraints.size, "buffer too small for screencopy");
-                                inner.fail(&resource, FailureReason::BufferConstraints);
-                                return;
-                            }
-
-                            if !constraints.shm.contains(&buffer_data.format) {
-                                debug!(?buffer_data.format, ?constraints.shm, "unsupported buffer format for screencopy");
-                                inner.fail(&resource, FailureReason::BufferConstraints);
-                                return;
-                            }
-                        }
-                        x => {
-                            debug!(?x, "Attempt to screencopy with unsupported buffer type");
-                            inner.fail(&resource, FailureReason::BufferConstraints);
-                            return;
-                        }
-                    }
-                } else {
-                    inner.fail(&resource, FailureReason::Unknown);
-                    return;
-                }
-
                 let frame = Frame(FrameRef {
                     obj: resource.clone(),
                     inner: data.inner.clone(),
                 });
-
-                let scpy = state.screencopy_state();
-                if let Some(session) = scpy
-                    .known_sessions
-                    .iter()
-                    .find(|session| session.obj == inner.obj)
-                    .map(|s| SessionRef {
-                        obj: s.obj.clone(),
-                        inner: s.inner.clone(),
-                        user_data: s.user_data.clone(),
-                    })
-                {
-                    if session.inner.lock().unwrap().stopped {
-                        inner.fail(&resource, FailureReason::Stopped);
-                        return;
-                    }
-
-                    std::mem::drop(inner);
-                    state.frame(session, frame);
-                } else if let Some(session) = scpy
-                    .known_cursor_sessions
-                    .iter()
-                    .find(|session| {
-                        session.inner.lock().unwrap().session.as_ref()
-                            == inner.obj.upgrade().ok().as_ref()
-                    })
-                    .map(|s| CursorSessionRef {
-                        obj: s.obj.clone(),
-                        inner: s.inner.clone(),
-                        user_data: s.user_data.clone(),
-                    })
-                {
-                    if session.inner.lock().unwrap().stopped {
-                        inner.fail(&resource, FailureReason::Stopped);
-                        return;
-                    }
-
-                    std::mem::drop(inner);
-                    state.cursor_frame(session, frame);
-                } else {
-                    inner.fail(&resource, FailureReason::Unknown);
-                }
+                capture(state, frame);
             }
             _ => {}
         }
@@ -1149,6 +1004,150 @@ where
             }
         }
         state.frame_aborted(frame_ref);
+    }
+}
+
+fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
+    let resource = &frame.0.obj;
+    let mut inner = frame.0.inner.lock().unwrap();
+
+    if inner.capture_requested {
+        resource.post_error(
+            ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
+            "Frame was captured previously",
+        );
+    }
+
+    if inner.buffer.is_none() {
+        resource.post_error(
+            ext_image_copy_capture_frame_v1::Error::NoBuffer,
+            "Attempting to capture frame without a buffer",
+        );
+    }
+
+    inner.capture_requested = true;
+
+    if let Some(reason) = inner.failed {
+        inner.fail(resource, reason);
+        return;
+    }
+
+    if let Some(constraints) = inner.constraints.as_ref() {
+        let buffer = inner.buffer.as_ref().unwrap();
+        match buffer_type(buffer) {
+            Some(BufferType::Dma) => {
+                let Some(dma_constraints) = constraints.dma.as_ref() else {
+                    debug!("dma buffer not specified for screencopy");
+                    inner.fail(resource, FailureReason::BufferConstraints);
+                    return;
+                };
+
+                let dmabuf = match get_dmabuf(buffer) {
+                    Ok(buf) => buf,
+                    Err(err) => {
+                        debug!(?err, "Error accessing dma buffer for screencopy");
+                        inner.fail(resource, FailureReason::Stopped);
+                        return;
+                    }
+                };
+
+                let buffer_size = dmabuf.size();
+                if buffer_size.w < constraints.size.w || buffer_size.h < constraints.size.h {
+                    debug!(?buffer_size, ?constraints.size, "buffer too small for screencopy");
+                    inner.fail(&resource, FailureReason::BufferConstraints);
+                    return;
+                }
+
+                let format = dmabuf.format();
+                if dma_constraints
+                    .formats
+                    .iter()
+                    .find(|(fourcc, _)| *fourcc == format.code)
+                    .filter(|(_, modifiers)| modifiers.contains(&format.modifier))
+                    .is_none()
+                {
+                    debug!(
+                        ?format,
+                        ?dma_constraints,
+                        "unsupported buffer format for screencopy"
+                    );
+                    inner.fail(&resource, FailureReason::BufferConstraints);
+                    return;
+                }
+            }
+            Some(BufferType::Shm) => {
+                let buffer_data = match with_buffer_contents(buffer, |_, _, data| data) {
+                    Ok(data) => data,
+                    Err(err) => {
+                        debug!(?err, "Error accessing shm buffer for screencopy");
+                        inner.fail(&resource, FailureReason::Unknown);
+                        return;
+                    }
+                };
+
+                if buffer_data.width < constraints.size.w || buffer_data.height < constraints.size.h
+                {
+                    debug!(?buffer_data, ?constraints.size, "buffer too small for screencopy");
+                    inner.fail(&resource, FailureReason::BufferConstraints);
+                    return;
+                }
+
+                if !constraints.shm.contains(&buffer_data.format) {
+                    debug!(?buffer_data.format, ?constraints.shm, "unsupported buffer format for screencopy");
+                    inner.fail(&resource, FailureReason::BufferConstraints);
+                    return;
+                }
+            }
+            x => {
+                debug!(?x, "Attempt to screencopy with unsupported buffer type");
+                inner.fail(&resource, FailureReason::BufferConstraints);
+                return;
+            }
+        }
+    } else {
+        inner.fail(&resource, FailureReason::Unknown);
+        return;
+    }
+
+    let scpy = state.screencopy_state();
+    if let Some(session) = scpy
+        .known_sessions
+        .iter()
+        .find(|session| session.obj == inner.obj)
+        .map(|s| SessionRef {
+            obj: s.obj.clone(),
+            inner: s.inner.clone(),
+            user_data: s.user_data.clone(),
+        })
+    {
+        if session.inner.lock().unwrap().stopped {
+            inner.fail(&resource, FailureReason::Stopped);
+            return;
+        }
+
+        std::mem::drop(inner);
+        state.frame(session, frame);
+    } else if let Some(session) = scpy
+        .known_cursor_sessions
+        .iter()
+        .find(|session| {
+            session.inner.lock().unwrap().session.as_ref() == inner.obj.upgrade().ok().as_ref()
+        })
+        .map(|s| CursorSessionRef {
+            obj: s.obj.clone(),
+            inner: s.inner.clone(),
+            user_data: s.user_data.clone(),
+        })
+    {
+        if session.inner.lock().unwrap().stopped {
+            inner.fail(&resource, FailureReason::Stopped);
+            return;
+        }
+
+        std::mem::drop(inner);
+        state.cursor_frame(session, frame);
+    } else {
+        inner.fail(&resource, FailureReason::Unknown);
     }
 }
 
