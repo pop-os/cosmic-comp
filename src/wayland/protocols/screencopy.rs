@@ -172,7 +172,7 @@ impl SessionRef {
 }
 
 #[derive(Debug)]
-pub struct Session(pub SessionRef);
+pub struct Session(SessionRef);
 
 impl ops::Deref for Session {
     type Target = SessionRef;
@@ -351,7 +351,7 @@ impl CursorSessionRef {
 }
 
 #[derive(Debug)]
-pub struct CursorSession(pub CursorSessionRef);
+pub struct CursorSession(CursorSessionRef);
 
 impl ops::Deref for CursorSession {
     type Target = CursorSessionRef;

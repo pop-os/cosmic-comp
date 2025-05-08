@@ -104,7 +104,7 @@ impl SessionHolder for Output {
                     .borrow()
                     .sessions
                     .iter()
-                    .map(|s| s.0.clone())
+                    .map(|s| (*s).clone())
                     .collect()
             })
     }
@@ -137,7 +137,7 @@ impl SessionHolder for Output {
                     .borrow()
                     .cursor_sessions
                     .iter()
-                    .map(|s| s.0.clone())
+                    .map(|s| (*s).clone())
                     .collect()
             })
     }
@@ -179,7 +179,7 @@ impl SessionHolder for Workspace {
         self.screencopy
             .sessions
             .iter()
-            .map(|s| s.0.clone())
+            .map(|s| (*s).clone())
             .collect()
     }
 
@@ -194,7 +194,7 @@ impl SessionHolder for Workspace {
         self.screencopy
             .cursor_sessions
             .iter()
-            .map(|s| s.0.clone())
+            .map(|s| (*s).clone())
             .collect()
     }
 }
@@ -227,7 +227,7 @@ impl SessionHolder for CosmicSurface {
                     .borrow()
                     .sessions
                     .iter()
-                    .map(|s| s.0.clone())
+                    .map(|s| (*s).clone())
                     .collect()
             })
     }
@@ -260,7 +260,7 @@ impl SessionHolder for CosmicSurface {
                     .borrow()
                     .cursor_sessions
                     .iter()
-                    .map(|s| s.0.clone())
+                    .map(|s| (*s).clone())
                     .collect()
             })
     }
