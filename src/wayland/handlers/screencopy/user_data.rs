@@ -1,9 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-    sync::Mutex,
-};
+use std::{cell::RefCell, collections::HashMap, sync::Mutex};
 
 use smithay::{
     backend::renderer::{damage::OutputDamageTracker, utils::CommitCounter},
@@ -13,7 +8,9 @@ use smithay::{
 
 use crate::{
     shell::{CosmicSurface, Workspace},
-    wayland::protocols::screencopy::{CursorSession, Frame, FrameRef, Session, SessionRef},
+    wayland::protocols::screencopy::{
+        CursorSession, DropableCursorSession, Frame, FrameRef, Session, SessionRef,
+    },
 };
 
 type ScreencopySessionsData = RefCell<ScreencopySessions>;
@@ -67,7 +64,7 @@ pub trait SessionHolder {
     fn remove_session(&mut self, session: &SessionRef);
     fn sessions(&self) -> Vec<SessionRef>;
 
-    fn add_cursor_session(&mut self, session: CursorSession);
+    fn add_cursor_session(&mut self, session: DropableCursorSession);
     fn remove_cursor_session(&mut self, session: CursorSession);
     fn cursor_sessions(&self) -> Vec<CursorSession>;
 }
@@ -112,7 +109,7 @@ impl SessionHolder for Output {
             })
     }
 
-    fn add_cursor_session(&mut self, session: CursorSession) {
+    fn add_cursor_session(&mut self, session: DropableCursorSession) {
         self.user_data()
             .insert_if_missing(ScreencopySessionsData::default);
         self.user_data()
@@ -120,7 +117,7 @@ impl SessionHolder for Output {
             .unwrap()
             .borrow_mut()
             .cursor_sessions
-            .push(DropableCursorSession(Some(session)));
+            .push(session);
     }
 
     fn remove_cursor_session(&mut self, session: CursorSession) {
@@ -189,10 +186,8 @@ impl SessionHolder for Workspace {
             .collect()
     }
 
-    fn add_cursor_session(&mut self, session: CursorSession) {
-        self.screencopy
-            .cursor_sessions
-            .push(DropableCursorSession(Some(session)));
+    fn add_cursor_session(&mut self, session: DropableCursorSession) {
+        self.screencopy.cursor_sessions.push(session);
     }
 
     fn remove_cursor_session(&mut self, session: CursorSession) {
@@ -240,7 +235,7 @@ impl SessionHolder for CosmicSurface {
             })
     }
 
-    fn add_cursor_session(&mut self, session: CursorSession) {
+    fn add_cursor_session(&mut self, session: DropableCursorSession) {
         self.user_data()
             .insert_if_missing(ScreencopySessionsData::default);
         self.user_data()
@@ -248,7 +243,7 @@ impl SessionHolder for CosmicSurface {
             .unwrap()
             .borrow_mut()
             .cursor_sessions
-            .push(DropableCursorSession(Some(session)));
+            .push(session);
     }
 
     fn remove_cursor_session(&mut self, session: CursorSession) {
@@ -271,31 +266,5 @@ impl SessionHolder for CosmicSurface {
                     .flat_map(|s| s.0.clone())
                     .collect()
             })
-    }
-}
-
-#[derive(Debug)]
-struct DropableCursorSession(Option<CursorSession>);
-impl Deref for DropableCursorSession {
-    type Target = CursorSession;
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
-    }
-}
-impl DerefMut for DropableCursorSession {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
-    }
-}
-impl PartialEq<CursorSession> for DropableCursorSession {
-    fn eq(&self, other: &CursorSession) -> bool {
-        self.0.as_ref().map(|s| s == other).unwrap_or(false)
-    }
-}
-impl Drop for DropableCursorSession {
-    fn drop(&mut self) {
-        if let Some(s) = self.0.take() {
-            s.stop();
-        }
     }
 }
