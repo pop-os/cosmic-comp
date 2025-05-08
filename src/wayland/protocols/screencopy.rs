@@ -988,7 +988,7 @@ where
                     obj: resource.clone(),
                     inner: data.inner.clone(),
                 });
-                if let Err(reason) = capture(state, frame) {
+                if let Err(reason) = capture_frame(state, frame) {
                     data.inner.lock().unwrap().fail(resource, reason);
                 }
             }
@@ -1029,7 +1029,7 @@ where
     }
 }
 
-fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) -> Result<(), FailureReason> {
+fn capture_frame<D: ScreencopyHandler>(state: &mut D, frame: Frame) -> Result<(), FailureReason> {
     let mut inner = frame.0.inner.lock().unwrap();
 
     inner.capture_requested = true;
