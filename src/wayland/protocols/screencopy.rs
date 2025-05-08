@@ -1016,6 +1016,7 @@ fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
             ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
             "Frame was captured previously",
         );
+        return;
     }
 
     if inner.buffer.is_none() {
@@ -1023,6 +1024,7 @@ fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
             ext_image_copy_capture_frame_v1::Error::NoBuffer,
             "Attempting to capture frame without a buffer",
         );
+        return;
     }
 
     inner.capture_requested = true;
