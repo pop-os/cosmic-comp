@@ -964,11 +964,33 @@ where
                     .push(Rectangle::new((x, y).into(), (width, height).into()));
             }
             ext_image_copy_capture_frame_v1::Request::Capture => {
+                {
+                    let inner = data.inner.lock().unwrap();
+
+                    if inner.capture_requested {
+                        resource.post_error(
+                            ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
+                            "Frame was captured previously",
+                        );
+                        return;
+                    }
+
+                    if inner.buffer.is_none() {
+                        resource.post_error(
+                            ext_image_copy_capture_frame_v1::Error::NoBuffer,
+                            "Attempting to capture frame without a buffer",
+                        );
+                        return;
+                    }
+                }
+
                 let frame = Frame(FrameRef {
                     obj: resource.clone(),
                     inner: data.inner.clone(),
                 });
-                capture(state, frame);
+                if let Err(reason) = capture(state, frame) {
+                    data.inner.lock().unwrap().fail(resource, reason);
+                }
             }
             _ => {}
         }
@@ -1007,31 +1029,13 @@ where
     }
 }
 
-fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
-    let resource = &frame.0.obj;
+fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) -> Result<(), FailureReason> {
     let mut inner = frame.0.inner.lock().unwrap();
-
-    if inner.capture_requested {
-        resource.post_error(
-            ext_image_copy_capture_frame_v1::Error::AlreadyCaptured,
-            "Frame was captured previously",
-        );
-        return;
-    }
-
-    if inner.buffer.is_none() {
-        resource.post_error(
-            ext_image_copy_capture_frame_v1::Error::NoBuffer,
-            "Attempting to capture frame without a buffer",
-        );
-        return;
-    }
 
     inner.capture_requested = true;
 
     if let Some(reason) = inner.failed {
-        inner.fail(resource, reason);
-        return;
+        return Err(reason);
     }
 
     if let Some(constraints) = inner.constraints.as_ref() {
@@ -1040,24 +1044,21 @@ fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
             Some(BufferType::Dma) => {
                 let Some(dma_constraints) = constraints.dma.as_ref() else {
                     debug!("dma buffer not specified for screencopy");
-                    inner.fail(resource, FailureReason::BufferConstraints);
-                    return;
+                    return Err(FailureReason::BufferConstraints);
                 };
 
                 let dmabuf = match get_dmabuf(buffer) {
                     Ok(buf) => buf,
                     Err(err) => {
                         debug!(?err, "Error accessing dma buffer for screencopy");
-                        inner.fail(resource, FailureReason::Stopped);
-                        return;
+                        return Err(FailureReason::Stopped);
                     }
                 };
 
                 let buffer_size = dmabuf.size();
                 if buffer_size.w < constraints.size.w || buffer_size.h < constraints.size.h {
                     debug!(?buffer_size, ?constraints.size, "buffer too small for screencopy");
-                    inner.fail(&resource, FailureReason::BufferConstraints);
-                    return;
+                    return Err(FailureReason::BufferConstraints);
                 }
 
                 let format = dmabuf.format();
@@ -1073,8 +1074,7 @@ fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
                         ?dma_constraints,
                         "unsupported buffer format for screencopy"
                     );
-                    inner.fail(&resource, FailureReason::BufferConstraints);
-                    return;
+                    return Err(FailureReason::BufferConstraints);
                 }
             }
             Some(BufferType::Shm) => {
@@ -1082,33 +1082,28 @@ fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
                     Ok(data) => data,
                     Err(err) => {
                         debug!(?err, "Error accessing shm buffer for screencopy");
-                        inner.fail(&resource, FailureReason::Unknown);
-                        return;
+                        return Err(FailureReason::Unknown);
                     }
                 };
 
                 if buffer_data.width < constraints.size.w || buffer_data.height < constraints.size.h
                 {
                     debug!(?buffer_data, ?constraints.size, "buffer too small for screencopy");
-                    inner.fail(&resource, FailureReason::BufferConstraints);
-                    return;
+                    return Err(FailureReason::BufferConstraints);
                 }
 
                 if !constraints.shm.contains(&buffer_data.format) {
                     debug!(?buffer_data.format, ?constraints.shm, "unsupported buffer format for screencopy");
-                    inner.fail(&resource, FailureReason::BufferConstraints);
-                    return;
+                    return Err(FailureReason::BufferConstraints);
                 }
             }
             x => {
                 debug!(?x, "Attempt to screencopy with unsupported buffer type");
-                inner.fail(&resource, FailureReason::BufferConstraints);
-                return;
+                return Err(FailureReason::BufferConstraints);
             }
         }
     } else {
-        inner.fail(&resource, FailureReason::Unknown);
-        return;
+        return Err(FailureReason::Unknown);
     }
 
     let scpy = state.screencopy_state();
@@ -1123,12 +1118,12 @@ fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
         })
     {
         if session.inner.lock().unwrap().stopped {
-            inner.fail(&resource, FailureReason::Stopped);
-            return;
+            return Err(FailureReason::Stopped);
         }
 
         std::mem::drop(inner);
         state.frame(session, frame);
+        Ok(())
     } else if let Some(session) = scpy
         .known_cursor_sessions
         .iter()
@@ -1142,14 +1137,14 @@ fn capture<D: ScreencopyHandler>(state: &mut D, frame: Frame) {
         })
     {
         if session.inner.lock().unwrap().stopped {
-            inner.fail(&resource, FailureReason::Stopped);
-            return;
+            return Err(FailureReason::Stopped);
         }
 
         std::mem::drop(inner);
         state.cursor_frame(session, frame);
+        Ok(())
     } else {
-        inner.fail(&resource, FailureReason::Unknown);
+        Err(FailureReason::Unknown)
     }
 }
 
