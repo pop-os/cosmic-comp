@@ -28,7 +28,7 @@ use crate::{
         image_capture_source::ImageCaptureSourceData,
         screencopy::{
             delegate_screencopy, BufferConstraints, CursorSessionRef, DmabufConstraints,
-            DropableCursorSession, Frame, FrameRef, ScreencopyHandler, ScreencopyState, Session,
+            CursorSession, Frame, FrameRef, ScreencopyHandler, ScreencopyState, Session,
             SessionRef,
         },
     },
@@ -130,7 +130,7 @@ impl ScreencopyHandler for State {
             ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
-    fn new_cursor_session(&mut self, session: DropableCursorSession) {
+    fn new_cursor_session(&mut self, session: CursorSession) {
         let (pointer_loc, pointer_size, hotspot) = {
             let seat = self
                 .common

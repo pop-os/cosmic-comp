@@ -9,7 +9,7 @@ use smithay::{
 use crate::{
     shell::{CosmicSurface, Workspace},
     wayland::protocols::screencopy::{
-        CursorSessionRef, DropableCursorSession, Frame, FrameRef, Session, SessionRef,
+        CursorSessionRef, CursorSession, Frame, FrameRef, Session, SessionRef,
     },
 };
 
@@ -56,7 +56,7 @@ impl SessionUserData {
 #[derive(Debug, Default)]
 pub struct ScreencopySessions {
     sessions: Vec<Session>,
-    cursor_sessions: Vec<DropableCursorSession>,
+    cursor_sessions: Vec<CursorSession>,
 }
 
 pub trait SessionHolder {
@@ -64,7 +64,7 @@ pub trait SessionHolder {
     fn remove_session(&mut self, session: &SessionRef);
     fn sessions(&self) -> Vec<SessionRef>;
 
-    fn add_cursor_session(&mut self, session: DropableCursorSession);
+    fn add_cursor_session(&mut self, session: CursorSession);
     fn remove_cursor_session(&mut self, session: CursorSessionRef);
     fn cursor_sessions(&self) -> Vec<CursorSessionRef>;
 }
@@ -109,7 +109,7 @@ impl SessionHolder for Output {
             })
     }
 
-    fn add_cursor_session(&mut self, session: DropableCursorSession) {
+    fn add_cursor_session(&mut self, session: CursorSession) {
         self.user_data()
             .insert_if_missing(ScreencopySessionsData::default);
         self.user_data()
@@ -186,7 +186,7 @@ impl SessionHolder for Workspace {
             .collect()
     }
 
-    fn add_cursor_session(&mut self, session: DropableCursorSession) {
+    fn add_cursor_session(&mut self, session: CursorSession) {
         self.screencopy.cursor_sessions.push(session);
     }
 
@@ -235,7 +235,7 @@ impl SessionHolder for CosmicSurface {
             })
     }
 
-    fn add_cursor_session(&mut self, session: DropableCursorSession) {
+    fn add_cursor_session(&mut self, session: CursorSession) {
         self.user_data()
             .insert_if_missing(ScreencopySessionsData::default);
         self.user_data()

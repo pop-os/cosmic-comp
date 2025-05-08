@@ -376,24 +376,24 @@ impl CursorSessionRef {
 }
 
 #[derive(Debug)]
-pub struct DropableCursorSession(pub Option<CursorSessionRef>);
-impl ops::Deref for DropableCursorSession {
+pub struct CursorSession(pub Option<CursorSessionRef>);
+impl ops::Deref for CursorSession {
     type Target = CursorSessionRef;
     fn deref(&self) -> &Self::Target {
         self.0.as_ref().unwrap()
     }
 }
-impl ops::DerefMut for DropableCursorSession {
+impl ops::DerefMut for CursorSession {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.0.as_mut().unwrap()
     }
 }
-impl PartialEq<CursorSessionRef> for DropableCursorSession {
+impl PartialEq<CursorSessionRef> for CursorSession {
     fn eq(&self, other: &CursorSessionRef) -> bool {
         self.0.as_ref().map(|s| s == other).unwrap_or(false)
     }
 }
-impl Drop for DropableCursorSession {
+impl Drop for CursorSession {
     fn drop(&mut self) {
         if let Some(s) = self.0.take() {
             s.stop();
@@ -539,7 +539,7 @@ pub trait ScreencopyHandler {
     ) -> Option<BufferConstraints>;
 
     fn new_session(&mut self, session: Session);
-    fn new_cursor_session(&mut self, session: DropableCursorSession);
+    fn new_cursor_session(&mut self, session: CursorSession);
 
     fn frame(&mut self, session: SessionRef, frame: Frame);
     fn cursor_frame(&mut self, session: CursorSessionRef, frame: Frame);
@@ -698,7 +698,7 @@ where
                                 .screencopy_state()
                                 .known_cursor_sessions
                                 .push(session.clone());
-                            state.new_cursor_session(DropableCursorSession(Some(session)));
+                            state.new_cursor_session(CursorSession(Some(session)));
                             return;
                         }
                     }
