@@ -156,10 +156,7 @@ impl FrameHolder for Output {
     }
     fn remove_frame(&mut self, frame: &FrameRef) {
         if let Some(pending) = self.user_data().get::<PendingScreencopyBuffers>() {
-            pending
-                .lock()
-                .unwrap()
-                .retain(|(_, f)| f.handle() != frame.handle());
+            pending.lock().unwrap().retain(|(_, f)| f != frame);
         }
     }
     fn take_pending_frames(&self) -> Vec<(SessionRef, Frame)> {

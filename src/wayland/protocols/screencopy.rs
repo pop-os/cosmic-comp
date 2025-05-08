@@ -173,6 +173,7 @@ impl SessionRef {
 
 #[derive(Debug)]
 pub struct Session(pub SessionRef);
+
 impl ops::Deref for Session {
     type Target = SessionRef;
     fn deref(&self) -> &Self::Target {
@@ -410,11 +411,6 @@ impl PartialEq for FrameRef {
 }
 
 impl FrameRef {
-    // TODO handle not right name?
-    pub fn handle(&self) -> &ExtImageCopyCaptureFrameV1 {
-        &self.obj
-    }
-
     pub fn buffer(&self) -> WlBuffer {
         self.inner.lock().unwrap().buffer.clone().unwrap()
     }
@@ -436,6 +432,12 @@ impl ops::Deref for Frame {
 
     fn deref(&self) -> &FrameRef {
         &self.0
+    }
+}
+
+impl PartialEq<FrameRef> for Frame {
+    fn eq(&self, other: &FrameRef) -> bool {
+        self.0 == *other
     }
 }
 
@@ -1123,6 +1125,10 @@ where
         resource: &ExtImageCopyCaptureFrameV1,
         data: &FrameData,
     ) {
+        let frame_ref = FrameRef {
+            obj: resource.clone(),
+            inner: data.inner.clone(),
+        };
         {
             let scpy = state.screencopy_state();
             for session in &mut scpy.known_sessions {
@@ -1131,7 +1137,7 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .retain(|i| i.handle() != resource);
+                    .retain(|i| *i != frame_ref);
             }
             for cursor_session in &mut scpy.known_cursor_sessions {
                 cursor_session
@@ -1139,13 +1145,10 @@ where
                     .lock()
                     .unwrap()
                     .active_frames
-                    .retain(|i| i.handle() != resource);
+                    .retain(|i| *i != frame_ref);
             }
         }
-        state.frame_aborted(FrameRef {
-            obj: resource.clone(),
-            inner: data.inner.clone(),
-        });
+        state.frame_aborted(frame_ref);
     }
 }
 
