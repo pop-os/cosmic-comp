@@ -9,7 +9,7 @@ use smithay::{
 use crate::{
     shell::{CosmicSurface, Workspace},
     wayland::protocols::screencopy::{
-        CursorSession, DropableCursorSession, Frame, FrameRef, Session, SessionRef,
+        CursorSessionRef, DropableCursorSession, Frame, FrameRef, Session, SessionRef,
     },
 };
 
@@ -65,8 +65,8 @@ pub trait SessionHolder {
     fn sessions(&self) -> Vec<SessionRef>;
 
     fn add_cursor_session(&mut self, session: DropableCursorSession);
-    fn remove_cursor_session(&mut self, session: CursorSession);
-    fn cursor_sessions(&self) -> Vec<CursorSession>;
+    fn remove_cursor_session(&mut self, session: CursorSessionRef);
+    fn cursor_sessions(&self) -> Vec<CursorSessionRef>;
 }
 
 pub trait FrameHolder {
@@ -120,7 +120,7 @@ impl SessionHolder for Output {
             .push(session);
     }
 
-    fn remove_cursor_session(&mut self, session: CursorSession) {
+    fn remove_cursor_session(&mut self, session: CursorSessionRef) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
@@ -129,7 +129,7 @@ impl SessionHolder for Output {
             .retain(|s| *s != session);
     }
 
-    fn cursor_sessions(&self) -> Vec<CursorSession> {
+    fn cursor_sessions(&self) -> Vec<CursorSessionRef> {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .map_or(Vec::new(), |sessions| {
@@ -190,10 +190,10 @@ impl SessionHolder for Workspace {
         self.screencopy.cursor_sessions.push(session);
     }
 
-    fn remove_cursor_session(&mut self, session: CursorSession) {
+    fn remove_cursor_session(&mut self, session: CursorSessionRef) {
         self.screencopy.cursor_sessions.retain(|s| *s != session);
     }
-    fn cursor_sessions(&self) -> Vec<CursorSession> {
+    fn cursor_sessions(&self) -> Vec<CursorSessionRef> {
         self.screencopy
             .cursor_sessions
             .iter()
@@ -246,7 +246,7 @@ impl SessionHolder for CosmicSurface {
             .push(session);
     }
 
-    fn remove_cursor_session(&mut self, session: CursorSession) {
+    fn remove_cursor_session(&mut self, session: CursorSessionRef) {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .unwrap()
@@ -255,7 +255,7 @@ impl SessionHolder for CosmicSurface {
             .retain(|s| *s != session);
     }
 
-    fn cursor_sessions(&self) -> Vec<CursorSession> {
+    fn cursor_sessions(&self) -> Vec<CursorSessionRef> {
         self.user_data()
             .get::<ScreencopySessionsData>()
             .map_or(Vec::new(), |sessions| {

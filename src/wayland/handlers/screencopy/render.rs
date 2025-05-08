@@ -46,7 +46,7 @@ use crate::{
             constraints_for_output, constraints_for_toplevel, SessionData, SessionUserData,
         },
         protocols::{
-            screencopy::{BufferConstraints, CursorSession, FailureReason, Frame, SessionRef},
+            screencopy::{BufferConstraints, CursorSessionRef, FailureReason, Frame, SessionRef},
             workspace::WorkspaceHandle,
         },
     },
@@ -662,7 +662,7 @@ pub fn render_window_to_buffer(
 
 pub fn render_cursor_to_buffer(
     state: &mut State,
-    session: &CursorSession,
+    session: &CursorSessionRef,
     frame: Frame,
     seat: &Seat<State>,
 ) {

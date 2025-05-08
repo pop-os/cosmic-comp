@@ -39,7 +39,7 @@ use super::image_capture_source::ImageCaptureSourceData;
 pub struct ScreencopyState {
     global: GlobalId,
     known_sessions: Vec<SessionRef>,
-    known_cursor_sessions: Vec<CursorSession>,
+    known_cursor_sessions: Vec<CursorSessionRef>,
 }
 
 impl ScreencopyState {
@@ -218,13 +218,13 @@ impl Session {
 }
 
 #[derive(Debug, Clone)]
-pub struct CursorSession {
+pub struct CursorSessionRef {
     obj: ExtImageCopyCaptureCursorSessionV1,
     inner: Arc<Mutex<CursorSessionInner>>,
     user_data: Arc<UserDataMap>,
 }
 
-impl PartialEq for CursorSession {
+impl PartialEq for CursorSessionRef {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
     }
@@ -255,13 +255,13 @@ impl CursorSessionInner {
     }
 }
 
-impl IsAlive for CursorSession {
+impl IsAlive for CursorSessionRef {
     fn alive(&self) -> bool {
         self.obj.is_alive()
     }
 }
 
-impl CursorSession {
+impl CursorSessionRef {
     pub fn update_constraints(&self, constrains: BufferConstraints) {
         let mut inner = self.inner.lock().unwrap();
 
@@ -376,9 +376,9 @@ impl CursorSession {
 }
 
 #[derive(Debug)]
-pub struct DropableCursorSession(pub Option<CursorSession>);
+pub struct DropableCursorSession(pub Option<CursorSessionRef>);
 impl ops::Deref for DropableCursorSession {
-    type Target = CursorSession;
+    type Target = CursorSessionRef;
     fn deref(&self) -> &Self::Target {
         self.0.as_ref().unwrap()
     }
@@ -388,8 +388,8 @@ impl ops::DerefMut for DropableCursorSession {
         self.0.as_mut().unwrap()
     }
 }
-impl PartialEq<CursorSession> for DropableCursorSession {
-    fn eq(&self, other: &CursorSession) -> bool {
+impl PartialEq<CursorSessionRef> for DropableCursorSession {
+    fn eq(&self, other: &CursorSessionRef) -> bool {
         self.0.as_ref().map(|s| s == other).unwrap_or(false)
     }
 }
@@ -542,13 +542,13 @@ pub trait ScreencopyHandler {
     fn new_cursor_session(&mut self, session: DropableCursorSession);
 
     fn frame(&mut self, session: SessionRef, frame: Frame);
-    fn cursor_frame(&mut self, session: CursorSession, frame: Frame);
+    fn cursor_frame(&mut self, session: CursorSessionRef, frame: Frame);
 
     fn frame_aborted(&mut self, frame_handle: FrameRef);
     fn session_destroyed(&mut self, session: SessionRef) {
         let _ = session;
     }
-    fn cursor_session_destroyed(&mut self, session: CursorSession) {
+    fn cursor_session_destroyed(&mut self, session: CursorSessionRef) {
         let _ = session;
     }
 }
@@ -688,7 +688,7 @@ where
                                 },
                             );
 
-                            let session = CursorSession {
+                            let session = CursorSessionRef {
                                 obj,
                                 inner: session_data,
                                 user_data: Arc::new(UserDataMap::new()),
@@ -713,7 +713,7 @@ where
                         inner: session_data.clone(),
                     },
                 );
-                let session = CursorSession {
+                let session = CursorSessionRef {
                     obj,
                     inner: session_data,
                     user_data: Arc::new(UserDataMap::new()),
@@ -1101,7 +1101,7 @@ where
                         session.inner.lock().unwrap().session.as_ref()
                             == inner.obj.upgrade().ok().as_ref()
                     })
-                    .map(|s| CursorSession {
+                    .map(|s| CursorSessionRef {
                         obj: s.obj.clone(),
                         inner: s.inner.clone(),
                         user_data: s.user_data.clone(),
