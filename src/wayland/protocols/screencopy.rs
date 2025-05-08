@@ -179,16 +179,13 @@ impl ops::Deref for Session {
         &self.0
     }
 }
-impl ops::DerefMut for Session {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+
 impl PartialEq<SessionRef> for Session {
     fn eq(&self, other: &SessionRef) -> bool {
         self.0 == *other
     }
 }
+
 impl Drop for Session {
     fn drop(&mut self) {
         let mut inner = self.0.inner.lock().unwrap();
@@ -354,22 +351,20 @@ impl CursorSessionRef {
 
 #[derive(Debug)]
 pub struct CursorSession(pub CursorSessionRef);
+
 impl ops::Deref for CursorSession {
     type Target = CursorSessionRef;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl ops::DerefMut for CursorSession {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+
 impl PartialEq<CursorSessionRef> for CursorSession {
     fn eq(&self, other: &CursorSessionRef) -> bool {
         self.0 == *other
     }
 }
+
 impl Drop for CursorSession {
     fn drop(&mut self) {
         let mut inner = self.0.inner.lock().unwrap();
