@@ -9,7 +9,7 @@ use smithay::{
 use crate::{
     shell::{CosmicSurface, Workspace},
     wayland::protocols::screencopy::{
-        CursorSessionRef, CursorSession, Frame, FrameRef, Session, SessionRef,
+        CursorSession, CursorSessionRef, Frame, FrameRef, Session, SessionRef,
     },
 };
 
@@ -137,7 +137,7 @@ impl SessionHolder for Output {
                     .borrow()
                     .cursor_sessions
                     .iter()
-                    .flat_map(|s| s.0.clone())
+                    .map(|s| s.0.clone())
                     .collect()
             })
     }
@@ -197,7 +197,7 @@ impl SessionHolder for Workspace {
         self.screencopy
             .cursor_sessions
             .iter()
-            .flat_map(|s| s.0.clone())
+            .map(|s| s.0.clone())
             .collect()
     }
 }
@@ -263,7 +263,7 @@ impl SessionHolder for CosmicSurface {
                     .borrow()
                     .cursor_sessions
                     .iter()
-                    .flat_map(|s| s.0.clone())
+                    .map(|s| s.0.clone())
                     .collect()
             })
     }

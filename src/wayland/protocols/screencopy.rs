@@ -350,11 +350,31 @@ impl CursorSessionRef {
     pub fn user_data(&self) -> &UserDataMap {
         &*self.user_data
     }
+}
 
-    pub fn stop(self) {
-        let mut inner = self.inner.lock().unwrap();
+#[derive(Debug)]
+pub struct CursorSession(pub CursorSessionRef);
+impl ops::Deref for CursorSession {
+    type Target = CursorSessionRef;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl ops::DerefMut for CursorSession {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+impl PartialEq<CursorSessionRef> for CursorSession {
+    fn eq(&self, other: &CursorSessionRef) -> bool {
+        self.0 == *other
+    }
+}
+impl Drop for CursorSession {
+    fn drop(&mut self) {
+        let mut inner = self.0.inner.lock().unwrap();
 
-        if !self.obj.is_alive() || inner.stopped {
+        if !self.0.obj.is_alive() || inner.stopped {
             return;
         }
 
@@ -375,29 +395,9 @@ impl CursorSessionRef {
     }
 }
 
-#[derive(Debug)]
-pub struct CursorSession(pub Option<CursorSessionRef>);
-impl ops::Deref for CursorSession {
-    type Target = CursorSessionRef;
-    fn deref(&self) -> &Self::Target {
-        self.0.as_ref().unwrap()
-    }
-}
-impl ops::DerefMut for CursorSession {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.as_mut().unwrap()
-    }
-}
-impl PartialEq<CursorSessionRef> for CursorSession {
-    fn eq(&self, other: &CursorSessionRef) -> bool {
-        self.0.as_ref().map(|s| s == other).unwrap_or(false)
-    }
-}
-impl Drop for CursorSession {
-    fn drop(&mut self) {
-        if let Some(s) = self.0.take() {
-            s.stop();
-        }
+impl CursorSession {
+    pub fn stop(self) {
+        let _ = self;
     }
 }
 
@@ -698,7 +698,7 @@ where
                                 .screencopy_state()
                                 .known_cursor_sessions
                                 .push(session.clone());
-                            state.new_cursor_session(CursorSession(Some(session)));
+                            state.new_cursor_session(CursorSession(session));
                             return;
                         }
                     }
@@ -713,11 +713,11 @@ where
                         inner: session_data.clone(),
                     },
                 );
-                let session = CursorSessionRef {
+                let session = CursorSession(CursorSessionRef {
                     obj,
                     inner: session_data,
                     user_data: Arc::new(UserDataMap::new()),
-                };
+                });
                 session.stop();
             }
             _ => {}
