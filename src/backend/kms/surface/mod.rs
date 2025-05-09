@@ -13,7 +13,7 @@ use crate::{
     wayland::{
         handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
         protocols::screencopy::{
-            FailureReason, Frame as ScreencopyFrame, Session as ScreencopySession,
+            FailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
         },
     },
 };
@@ -1024,7 +1024,7 @@ impl SurfaceThreadState {
         // so let's collect everything we need for screencopy now
         let mut has_cursor_mode_none = false;
         let frames: Vec<(
-            ScreencopySession,
+            ScreencopySessionRef,
             ScreencopyFrame,
             Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
         )> = self

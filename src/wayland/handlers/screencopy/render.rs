@@ -46,13 +46,13 @@ use crate::{
             constraints_for_output, constraints_for_toplevel, SessionData, SessionUserData,
         },
         protocols::{
-            screencopy::{BufferConstraints, CursorSession, FailureReason, Frame, Session},
+            screencopy::{BufferConstraints, CursorSessionRef, FailureReason, Frame, SessionRef},
             workspace::WorkspaceHandle,
         },
     },
 };
 
-use super::super::data_device::get_dnd_icon;
+use super::{super::data_device::get_dnd_icon, user_data::SessionHolder};
 
 pub fn submit_buffer<R>(
     frame: Frame,
@@ -205,17 +205,16 @@ where
 
 pub fn render_workspace_to_buffer(
     state: &mut State,
-    session: Session,
+    session: SessionRef,
     frame: Frame,
     handle: WorkspaceHandle,
 ) {
     let shell = state.common.shell.read().unwrap();
     let Some(workspace) = shell.workspaces.space_for_handle(&handle) else {
-        session.stop();
         return;
     };
 
-    let output = workspace.output().clone();
+    let mut output = workspace.output().clone();
     let idx = shell.workspaces.idx_for_handle(&output, &handle).unwrap();
     std::mem::drop(shell);
 
@@ -227,7 +226,7 @@ pub fn render_workspace_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if mode != Some(buffer_size) {
         let Some(constraints) = constraints_for_output(&output, &mut state.backend) else {
-            session.stop();
+            output.remove_session(&session);
             return;
         };
         session.update_constraints(constraints);
@@ -439,12 +438,12 @@ smithay::render_elements! {
 
 pub fn render_window_to_buffer(
     state: &mut State,
-    session: Session,
+    session: SessionRef,
     frame: Frame,
     toplevel: &CosmicSurface,
 ) {
     if !toplevel.alive() {
-        session.stop();
+        toplevel.clone().remove_session(&session);
         return;
     }
 
@@ -453,7 +452,7 @@ pub fn render_window_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if buffer_size != geometry.size.to_buffer(1, Transform::Normal) {
         let Some(constraints) = constraints_for_toplevel(toplevel, &mut state.backend) else {
-            session.stop();
+            toplevel.clone().remove_session(&session);
             return;
         };
         session.update_constraints(constraints);
@@ -663,7 +662,7 @@ pub fn render_window_to_buffer(
 
 pub fn render_cursor_to_buffer(
     state: &mut State,
-    session: &CursorSession,
+    session: &CursorSessionRef,
     frame: Frame,
     seat: &Seat<State>,
 ) {

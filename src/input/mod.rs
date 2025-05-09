@@ -27,7 +27,7 @@ use crate::{
     utils::{float::NextDown, prelude::*, quirks::workspace_overview_is_open},
     wayland::{
         handlers::screencopy::SessionHolder,
-        protocols::screencopy::{BufferConstraints, CursorSession},
+        protocols::screencopy::{BufferConstraints, CursorSessionRef},
     },
 };
 use calloop::{
@@ -2262,7 +2262,7 @@ impl State {
 fn cursor_sessions_for_output<'a>(
     shell: &'a Shell,
     output: &'a Output,
-) -> impl Iterator<Item = CursorSession> + 'a {
+) -> impl Iterator<Item = CursorSessionRef> + 'a {
     shell
         .active_space(&output)
         .into_iter()
