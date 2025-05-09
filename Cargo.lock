@@ -851,7 +851,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "smithay",
+ "smithay 0.6.0",
  "smithay-egui",
  "thiserror 1.0.69",
  "time",
@@ -2909,7 +2909,7 @@ dependencies = [
  "libc",
  "libdisplay-info-derive",
  "libdisplay-info-sys",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -4735,8 +4735,40 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "smithay"
+version = "0.5.0"
+source = "git+https://github.com/smithay/smithay?rev=a503d98#a503d981d1be9a54b286ab5e160e4b9edddb500f"
+dependencies = [
+ "appendlist",
+ "bitflags 2.8.0",
+ "calloop 0.14.2",
+ "cgmath",
+ "cursor-icon",
+ "downcast-rs",
+ "drm-fourcc",
+ "errno",
+ "gl_generator",
+ "glow 0.16.0",
+ "indexmap 2.7.0",
+ "libc",
+ "libloading",
+ "profiling",
+ "rand 0.8.5",
+ "rustix",
+ "smallvec",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "wayland-protocols",
+ "wayland-protocols-misc",
+ "wayland-protocols-wlr",
+ "wayland-server",
+ "xkbcommon 0.8.0",
+]
+
+[[package]]
+name = "smithay"
 version = "0.6.0"
-source = "git+https://github.com/smithay/smithay//?rev=f85d06a#f85d06a4629795f5008b573f6b48606db9ff6d71"
+source = "git+https://github.com/smithay/smithay//?rev=c1f13a6#c1f13a6b9605c9f7009122a7b2b34f210255dac3"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -4764,12 +4796,12 @@ dependencies = [
  "pixman",
  "pkg-config",
  "profiling",
- "rand 0.8.5",
+ "rand 0.9.0",
  "rustix",
  "scopeguard",
  "smallvec",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tracing",
  "udev",
  "wayland-client",
@@ -4835,7 +4867,7 @@ dependencies = [
  "image",
  "log",
  "memoffset",
- "smithay",
+ "smithay 0.5.0",
  "xkbcommon 0.8.0",
 ]
 
@@ -5075,11 +5107,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.11"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d452f284b73e6d76dd36758a0c8684b1d5be31f92b89d07fd5822175732206fc"
+checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
 dependencies = [
- "thiserror-impl 2.0.11",
+ "thiserror-impl 2.0.12",
 ]
 
 [[package]]
@@ -5095,9 +5127,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.11"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26afc1baea8a989337eeb52b6e72a039780ce45c3edfcc9c5b9d112feeb173c2"
+checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
 dependencies = [
  "proc-macro2",
  "quote",

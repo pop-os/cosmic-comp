@@ -53,6 +53,7 @@ use smithay::{
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
         xdg_activation::XdgActivationState,
+        xwayland_keyboard_grab::XWaylandKeyboardGrab,
     },
     xwayland::X11Surface,
 };
@@ -266,6 +267,7 @@ pub struct Shell {
     pub session_lock: Option<SessionLock>,
     pub seats: Seats,
     pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,
+    pub xwayland_keyboard_grab: Option<XWaylandKeyboardGrab<State>>,
 
     theme: cosmic::Theme,
     pub active_hint: bool,
@@ -1478,6 +1480,7 @@ impl Shell {
             override_redirect_windows: Vec::new(),
             session_lock: None,
             previous_workspace_idx: None,
+            xwayland_keyboard_grab: None,
 
             theme,
             active_hint: config.cosmic_conf.active_hint,
@@ -1730,6 +1733,11 @@ impl Shell {
                 .iter()
                 .find_map(|(output, s)| (s == &surface).then_some(output))
                 .cloned(),
+            KeyboardFocusTarget::XWaylandGrab(surface) => {
+                // XXX?
+                //todo!()
+                None
+            }
             KeyboardFocusTarget::Popup(_) => unreachable!(),
         }
     }
