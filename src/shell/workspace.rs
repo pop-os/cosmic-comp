@@ -1095,7 +1095,7 @@ impl Workspace {
     pub fn set_tiling(
         &mut self,
         tiling: bool,
-        seat: &Seat<State>,
+        _seat: &Seat<State>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
         let mut maximized_windows = Vec::new();
@@ -1111,12 +1111,10 @@ impl Workspace {
                 maximized_windows.push((window.clone(), ManagedLayer::Tiling, original_geometry));
             }
 
-            let focus_stack = self.focus_stack.get(seat);
-            for window in floating_windows.into_iter() {
+            for window in floating_windows.clone().into_iter() {
                 self.floating_layer.unmap(&window);
-                self.tiling_layer
-                    .map(window, Some(focus_stack.iter()), None)
             }
+            self.tiling_layer.map_from_floating_windows(floating_windows.clone());
             workspace_state.set_workspace_tiling_state(&self.handle, TilingState::TilingEnabled);
             self.tiling_enabled = true;
         } else {
@@ -1127,6 +1125,7 @@ impl Workspace {
                 .collect::<Vec<_>>()
                 .into_iter()
             {
+
                 if window.is_maximized(false) {
                     let original_geometry = {
                         let state = window.maximized_state.lock().unwrap();
