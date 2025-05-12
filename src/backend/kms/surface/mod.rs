@@ -1431,6 +1431,25 @@ impl SurfaceThreadState {
                     x @ Ok(()) | x @ Err(FrameError::EmptyFrame) => {
                         self.timings.submitted_for_presentation(&self.clock);
 
+                        // Update `state` after `queue_frame`, before any early return from errors
+                        if x.is_ok() {
+                            let new_state = QueueState::WaitingForVBlank {
+                                redraw_needed: false,
+                            };
+                            match mem::replace(&mut self.state, new_state) {
+                                QueueState::Idle => unreachable!(),
+                                QueueState::Queued(_) => (),
+                                QueueState::WaitingForVBlank { .. } => unreachable!(),
+                                QueueState::WaitingForEstimatedVBlank(estimated_vblank)
+                                | QueueState::WaitingForEstimatedVBlankAndQueued {
+                                    estimated_vblank,
+                                    ..
+                                } => {
+                                    self.loop_handle.remove(estimated_vblank);
+                                }
+                            };
+                        }
+
                         for (session, frame, res) in frames {
                             let damage = match res {
                                 Ok((damage, _)) => damage,
@@ -1691,22 +1710,6 @@ impl SurfaceThreadState {
                         }
 
                         if x.is_ok() {
-                            let new_state = QueueState::WaitingForVBlank {
-                                redraw_needed: false,
-                            };
-                            match mem::replace(&mut self.state, new_state) {
-                                QueueState::Idle => unreachable!(),
-                                QueueState::Queued(_) => (),
-                                QueueState::WaitingForVBlank { .. } => unreachable!(),
-                                QueueState::WaitingForEstimatedVBlank(estimated_vblank)
-                                | QueueState::WaitingForEstimatedVBlankAndQueued {
-                                    estimated_vblank,
-                                    ..
-                                } => {
-                                    self.loop_handle.remove(estimated_vblank);
-                                }
-                            };
-
                             if self.mirroring.is_none() {
                                 self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
                                 self.send_frame_callbacks();
