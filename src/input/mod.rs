@@ -1557,12 +1557,15 @@ impl State {
                 .unwrap_or(false)
         });
 
+        // TODO update keyboard monitor
         self.common.atspi_ei.input(
             modifiers,
             &handle,
             event.state(),
             event.time() as u64 * 1000,
         );
+        let unichar = '\0'; // XXX
+        self.common.a11y_keyboard_monitor_state.key_event(modifiers, &handle, event.state(), unichar);
 
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
