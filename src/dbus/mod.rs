@@ -6,6 +6,7 @@ use futures_util::stream::StreamExt;
 use std::collections::HashMap;
 use zbus::blocking::{fdo::DBusProxy, Connection};
 
+pub mod a11y_keyboard_monitor;
 mod name_owners;
 mod power;
 
