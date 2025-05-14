@@ -8,6 +8,7 @@ use crate::{
         x11::X11State,
     },
     config::{CompOutputConfig, Config, ScreenFilter},
+    dbus::a11y_keyboard_monitor::A11yKeyboardMonitorState,
     input::{PointerFocusState, gestures::GestureState},
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
@@ -255,6 +256,7 @@ pub struct Common {
     pub xdg_decoration_state: XdgDecorationState,
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
+    pub a11y_keyboard_monitor_state: A11yKeyboardMonitorState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -704,6 +706,8 @@ impl State {
 
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
+        let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
+
         // TODO: Restrict to only specific client?
         let atspi_state = AtspiState::new::<State, _>(dh, client_has_no_security_context);
 
@@ -764,6 +768,7 @@ impl State {
                 xdg_foreign_state,
                 workspace_state,
                 a11y_state,
+                a11y_keyboard_monitor_state,
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
