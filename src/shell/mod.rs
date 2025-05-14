@@ -1454,6 +1454,7 @@ impl Common {
         self.popups.cleanup();
         self.toplevel_info_state.refresh(&self.workspace_state);
         self.refresh_idle_inhibit();
+        self.a11y_keyboard_monitor_state.refresh();
     }
 
     pub fn refresh_idle_inhibit(&mut self) {
