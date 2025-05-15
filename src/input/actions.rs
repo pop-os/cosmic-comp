@@ -582,10 +582,12 @@ impl State {
                 }
             }
 
+            #[allow(deprecated)]
             Action::NextOutput => {
                 warn!("Skipping deprecated shortcut NextOutput");
             }
 
+            #[allow(deprecated)]
             Action::PreviousOutput => {
                 warn!("Skipping deprecated shortcut PreviousOutput");
             }
@@ -652,10 +654,12 @@ impl State {
                 }
             }
 
+            #[allow(deprecated)]
             Action::MoveToNextOutput | Action::SendToNextOutput => {
                 warn!("Ignoring deprecated action Move/SendToNextOutput");
             }
 
+            #[allow(deprecated)]
             Action::MoveToPreviousOutput | Action::SendToPreviousOutput => {
                 warn!("Ignoring deprecated action Move/SendToPreviousOutput");
             }
@@ -677,10 +681,12 @@ impl State {
                 }
             }
 
+            #[allow(deprecated)]
             Action::MigrateWorkspaceToNextOutput => {
                 warn!("Ignoring deprecated action MigrateWorkspaceToNextOutput");
             }
 
+            #[allow(deprecated)]
             Action::MigrateWorkspaceToPreviousOutput => {
                 warn!("Ignoring deprecated action MigrateWorkspaceToPreviousOutput");
             }
