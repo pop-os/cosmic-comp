@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
-use std::{error::Error, future::pending};
 use xkbcommon::xkb::{self, Keysym};
 use zbus::message::Header;
 use zbus::names::UniqueName;
@@ -17,12 +16,39 @@ use zbus::SignalContext;
 // As defined in at-spi2-core
 const ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START: u32 = 15;
 
+#[derive(PartialEq, Eq, Debug)]
+struct KeyGrab {
+    pub mods: u32,
+    pub virtual_modifiers: HashSet<Keysym>,
+    pub key: Keysym,
+}
+
+impl KeyGrab {
+    fn new(virtual_modifiers: &[Keysym], key: Keysym, raw_mods: u32) -> Self {
+        let mods = raw_mods & ((1 << ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START) - 1);
+        let virtual_modifiers = virtual_modifiers
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(i, _)| {
+                raw_mods & (1 << (ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START + *i as u32)) != 0
+            })
+            .map(|(_, x)| x)
+            .collect();
+        Self {
+            mods,
+            virtual_modifiers,
+            key,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Client {
     grabbed: bool,
     watched: bool,
-    virtual_modifiers: Vec<Keysym>,
-    keystrokes: Vec<(Keysym, Modifiers)>,
+    virtual_modifiers: HashSet<Keysym>,
+    key_grabs: Vec<KeyGrab>,
 }
 
 #[derive(Debug, Default)]
@@ -124,8 +150,6 @@ impl A11yKeyboardMonitorState {
     }
 }
 
-trait A11yKeyboardMonitorHandler {}
-
 struct KeyboardMonitor {
     clients: Arc<Mutex<Clients>>,
 }
@@ -174,21 +198,21 @@ impl KeyboardMonitor {
             .into_iter()
             .map(Keysym::from)
             .collect::<Vec<_>>();
-        let keystrokes = keystrokes
+        let key_grabs = keystrokes
             .into_iter()
-            .map(|(k, mods)| (Keysym::from(k), Modifiers(mods)))
+            .map(|(k, mods)| KeyGrab::new(&virtual_modifiers, Keysym::from(k), mods))
             .collect::<Vec<_>>();
 
         if let Some(sender) = header.sender() {
             let mut clients = self.clients.lock().unwrap();
-            let mut client = clients.get(sender);
+            let client = clients.get(sender);
             eprintln!(
                 "key grabs set by {}: {:?}",
                 sender,
-                (&virtual_modifiers, &keystrokes)
+                (&virtual_modifiers, &key_grabs)
             );
-            client.virtual_modifiers = virtual_modifiers;
-            client.keystrokes = keystrokes;
+            client.virtual_modifiers = virtual_modifiers.into_iter().collect::<HashSet<_>>();
+            client.key_grabs = key_grabs;
         }
     }
 
@@ -203,9 +227,6 @@ impl KeyboardMonitor {
         keycode: u16,
     ) -> zbus::Result<()>;
 }
-
-#[derive(Debug)]
-struct Modifiers(u32);
 
 async fn serve(clients: Arc<Mutex<Clients>>) -> zbus::Result<zbus::Connection> {
     let keyboard_monitor = KeyboardMonitor { clients };
