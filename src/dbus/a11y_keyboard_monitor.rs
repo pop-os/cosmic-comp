@@ -19,14 +19,14 @@ const ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START: u32 = 15;
 #[derive(PartialEq, Eq, Debug)]
 struct KeyGrab {
     pub mods: u32,
-    pub virtual_modifiers: HashSet<Keysym>,
+    pub virtual_mods: HashSet<Keysym>,
     pub key: Keysym,
 }
 
 impl KeyGrab {
-    fn new(virtual_modifiers: &[Keysym], key: Keysym, raw_mods: u32) -> Self {
+    fn new(virtual_mods: &[Keysym], key: Keysym, raw_mods: u32) -> Self {
         let mods = raw_mods & ((1 << ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START) - 1);
-        let virtual_modifiers = virtual_modifiers
+        let virtual_mods = virtual_mods
             .iter()
             .copied()
             .enumerate()
@@ -37,7 +37,7 @@ impl KeyGrab {
             .collect();
         Self {
             mods,
-            virtual_modifiers,
+            virtual_mods,
             key,
         }
     }
@@ -47,7 +47,7 @@ impl KeyGrab {
 struct Client {
     grabbed: bool,
     watched: bool,
-    virtual_modifiers: HashSet<Keysym>,
+    virtual_mods: HashSet<Keysym>,
     key_grabs: Vec<KeyGrab>,
 }
 
@@ -68,7 +68,7 @@ impl Clients {
 pub struct A11yKeyboardMonitorState {
     executor: ThreadPool,
     clients: Arc<Mutex<Clients>>,
-    active_virtual_modifiers: HashSet<Keysym>,
+    active_virtual_mods: HashSet<Keysym>,
     conn: Arc<OnceLock<zbus::Connection>>,
 }
 
@@ -92,7 +92,7 @@ impl A11yKeyboardMonitorState {
         Self {
             clients,
             executor,
-            active_virtual_modifiers: HashSet::new(),
+            active_virtual_mods: HashSet::new(),
             conn: conn_cell,
         }
     }
@@ -103,7 +103,35 @@ impl A11yKeyboardMonitorState {
             .unwrap()
             .0
             .values()
-            .any(|client| client.virtual_modifiers.contains(&keysym))
+            .any(|client| client.virtual_mods.contains(&keysym))
+    }
+
+    pub fn remove_active_virtual_modifier(&mut self, keysym: Keysym) -> bool {
+        self.active_virtual_mods.remove(&keysym)
+    }
+
+    pub fn has_keyboard_grab(&self) -> bool {
+        self.clients
+            .lock()
+            .unwrap()
+            .0
+            .values()
+            .any(|client| client.grabbed)
+    }
+
+    /// Key grab exists for mods, key, with active virtual mods
+    pub fn has_key_grab(&self, mods: u32, key: Keysym) -> bool {
+        self.clients
+            .lock()
+            .unwrap()
+            .0
+            .values()
+            .flat_map(|client| &client.key_grabs)
+            .any(|grab| {
+                grab.mods == mods
+                    && grab.virtual_mods == self.active_virtual_mods
+                    && grab.key == key
+            })
     }
 
     pub fn key_event(
@@ -139,7 +167,7 @@ impl A11yKeyboardMonitorState {
         let future = KeyboardMonitor::key_event(
             signal_context,
             released,
-            modifiers.serialized.depressed,
+            modifiers.serialized.layout_effective,
             keysym.modified_sym().raw(),
             unichar,
             keysym.raw_code().raw() as u16,
@@ -191,16 +219,16 @@ impl KeyboardMonitor {
     fn set_key_grabs(
         &self,
         #[zbus(header)] header: Header<'_>,
-        virtual_modifiers: Vec<u32>,
+        virtual_mods: Vec<u32>,
         keystrokes: Vec<(u32, u32)>,
     ) {
-        let virtual_modifiers = virtual_modifiers
+        let virtual_mods = virtual_mods
             .into_iter()
             .map(Keysym::from)
             .collect::<Vec<_>>();
         let key_grabs = keystrokes
             .into_iter()
-            .map(|(k, mods)| KeyGrab::new(&virtual_modifiers, Keysym::from(k), mods))
+            .map(|(k, mods)| KeyGrab::new(&virtual_mods, Keysym::from(k), mods))
             .collect::<Vec<_>>();
 
         if let Some(sender) = header.sender() {
@@ -209,9 +237,9 @@ impl KeyboardMonitor {
             eprintln!(
                 "key grabs set by {}: {:?}",
                 sender,
-                (&virtual_modifiers, &key_grabs)
+                (&virtual_mods, &key_grabs)
             );
-            client.virtual_modifiers = virtual_modifiers.into_iter().collect::<HashSet<_>>();
+            client.virtual_mods = virtual_mods.into_iter().collect::<HashSet<_>>();
             client.key_grabs = key_grabs;
         }
     }

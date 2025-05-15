@@ -1804,10 +1804,15 @@ impl State {
         }
 
         if self.common.atspi_ei.has_keyboard_grab()
+            || self.common.a11y_keyboard_monitor_state.has_keyboard_grab()
             || self
                 .common
                 .atspi_ei
                 .has_key_grab(modifiers.serialized.layout_effective, event.key_code())
+            || self
+                .common
+                .a11y_keyboard_monitor_state
+                .has_key_grab(modifiers.serialized.layout_effective, handle.modified_sym())
         {
             return FilterResult::Intercept(None);
         }
