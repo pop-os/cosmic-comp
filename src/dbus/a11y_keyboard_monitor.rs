@@ -1,4 +1,4 @@
-// https://gitlab.gnome.org/mwcampbell/mutter/-/blob/newton/data/dbus-interfaces/org.freedesktop.a11y.xml
+// https://gitlab.gnome.org/GNOME/mutter/-/blob/main/data/dbus-interfaces/org.freedesktop.a11y.xml
 //
 // TODO: Restrict protocol acccess?
 
