@@ -1,6 +1,7 @@
 // https://gitlab.gnome.org/GNOME/mutter/-/blob/main/data/dbus-interfaces/org.freedesktop.a11y.xml
 //
 // TODO: Restrict protocol acccess?
+// TODO remove client when not connected to server
 
 use futures_executor::ThreadPool;
 use smithay::backend::input::KeyState;
@@ -97,7 +98,7 @@ impl A11yKeyboardMonitorState {
         }
     }
 
-    pub fn has_virtual_modifier(&self, keysym: Keysym) -> bool {
+    pub fn has_virtual_mod(&self, keysym: Keysym) -> bool {
         self.clients
             .lock()
             .unwrap()
@@ -106,7 +107,11 @@ impl A11yKeyboardMonitorState {
             .any(|client| client.virtual_mods.contains(&keysym))
     }
 
-    pub fn remove_active_virtual_modifier(&mut self, keysym: Keysym) -> bool {
+    pub fn add_active_virtual_mod(&mut self, keysym: Keysym) {
+        self.active_virtual_mods.insert(keysym);
+    }
+
+    pub fn remove_active_virtual_mod(&mut self, keysym: Keysym) -> bool {
         self.active_virtual_mods.remove(&keysym)
     }
 
