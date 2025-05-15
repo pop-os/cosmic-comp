@@ -166,9 +166,10 @@ impl A11yKeyboardMonitorState {
             KeyState::Pressed => false,
             KeyState::Released => true,
         };
-        // XXX need to add virtual modifiers?
-        let xkb = keysym.xkb().lock().unwrap();
-        let unichar = unsafe { xkb.state() }.key_get_utf32(keysym.raw_code());
+        let unichar = {
+            let xkb = keysym.xkb().lock().unwrap();
+            unsafe { xkb.state() }.key_get_utf32(keysym.raw_code())
+        };
         let future = KeyboardMonitor::key_event(
             signal_context,
             released,
