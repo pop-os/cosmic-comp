@@ -6,13 +6,13 @@ use futures_executor::ThreadPool;
 use smithay::backend::input::KeyState;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::{error::Error, future::pending};
 use xkbcommon::xkb::{self, Keysym};
 use zbus::message::Header;
 use zbus::names::UniqueName;
 use zbus::SignalContext;
-use std::sync::OnceLock;
 
 // As defined in at-spi2-core
 const ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START: u32 = 15;
@@ -85,7 +85,6 @@ impl A11yKeyboardMonitorState {
         modifiers: &smithay::input::keyboard::ModifiersState,
         keysym: &smithay::input::keyboard::KeysymHandle,
         state: smithay::backend::input::KeyState,
-        unichar: char,
     ) {
         let Some(conn) = self.conn.get() else {
             return;
@@ -108,14 +107,15 @@ impl A11yKeyboardMonitorState {
             KeyState::Pressed => false,
             KeyState::Released => true,
         };
-        // XXX keysym and keycode?
         // XXX need to add virtual modifiers?
+        let xkb = keysym.xkb().lock().unwrap();
+        let unichar = unsafe { xkb.state() }.key_get_utf32(keysym.raw_code());
         let future = KeyboardMonitor::key_event(
             signal_context,
             released,
             modifiers.serialized.depressed,
             keysym.modified_sym().raw(),
-            unichar as u32,
+            unichar,
             keysym.raw_code().raw() as u16,
         );
         self.executor.spawn_ok(async {
@@ -220,10 +220,8 @@ impl KeyboardMonitor {
 #[derive(Debug)]
 struct Modifiers(u32);
 
-async fn serve(
-    clients: Arc<Mutex<Clients>>,
-    ) -> zbus::Result<zbus::Connection> {
-    let keyboard_monitor = KeyboardMonitor {clients};
+async fn serve(clients: Arc<Mutex<Clients>>) -> zbus::Result<zbus::Connection> {
+    let keyboard_monitor = KeyboardMonitor { clients };
     zbus::connection::Builder::session()?
         .name("org.freedesktop.a11y.Manager")?
         .serve_at("/org/freedesktop/a11y/Manager", keyboard_monitor)?
