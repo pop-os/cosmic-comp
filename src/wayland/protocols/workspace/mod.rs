@@ -289,7 +289,7 @@ where
         &'a self,
         workspace: &'a WorkspaceHandle,
         client: &'a ObjectId,
-    ) -> impl Iterator<Item = &ExtWorkspaceHandleV1> + 'a {
+    ) -> impl Iterator<Item = &'a ExtWorkspaceHandleV1> + 'a {
         self.groups
             .iter()
             .find_map(|g| g.workspaces.iter().find(|w| w.id == workspace.id))
