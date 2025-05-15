@@ -128,35 +128,6 @@ trait A11yKeyboardMonitorHandler {}
 
 struct KeyboardMonitor {
     clients: Arc<Mutex<Clients>>,
-    //mod_names: Vec<String>,
-}
-
-impl KeyboardMonitor {
-    fn map_mods(&self, virtual_mods: &[Keysym], mods: u32) -> Vec<&str> {
-        /*
-        // TODO warn unrecognized modifier
-        self.mod_names
-            .iter()
-            .map(|name| name.as_str())
-            .enumerate()
-            .filter(|(i, _)| {
-                (*i as u32) < ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START && (mods & (1 << i) != 0)
-            })
-            .map(|(_, name)| name)
-            // XXX unwrap
-            .chain(
-                virtual_mods
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, _)| {
-                        mods & (1 << (*i as u32 + ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START)) != 0
-                    })
-                    .map(|(_, keysym)| keysym.name().unwrap()),
-            )
-            .collect()
-        */
-        Vec::new()
-    }
 }
 
 #[zbus::interface(name = "org.freedesktop.a11y.KeyboardMonitor")]
@@ -193,16 +164,32 @@ impl KeyboardMonitor {
         }
     }
 
-    fn set_key_grabs(&self, virtual_modifiers: Vec<u32>, keystrokes: Vec<(u32, u32)>) {
+    fn set_key_grabs(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        virtual_modifiers: Vec<u32>,
+        keystrokes: Vec<(u32, u32)>,
+    ) {
         let virtual_modifiers = virtual_modifiers
             .into_iter()
             .map(Keysym::from)
             .collect::<Vec<_>>();
         let keystrokes = keystrokes
             .into_iter()
-            .map(|(k, mods)| (Keysym::from(k), self.map_mods(&virtual_modifiers, mods)))
+            .map(|(k, mods)| (Keysym::from(k), Modifiers(mods)))
             .collect::<Vec<_>>();
-        dbg!(virtual_modifiers, keystrokes);
+
+        if let Some(sender) = header.sender() {
+            let mut clients = self.clients.lock().unwrap();
+            let mut client = clients.get(sender);
+            eprintln!(
+                "key grabs set by {}: {:?}",
+                sender,
+                (&virtual_modifiers, &keystrokes)
+            );
+            client.virtual_modifiers = virtual_modifiers;
+            client.keystrokes = keystrokes;
+        }
     }
 
     // TODO signal
