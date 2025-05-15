@@ -4753,7 +4753,7 @@ checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 [[package]]
 name = "smithay"
 version = "0.6.0"
-source = "git+https://github.com/smithay/smithay//?rev=f85d06a#f85d06a4629795f5008b573f6b48606db9ff6d71"
+source = "git+https://github.com/smithay/smithay//?rev=c1f13a6#c1f13a6b9605c9f7009122a7b2b34f210255dac3"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -4781,12 +4781,12 @@ dependencies = [
  "pixman",
  "pkg-config",
  "profiling",
- "rand 0.8.5",
+ "rand 0.9.1",
  "rustix 0.38.44",
  "scopeguard",
  "smallvec",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tracing",
  "udev",
  "wayland-client",
