@@ -547,23 +547,19 @@ impl Program for CosmicWindowInternal {
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
         let mut header = cosmic::widget::header_bar()
-            .start(cosmic::widget::horizontal_space().width(32))
             .title(self.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
             .on_close(Message::Close)
             .focused(self.window.is_activated(false))
             .on_double_click(Message::Maximize)
-            .on_right_click(Message::Menu);
+            .on_right_click(Message::Menu)
+            .is_ssd(true);
 
         if cosmic::config::show_minimize() {
-            header = header
-                .on_minimize(Message::Minimize)
-                .start(cosmic::widget::horizontal_space().width(40)); // 32 + 8 spacing
+            header = header.on_minimize(Message::Minimize)
         }
         if cosmic::config::show_maximize() {
-            header = header
-                .on_maximize(Message::Maximize)
-                .start(cosmic::widget::horizontal_space().width(40)); // 32 + 8 spacing
+            header = header.on_maximize(Message::Maximize)
         }
 
         header.into()
