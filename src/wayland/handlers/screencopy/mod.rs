@@ -418,7 +418,9 @@ fn constraints_for_renderer(
                 .fold(
                     HashMap::<Fourcc, Vec<Modifier>>::new(),
                     |mut map, format| {
-                        map.entry(format.code).or_default().push(format.modifier);
+                        if format.modifier != Modifier::Invalid {
+                            map.entry(format.code).or_default().push(format.modifier);
+                        }
                         map
                     },
                 )
