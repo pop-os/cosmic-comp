@@ -847,9 +847,8 @@ impl SurfaceThreadState {
             self.vblank_frame = Some(vblank_frame);
 
             self.queue_redraw(false);
-        } else {
-            self.send_frame_callbacks();
         }
+        self.send_frame_callbacks();
     }
 
     #[profiling::function]
@@ -870,9 +869,8 @@ impl SurfaceThreadState {
 
         if force || self.shell.read().animations_going() {
             self.queue_redraw(false);
-        } else {
-            self.send_frame_callbacks();
         }
+        self.send_frame_callbacks();
     }
 
     fn queue_redraw(&mut self, force: bool) {
