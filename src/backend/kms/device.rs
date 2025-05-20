@@ -149,6 +149,48 @@ impl State {
             return Ok(());
         }
 
+        if let Some(allowlist) = dev_list_var("COSMIC_DRM_ALLOW_DEVICES") {
+            let mut matched = false;
+            if let Ok(node) = DrmNode::from_dev_id(dev) {
+                let node = node
+                    .node_with_type(NodeType::Render)
+                    .map(|res| res.ok())
+                    .flatten()
+                    .unwrap_or(node);
+                for ident in allowlist {
+                    if ident.matches(&node) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
+                    info!(
+                        "Skipping device {} due to COSMIC_DRM_ALLOW_DEVICE list.",
+                        path.display()
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        if let Some(blocklist) = dev_list_var("COSMIC_DRM_BLOCK_DEVICES") {
+            if let Ok(node) = DrmNode::from_dev_id(dev) {
+                let node = node
+                    .node_with_type(NodeType::Render)
+                    .map(|res| res.ok())
+                    .flatten()
+                    .unwrap_or(node);
+                for ident in blocklist {
+                    if ident.matches(&node) {
+                        info!(
+                            "Skipping device {} due to COSMIC_DRM_BLOCK_DEVICE list.",
+                            path.display()
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         let fd = DrmDeviceFd::new(DeviceFd::from(
             self.backend
                 .kms()
