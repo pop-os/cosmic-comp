@@ -122,6 +122,7 @@ impl State {
         }
     }
 
+    #[profiling::function]
     pub fn handle_shortcut_action(
         &mut self,
         action: shortcuts::Action,

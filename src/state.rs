@@ -695,6 +695,7 @@ fn primary_scanout_output_compare<'a>(
 }
 
 impl Common {
+    #[profiling::function]
     pub fn update_primary_output(
         &self,
         output: &Output,
@@ -796,6 +797,7 @@ impl Common {
         }
     }
 
+    #[profiling::function]
     pub fn send_dmabuf_feedback(
         &self,
         output: &Output,
@@ -946,6 +948,7 @@ impl Common {
         }
     }
 
+    #[profiling::function]
     pub fn send_frames(&self, output: &Output, sequence: Option<usize>) {
         let time = self.clock.now();
         let should_send = |surface: &WlSurface, states: &SurfaceData| {

@@ -161,6 +161,7 @@ impl ModifiersShortcutQueue {
 }
 
 impl State {
+    #[profiling::function]
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
     where
         <B as InputBackend>::Device: 'static,
@@ -1504,6 +1505,7 @@ impl State {
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
+    #[profiling::function]
     pub fn filter_keyboard_input<B: InputBackend, E: KeyboardKeyEvent<B>>(
         &mut self,
         event: &E,
@@ -1958,6 +1960,7 @@ impl State {
         }
     }
 
+    #[profiling::function]
     pub fn element_under(
         global_pos: Point<f64, Global>,
         output: &Output,
@@ -2084,6 +2087,7 @@ impl State {
         .flatten()
     }
 
+    #[profiling::function]
     pub fn surface_under(
         global_pos: Point<f64, Global>,
         output: &Output,
