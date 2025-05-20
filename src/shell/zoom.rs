@@ -539,14 +539,7 @@ impl Program for ZoomProgram {
         match message {
             ZoomMessage::Decrease => {
                 let _ = loop_handle.insert_idle(|state| {
-                    let seat = state
-                        .common
-                        .shell
-                        .read()
-                        .unwrap()
-                        .seats
-                        .last_active()
-                        .clone();
+                    let seat = state.common.shell.read().seats.last_active().clone();
                     let increment =
                         state.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
 
@@ -555,14 +548,7 @@ impl Program for ZoomProgram {
             }
             ZoomMessage::Increase => {
                 let _ = loop_handle.insert_idle(|state| {
-                    let seat = state
-                        .common
-                        .shell
-                        .read()
-                        .unwrap()
-                        .seats
-                        .last_active()
-                        .clone();
+                    let seat = state.common.shell.read().seats.last_active().clone();
                     let increment =
                         state.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
 
@@ -576,7 +562,7 @@ impl Program for ZoomProgram {
                         if let Some(start_data) =
                             check_grab_preconditions(&seat, Some(serial), None)
                         {
-                            let shell = state.common.shell.read().unwrap();
+                            let shell = state.common.shell.read();
                             let output = seat.active_output();
 
                             if shell.zoom_state().is_some() {
@@ -741,7 +727,7 @@ impl Program for ZoomProgram {
                         if let Some(start_data) =
                             check_grab_preconditions(&seat, Some(serial), None)
                         {
-                            let shell = state.common.shell.read().unwrap();
+                            let shell = state.common.shell.read();
                             let output = seat.active_output();
 
                             if shell.zoom_state().is_some() {

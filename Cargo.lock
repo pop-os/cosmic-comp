@@ -843,6 +843,7 @@ dependencies = [
  "log-panics",
  "once_cell",
  "ordered-float",
+ "parking_lot 0.12.3",
  "png",
  "profiling",
  "rand 0.9.1",

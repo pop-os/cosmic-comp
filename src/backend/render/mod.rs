@@ -5,7 +5,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     ops::ControlFlow,
-    sync::{Arc, RwLock, Weak},
+    sync::{Arc, Weak},
     time::Instant,
 };
 
@@ -559,7 +559,7 @@ pub enum ElementFilter {
 pub fn output_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
-    shell: &Arc<RwLock<Shell>>,
+    shell: &Arc<parking_lot::RwLock<Shell>>,
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
@@ -575,7 +575,7 @@ where
     #[cfg(feature = "debug")]
     let mut debug_elements = {
         let output_geo = output.geometry();
-        let shell_guard = shell.read().unwrap();
+        let shell_guard = shell.read();
         let seats = shell_guard.seats.iter().cloned().collect::<Vec<_>>();
         let debug_active = shell_guard.debug_active;
         std::mem::drop(shell_guard);
@@ -602,7 +602,7 @@ where
         }
     };
 
-    let shell_guard = shell.read().unwrap();
+    let shell_guard = shell.read();
     let Some((previous_workspace, workspace)) = shell_guard.workspaces.active(output) else {
         #[cfg(not(feature = "debug"))]
         return Ok(Vec::new());
@@ -623,7 +623,7 @@ where
     } else {
         ElementFilter::All
     };
-    let zoom_state = shell.read().unwrap().zoom_state().cloned();
+    let zoom_state = shell.read().zoom_state().cloned();
 
     #[allow(unused_mut)]
     let workspace_elements = workspace_elements(
@@ -652,7 +652,7 @@ where
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
-    shell: &Arc<RwLock<Shell>>,
+    shell: &Arc<parking_lot::RwLock<Shell>>,
     zoom_level: Option<&ZoomState>,
     now: Time<Monotonic>,
     output: &Output,
@@ -670,7 +670,7 @@ where
 {
     let mut elements = Vec::new();
 
-    let shell_ref = shell.read().unwrap();
+    let shell_ref = shell.read();
     let seats = shell_ref.seats.iter().cloned().collect::<Vec<_>>();
     if seats.is_empty() {
         return Ok(Vec::new());
@@ -692,7 +692,7 @@ where
         element_filter == ElementFilter::ExcludeWorkspaceOverview,
     ));
 
-    let shell = shell.read().unwrap();
+    let shell = shell.read();
     let overview = shell.overview_mode();
     let (resize_mode, resize_indicator) = shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
@@ -1136,7 +1136,7 @@ pub fn render_output<'d, R>(
     target: &mut R::Framebuffer<'_>,
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
-    shell: &Arc<RwLock<Shell>>,
+    shell: &Arc<parking_lot::RwLock<Shell>>,
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
@@ -1157,7 +1157,7 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let shell_ref = shell.read().unwrap();
+    let shell_ref = shell.read();
     let (previous_workspace, workspace) = shell_ref
         .workspaces
         .active(output)
@@ -1439,7 +1439,7 @@ pub fn render_workspace<'d, R>(
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
-    shell: &Arc<RwLock<Shell>>,
+    shell: &Arc<parking_lot::RwLock<Shell>>,
     zoom_level: Option<&ZoomState>,
     now: Time<Monotonic>,
     output: &Output,

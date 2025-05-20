@@ -76,7 +76,6 @@ impl WinitState {
                     let mut output_presentation_feedback = state
                         .shell
                         .read()
-                        .unwrap()
                         .take_presentation_feedback(&self.output, &states);
                     output_presentation_feedback.presented(
                         state.clock.now(),
@@ -297,7 +296,7 @@ impl State {
         // here we can handle special cases for winit inputs
         match event {
             WinitEvent::Focus(true) => {
-                for seat in self.common.shell.read().unwrap().seats.iter() {
+                for seat in self.common.shell.read().seats.iter() {
                     let devices = seat.user_data().get::<Devices>().unwrap();
                     if devices.has_device(&WinitVirtualDevice) {
                         seat.set_active_output(&self.backend.winit().output);

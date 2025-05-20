@@ -114,14 +114,14 @@ pub fn unset_mode(mapped: &CosmicMapped, surface: &WlSurface) {
 
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface()) {
             new_decoration(mapped, toplevel.wl_surface());
         }
     }
 
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: XdgMode) {
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface()) {
             request_mode(mapped, toplevel.wl_surface(), mode);
         } else {
@@ -130,7 +130,7 @@ impl XdgDecorationHandler for State {
     }
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface()) {
             unset_mode(mapped, toplevel.wl_surface())
         }
@@ -143,7 +143,7 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(surface) {
             let mode = new_decoration(mapped, surface);
             decoration.mode(mode);
@@ -157,7 +157,7 @@ impl KdeDecorationHandler for State {
         mode: WEnum<KdeMode>,
     ) {
         if let WEnum::Value(mode) = mode {
-            let shell = self.common.shell.read().unwrap();
+            let shell = self.common.shell.read();
             // TODO: We need to store this value until it gets mapped and apply it then, if it is not mapped yet.
             if let Some(mapped) = shell.element_for_surface(surface) {
                 request_mode(
@@ -174,7 +174,7 @@ impl KdeDecorationHandler for State {
     }
 
     fn release(&mut self, _decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(surface) {
             unset_mode(mapped, surface)
         }

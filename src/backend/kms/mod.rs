@@ -169,7 +169,7 @@ fn init_libinput(
 
         state.process_input_event(event);
 
-        for output in state.common.shell.read().unwrap().outputs() {
+        for output in state.common.shell.read().outputs() {
             state.backend.kms().schedule_render(output);
         }
     })
@@ -592,7 +592,7 @@ impl KmsState {
         test_only: bool,
         loop_handle: &LoopHandle<'static, State>,
         screen_filter: &ScreenFilter,
-        shell: Arc<RwLock<Shell>>,
+        shell: Arc<parking_lot::RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
         clock: &Clock<Monotonic>,
     ) -> Result<Vec<Output>, anyhow::Error> {
@@ -683,7 +683,7 @@ impl KmsState {
             }
 
             // add new ones
-            let mut w = shell.read().unwrap().global_space().size.w as u32;
+            let mut w = shell.read().global_space().size.w as u32;
             if !test_only {
                 for (conn, crtc) in new_pairings {
                     let (output, _) = device.connector_added(

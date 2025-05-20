@@ -33,7 +33,7 @@ use std::{
     fs::OpenOptions,
     io::Write,
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{atomic::AtomicBool, Arc},
 };
 use tracing::{error, warn};
 
@@ -227,7 +227,7 @@ impl Config {
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
             fn handle_new_toolkit_config(config: CosmicTk, state: &mut State) {
                 let mut workspace_guard = state.common.workspace_state.update();
-                state.common.shell.write().unwrap().update_toolkit(
+                state.common.shell.write().update_toolkit(
                     config,
                     &state.common.xdg_activation_state,
                     &mut workspace_guard,
@@ -308,14 +308,9 @@ impl Config {
                             "tiling_exception_defaults" | "tiling_exception_custom" => {
                                 let new_exceptions = window_rules::tiling_exceptions(&config);
                                 state.common.config.tiling_exceptions = new_exceptions;
-                                state
-                                    .common
-                                    .shell
-                                    .write()
-                                    .unwrap()
-                                    .update_tiling_exceptions(
-                                        state.common.config.tiling_exceptions.iter(),
-                                    );
+                                state.common.shell.write().update_tiling_exceptions(
+                                    state.common.config.tiling_exceptions.iter(),
+                                );
                             }
                             _ => (),
                         }
@@ -470,7 +465,7 @@ impl Config {
         &mut self,
         output_state: &mut OutputConfigurationState<State>,
         backend: &mut BackendData,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
         loop_handle: &LoopHandle<'static, State>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
@@ -809,7 +804,6 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .iter()
                     .cloned()
@@ -843,7 +837,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "keyboard_config" => {
                 let value = get_config::<KeyboardConfig>(&config, "keyboard_config");
                 state.common.config.cosmic_conf.keyboard_config = value;
-                let shell = state.common.shell.read().unwrap();
+                let shell = state.common.shell.read();
                 let seat = shell.seats.last_active();
                 state.common.config.dynamic_conf.numlock_mut().last_state =
                     seat.get_keyboard().unwrap().modifier_state().num_lock;
@@ -873,7 +867,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.autotile {
                     state.common.config.cosmic_conf.autotile = new;
 
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let shell_ref = &mut *shell;
                     shell_ref.workspaces.update_autotile(
                         new,
@@ -887,7 +881,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.autotile_behavior {
                     state.common.config.cosmic_conf.autotile_behavior = new;
 
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let shell_ref = &mut *shell;
                     shell_ref.workspaces.update_autotile_behavior(
                         new,

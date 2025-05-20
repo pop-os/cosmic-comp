@@ -240,7 +240,6 @@ impl Surface {
                     let mut output_presentation_feedback = state
                         .shell
                         .read()
-                        .unwrap()
                         .take_presentation_feedback(&self.output, &states);
                     output_presentation_feedback.presented(
                         state.clock.now(),
@@ -520,7 +519,7 @@ impl State {
                         .unwrap();
 
                     let device = event.device();
-                    for seat in self.common.shell.read().unwrap().seats.iter() {
+                    for seat in self.common.shell.read().seats.iter() {
                         let devices = seat.user_data().get::<Devices>().unwrap();
                         if devices.has_device(&device) {
                             seat.set_active_output(&output);
@@ -534,7 +533,7 @@ impl State {
 
         self.process_input_event(event);
         // TODO actually figure out the output
-        for output in self.common.shell.read().unwrap().outputs() {
+        for output in self.common.shell.read().outputs() {
             self.backend.x11().schedule_render(output);
         }
     }

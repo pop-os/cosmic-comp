@@ -22,7 +22,7 @@ impl WorkspaceHandler for State {
         for request in requests.into_iter() {
             match request {
                 Request::Activate(handle) => {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     let maybe = shell.workspaces.iter().find_map(|(o, set)| {
                         set.workspaces
                             .iter()
@@ -41,7 +41,7 @@ impl WorkspaceHandler for State {
                     }
                 }
                 Request::SetTilingState { workspace, state } => {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     if let Some(workspace) = shell.workspaces.space_for_handle_mut(&workspace) {
                         let mut guard = self.common.workspace_state.update();
@@ -56,7 +56,7 @@ impl WorkspaceHandler for State {
                     }
                 }
                 Request::SetPin { workspace, pinned } => {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     if let Some(workspace) = shell.workspaces.space_for_handle_mut(&workspace) {
                         workspace.pinned = pinned;
                         let mut update = self.common.workspace_state.update();
@@ -78,7 +78,7 @@ impl WorkspaceHandler for State {
                     if axis != 0 {
                         continue;
                     }
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     let mut update = self.common.workspace_state.update();
                     shell.workspaces.move_workspace(
                         &workspace,
@@ -95,7 +95,7 @@ impl WorkspaceHandler for State {
                     if axis != 0 {
                         continue;
                     }
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     let mut update = self.common.workspace_state.update();
                     shell.workspaces.move_workspace(
                         &workspace,

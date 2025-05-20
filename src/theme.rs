@@ -33,7 +33,7 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), cosmic_config::E
         if theme.theme_type != new_theme.theme_type {
             *theme = new_theme;
             let mut workspace_guard = state.common.workspace_state.update();
-            state.common.shell.write().unwrap().set_theme(
+            state.common.shell.write().set_theme(
                 theme.clone(),
                 &state.common.xdg_activation_state,
                 &mut workspace_guard,

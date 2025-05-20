@@ -248,7 +248,6 @@ impl Common {
         let keyboard = self
             .shell
             .read()
-            .unwrap()
             .seats
             .last_active()
             .get_keyboard()
@@ -260,14 +259,7 @@ impl Common {
     }
 
     fn has_x_pointer_focus(&self, xwmid: XwmId) -> bool {
-        let pointer = self
-            .shell
-            .read()
-            .unwrap()
-            .seats
-            .last_active()
-            .get_pointer()
-            .unwrap();
+        let pointer = self.shell.read().seats.last_active().get_pointer().unwrap();
 
         if let Some(x_client) = self.xwayland_state.as_ref().and_then(|xstate| {
             xstate
@@ -307,7 +299,7 @@ impl Common {
     }
 
     pub fn xwayland_reset_eavesdropping(&mut self, serial: Serial) {
-        let seat = self.shell.read().unwrap().seats.last_active().clone();
+        let seat = self.shell.read().seats.last_active().clone();
         let keyboard = seat.get_keyboard().unwrap();
         let pointer = seat.get_pointer().unwrap();
 
@@ -350,7 +342,6 @@ impl Common {
         let keyboard = self
             .shell
             .read()
-            .unwrap()
             .seats
             .last_active()
             .get_keyboard()
@@ -420,14 +411,7 @@ impl Common {
             return;
         }
 
-        let pointer = self
-            .shell
-            .read()
-            .unwrap()
-            .seats
-            .last_active()
-            .get_pointer()
-            .unwrap();
+        let pointer = self.shell.read().seats.last_active().get_pointer().unwrap();
 
         if self.xwayland_state.as_ref().is_none_or(|xstate| {
             xstate
@@ -466,7 +450,7 @@ impl Common {
     }
 
     pub fn update_x11_stacking_order(&mut self) {
-        let shell = self.shell.read().unwrap();
+        let shell = self.shell.read();
         let active_output = shell.seats.last_active().active_output();
         if let Some(xwm) = self
             .xwayland_state
@@ -560,7 +544,7 @@ impl Common {
         let new_scale = match self.config.cosmic_conf.descale_xwayland {
             XwaylandDescaling::Disabled => 1.,
             XwaylandDescaling::Enabled => {
-                let shell = self.shell.read().unwrap();
+                let shell = self.shell.read();
                 shell
                     .outputs()
                     .map(|o| o.current_scale().integer_scale())
@@ -568,7 +552,7 @@ impl Common {
                     .unwrap_or(1) as f64
             }
             XwaylandDescaling::Fractional => {
-                let shell = self.shell.read().unwrap();
+                let shell = self.shell.read();
                 let val =
                     if let Some(output) = shell.outputs().find(|o| o.config().xwayland_primary) {
                         output.current_scale().fractional_scale().max(1f64)
@@ -589,7 +573,6 @@ impl Common {
                 let geometries = self
                     .shell
                     .read()
-                    .unwrap()
                     .mapped()
                     .flat_map(|m| m.windows().map(|(s, _)| s))
                     .filter_map(|s| s.0.x11_surface().map(|x| (x.clone(), x.geometry())))
@@ -638,7 +621,7 @@ impl Common {
                     .set_client_scale(new_scale);
 
                 // update wl/xdg_outputs
-                for output in self.shell.read().unwrap().outputs() {
+                for output in self.shell.read().outputs() {
                     output.change_current_state(None, None, None, None);
                 }
 
@@ -695,7 +678,7 @@ impl XwmHandler for State {
             warn!(?window, ?err, "Failed to send Xwayland Mapped-Event",);
         }
 
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         let startup_id = window.startup_id();
         if shell.element_for_surface(&window).is_some() {
             return;
@@ -723,7 +706,7 @@ impl XwmHandler for State {
     }
 
     fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(window) = shell
             .pending_windows
             .iter()
@@ -763,7 +746,7 @@ impl XwmHandler for State {
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if shell
             .override_redirect_windows
             .iter()
@@ -775,7 +758,7 @@ impl XwmHandler for State {
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if window.is_override_redirect() {
             shell.override_redirect_windows.retain(|or| or != &window);
         } else {
@@ -812,7 +795,7 @@ impl XwmHandler for State {
         _reorder: Option<Reorder>,
     ) {
         // We only allow floating X11 windows to resize themselves. Nothing else
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
 
         if let Some(mapped) = shell
             .element_for_surface(&window)
@@ -880,7 +863,7 @@ impl XwmHandler for State {
         above: Option<X11Window>,
     ) {
         if window.is_override_redirect() {
-            let mut shell = self.common.shell.write().unwrap();
+            let mut shell = self.common.shell.write();
             if let Some(id) = above {
                 let or_windows = &mut shell.override_redirect_windows;
                 if let Some(own_pos) = or_windows.iter().position(|or| or == &window) {
@@ -917,7 +900,7 @@ impl XwmHandler for State {
         resize_edge: smithay::xwayland::xwm::ResizeEdge,
     ) {
         if let Some(wl_surface) = window.wl_surface() {
-            let mut shell = self.common.shell.write().unwrap();
+            let mut shell = self.common.shell.write();
             let seat = shell.seats.last_active().clone();
             if let Some((grab, focus)) = shell.resize_request(
                 &wl_surface,
@@ -946,7 +929,7 @@ impl XwmHandler for State {
 
     fn move_request(&mut self, _xwm: XwmId, window: X11Surface, _button: u32) {
         if let Some(wl_surface) = window.wl_surface() {
-            let mut shell = self.common.shell.write().unwrap();
+            let mut shell = self.common.shell.write();
             let seat = shell.seats.last_active().clone();
             if let Some((grab, focus)) = shell.move_request(
                 &wl_surface,
@@ -976,7 +959,7 @@ impl XwmHandler for State {
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.maximize_request(&mapped, &seat, true);
@@ -990,7 +973,7 @@ impl XwmHandler for State {
     }
 
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             shell.unmaximize_request(&mapped);
         } else if let Some(pending) = shell
@@ -1003,7 +986,7 @@ impl XwmHandler for State {
     }
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             if !mapped.is_stack() || mapped.active_window().is_window(&window) {
                 shell.minimize_request(&mapped);
@@ -1012,7 +995,7 @@ impl XwmHandler for State {
     }
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.unminimize_request(&mapped, &seat);
@@ -1026,7 +1009,7 @@ impl XwmHandler for State {
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             if let Some((output, handle)) = shell
@@ -1056,7 +1039,7 @@ impl XwmHandler for State {
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             if let Some(workspace) = shell.space_for_mut(&mapped) {
                 let (window, _) = mapped
@@ -1082,14 +1065,7 @@ impl XwmHandler for State {
         mime_type: String,
         fd: OwnedFd,
     ) {
-        let seat = self
-            .common
-            .shell
-            .read()
-            .unwrap()
-            .seats
-            .last_active()
-            .clone();
+        let seat = self.common.shell.read().seats.last_active().clone();
         match selection {
             SelectionTarget::Clipboard => {
                 if let Err(err) = request_data_device_client_selection(&seat, mime_type, fd) {
@@ -1117,14 +1093,7 @@ impl XwmHandler for State {
     fn new_selection(&mut self, xwm: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         trace!(?selection, ?mime_types, "Got Selection from Xwayland",);
 
-        let seat = self
-            .common
-            .shell
-            .read()
-            .unwrap()
-            .seats
-            .last_active()
-            .clone();
+        let seat = self.common.shell.read().seats.last_active().clone();
         match selection {
             SelectionTarget::Clipboard => {
                 set_data_device_selection(&self.common.display_handle, &seat, mime_types, xwm)
@@ -1136,7 +1105,7 @@ impl XwmHandler for State {
     }
 
     fn cleared_selection(&mut self, xwm: XwmId, selection: SelectionTarget) {
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
         for seat in shell.seats.iter() {
             match selection {
                 SelectionTarget::Clipboard => {
