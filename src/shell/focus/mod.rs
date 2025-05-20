@@ -115,6 +115,13 @@ impl Shell {
                 .unwrap()
                 .element_for_surface(window)
                 .cloned(),
+            Some(KeyboardFocusTarget::LayerSurface(layer)) => {
+                // Do not focus layer surfaces with KeyboardInteractivity::None
+                if !layer.can_receive_keyboard_focus() {
+                    return;
+                }
+                None
+            }
             _ => None,
         };
 
