@@ -12,7 +12,7 @@ impl A11yHandler for State {
     }
 
     fn request_screen_magnifier(&mut self, enabled: bool) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
 
         if shell
             .zoom_state()

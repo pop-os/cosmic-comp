@@ -39,7 +39,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
         serial: Serial,
         time: u32,
     ) {
-        if !matches!(&data.common.shell.read().unwrap().overview_mode.active_trigger(), Some(Trigger::KeyboardSwap(_, d)) if d == &self.desc)
+        if !matches!(&data.common.shell.read().overview_mode.active_trigger(), Some(Trigger::KeyboardSwap(_, d)) if d == &self.desc)
         {
             handle.unset_grab(self, data, serial, false);
             return;

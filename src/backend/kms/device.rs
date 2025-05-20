@@ -307,7 +307,7 @@ impl State {
 
         let connectors = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         let mut wl_outputs = Vec::new();
-        let mut w = self.common.shell.read().unwrap().global_space().size.w as u32;
+        let mut w = self.common.shell.read().global_space().size.w as u32;
 
         {
             for (conn, maybe_crtc) in connectors {
@@ -380,7 +380,7 @@ impl State {
             if let Some(device) = backend.drm_devices.get_mut(&drm_node) {
                 let changes = device.enumerate_surfaces()?;
 
-                let mut w = self.common.shell.read().unwrap().global_space().size.w as u32;
+                let mut w = self.common.shell.read().global_space().size.w as u32;
                 for conn in changes.removed {
                     // contains conns with updated crtcs, just drop the surface and re-create
                     if let Some(pos) = device
@@ -577,7 +577,7 @@ impl Device {
         position: (u32, u32),
         evlh: &LoopHandle<'static, State>,
         screen_filter: ScreenFilter,
-        shell: Arc<RwLock<Shell>>,
+        shell: Arc<parking_lot::RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
     ) -> Result<(Output, bool)> {
         let output = self
@@ -676,7 +676,7 @@ impl Device {
         flags: FrameFlags,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         for surface in self.surfaces.values_mut() {
             surface.allow_frame_flags(flag, flags);
@@ -733,7 +733,7 @@ impl Device {
         flag: bool,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         self.allow_frame_flags(
             flag,
@@ -749,7 +749,7 @@ impl Device {
         flag: bool,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         self.allow_frame_flags(
             flag,

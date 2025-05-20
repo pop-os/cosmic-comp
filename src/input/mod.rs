@@ -170,7 +170,7 @@ impl State {
         use smithay::backend::input::Event;
         match event {
             InputEvent::DeviceAdded { device } => {
-                let shell = self.common.shell.read().unwrap();
+                let shell = self.common.shell.read();
                 let seat = shell.seats.last_active();
                 let led_state = seat.get_keyboard().unwrap().led_state();
                 seat.devices().add_device(&device, led_state);
@@ -182,7 +182,7 @@ impl State {
                 }
             }
             InputEvent::DeviceRemoved { device } => {
-                for seat in &mut self.common.shell.read().unwrap().seats.iter() {
+                for seat in &mut self.common.shell.read().seats.iter() {
                     let devices = seat.devices();
                     if devices.has_device(&device) {
                         devices.remove_device(&device);
@@ -205,7 +205,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -305,7 +304,7 @@ impl State {
             InputEvent::PointerMotion { event, .. } => {
                 use smithay::backend::input::PointerMotionEvent;
 
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let current_output = seat.active_output();
@@ -389,7 +388,7 @@ impl State {
                         }
                         //If the pointer isn't grabbed, we should check if the focused element should be updated
                     } else if self.common.config.cosmic_conf.focus_follows_cursor {
-                        let shell = self.common.shell.read().unwrap();
+                        let shell = self.common.shell.read();
                         let old_keyboard_target =
                             State::element_under(original_position, &current_output, &*shell);
                         let new_keyboard_target = State::element_under(position, &output, &*shell);
@@ -558,7 +557,7 @@ impl State {
                         });
                     }
 
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     shell.update_pointer_position(position.to_local(&output), &output);
                     shell.update_focal_point(
                         &seat,
@@ -604,7 +603,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -619,12 +617,9 @@ impl State {
                         )
                         .as_global();
                     let serial = SERIAL_COUNTER.next_serial();
-                    let under = State::surface_under(
-                        position,
-                        &output,
-                        &mut *self.common.shell.write().unwrap(),
-                    )
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                    let under =
+                        State::surface_under(position, &output, &mut *self.common.shell.write())
+                            .map(|(target, pos)| (target, pos.as_logical()));
 
                     let ptr = seat.get_pointer().unwrap();
                     ptr.motion(
@@ -638,7 +633,7 @@ impl State {
                     );
                     ptr.frame(self);
 
-                    let shell = self.common.shell.read().unwrap();
+                    let shell = self.common.shell.read();
                     for session in cursor_sessions_for_output(&*shell, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
                             position.as_logical().to_buffer(
@@ -673,7 +668,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned()
@@ -707,7 +701,7 @@ impl State {
                         let global_position =
                             seat.get_pointer().unwrap().current_location().as_global();
                         let under = {
-                            let shell = self.common.shell.read().unwrap();
+                            let shell = self.common.shell.read();
                             State::element_under(global_position, &output, &shell)
                         };
                         if let Some(target) = under {
@@ -747,8 +741,7 @@ impl State {
                                                 supress_button();
                                                 self.common.event_loop_handle.insert_idle(
                                                     move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
+                                                        let mut shell = state.common.shell.write();
                                                         let res = shell.move_request(
                                                             &surface,
                                                             &seat_clone,
@@ -770,8 +763,7 @@ impl State {
                                                 supress_button();
                                                 self.common.event_loop_handle.insert_idle(
                                                     move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
+                                                        let mut shell = state.common.shell.write();
                                                         let Some(target_elem) =
                                                             shell.element_for_surface(&surface)
                                                         else {
@@ -831,7 +823,7 @@ impl State {
                         }
                     }
                 } else {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     if let Some(Trigger::Pointer(action_button)) =
                         shell.overview_mode().0.active_trigger()
                     {
@@ -882,7 +874,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -953,7 +944,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -980,7 +970,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1053,7 +1042,7 @@ impl State {
 
                         match gesture_state.action {
                             Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
-                                self.common.shell.write().unwrap().update_workspace_delta(
+                                self.common.shell.write().update_workspace_delta(
                                     &seat.active_output(),
                                     gesture_state.delta,
                                 )
@@ -1081,7 +1070,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1099,7 +1087,7 @@ impl State {
                                     } else {
                                         velocity / seat.active_output().geometry().size.h as f64
                                     };
-                                let _ = self.common.shell.write().unwrap().end_workspace_swipe(
+                                let _ = self.common.shell.write().end_workspace_swipe(
                                     &seat.active_output(),
                                     norm_velocity,
                                     &mut self.common.workspace_state.update(),
@@ -1127,7 +1115,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1150,7 +1137,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1173,7 +1159,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1196,7 +1181,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1219,7 +1203,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1239,7 +1222,7 @@ impl State {
             }
 
             InputEvent::TouchDown { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1271,7 +1254,7 @@ impl State {
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1301,7 +1284,7 @@ impl State {
                 }
             }
             InputEvent::TouchUp { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(Trigger::Touch(slot)) = shell.overview_mode().0.active_trigger() {
                     if *slot == event.slot() {
                         shell.set_overview_mode(None, self.common.event_loop_handle.clone());
@@ -1329,7 +1312,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1344,7 +1326,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1356,7 +1337,7 @@ impl State {
             }
 
             InputEvent::TabletToolAxis { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1421,7 +1402,7 @@ impl State {
                 }
             }
             InputEvent::TabletToolProximity { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1480,7 +1461,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1503,7 +1483,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1533,7 +1512,7 @@ impl State {
         handle: KeysymHandle<'_>,
         serial: Serial,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
 
         let keyboard = seat.get_keyboard().unwrap();
         let pointer = seat.get_pointer().unwrap();

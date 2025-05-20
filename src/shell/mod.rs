@@ -1309,7 +1309,7 @@ pub struct InvalidWorkspaceIndex;
 
 impl Common {
     pub fn add_output(&mut self, output: &Output) {
-        let mut shell = self.shell.write().unwrap();
+        let mut shell = self.shell.write();
         shell
             .workspaces
             .add_output(output, &mut self.workspace_state.update());
@@ -1333,7 +1333,7 @@ impl Common {
     }
 
     pub fn remove_output(&mut self, output: &Output) {
-        let mut shell = self.shell.write().unwrap();
+        let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
         shell_ref.workspaces.remove_output(
             output,
@@ -1351,7 +1351,7 @@ impl Common {
             return;
         }
 
-        let mut shell = self.shell.write().unwrap();
+        let mut shell = self.shell.write();
         shell
             .workspaces
             .migrate_workspace(from, to, handle, &mut self.workspace_state.update());
@@ -1360,7 +1360,7 @@ impl Common {
     }
 
     pub fn update_config(&mut self) {
-        let mut shell = self.shell.write().unwrap();
+        let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
         shell_ref.active_hint = self.config.cosmic_conf.active_hint;
         if let Some(zoom_state) = shell_ref.zoom_state.as_mut() {
@@ -1388,7 +1388,7 @@ impl Common {
     pub fn refresh(&mut self) {
         self.xdg_activation_state
             .retain_tokens(|_, data| data.timestamp.elapsed() < ACTIVATION_TOKEN_EXPIRE_TIME);
-        self.shell.write().unwrap().refresh(
+        self.shell.write().refresh(
             &self.xdg_activation_state,
             &mut self.workspace_state.update(),
         );
@@ -1410,7 +1410,7 @@ impl Common {
 
     pub fn on_commit(&mut self, surface: &WlSurface) {
         {
-            let shell = self.shell.read().unwrap();
+            let shell = self.shell.read();
 
             for seat in shell.seats.iter() {
                 if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {

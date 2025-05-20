@@ -46,7 +46,7 @@ impl State {
     ) {
         // TODO: Detect if started from login manager or tty, and only allow
         // `Terminate` if it will return to login manager.
-        if self.common.shell.read().unwrap().session_lock.is_some()
+        if self.common.shell.read().session_lock.is_some()
             && !matches!(
                 action,
                 Action::Shortcut(shortcuts::Action::Terminate)
@@ -65,7 +65,7 @@ impl State {
             }
             Action::Private(PrivateAction::Escape) => {
                 {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     shell.set_overview_mode(None, self.common.event_loop_handle.clone());
                     shell.set_resize_mode(
                         None,
@@ -88,13 +88,11 @@ impl State {
                     self.common
                         .shell
                         .write()
-                        .unwrap()
                         .resize(seat, direction, edge.into());
                 } else {
                     self.common
                         .shell
                         .write()
-                        .unwrap()
                         .finish_resize(direction, edge.into());
                 }
             }
@@ -107,7 +105,7 @@ impl State {
         match action {
             SwipeAction::NextWorkspace => {
                 let _ = to_next_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut *self.common.shell.write(),
                     &seat,
                     true,
                     &mut self.common.workspace_state.update(),
@@ -115,7 +113,7 @@ impl State {
             }
             SwipeAction::PrevWorkspace => {
                 let _ = to_previous_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut *self.common.shell.write(),
                     &seat,
                     true,
                     &mut self.common.workspace_state.update(),
@@ -143,7 +141,7 @@ impl State {
 
             #[cfg(feature = "debug")]
             Action::Debug => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 shell.debug_active = !shell.debug_active;
                 for mapped in shell.workspaces.spaces().flat_map(|w| w.mapped()) {
                     mapped.set_debug(shell.debug_active);
@@ -157,11 +155,7 @@ impl State {
 
             Action::Close => {
                 if let Some(focus_target) = seat.get_keyboard().unwrap().current_focus() {
-                    self.common
-                        .shell
-                        .read()
-                        .unwrap()
-                        .close_focused(&focus_target);
+                    self.common.shell.read().close_focused(&focus_target);
                 }
             }
 
@@ -171,7 +165,7 @@ impl State {
                     0 => 9,
                     x => x - 1,
                 };
-                let _ = self.common.shell.write().unwrap().activate(
+                let _ = self.common.shell.write().activate(
                     &current_output,
                     workspace as usize,
                     WorkspaceDelta::new_shortcut(),
@@ -181,7 +175,7 @@ impl State {
 
             Action::LastWorkspace => {
                 let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.workspaces.len(&current_output).saturating_sub(1);
                 let _ = shell.activate(
                     &current_output,
@@ -205,7 +199,7 @@ impl State {
                 }
 
                 let next = to_next_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut *self.common.shell.write(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
@@ -251,7 +245,7 @@ impl State {
                 }
 
                 let previous = to_previous_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut *self.common.shell.write(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
@@ -293,7 +287,7 @@ impl State {
                     Action::MoveToWorkspace(x) | Action::SendToWorkspace(x) => x - 1,
                     _ => unreachable!(),
                 };
-                let res = self.common.shell.write().unwrap().move_current_window(
+                let res = self.common.shell.write().move_current_window(
                     seat,
                     &focused_output,
                     (&focused_output, Some(workspace as usize)),
@@ -316,7 +310,7 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.workspaces.len(&focused_output).saturating_sub(1);
                 let res = shell.move_current_window(
                     seat,
@@ -356,7 +350,7 @@ impl State {
                 };
 
                 let res = {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     shell
                         .workspaces
                         .active_num(&focused_output)
@@ -440,7 +434,7 @@ impl State {
                 };
 
                 let res = {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     shell
                         .workspaces
                         .active_num(&focused_output)
@@ -508,7 +502,7 @@ impl State {
 
             Action::SwitchOutput(direction) => {
                 let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
 
                 let next_output = shell.next_output(&current_output, direction).cloned();
 
@@ -603,7 +597,7 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let next_output = shell.next_output(&focused_output, direction).cloned();
 
                 if let Some(next_output) = next_output {
@@ -667,7 +661,7 @@ impl State {
             Action::MigrateWorkspaceToOutput(direction) => {
                 let active_output = seat.active_output();
                 let (active, next_output) = {
-                    let shell = self.common.shell.read().unwrap();
+                    let shell = self.common.shell.read();
 
                     (
                         shell.active_space(&active_output).unwrap().handle,
@@ -692,7 +686,7 @@ impl State {
             }
 
             Action::Focus(focus) => {
-                let result = self.common.shell.read().unwrap().next_focus(focus, seat);
+                let result = self.common.shell.read().next_focus(focus, seat);
 
                 match result {
                     FocusResult::None => {
@@ -706,7 +700,7 @@ impl State {
 
                         if let Some(direction) = dir {
                             if let Some(last_mod_serial) = seat.last_modifier_change() {
-                                let mut shell = self.common.shell.write().unwrap();
+                                let mut shell = self.common.shell.write();
                                 if !shell
                                     .previous_workspace_idx
                                     .as_ref()
@@ -761,12 +755,11 @@ impl State {
                     .common
                     .shell
                     .write()
-                    .unwrap()
                     .move_current_element(direction, seat);
                 match res {
                     MoveResult::MoveFurther(_move_further) => {
                         if let Some(last_mod_serial) = seat.last_modifier_change() {
-                            let mut shell = self.common.shell.write().unwrap();
+                            let mut shell = self.common.shell.write();
                             if !shell
                                 .previous_workspace_idx
                                 .as_ref()
@@ -812,7 +805,7 @@ impl State {
                     }
                     _ => {
                         let current_output = seat.active_output();
-                        let mut shell = self.common.shell.write().unwrap();
+                        let mut shell = self.common.shell.write();
                         let workspace = shell.active_space(&current_output).unwrap();
                         if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
                             if workspace.is_tiled(focused_window) {
@@ -830,7 +823,7 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
 
                 let workspace = shell.active_space_mut(&focused_output).unwrap();
                 if workspace.get_fullscreen().is_some() {
@@ -843,7 +836,7 @@ impl State {
                         let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
                         drop(shell);
                         keyboard_handle.set_grab(self, grab, serial);
-                        let mut shell = self.common.shell.write().unwrap();
+                        let mut shell = self.common.shell.write();
                         shell.set_overview_mode(
                             Some(Trigger::KeyboardSwap(pattern, descriptor)),
                             self.common.event_loop_handle.clone(),
@@ -856,7 +849,7 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&focused_output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
                 let focused_window = focus_stack.last().cloned();
@@ -869,7 +862,7 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space(&focused_output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
                 let focused_window = focus_stack.last().cloned();
@@ -878,7 +871,7 @@ impl State {
                 }
             }
 
-            Action::Resizing(direction) => self.common.shell.write().unwrap().set_resize_mode(
+            Action::Resizing(direction) => self.common.shell.write().set_resize_mode(
                 Some((pattern, direction)),
                 &self.common.config,
                 self.common.event_loop_handle.clone(),
@@ -887,14 +880,14 @@ impl State {
             // rather than the output that has keyboard focus
             Action::ToggleOrientation => {
                 let output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.tiling_layer.update_orientation(None, &seat);
             }
 
             Action::Orientation(orientation) => {
                 let output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace
                     .tiling_layer
@@ -902,12 +895,7 @@ impl State {
             }
 
             Action::ToggleStacking => {
-                let res = self
-                    .common
-                    .shell
-                    .write()
-                    .unwrap()
-                    .toggle_stacking_focused(seat);
+                let res = self.common.shell.write().toggle_stacking_focused(seat);
                 if let Some(new_focus) = res {
                     Shell::set_focus(self, Some(&new_focus), seat, Some(serial), false);
                 }
@@ -922,7 +910,7 @@ impl State {
                     self.common.config.cosmic_conf.autotile = autotile;
 
                     {
-                        let mut shell = self.common.shell.write().unwrap();
+                        let mut shell = self.common.shell.write();
                         let shell_ref = &mut *shell;
                         shell_ref.workspaces.update_autotile(
                             self.common.config.cosmic_conf.autotile,
@@ -938,7 +926,7 @@ impl State {
                     });
                 } else {
                     let output = seat.active_output();
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     let workspace = shell.workspaces.active_mut(&output).unwrap();
                     let mut guard = self.common.workspace_state.update();
                     workspace.toggle_tiling(seat, &mut guard);
@@ -949,17 +937,13 @@ impl State {
                 let Some(output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.toggle_floating_window_focused(seat);
             }
 
             Action::ToggleSticky => {
-                self.common
-                    .shell
-                    .write()
-                    .unwrap()
-                    .toggle_sticky_current(seat);
+                self.common.shell.write().toggle_sticky_current(seat);
             }
 
             // Gets the configured command for a given system action.
@@ -991,7 +975,7 @@ impl State {
     }
 
     pub fn spawn_command(&mut self, command: String) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
 
         let (token, data) = self.common.xdg_activation_state.create_external_token(None);
         let (token, data) = (token.clone(), data.clone());
@@ -1034,7 +1018,7 @@ impl State {
 
     pub fn update_zoom(&mut self, seat: &Seat<State>, change: f64, animate: bool) {
         let output = seat.active_output();
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         let (zoom_seat, current_level) = shell
             .zoom_state()
             .map(|state| (state.current_seat(), state.current_level(&output)))

@@ -136,7 +136,7 @@ pub struct SurfaceThreadState {
     screen_filter: ScreenFilter,
     postprocess_textures: HashMap<DrmNode, PostprocessState>,
 
-    shell: Arc<RwLock<Shell>>,
+    shell: Arc<parking_lot::RwLock<Shell>>,
 
     loop_handle: LoopHandle<'static, Self>,
     clock: Clock<Monotonic>,
@@ -233,7 +233,7 @@ impl Surface {
         target_node: DrmNode,
         evlh: &LoopHandle<'static, State>,
         screen_filter: ScreenFilter,
-        shell: Arc<RwLock<Shell>>,
+        shell: Arc<parking_lot::RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
     ) -> Result<Self> {
         let (tx, rx) = channel::<ThreadCommand>();
@@ -471,7 +471,7 @@ fn surface_thread(
     output: Output,
     primary_node: Arc<RwLock<Option<DrmNode>>>,
     target_node: DrmNode,
-    shell: Arc<RwLock<Shell>>,
+    shell: Arc<parking_lot::RwLock<Shell>>,
     active: Arc<AtomicBool>,
     screen_filter: ScreenFilter,
     thread_sender: Sender<SurfaceCommand>,
@@ -839,7 +839,7 @@ impl SurfaceThreadState {
             QueueState::WaitingForEstimatedVBlankAndQueued { .. } => unreachable!(),
         };
 
-        if redraw_needed || self.shell.read().unwrap().animations_going() {
+        if redraw_needed || self.shell.read().animations_going() {
             let vblank_frame = tracy_client::Client::running()
                 .unwrap()
                 .non_continuous_frame(self.vblank_frame_name);
@@ -866,7 +866,7 @@ impl SurfaceThreadState {
 
         self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
 
-        if force || self.shell.read().unwrap().animations_going() {
+        if force || self.shell.read().animations_going() {
             self.queue_redraw(false);
         } else {
             self.send_frame_callbacks();
@@ -962,7 +962,7 @@ impl SurfaceThreadState {
                 .as_ref()
                 .unwrap_or(&self.target_node),
             &self.target_node,
-            &*self.shell.read().unwrap(),
+            &*self.shell.read(),
         );
 
         let mut renderer = if render_node != self.target_node {
@@ -979,7 +979,7 @@ impl SurfaceThreadState {
         let mut remove_frame_flags = FrameFlags::empty();
 
         let has_active_fullscreen = {
-            let shell = self.shell.read().unwrap();
+            let shell = self.shell.read();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
             if let Some((_, workspace)) = shell.workspaces.active(output) {
                 workspace.get_fullscreen().is_some()
@@ -1416,7 +1416,6 @@ impl SurfaceThreadState {
                     Some((
                         self.shell
                             .read()
-                            .unwrap()
                             .take_presentation_feedback(&self.output, &frame_result.states),
                         rx,
                         estimated_presentation,
