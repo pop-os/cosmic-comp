@@ -99,6 +99,7 @@ impl Shell {
     /// Set the keyboard focus to the given target
     /// Note: `update_cursor` is used to determine whether to update the pointer location if cursor_follows_focus is enabled
     /// if the focus change was due to a pointer event, this should be set to false
+    #[profiling::function]
     pub fn set_focus(
         state: &mut State,
         target: Option<&KeyboardFocusTarget>,
@@ -224,6 +225,7 @@ impl Shell {
 }
 
 /// Internal, used to ensure that ActiveFocus, KeyboardFocusTarget, and FocusedOutput are all in sync
+#[profiling::function]
 fn update_focus_state(
     seat: &Seat<State>,
     target: Option<&KeyboardFocusTarget>,
@@ -327,6 +329,7 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
 }
 
 impl Common {
+    #[profiling::function]
     pub fn refresh_focus(state: &mut State) {
         let seats = state
             .common

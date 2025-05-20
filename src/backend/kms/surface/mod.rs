@@ -725,6 +725,7 @@ impl SurfaceThreadState {
         //self.software_api.as_mut().remove_node(node);
     }
 
+    #[profiling::function]
     fn on_vblank(&mut self, metadata: Option<DrmEventMetadata>) {
         let Some(compositor) = self.compositor.as_mut() else {
             return;
@@ -851,6 +852,7 @@ impl SurfaceThreadState {
         }
     }
 
+    #[profiling::function]
     fn on_estimated_vblank(&mut self, force: bool) {
         match mem::replace(&mut self.state, QueueState::Idle) {
             QueueState::Idle => unreachable!(),
@@ -949,6 +951,7 @@ impl SurfaceThreadState {
         }
     }
 
+    #[profiling::function]
     fn redraw(&mut self, estimated_presentation: Duration) -> Result<()> {
         let Some(compositor) = self.compositor.as_mut() else {
             return Ok(());
@@ -1826,6 +1829,7 @@ fn source_node_for_surface(w: &WlSurface) -> Option<DrmNode> {
 
 // TODO: Introduce can_shared_dmabuf_framebuffer for cases where we might select another gpu
 //  and composite on target if not possible to finally get rid of "primary"
+#[profiling::function]
 fn render_node_for_output(
     output: &Output,
     primary_node: &DrmNode,

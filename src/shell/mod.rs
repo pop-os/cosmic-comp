@@ -1408,6 +1408,7 @@ impl Common {
         self.idle_notifier_state.set_is_inhibited(is_inhibited);
     }
 
+    #[profiling::function]
     pub fn on_commit(&mut self, surface: &WlSurface) {
         {
             let shell = self.shell.read();

@@ -317,6 +317,7 @@ impl Common {
         }
     }
 
+    #[profiling::function]
     pub fn xwayland_notify_key_event(
         &mut self,
         sym: Keysym,
@@ -400,6 +401,7 @@ impl Common {
         }
     }
 
+    #[profiling::function]
     pub fn xwayland_notify_pointer_button_event(
         &mut self,
         button: u32,
@@ -449,6 +451,7 @@ impl Common {
         }
     }
 
+    #[profiling::function]
     pub fn update_x11_stacking_order(&mut self) {
         let shell = self.shell.read();
         let active_output = shell.seats.last_active().active_output();

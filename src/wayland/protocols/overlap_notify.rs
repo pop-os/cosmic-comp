@@ -71,6 +71,7 @@ impl OverlapNotifyState {
         self.global.clone()
     }
 
+    #[profiling::function]
     pub fn refresh<D, W>(state: &mut D)
     where
         D: GlobalDispatch<ZcosmicOverlapNotifyV1, OverlapNotifyGlobalData>
