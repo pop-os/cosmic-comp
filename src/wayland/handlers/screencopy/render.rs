@@ -209,7 +209,7 @@ pub fn render_workspace_to_buffer(
     frame: Frame,
     handle: WorkspaceHandle,
 ) {
-    let shell = state.common.shell.read().unwrap();
+    let shell = state.common.shell.read();
     let Some(workspace) = shell.workspaces.space_for_handle(&handle) else {
         return;
     };
@@ -509,7 +509,7 @@ pub fn render_window_to_buffer(
                 .map(Into::<WindowCaptureElement<R>>::into),
         );
 
-        let shell = common.shell.read().unwrap();
+        let shell = common.shell.read();
         let seat = shell.seats.last_active().clone();
         let location = if let Some(mapped) = shell.element_for_surface(window) {
             mapped.cursor_position(&seat).and_then(|mut p| {

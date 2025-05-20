@@ -162,7 +162,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // trigger routines
-        let clients = state.common.shell.write().unwrap().update_animations();
+        let clients = state.common.shell.write().update_animations();
         {
             let dh = state.common.display_handle.clone();
             for client in clients.values() {
@@ -173,7 +173,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         refresh(state);
 
         {
-            let shell = state.common.shell.read().unwrap();
+            let shell = state.common.shell.read();
             if shell.animations_going() {
                 for output in shell.outputs().cloned().collect::<Vec<_>>().into_iter() {
                     state.backend.schedule_render(&output);

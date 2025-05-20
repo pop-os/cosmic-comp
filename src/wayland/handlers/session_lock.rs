@@ -18,7 +18,7 @@ impl SessionLockHandler for State {
     }
 
     fn lock(&mut self, locker: SessionLocker) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
 
         // Reject lock if sesion lock exists and is still valid
         if let Some(session_lock) = shell.session_lock.as_ref() {
@@ -45,7 +45,7 @@ impl SessionLockHandler for State {
     }
 
     fn unlock(&mut self) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         shell.session_lock = None;
 
         for output in shell.outputs() {
@@ -54,7 +54,7 @@ impl SessionLockHandler for State {
     }
 
     fn new_surface(&mut self, lock_surface: LockSurface, wl_output: WlOutput) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(session_lock) = &mut shell.session_lock {
             if let Some(output) = Output::from_resource(&wl_output) {
                 lock_surface.with_pending_state(|states| {

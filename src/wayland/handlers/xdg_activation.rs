@@ -43,7 +43,7 @@ impl XdgActivationHandler for State {
         {
             if let Some(seat) = data.serial.and_then(|(_, seat)| Seat::from_resource(&seat)) {
                 let output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 let handle = workspace.handle;
                 data.user_data
@@ -86,7 +86,7 @@ impl XdgActivationHandler for State {
 
         if valid {
             let output = seat.active_output();
-            let mut shell = self.common.shell.write().unwrap();
+            let mut shell = self.common.shell.write();
             let workspace = shell.active_space_mut(&output).unwrap();
             let handle = workspace.handle;
             data.user_data
@@ -107,7 +107,7 @@ impl XdgActivationHandler for State {
         surface: WlSurface,
     ) {
         if let Some(context) = token_data.user_data.get::<ActivationContext>() {
-            let mut shell = self.common.shell.write().unwrap();
+            let mut shell = self.common.shell.write();
             if let Some(element) = shell.element_for_surface(&surface).cloned() {
                 match context {
                     ActivationContext::UrgentOnly => {

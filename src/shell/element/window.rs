@@ -441,7 +441,7 @@ impl Program for CosmicWindowInternal {
                 if let Some((seat, serial)) = last_seat.cloned() {
                     if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                         loop_handle.insert_idle(move |state| {
-                            let res = state.common.shell.write().unwrap().move_request(
+                            let res = state.common.shell.write().move_request(
                                 &surface,
                                 &seat,
                                 serial,
@@ -467,7 +467,7 @@ impl Program for CosmicWindowInternal {
             Message::Minimize => {
                 if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                             shell.minimize_request(&mapped)
                         }
@@ -477,7 +477,7 @@ impl Program for CosmicWindowInternal {
             Message::Maximize => {
                 if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                             let seat = shell.seats.last_active().clone();
                             shell.maximize_toggle(&mapped, &seat)
@@ -490,7 +490,7 @@ impl Program for CosmicWindowInternal {
                 if let Some((seat, serial)) = last_seat.cloned() {
                     if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                         loop_handle.insert_idle(move |state| {
-                            let shell = state.common.shell.read().unwrap();
+                            let shell = state.common.shell.read();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                                 let position = if let Some((output, set)) =
                                     shell.workspaces.sets.iter().find(|(_, set)| {
@@ -763,7 +763,7 @@ impl PointerTarget<State> for CosmicWindow {
                     return;
                 };
                 self.0.loop_handle().insert_idle(move |state| {
-                    let res = state.common.shell.write().unwrap().resize_request(
+                    let res = state.common.shell.write().resize_request(
                         &surface,
                         &seat,
                         serial,

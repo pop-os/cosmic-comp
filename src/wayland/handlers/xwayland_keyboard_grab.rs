@@ -12,7 +12,6 @@ impl XWaylandKeyboardGrabHandler for State {
             .common
             .shell
             .read()
-            .unwrap()
             .workspaces
             .spaces()
             .find_map(|x| x.element_for_surface(surface).cloned())?;

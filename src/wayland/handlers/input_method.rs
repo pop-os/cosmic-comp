@@ -27,7 +27,6 @@ impl InputMethodHandler for State {
         self.common
             .shell
             .read()
-            .unwrap()
             .element_for_surface(parent)
             .map(|e| e.geometry())
             .unwrap_or_default()

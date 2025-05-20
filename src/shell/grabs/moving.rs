@@ -347,7 +347,7 @@ pub struct MoveGrab {
 
 impl MoveGrab {
     fn update_location(&mut self, state: &mut State, location: Point<f64, Logical>) {
-        let mut shell = state.common.shell.write().unwrap();
+        let mut shell = state.common.shell.write();
 
         let Some(current_output) = shell
             .outputs()
@@ -792,7 +792,7 @@ impl Drop for MoveGrab {
                 if grab_state.window.alive() {
                     let window_location =
                         (grab_state.location.to_i32_round() + grab_state.window_offset).as_global();
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
 
                     let workspace_handle = shell.active_space(&output).unwrap().handle;
                     for old_output in window_outputs.iter().filter(|o| *o != &output) {

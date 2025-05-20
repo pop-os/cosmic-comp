@@ -65,6 +65,7 @@ rand = "0.9.0"
 reis = { version = "0.5", features = ["calloop"] }
 # CLI arguments
 clap_lex = "0.7"
+parking_lot = "0.12.3"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
