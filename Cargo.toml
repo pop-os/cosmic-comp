@@ -57,7 +57,7 @@ xcursor = "0.3.3"
 xdg = "^2.1"
 xdg-user = "0.2.1"
 xkbcommon = "0.8"
-zbus = "4.4.0"
+zbus = "5.7.1"
 profiling = { version = "1.0" }
 rustix = { version = "0.38.32", features = ["process"] }
 smallvec = "1.13.2"
