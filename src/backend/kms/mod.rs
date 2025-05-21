@@ -4,11 +4,12 @@ use crate::{
     config::{AdaptiveSync, OutputState, ScreenFilter},
     shell::Shell,
     state::BackendData,
-    utils::prelude::*,
+    utils::{env::dev_var, prelude::*},
 };
 
 use anyhow::{Context, Result};
 use calloop::LoopSignal;
+use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{
     backend::{
@@ -22,13 +23,13 @@ use smithay::{
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{glow::GlowRenderer, multigpu::GpuManager},
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
-        udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
+        udev::{primary_gpu, UdevBackend, UdevEvent},
     },
     output::Output,
     reexports::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
         drm::{
-            control::{crtc, Device as _},
+            control::{connector::Interface, crtc, Device as _},
             Device as _,
         },
         input::{self, Libinput},
@@ -65,9 +66,9 @@ use super::render::{init_shaders, output_elements, CursorMode, CLEAR_COLOR};
 
 #[derive(Debug)]
 pub struct KmsState {
-    pub drm_devices: HashMap<DrmNode, Device>,
+    pub drm_devices: IndexMap<DrmNode, Device>,
     pub input_devices: HashMap<String, input::Device>,
-    pub primary_node: Option<DrmNode>,
+    pub primary_node: Arc<RwLock<Option<DrmNode>>>,
     // Mesa llvmpipe renderer, if supported and there are no render nodes
     pub software_renderer: Option<GlowRenderer>,
     pub api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
@@ -89,24 +90,6 @@ pub fn init_backend(
     // setup input
     let libinput_context = init_libinput(dh, &session, &event_loop.handle())
         .context("Failed to initialize libinput backend")?;
-
-    // get our primary gpu
-    let primary = determine_primary_gpu(session.seat());
-    if let Some(primary) = primary.as_ref() {
-        info!("Using {} as primary gpu for rendering.", primary);
-    }
-
-    let software_renderer = if primary.is_none() {
-        match software_renderer() {
-            Ok(renderer) => Some(renderer),
-            Err(err) => {
-                error!(?err, "Failed to initialize software EGL renderer.");
-                None
-            }
-        }
-    } else {
-        None
-    };
 
     // watch for gpu events
     let udev_dispatcher = init_udev(session.seat(), &event_loop.handle())
@@ -134,10 +117,10 @@ pub fn init_backend(
 
     // finish backend initialization
     state.backend = BackendData::Kms(KmsState {
-        drm_devices: HashMap::new(),
+        drm_devices: IndexMap::new(),
         input_devices: HashMap::new(),
-        primary_node: primary,
-        software_renderer,
+        primary_node: Arc::new(RwLock::new(None)),
+        software_renderer: None,
         api: GpuManager::new(GbmGlowBackend::new()).context("Failed to initialize gpu backend")?,
 
         session,
@@ -146,9 +129,6 @@ pub fn init_backend(
         syncobj_state: None,
     });
 
-    // start x11
-    state.launch_xwayland(primary);
-
     // manually add already present gpus
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
         if let Err(err) = state.device_added(dev, path.into(), dh) {
@@ -156,24 +136,9 @@ pub fn init_backend(
         }
     }
 
-    if !crate::utils::env::bool_var("COSMIC_DISABLE_SYNCOBJ").unwrap_or(false) {
-        let kms = match &mut state.backend {
-            BackendData::Kms(kms) => kms,
-            _ => unreachable!(),
-        };
-        if let Some(primary_node) = kms
-            .primary_node
-            .and_then(|node| node.node_with_type(NodeType::Primary).and_then(|x| x.ok()))
-        {
-            if let Some(device) = kms.drm_devices.get(&primary_node) {
-                let import_device = device.drm.device().device_fd().clone();
-                if supports_syncobj_eventfd(&import_device) {
-                    let syncobj_state = DrmSyncobjState::new::<State>(&dh, import_device);
-                    kms.syncobj_state = Some(syncobj_state);
-                }
-            }
-        }
-    }
+    // start x11
+    let primary = state.backend.kms().primary_node.read().unwrap().clone();
+    state.launch_xwayland(primary);
 
     Ok(())
 }
@@ -217,32 +182,51 @@ fn init_libinput(
     Ok(libinput_context)
 }
 
-fn determine_primary_gpu(seat: String) -> Option<DrmNode> {
-    if let Some(node) = std::env::var("COSMIC_RENDER_DEVICE")
+fn determine_boot_gpu(seat: String) -> Option<DrmNode> {
+    let primary_node = primary_gpu(&seat)
         .ok()
-        .and_then(|x| DrmNode::from_path(x).ok())
-    {
-        Some(node)
-    } else {
-        let primary_node = primary_gpu(&seat)
-            .ok()
-            .flatten()
-            .and_then(|x| DrmNode::from_path(x).ok());
-        primary_node
-            .and_then(|x| x.node_with_type(NodeType::Render).and_then(Result::ok))
-            .or_else(|| {
-                for dev in all_gpus(&seat).expect("Failed to query gpus") {
-                    if let Some(node) = DrmNode::from_path(dev)
-                        .ok()
-                        .and_then(|x| x.node_with_type(NodeType::Render).and_then(Result::ok))
-                    {
-                        return Some(node);
-                    }
-                }
+        .flatten()
+        .and_then(|x| DrmNode::from_path(x).ok());
+    primary_node.and_then(|x| x.node_with_type(NodeType::Render).and_then(Result::ok))
+}
 
-                None
-            })
+fn determine_primary_gpu(
+    drm_devices: &IndexMap<DrmNode, Device>,
+    seat: String,
+) -> Result<Option<DrmNode>> {
+    if let Some(device) = dev_var("COSMIC_RENDER_DEVICE") {
+        if let Some(node) = drm_devices
+            .values()
+            .find_map(|dev| device.matches(&dev.render_node).then_some(dev.render_node))
+        {
+            return Ok(Some(node));
+        }
     }
+
+    // try to find builtin display
+    for dev in drm_devices.values() {
+        if dev.surfaces.values().any(|s| {
+            if let Some(conn_info) = dev.drm.device().get_connector(s.connector, false).ok() {
+                let i = conn_info.interface();
+                i == Interface::EmbeddedDisplayPort || i == Interface::LVDS || i == Interface::DSI
+            } else {
+                false
+            }
+        }) {
+            return Ok(Some(dev.render_node));
+        }
+    }
+
+    // else try to find the boot gpu
+    let boot = determine_boot_gpu(seat);
+    if let Some(boot) = boot {
+        if drm_devices.values().any(|dev| dev.render_node == boot) {
+            return Ok(Some(boot));
+        }
+    }
+
+    // else just take the first
+    Ok(drm_devices.values().next().map(|dev| dev.render_node))
 }
 
 /// Create `GlowRenderer` for `EGL_MESA_device_software` device, if present
@@ -375,6 +359,55 @@ impl State {
 }
 
 impl KmsState {
+    fn select_primary_gpu(&mut self, dh: &DisplayHandle) -> Result<()> {
+        // We don't have to check the allow/blocklist here,
+        // as any disallowed devices won't be in `self.drm_devices`.
+
+        let mut primary_node = self.primary_node.write().unwrap();
+        let _ = primary_node.take(); // if we error don't leave an old node in place
+        *primary_node = determine_primary_gpu(&self.drm_devices, self.session.seat())?;
+
+        if let Some(node) = *primary_node {
+            info!("Using {} as primary gpu for rendering.", node);
+            self.software_renderer.take();
+        } else if self.software_renderer.is_none() {
+            info!("Failed to find a suitable gpu, using software renderingr");
+            self.software_renderer = match software_renderer() {
+                Ok(renderer) => Some(renderer),
+                Err(err) => {
+                    error!(?err, "Failed to initialize software EGL renderer.");
+                    None
+                }
+            };
+        }
+
+        if !crate::utils::env::bool_var("COSMIC_DISABLE_SYNCOBJ").unwrap_or(false) {
+            if let Some(primary_node) = primary_node
+                .as_ref()
+                .and_then(|node| node.node_with_type(NodeType::Primary).and_then(|x| x.ok()))
+            {
+                if let Some(device) = self.drm_devices.get(&primary_node) {
+                    let import_device = device.drm.device().device_fd().clone();
+                    if supports_syncobj_eventfd(&import_device) {
+                        if let Some(state) = self.syncobj_state.as_mut() {
+                            state.update_device(import_device);
+                        } else {
+                            let syncobj_state = DrmSyncobjState::new::<State>(&dh, import_device);
+                            self.syncobj_state = Some(syncobj_state);
+                        }
+                        return Ok(());
+                    }
+                }
+            }
+
+            if let Some(old_state) = self.syncobj_state.take() {
+                dh.remove_global::<State>(old_state.into_global());
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn switch_vt(&mut self, num: i32) -> Result<(), anyhow::Error> {
         self.session.change_vt(num).map_err(Into::into)
     }
@@ -459,7 +492,7 @@ impl KmsState {
         let mut used_devices = HashSet::new();
 
         for device in self.drm_devices.values_mut() {
-            if device.in_use(self.primary_node.as_ref()) {
+            if device.in_use(self.primary_node.read().unwrap().as_ref()) {
                 if device.egl.is_none() {
                     let egl = init_egl(&device.gbm).context("Failed to create EGL context")?;
                     let mut renderer = unsafe {
@@ -495,7 +528,7 @@ impl KmsState {
         }
 
         // trigger re-evaluation... urgh
-        if let Some(primary_node) = self.primary_node.as_ref() {
+        if let Some(primary_node) = self.primary_node.read().unwrap().as_ref() {
             let _ = self.api.single_renderer(primary_node);
         }
 
@@ -654,7 +687,7 @@ impl KmsState {
             if !test_only {
                 for (conn, crtc) in new_pairings {
                     let (output, _) = device.connector_added(
-                        self.primary_node.as_ref(),
+                        self.primary_node.clone(),
                         conn,
                         Some(crtc),
                         (w, 0),

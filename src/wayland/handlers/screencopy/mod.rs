@@ -355,7 +355,10 @@ fn constraints_for_output(output: &Output, backend: &mut BackendData) -> Option<
     };
 
     let mut renderer = backend
-        .offscreen_renderer(|kms| kms.target_node_for_output(&output).or(kms.primary_node))
+        .offscreen_renderer(|kms| {
+            kms.target_node_for_output(&output)
+                .or(*kms.primary_node.read().unwrap())
+        })
         .unwrap();
     Some(constraints_for_renderer(mode, renderer.as_mut()))
 }
@@ -376,7 +379,7 @@ fn constraints_for_toplevel(
             })
             .flatten();
 
-            dma_node.or(kms.primary_node)
+            dma_node.or(*kms.primary_node.read().unwrap())
         })
         .unwrap();
 
