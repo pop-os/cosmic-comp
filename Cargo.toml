@@ -71,6 +71,7 @@ branch = "feature/copy_clone"
 git = "https://github.com/Drakulix/id-tree.git"
 
 [dependencies.smithay]
+version = "0.6.0"
 default-features = false
 features = [
   "backend_drm",
@@ -89,14 +90,11 @@ features = [
   "wayland_frontend",
   "xwayland",
 ]
-git = "https://github.com/smithay/smithay"
-rev = "a503d98"
 
 [dependencies.smithay-egui]
+version = "0.1.0"
 features = ["svg"]
-git = "https://github.com/Smithay/smithay-egui.git"
 optional = true
-rev = "e720136"
 
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
@@ -124,5 +122,5 @@ lto = "fat"
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
-[patch."https://github.com/smithay/smithay"]
-smithay = { git = "https://github.com/smithay/smithay//", rev = "c1f13a6" }
+[patch.crates-io]
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "7ad90b5" }
