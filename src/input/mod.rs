@@ -2032,19 +2032,21 @@ impl State {
                         }
                     }
                     Stage::LayerSurface { layer, location } => {
-                        if layer.can_receive_keyboard_focus() {
-                            if under_from_surface_tree(
-                                layer.wl_surface(),
-                                global_pos.as_logical(),
-                                location.as_logical(),
-                                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
-                            )
-                            .is_some()
-                            {
-                                return ControlFlow::Break(Ok(Some(
-                                    KeyboardFocusTarget::LayerSurface(layer),
-                                )));
-                            }
+                        if under_from_surface_tree(
+                            layer.wl_surface(),
+                            global_pos.as_logical(),
+                            location.as_logical(),
+                            WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                        )
+                        .is_some()
+                        {
+                            return ControlFlow::Break(Ok(if layer.can_receive_keyboard_focus() {
+                                Some(KeyboardFocusTarget::LayerSurface(layer))
+                            } else {
+                                // Don't change keyboard focus if in input region of layer shell
+                                // surface, but surface doesn't have keyboard interactivity.
+                                None
+                            }));
                         }
                     }
                     Stage::OverrideRedirect { .. } => {
