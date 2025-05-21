@@ -1056,9 +1056,9 @@ checksum = "1f791803201ab277ace03903de1594460708d2d54df6053f2d9e82f592b19e3b"
 
 [[package]]
 name = "cursor-icon"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96a6ac251f4a2aca6b3f91340350eab87ae57c3f127ffeb585e92bd336717991"
+checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "d3d12"
@@ -4729,7 +4729,7 @@ checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 [[package]]
 name = "smithay"
 version = "0.6.0"
-source = "git+https://github.com/smithay/smithay//?rev=c1f13a6#c1f13a6b9605c9f7009122a7b2b34f210255dac3"
+source = "git+https://github.com/smithay/smithay.git?rev=7ad90b5#7ad90b55df53bf9066211d1e64f276e88c41eb00"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -4758,8 +4758,9 @@ dependencies = [
  "pkg-config",
  "profiling",
  "rand 0.9.1",
- "rustix 0.38.44",
+ "rustix 1.0.7",
  "scopeguard",
+ "sha2",
  "smallvec",
  "tempfile",
  "thiserror 2.0.12",
@@ -4819,7 +4820,8 @@ dependencies = [
 [[package]]
 name = "smithay-egui"
 version = "0.1.0"
-source = "git+https://github.com/Smithay/smithay-egui.git?rev=e720136#e7201366b88e4fb20d0c6618a6cac9acc6299e07"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f69e928bd02c12d7b66ba74fc68b984d77181be4309dd969ed4ef141c150241"
 dependencies = [
  "cgmath",
  "egui",
