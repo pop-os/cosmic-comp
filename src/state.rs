@@ -671,7 +671,7 @@ impl State {
         ClientState {
             compositor_client_state: CompositorClientState::default(),
             advertised_drm_node: match &self.backend {
-                BackendData::Kms(kms_state) => kms_state.primary_node,
+                BackendData::Kms(kms_state) => *kms_state.primary_node.read().unwrap(),
                 _ => None,
             },
             privileged: !enable_wayland_security(),

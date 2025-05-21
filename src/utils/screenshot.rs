@@ -104,7 +104,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             .backend
             .offscreen_renderer(|kms| {
                 advertised_node_for_surface(&wl_surface, &state.common.display_handle)
-                    .or(kms.primary_node)
+                    .or(*kms.primary_node.read().unwrap())
             })
             .with_context(|| "Failed to get renderer for screenshot")
             .and_then(|renderer| match renderer {
