@@ -4,7 +4,7 @@ use crate::{
     backend::render::{output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
     config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState, ScreenFilter},
     shell::Shell,
-    utils::prelude::*,
+    utils::{env::dev_list_var, prelude::*},
     wayland::protocols::screencopy::Frame,
 };
 
@@ -21,7 +21,7 @@ use smithay::{
             compositor::{FrameError, FrameFlags},
             exporter::gbm::GbmFramebufferExporter,
             output::DrmOutputManager,
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode,
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
         },
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         session::Session,
@@ -312,7 +312,7 @@ impl State {
         {
             for (conn, maybe_crtc) in connectors {
                 match device.connector_added(
-                    self.backend.kms().primary_node.as_ref(),
+                    self.backend.kms().primary_node.clone(),
                     conn,
                     maybe_crtc,
                     (w, 0),
@@ -336,7 +336,14 @@ impl State {
 
             // TODO atomic commit all surfaces together and drop surfaces, if it fails due to bandwidth
 
-            self.backend.kms().drm_devices.insert(drm_node, device);
+            let kms = self.backend.kms();
+            let was_empty = kms.drm_devices.is_empty();
+            kms.drm_devices.insert(drm_node, device);
+            if was_empty {
+                if let Err(err) = kms.select_primary_gpu(dh) {
+                    warn!("Failed to determine a new primary gpu: {}", err);
+                }
+            }
         }
 
         self.common
@@ -406,7 +413,7 @@ impl State {
 
                 for (conn, maybe_crtc) in changes.added {
                     match device.connector_added(
-                        backend.primary_node.as_ref(),
+                        backend.primary_node.clone(),
                         conn,
                         maybe_crtc,
                         (w, 0),
@@ -466,7 +473,7 @@ impl State {
         let drm_node = DrmNode::from_dev_id(dev)?;
         let mut outputs_removed = Vec::new();
         let backend = self.backend.kms();
-        if let Some(mut device) = backend.drm_devices.remove(&drm_node) {
+        if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
             if let Some(mut leasing_global) = device.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
@@ -482,6 +489,12 @@ impl State {
                     .dmabuf_state
                     .destroy_global::<State>(dh, socket.dmabuf_global);
                 dh.remove_global::<State>(socket.drm_global);
+            }
+            let was_primary = *backend.primary_node.read().unwrap() == Some(device.render_node);
+            if was_primary {
+                if let Err(err) = backend.select_primary_gpu(dh) {
+                    warn!("Failed to determine a new primary gpu: {}", err);
+                }
             }
         }
         self.common
@@ -558,7 +571,7 @@ impl Device {
 
     pub fn connector_added(
         &mut self,
-        primary_node: Option<&DrmNode>,
+        primary_node: Arc<RwLock<Option<DrmNode>>>,
         conn: connector::Handle,
         maybe_crtc: Option<crtc::Handle>,
         position: (u32, u32),
@@ -623,7 +636,7 @@ impl Device {
                     &output,
                     crtc,
                     conn,
-                    primary_node.copied().unwrap_or(self.render_node),
+                    primary_node,
                     self.dev_node,
                     self.render_node,
                     evlh,

@@ -119,7 +119,7 @@ pub struct Surface {
 pub struct SurfaceThreadState {
     // rendering
     api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
-    primary_node: DrmNode,
+    primary_node: Arc<RwLock<Option<DrmNode>>>,
     target_node: DrmNode,
     active: Arc<AtomicBool>,
     vrr_mode: AdaptiveSync,
@@ -228,7 +228,7 @@ impl Surface {
         output: &Output,
         crtc: crtc::Handle,
         connector: connector::Handle,
-        primary_node: DrmNode,
+        primary_node: Arc<RwLock<Option<DrmNode>>>,
         dev_node: DrmNode,
         target_node: DrmNode,
         evlh: &LoopHandle<'static, State>,
@@ -469,7 +469,7 @@ impl Drop for Surface {
 
 fn surface_thread(
     output: Output,
-    primary_node: DrmNode,
+    primary_node: Arc<RwLock<Option<DrmNode>>>,
     target_node: DrmNode,
     shell: Arc<RwLock<Shell>>,
     active: Arc<AtomicBool>,
@@ -956,7 +956,11 @@ impl SurfaceThreadState {
 
         let render_node = render_node_for_output(
             self.mirroring.as_ref().unwrap_or(&self.output),
-            &self.primary_node,
+            self.primary_node
+                .read()
+                .unwrap()
+                .as_ref()
+                .unwrap_or(&self.target_node),
             &self.target_node,
             &*self.shell.read().unwrap(),
         );
@@ -1821,6 +1825,8 @@ fn source_node_for_surface(w: &WlSurface) -> Option<DrmNode> {
     .flatten()
 }
 
+// TODO: Introduce can_shared_dmabuf_framebuffer for cases where we might select another gpu
+//  and composite on target if not possible to finally get rid of "primary"
 fn render_node_for_output(
     output: &Output,
     primary_node: &DrmNode,

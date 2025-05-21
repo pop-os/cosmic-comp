@@ -337,7 +337,9 @@ pub fn render_workspace_to_buffer(
     let common = &mut state.common;
 
     let renderer = match state.backend.offscreen_renderer(|kms| {
-        let render_node = kms.target_node_for_output(&output).or(kms.primary_node)?;
+        let render_node = kms
+            .target_node_for_output(&output)
+            .or(*kms.primary_node.read().unwrap())?;
         let target_node = get_dmabuf(&buffer)
             .ok()
             .and_then(|dma| dma.node())
@@ -591,7 +593,7 @@ pub fn render_window_to_buffer(
                     })
                     .flatten()
             })
-            .or(kms.primary_node)
+            .or(*kms.primary_node.read().unwrap())
     }) {
         Ok(renderer) => renderer,
         Err(err) => {
@@ -745,7 +747,10 @@ pub fn render_cursor_to_buffer(
     }
 
     let common = &mut state.common;
-    let renderer = match state.backend.offscreen_renderer(|kms| kms.primary_node) {
+    let renderer = match state
+        .backend
+        .offscreen_renderer(|kms| *kms.primary_node.read().unwrap())
+    {
         Ok(renderer) => renderer,
         Err(err) => {
             warn!(?err, "Couldn't use node for screencopy");
