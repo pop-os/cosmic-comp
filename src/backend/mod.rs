@@ -47,7 +47,6 @@ pub fn init_backend_auto(
             .common
             .shell
             .read()
-            .unwrap()
             .outputs()
             .next()
             .with_context(|| "Backend initialized without output")
@@ -68,7 +67,6 @@ pub fn init_backend_auto(
             .common
             .shell
             .write()
-            .unwrap()
             .seats
             .add_seat(initial_seat.clone());
 
@@ -79,7 +77,7 @@ pub fn init_backend_auto(
             .accessibility_zoom
             .start_on_login
         {
-            state.common.shell.write().unwrap().trigger_zoom(
+            state.common.shell.write().trigger_zoom(
                 &initial_seat,
                 None,
                 1.0 + (state.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.),
@@ -117,7 +115,7 @@ pub fn init_backend_auto(
                     .common
                     .startup_done
                     .store(true, std::sync::atomic::Ordering::SeqCst);
-                for output in state.common.shell.read().unwrap().outputs() {
+                for output in state.common.shell.read().outputs() {
                     state.backend.schedule_render(&output);
                 }
             }

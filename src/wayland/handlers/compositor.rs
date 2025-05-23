@@ -173,7 +173,7 @@ impl CompositorHandler for State {
         // handle initial configure events and map windows if necessary
         let mapped = self.send_initial_configure_and_map(surface);
 
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
 
         // schedule a new render
         if let Some(output) = shell.visible_output_for_surface(surface) {
@@ -277,7 +277,7 @@ impl CompositorHandler for State {
 
 impl State {
     fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
 
         if let Some(pending) = shell
             .pending_windows

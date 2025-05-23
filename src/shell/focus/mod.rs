@@ -99,6 +99,7 @@ impl Shell {
     /// Set the keyboard focus to the given target
     /// Note: `update_cursor` is used to determine whether to update the pointer location if cursor_follows_focus is enabled
     /// if the focus change was due to a pointer event, this should be set to false
+    #[profiling::function]
     pub fn set_focus(
         state: &mut State,
         target: Option<&KeyboardFocusTarget>,
@@ -112,7 +113,6 @@ impl Shell {
                 .common
                 .shell
                 .read()
-                .unwrap()
                 .element_for_surface(window)
                 .cloned(),
             _ => None,
@@ -123,17 +123,12 @@ impl Shell {
                 return;
             }
 
-            state
-                .common
-                .shell
-                .write()
-                .unwrap()
-                .append_focus_stack(&mapped, seat);
+            state.common.shell.write().append_focus_stack(&mapped, seat);
         }
 
         update_focus_state(seat, target, state, serial, update_cursor);
 
-        state.common.shell.write().unwrap().update_active();
+        state.common.shell.write().update_active();
     }
 
     pub fn append_focus_stack(&mut self, mapped: &CosmicMapped, seat: &Seat<State>) {
@@ -230,6 +225,7 @@ impl Shell {
 }
 
 /// Internal, used to ensure that ActiveFocus, KeyboardFocusTarget, and FocusedOutput are all in sync
+#[profiling::function]
 fn update_focus_state(
     seat: &Seat<State>,
     target: Option<&KeyboardFocusTarget>,
@@ -242,7 +238,7 @@ fn update_focus_state(
         if should_update_cursor && state.common.config.cosmic_conf.cursor_follows_focus {
             if target.is_some() {
                 //need to borrow mutably for surface under
-                let shell = state.common.shell.read().unwrap();
+                let shell = state.common.shell.read();
                 // get the top left corner of the target element
                 let geometry = shell.focused_geometry(target.unwrap());
                 if let Some(geometry) = geometry {
@@ -292,7 +288,6 @@ fn update_focus_state(
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .get_output_for_focus(seat)
                     .as_ref(),
             )
@@ -334,19 +329,19 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
 }
 
 impl Common {
+    #[profiling::function]
     pub fn refresh_focus(state: &mut State) {
         let seats = state
             .common
             .shell
             .read()
-            .unwrap()
             .seats
             .iter()
             .cloned()
             .collect::<Vec<_>>();
         for seat in &seats {
             {
-                let shell = state.common.shell.read().unwrap();
+                let shell = state.common.shell.read();
                 let focused_output = seat.focused_output();
                 let active_output = seat.active_output();
 
@@ -365,7 +360,7 @@ impl Common {
             update_pointer_focus(state, &seat);
 
             let output = seat.focused_or_active_output();
-            let mut shell = state.common.shell.write().unwrap();
+            let mut shell = state.common.shell.write();
             let last_known_focus = ActiveFocus::get(&seat);
 
             if let Some(target) = last_known_focus {
@@ -454,7 +449,7 @@ impl Common {
             }
         }
 
-        state.common.shell.write().unwrap().update_active()
+        state.common.shell.write().update_active()
     }
 }
 
@@ -582,7 +577,7 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
         let output = seat.active_output();
         let position = pointer.current_location().as_global();
 
-        let mut shell = state.common.shell.write().unwrap();
+        let mut shell = state.common.shell.write();
         let under = State::surface_under(position, &output, &mut shell)
             .map(|(target, pos)| (target, pos.as_logical()));
         drop(shell);

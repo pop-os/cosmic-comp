@@ -118,7 +118,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     process::Child,
-    sync::{atomic::AtomicBool, Arc, Mutex, Once, RwLock},
+    sync::{atomic::AtomicBool, Arc, Mutex, Once},
     time::{Duration, Instant},
 };
 
@@ -195,7 +195,7 @@ pub struct Common {
     pub event_loop_signal: LoopSignal,
 
     pub popups: PopupManager,
-    pub shell: Arc<RwLock<Shell>>,
+    pub shell: Arc<parking_lot::RwLock<Shell>>,
 
     pub clock: Clock<Monotonic>,
     pub startup_done: Arc<AtomicBool>,
@@ -307,7 +307,7 @@ impl BackendData {
         test_only: bool,
         loop_handle: &LoopHandle<'static, State>,
         screen_filter: &ScreenFilter,
-        shell: Arc<RwLock<Shell>>,
+        shell: Arc<parking_lot::RwLock<Shell>>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
         startup_done: Arc<AtomicBool>,
@@ -327,7 +327,7 @@ impl BackendData {
             _ => unreachable!("No backend set when applying output config"),
         }?;
 
-        let mut shell = shell.write().unwrap();
+        let mut shell = shell.write();
         for output in result {
             // apply to Output
             let final_config = output
@@ -561,7 +561,7 @@ impl State {
                 DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
             });
 
-        let shell = Arc::new(RwLock::new(Shell::new(&config)));
+        let shell = Arc::new(parking_lot::RwLock::new(Shell::new(&config)));
 
         let layer_shell_state =
             WlrLayerShellState::new_with_filter::<State, _>(dh, client_is_privileged);
@@ -671,7 +671,7 @@ impl State {
         ClientState {
             compositor_client_state: CompositorClientState::default(),
             advertised_drm_node: match &self.backend {
-                BackendData::Kms(kms_state) => kms_state.primary_node,
+                BackendData::Kms(kms_state) => *kms_state.primary_node.read().unwrap(),
                 _ => None,
             },
             privileged: !enable_wayland_security(),
@@ -695,12 +695,13 @@ fn primary_scanout_output_compare<'a>(
 }
 
 impl Common {
+    #[profiling::function]
     pub fn update_primary_output(
         &self,
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
-        let shell = self.shell.read().unwrap();
+        let shell = self.shell.read();
         let processor = |surface: &WlSurface, states: &SurfaceData| {
             let primary_scanout_output = update_surface_primary_scanout_output(
                 surface,
@@ -796,13 +797,14 @@ impl Common {
         }
     }
 
+    #[profiling::function]
     pub fn send_dmabuf_feedback(
         &self,
         output: &Output,
         render_element_states: &RenderElementStates,
         mut dmabuf_feedback: impl FnMut(DrmNode) -> Option<SurfaceDmabufFeedback>,
     ) {
-        let shell = self.shell.read().unwrap();
+        let shell = self.shell.read();
 
         if let Some(session_lock) = shell.session_lock.as_ref() {
             if let Some(lock_surface) = session_lock.surfaces.get(output) {
@@ -946,6 +948,7 @@ impl Common {
         }
     }
 
+    #[profiling::function]
     pub fn send_frames(&self, output: &Output, sequence: Option<usize>) {
         let time = self.clock.now();
         let should_send = |surface: &WlSurface, states: &SurfaceData| {
@@ -995,7 +998,7 @@ impl Common {
             }
         }
 
-        let shell = self.shell.read().unwrap();
+        let shell = self.shell.read();
 
         if let Some(session_lock) = shell.session_lock.as_ref() {
             if let Some(lock_surface) = session_lock.surfaces.get(output) {

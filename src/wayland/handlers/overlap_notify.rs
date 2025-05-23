@@ -22,7 +22,7 @@ impl OverlapNotifyHandler for State {
             .layer_surfaces()
             .find(|l| l.shell_surface() == &resource)
             .and_then(|l| {
-                let shell = self.common.shell.read().unwrap();
+                let shell = self.common.shell.read();
                 let outputs = shell.outputs();
                 let ret = outputs.map(|o| layer_map_for_output(o)).find_map(|s| {
                     s.layer_for_surface(l.wl_surface(), WindowSurfaceType::ALL)
@@ -34,14 +34,14 @@ impl OverlapNotifyHandler for State {
     }
 
     fn outputs(&self) -> impl Iterator<Item = Output> {
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
         shell.outputs().cloned().collect::<Vec<_>>().into_iter()
     }
 
     fn active_workspaces(
         &self,
     ) -> impl Iterator<Item = crate::wayland::protocols::workspace::WorkspaceHandle> {
-        let shell = self.common.shell.read().unwrap();
+        let shell = self.common.shell.read();
         shell
             .workspaces
             .sets

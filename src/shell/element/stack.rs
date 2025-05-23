@@ -695,7 +695,7 @@ impl CosmicStack {
                 surface.send_configure();
                 if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
                     let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                        let res = state.common.shell.write().unwrap().move_request(
+                        let res = state.common.shell.write().move_request(
                             &surface,
                             &seat,
                             serial,
@@ -837,7 +837,7 @@ impl Program for CosmicStackInternal {
                         .map(Cow::into_owned)
                     {
                         loop_handle.insert_idle(move |state| {
-                            let res = state.common.shell.write().unwrap().move_request(
+                            let res = state.common.shell.write().move_request(
                                 &surface,
                                 &seat,
                                 serial,
@@ -867,12 +867,8 @@ impl Program for CosmicStackInternal {
                 *self.potential_drag.lock().unwrap() = None;
                 if let Some(surface) = self.windows.lock().unwrap().get(idx).cloned() {
                     loop_handle.insert_idle(move |state| {
-                        if let Some(mapped) = state
-                            .common
-                            .shell
-                            .read()
-                            .unwrap()
-                            .element_for_surface(&surface)
+                        if let Some(mapped) =
+                            state.common.shell.read().element_for_surface(&surface)
                         {
                             mapped.stack_ref().unwrap().set_active(&surface);
                         }
@@ -896,7 +892,7 @@ impl Program for CosmicStackInternal {
                         .map(Cow::into_owned)
                     {
                         loop_handle.insert_idle(move |state| {
-                            let shell = state.common.shell.read().unwrap();
+                            let shell = state.common.shell.read();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                                 let position = if let Some((output, set)) =
                                     shell.workspaces.sets.iter().find(|(_, set)| {
@@ -950,7 +946,7 @@ impl Program for CosmicStackInternal {
                         .map(Cow::into_owned)
                     {
                         loop_handle.insert_idle(move |state| {
-                            let shell = state.common.shell.read().unwrap();
+                            let shell = state.common.shell.read();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                                 if let Some(workspace) = shell.space_for(&mapped) {
                                     let Some(elem_geo) = workspace.element_geometry(&mapped) else {
@@ -1407,7 +1403,7 @@ impl PointerTarget<State> for CosmicStack {
                     return;
                 };
                 self.0.loop_handle().insert_idle(move |state| {
-                    let res = state.common.shell.write().unwrap().resize_request(
+                    let res = state.common.shell.write().resize_request(
                         &surface,
                         &seat,
                         serial,
@@ -1481,7 +1477,7 @@ impl PointerTarget<State> for CosmicStack {
                 surface.send_configure();
                 if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
                     let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                        let res = state.common.shell.write().unwrap().move_request(
+                        let res = state.common.shell.write().move_request(
                             &surface,
                             &seat,
                             serial,

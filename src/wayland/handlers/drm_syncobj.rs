@@ -7,12 +7,12 @@ use smithay::{
 };
 
 impl DrmSyncobjHandler for State {
-    fn drm_syncobj_state(&mut self) -> &mut DrmSyncobjState {
+    fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
         let kms = match &mut self.backend {
             BackendData::Kms(kms) => kms,
             _ => unreachable!(),
         };
-        kms.syncobj_state.as_mut().unwrap()
+        kms.syncobj_state.as_mut()
     }
 }
 

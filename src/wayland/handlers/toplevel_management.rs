@@ -34,7 +34,7 @@ impl ToplevelManagementHandler for State {
     ) {
         self.unminimize(dh, window);
 
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         for output in shell.outputs().cloned().collect::<Vec<_>>().iter() {
             let maybe = shell
                 .workspaces
@@ -120,7 +120,7 @@ impl ToplevelManagementHandler for State {
         to_handle: WorkspaceHandle,
         _output: Output,
     ) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mut mapped) = shell.element_for_surface(window).cloned() {
             if let Some(from_workspace) = shell.space_for_mut(&mapped) {
                 // If window is part of a stack, remove it and map it outside the stack
@@ -168,7 +168,7 @@ impl ToplevelManagementHandler for State {
         window: &<Self as ToplevelInfoHandler>::Window,
         output: Option<Output>,
     ) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             if let Some((output, workspace)) =
@@ -195,7 +195,7 @@ impl ToplevelManagementHandler for State {
         _dh: &DisplayHandle,
         window: &<Self as ToplevelInfoHandler>::Window,
     ) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             if let Some(workspace) = shell.space_for_mut(&mapped) {
                 if let Some((layer, previous_workspace)) = workspace.unfullscreen_request(window) {
@@ -219,7 +219,7 @@ impl ToplevelManagementHandler for State {
     }
 
     fn maximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.maximize_request(&mapped, &seat, true);
@@ -227,14 +227,14 @@ impl ToplevelManagementHandler for State {
     }
 
     fn unmaximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             shell.unmaximize_request(&mapped);
         }
     }
 
     fn minimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             if !mapped.is_stack() || &mapped.active_window() == window {
                 shell.minimize_request(&mapped);
@@ -243,7 +243,7 @@ impl ToplevelManagementHandler for State {
     }
 
     fn unminimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.unminimize_request(&mapped, &seat);
@@ -258,7 +258,7 @@ impl ToplevelManagementHandler for State {
             return;
         }
 
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.toggle_sticky(&seat, &mapped);
@@ -274,7 +274,7 @@ impl ToplevelManagementHandler for State {
             return;
         }
 
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             let seat = shell.seats.last_active().clone();
             shell.toggle_sticky(&seat, &mapped);

@@ -16,7 +16,7 @@ use crate::{
 use super::{Item, ResizeEdge};
 
 fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
-    let mut shell = state.common.shell.write().unwrap();
+    let mut shell = state.common.shell.write();
     let seat = shell.seats.last_active().clone();
     if let Some(new_focus) = shell.toggle_stacking(&seat, mapped) {
         std::mem::drop(shell);
@@ -25,7 +25,7 @@ fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
 }
 
 fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
-    let mut shell = state.common.shell.write().unwrap();
+    let mut shell = state.common.shell.write();
     let seat = shell.seats.last_active().clone();
     let (current_handle, output) = {
         let Some(ws) = shell.space_for(mapped) else {
@@ -58,7 +58,7 @@ fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
 }
 
 fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
-    let mut shell = state.common.shell.write().unwrap();
+    let mut shell = state.common.shell.write();
     let seat = shell.seats.last_active().clone();
     let (current_handle, output) = {
         let Some(ws) = shell.space_for(mapped) else {
@@ -114,7 +114,7 @@ pub fn tab_items(
                 )
                 .into();
 
-                let mut shell = state.common.shell.write().unwrap();
+                let mut shell = state.common.shell.write();
                 let seat = shell.seats.last_active().clone();
                 let output = seat.active_output();
                 let workspace = shell.workspaces.active_mut(&output).unwrap();
@@ -198,12 +198,7 @@ pub fn window_items(
             Item::new(fl!("window-menu-minimize"), move |handle| {
                 let mapped = minimize_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    state
-                        .common
-                        .shell
-                        .write()
-                        .unwrap()
-                        .minimize_request(&mapped);
+                    state.common.shell.write().minimize_request(&mapped);
                 });
             })
             .shortcut(config.shortcut_for_action(&Action::Minimize)),
@@ -212,7 +207,7 @@ pub fn window_items(
             Item::new(fl!("window-menu-maximize"), move |handle| {
                 let mapped = maximize_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     shell.maximize_toggle(&mapped, &seat);
                 });
@@ -224,7 +219,7 @@ pub fn window_items(
             Item::new(fl!("window-menu-tiled"), move |handle| {
                 let tile_clone = tile_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     if let Some(ws) = shell.space_for_mut(&tile_clone) {
                         ws.toggle_floating_window(&seat, &tile_clone);
@@ -246,7 +241,7 @@ pub fn window_items(
             let move_clone = move_clone.clone();
             let _ = handle.insert_idle(move |state| {
                 if let Some(surface) = move_clone.wl_surface() {
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     let res = shell.move_request(
                         &surface,
@@ -285,7 +280,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-top"), move |handle| {
                     let resize_clone = resize_top_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
                             &resize_clone,
@@ -320,7 +315,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-left"), move |handle| {
                     let resize_clone = resize_left_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
                             &resize_clone,
@@ -355,7 +350,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-right"), move |handle| {
                     let resize_clone = resize_right_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
                             &resize_clone,
@@ -390,7 +385,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-bottom"), move |handle| {
                     let resize_clone = resize_bottom_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
                             &resize_clone,
@@ -445,7 +440,7 @@ pub fn window_items(
             Item::new(fl!("window-menu-sticky"), move |handle| {
                 let mapped = sticky_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     shell.toggle_sticky(&seat, &mapped);
                 });

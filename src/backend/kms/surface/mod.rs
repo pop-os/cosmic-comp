@@ -119,7 +119,7 @@ pub struct Surface {
 pub struct SurfaceThreadState {
     // rendering
     api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
-    primary_node: DrmNode,
+    primary_node: Arc<RwLock<Option<DrmNode>>>,
     target_node: DrmNode,
     active: Arc<AtomicBool>,
     vrr_mode: AdaptiveSync,
@@ -136,7 +136,7 @@ pub struct SurfaceThreadState {
     screen_filter: ScreenFilter,
     postprocess_textures: HashMap<DrmNode, PostprocessState>,
 
-    shell: Arc<RwLock<Shell>>,
+    shell: Arc<parking_lot::RwLock<Shell>>,
 
     loop_handle: LoopHandle<'static, Self>,
     clock: Clock<Monotonic>,
@@ -228,12 +228,12 @@ impl Surface {
         output: &Output,
         crtc: crtc::Handle,
         connector: connector::Handle,
-        primary_node: DrmNode,
+        primary_node: Arc<RwLock<Option<DrmNode>>>,
         dev_node: DrmNode,
         target_node: DrmNode,
         evlh: &LoopHandle<'static, State>,
         screen_filter: ScreenFilter,
-        shell: Arc<RwLock<Shell>>,
+        shell: Arc<parking_lot::RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
     ) -> Result<Self> {
         let (tx, rx) = channel::<ThreadCommand>();
@@ -469,9 +469,9 @@ impl Drop for Surface {
 
 fn surface_thread(
     output: Output,
-    primary_node: DrmNode,
+    primary_node: Arc<RwLock<Option<DrmNode>>>,
     target_node: DrmNode,
-    shell: Arc<RwLock<Shell>>,
+    shell: Arc<parking_lot::RwLock<Shell>>,
     active: Arc<AtomicBool>,
     screen_filter: ScreenFilter,
     thread_sender: Sender<SurfaceCommand>,
@@ -725,6 +725,7 @@ impl SurfaceThreadState {
         //self.software_api.as_mut().remove_node(node);
     }
 
+    #[profiling::function]
     fn on_vblank(&mut self, metadata: Option<DrmEventMetadata>) {
         let Some(compositor) = self.compositor.as_mut() else {
             return;
@@ -839,18 +840,18 @@ impl SurfaceThreadState {
             QueueState::WaitingForEstimatedVBlankAndQueued { .. } => unreachable!(),
         };
 
-        if redraw_needed || self.shell.read().unwrap().animations_going() {
+        if redraw_needed || self.shell.read().animations_going() {
             let vblank_frame = tracy_client::Client::running()
                 .unwrap()
                 .non_continuous_frame(self.vblank_frame_name);
             self.vblank_frame = Some(vblank_frame);
 
             self.queue_redraw(false);
-        } else {
-            self.send_frame_callbacks();
         }
+        self.send_frame_callbacks();
     }
 
+    #[profiling::function]
     fn on_estimated_vblank(&mut self, force: bool) {
         match mem::replace(&mut self.state, QueueState::Idle) {
             QueueState::Idle => unreachable!(),
@@ -866,11 +867,10 @@ impl SurfaceThreadState {
 
         self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
 
-        if force || self.shell.read().unwrap().animations_going() {
+        if force || self.shell.read().animations_going() {
             self.queue_redraw(false);
-        } else {
-            self.send_frame_callbacks();
         }
+        self.send_frame_callbacks();
     }
 
     fn queue_redraw(&mut self, force: bool) {
@@ -949,6 +949,7 @@ impl SurfaceThreadState {
         }
     }
 
+    #[profiling::function]
     fn redraw(&mut self, estimated_presentation: Duration) -> Result<()> {
         let Some(compositor) = self.compositor.as_mut() else {
             return Ok(());
@@ -956,9 +957,13 @@ impl SurfaceThreadState {
 
         let render_node = render_node_for_output(
             self.mirroring.as_ref().unwrap_or(&self.output),
-            &self.primary_node,
+            self.primary_node
+                .read()
+                .unwrap()
+                .as_ref()
+                .unwrap_or(&self.target_node),
             &self.target_node,
-            &*self.shell.read().unwrap(),
+            &*self.shell.read(),
         );
 
         let mut renderer = if render_node != self.target_node {
@@ -975,7 +980,7 @@ impl SurfaceThreadState {
         let mut remove_frame_flags = FrameFlags::empty();
 
         let has_active_fullscreen = {
-            let shell = self.shell.read().unwrap();
+            let shell = self.shell.read();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
             if let Some((_, workspace)) = shell.workspaces.active(output) {
                 workspace.get_fullscreen().is_some()
@@ -1412,7 +1417,6 @@ impl SurfaceThreadState {
                     Some((
                         self.shell
                             .read()
-                            .unwrap()
                             .take_presentation_feedback(&self.output, &frame_result.states),
                         rx,
                         estimated_presentation,
@@ -1821,6 +1825,9 @@ fn source_node_for_surface(w: &WlSurface) -> Option<DrmNode> {
     .flatten()
 }
 
+// TODO: Introduce can_shared_dmabuf_framebuffer for cases where we might select another gpu
+//  and composite on target if not possible to finally get rid of "primary"
+#[profiling::function]
 fn render_node_for_output(
     output: &Output,
     primary_node: &DrmNode,

@@ -522,7 +522,7 @@ impl PointerGrab<State> for MenuGrab {
             let mut guard = self.elements.lock().unwrap();
             let elements = &mut *guard;
             let event_location = if let Some(output) = self.screen_space_relative.as_ref() {
-                if state.common.shell.read().unwrap().zoom_state().is_some() {
+                if state.common.shell.read().zoom_state().is_some() {
                     event
                         .location
                         .as_global()
@@ -726,7 +726,7 @@ impl TouchGrab<State> for MenuGrab {
             let mut guard = self.elements.lock().unwrap();
             let elements = &mut *guard;
             let event_location = if let Some(output) = self.screen_space_relative.as_ref() {
-                if data.common.shell.read().unwrap().zoom_state().is_some() {
+                if data.common.shell.read().zoom_state().is_some() {
                     event
                         .location
                         .as_global()

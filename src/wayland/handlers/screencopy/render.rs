@@ -209,7 +209,7 @@ pub fn render_workspace_to_buffer(
     frame: Frame,
     handle: WorkspaceHandle,
 ) {
-    let shell = state.common.shell.read().unwrap();
+    let shell = state.common.shell.read();
     let Some(workspace) = shell.workspaces.space_for_handle(&handle) else {
         return;
     };
@@ -337,7 +337,9 @@ pub fn render_workspace_to_buffer(
     let common = &mut state.common;
 
     let renderer = match state.backend.offscreen_renderer(|kms| {
-        let render_node = kms.target_node_for_output(&output).or(kms.primary_node)?;
+        let render_node = kms
+            .target_node_for_output(&output)
+            .or(*kms.primary_node.read().unwrap())?;
         let target_node = get_dmabuf(&buffer)
             .ok()
             .and_then(|dma| dma.node())
@@ -507,7 +509,7 @@ pub fn render_window_to_buffer(
                 .map(Into::<WindowCaptureElement<R>>::into),
         );
 
-        let shell = common.shell.read().unwrap();
+        let shell = common.shell.read();
         let seat = shell.seats.last_active().clone();
         let location = if let Some(mapped) = shell.element_for_surface(window) {
             mapped.cursor_position(&seat).and_then(|mut p| {
@@ -591,7 +593,7 @@ pub fn render_window_to_buffer(
                     })
                     .flatten()
             })
-            .or(kms.primary_node)
+            .or(*kms.primary_node.read().unwrap())
     }) {
         Ok(renderer) => renderer,
         Err(err) => {
@@ -745,7 +747,10 @@ pub fn render_cursor_to_buffer(
     }
 
     let common = &mut state.common;
-    let renderer = match state.backend.offscreen_renderer(|kms| kms.primary_node) {
+    let renderer = match state
+        .backend
+        .offscreen_renderer(|kms| *kms.primary_node.read().unwrap())
+    {
         Ok(renderer) => renderer,
         Err(err) => {
             warn!(?err, "Couldn't use node for screencopy");

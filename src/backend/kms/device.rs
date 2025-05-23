@@ -4,7 +4,7 @@ use crate::{
     backend::render::{output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
     config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState, ScreenFilter},
     shell::Shell,
-    utils::prelude::*,
+    utils::{env::dev_list_var, prelude::*},
     wayland::protocols::screencopy::Frame,
 };
 
@@ -21,7 +21,7 @@ use smithay::{
             compositor::{FrameError, FrameFlags},
             exporter::gbm::GbmFramebufferExporter,
             output::DrmOutputManager,
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode,
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
         },
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         session::Session,
@@ -149,6 +149,48 @@ impl State {
             return Ok(());
         }
 
+        if let Some(allowlist) = dev_list_var("COSMIC_DRM_ALLOW_DEVICES") {
+            let mut matched = false;
+            if let Ok(node) = DrmNode::from_dev_id(dev) {
+                let node = node
+                    .node_with_type(NodeType::Render)
+                    .map(|res| res.ok())
+                    .flatten()
+                    .unwrap_or(node);
+                for ident in allowlist {
+                    if ident.matches(&node) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
+                    info!(
+                        "Skipping device {} due to COSMIC_DRM_ALLOW_DEVICE list.",
+                        path.display()
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        if let Some(blocklist) = dev_list_var("COSMIC_DRM_BLOCK_DEVICES") {
+            if let Ok(node) = DrmNode::from_dev_id(dev) {
+                let node = node
+                    .node_with_type(NodeType::Render)
+                    .map(|res| res.ok())
+                    .flatten()
+                    .unwrap_or(node);
+                for ident in blocklist {
+                    if ident.matches(&node) {
+                        info!(
+                            "Skipping device {} due to COSMIC_DRM_BLOCK_DEVICE list.",
+                            path.display()
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         let fd = DrmDeviceFd::new(DeviceFd::from(
             self.backend
                 .kms()
@@ -265,12 +307,12 @@ impl State {
 
         let connectors = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         let mut wl_outputs = Vec::new();
-        let mut w = self.common.shell.read().unwrap().global_space().size.w as u32;
+        let mut w = self.common.shell.read().global_space().size.w as u32;
 
         {
             for (conn, maybe_crtc) in connectors {
                 match device.connector_added(
-                    self.backend.kms().primary_node.as_ref(),
+                    self.backend.kms().primary_node.clone(),
                     conn,
                     maybe_crtc,
                     (w, 0),
@@ -294,7 +336,14 @@ impl State {
 
             // TODO atomic commit all surfaces together and drop surfaces, if it fails due to bandwidth
 
-            self.backend.kms().drm_devices.insert(drm_node, device);
+            let kms = self.backend.kms();
+            let was_empty = kms.drm_devices.is_empty();
+            kms.drm_devices.insert(drm_node, device);
+            if was_empty {
+                if let Err(err) = kms.select_primary_gpu(dh) {
+                    warn!("Failed to determine a new primary gpu: {}", err);
+                }
+            }
         }
 
         self.common
@@ -331,7 +380,7 @@ impl State {
             if let Some(device) = backend.drm_devices.get_mut(&drm_node) {
                 let changes = device.enumerate_surfaces()?;
 
-                let mut w = self.common.shell.read().unwrap().global_space().size.w as u32;
+                let mut w = self.common.shell.read().global_space().size.w as u32;
                 for conn in changes.removed {
                     // contains conns with updated crtcs, just drop the surface and re-create
                     if let Some(pos) = device
@@ -364,7 +413,7 @@ impl State {
 
                 for (conn, maybe_crtc) in changes.added {
                     match device.connector_added(
-                        backend.primary_node.as_ref(),
+                        backend.primary_node.clone(),
                         conn,
                         maybe_crtc,
                         (w, 0),
@@ -424,7 +473,7 @@ impl State {
         let drm_node = DrmNode::from_dev_id(dev)?;
         let mut outputs_removed = Vec::new();
         let backend = self.backend.kms();
-        if let Some(mut device) = backend.drm_devices.remove(&drm_node) {
+        if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
             if let Some(mut leasing_global) = device.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
@@ -440,6 +489,12 @@ impl State {
                     .dmabuf_state
                     .destroy_global::<State>(dh, socket.dmabuf_global);
                 dh.remove_global::<State>(socket.drm_global);
+            }
+            let was_primary = *backend.primary_node.read().unwrap() == Some(device.render_node);
+            if was_primary {
+                if let Err(err) = backend.select_primary_gpu(dh) {
+                    warn!("Failed to determine a new primary gpu: {}", err);
+                }
             }
         }
         self.common
@@ -516,13 +571,13 @@ impl Device {
 
     pub fn connector_added(
         &mut self,
-        primary_node: Option<&DrmNode>,
+        primary_node: Arc<RwLock<Option<DrmNode>>>,
         conn: connector::Handle,
         maybe_crtc: Option<crtc::Handle>,
         position: (u32, u32),
         evlh: &LoopHandle<'static, State>,
         screen_filter: ScreenFilter,
-        shell: Arc<RwLock<Shell>>,
+        shell: Arc<parking_lot::RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
     ) -> Result<(Output, bool)> {
         let output = self
@@ -581,7 +636,7 @@ impl Device {
                     &output,
                     crtc,
                     conn,
-                    primary_node.copied().unwrap_or(self.render_node),
+                    primary_node,
                     self.dev_node,
                     self.render_node,
                     evlh,
@@ -621,7 +676,7 @@ impl Device {
         flags: FrameFlags,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         for surface in self.surfaces.values_mut() {
             surface.allow_frame_flags(flag, flags);
@@ -678,7 +733,7 @@ impl Device {
         flag: bool,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         self.allow_frame_flags(
             flag,
@@ -694,7 +749,7 @@ impl Device {
         flag: bool,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         self.allow_frame_flags(
             flag,
