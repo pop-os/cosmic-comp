@@ -4,6 +4,7 @@ use calloop::{InsertError, LoopHandle, RegistrationToken};
 use std::collections::HashMap;
 use zbus::blocking::{fdo::DBusProxy, Connection};
 
+pub mod a11y_keyboard_monitor;
 mod power;
 
 pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>> {
