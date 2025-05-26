@@ -470,9 +470,15 @@ impl State {
     }
 
     pub fn device_removed(&mut self, dev: dev_t, dh: &DisplayHandle) -> Result<()> {
-        let drm_node = DrmNode::from_dev_id(dev)?;
-        let mut outputs_removed = Vec::new();
         let backend = self.backend.kms();
+        // we can't use DrmNode::from_node_id, because that assumes the node is still on sysfs
+        let drm_node = backend
+            .drm_devices
+            .values()
+            .find_map(|device| (device.dev_node.dev_id() == dev).then_some(device.dev_node))
+            .with_context(|| format!("Couldn't find drm node for {}", dev))?;
+
+        let mut outputs_removed = Vec::new();
         if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
             if let Some(mut leasing_global) = device.leasing_global.take() {
                 leasing_global.disable_global::<State>();
@@ -490,6 +496,7 @@ impl State {
                     .destroy_global::<State>(dh, socket.dmabuf_global);
                 dh.remove_global::<State>(socket.drm_global);
             }
+            backend.api.as_mut().remove_node(&device.render_node);
             let was_primary = *backend.primary_node.read().unwrap() == Some(device.render_node);
             if was_primary {
                 if let Err(err) = backend.select_primary_gpu(dh) {
@@ -500,6 +507,7 @@ impl State {
         self.common
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
+        backend.refresh_used_devices()?;
 
         if self.backend.kms().session.is_active() {
             for output in outputs_removed {
