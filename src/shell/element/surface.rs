@@ -33,6 +33,7 @@ use smithay::{
                 shell::server::xdg_toplevel::State as ToplevelState,
             },
         },
+        wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::Mode as KdeMode,
         wayland_server::protocol::wl_surface::WlSurface,
     },
     utils::{
@@ -50,7 +51,7 @@ use tracing::trace;
 use crate::{
     state::{State, SurfaceDmabufFeedback},
     utils::prelude::*,
-    wayland::handlers::decoration::PreferredDecorationMode,
+    wayland::handlers::decoration::{KdeDecorationData, PreferredDecorationMode},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,20 +217,29 @@ impl CosmicSurface {
     pub fn is_decorated(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
-                if pending {
+                let xdg_state = if pending {
                     toplevel.with_pending_state(|pending| {
                         pending
                             .decoration_mode
                             .map(|mode| mode == DecorationMode::ClientSide)
-                            .unwrap_or(true)
                     })
                 } else {
                     toplevel
                         .current_state()
                         .decoration_mode
                         .map(|mode| mode == DecorationMode::ClientSide)
-                        .unwrap_or(true)
-                }
+                };
+
+                xdg_state
+                    .or_else(|| {
+                        with_states(toplevel.wl_surface(), |states| {
+                            states
+                                .data_map
+                                .get::<KdeDecorationData>()
+                                .map(|data| data.lock().unwrap().mode != KdeMode::Server)
+                        })
+                    })
+                    .unwrap_or(true)
             }
             WindowSurface::X11(surface) => surface.is_decorated(),
         }
@@ -247,11 +257,25 @@ impl CosmicSurface {
                     toplevel.with_pending_state(|pending| {
                         pending.decoration_mode = Some(DecorationMode::ServerSide);
                     });
+                    with_states(toplevel.wl_surface(), |data| {
+                        if let Some(kde_data) = data.data_map.get::<KdeDecorationData>() {
+                            for obj in kde_data.lock().unwrap().objs.iter() {
+                                obj.mode(KdeMode::Server);
+                            }
+                        }
+                    })
                 } else {
                     let previous_mode = PreferredDecorationMode::mode(&self.0);
                     toplevel.with_pending_state(|pending| {
                         pending.decoration_mode = previous_mode;
                     });
+                    with_states(toplevel.wl_surface(), |data| {
+                        if let Some(kde_data) = data.data_map.get::<KdeDecorationData>() {
+                            for obj in kde_data.lock().unwrap().objs.iter() {
+                                obj.mode(KdeMode::Server);
+                            }
+                        }
+                    })
                 }
             }
             WindowSurface::X11(_surface) => {}
