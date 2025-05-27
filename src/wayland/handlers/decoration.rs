@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::Mutex};
 
 use smithay::{
     delegate_kde_decoration, delegate_xdg_decoration,
@@ -11,6 +11,7 @@ use smithay::{
         wayland_server::protocol::wl_surface::WlSurface,
     },
     wayland::{
+        compositor::with_states,
         seat::WaylandFocus,
         shell::{
             kde::decoration::{KdeDecorationHandler, KdeDecorationState},
@@ -51,6 +52,22 @@ impl PreferredDecorationMode {
             .unwrap()
             .0
             .borrow_mut() = update;
+    }
+}
+
+pub type KdeDecorationData = Mutex<KdeDecorationSurfaceState>;
+#[derive(Debug)]
+pub struct KdeDecorationSurfaceState {
+    pub mode: KdeMode,
+    pub objs: Vec<OrgKdeKwinServerDecoration>,
+}
+
+impl Default for KdeDecorationSurfaceState {
+    fn default() -> Self {
+        KdeDecorationSurfaceState {
+            mode: KdeMode::Client,
+            objs: Vec::new(),
+        }
     }
 }
 
@@ -143,10 +160,22 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
+        with_states(surface, |states| {
+            states
+                .data_map
+                .get_or_insert::<KdeDecorationData, _>(Default::default)
+                .lock()
+                .unwrap()
+                .objs
+                .push(decoration.clone())
+        });
+
         let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(surface) {
             let mode = new_decoration(mapped, surface);
             decoration.mode(mode);
+        } else {
+            decoration.mode(KdeMode::Client);
         }
     }
 
@@ -157,8 +186,16 @@ impl KdeDecorationHandler for State {
         mode: WEnum<KdeMode>,
     ) {
         if let WEnum::Value(mode) = mode {
+            with_states(surface, |states| {
+                states
+                    .data_map
+                    .get_or_insert::<KdeDecorationData, _>(Default::default)
+                    .lock()
+                    .unwrap()
+                    .mode = mode
+            });
+
             let shell = self.common.shell.read();
-            // TODO: We need to store this value until it gets mapped and apply it then, if it is not mapped yet.
             if let Some(mapped) = shell.element_for_surface(surface) {
                 request_mode(
                     mapped,
@@ -168,12 +205,22 @@ impl KdeDecorationHandler for State {
                         _ => XdgMode::ClientSide,
                     },
                 );
-                decoration.mode(mode);
             }
+            decoration.mode(mode);
         }
     }
 
-    fn release(&mut self, _decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
+    fn release(&mut self, decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
+        with_states(surface, |states| {
+            states
+                .data_map
+                .get_or_insert::<KdeDecorationData, _>(Default::default)
+                .lock()
+                .unwrap()
+                .objs
+                .retain(|obj| obj != decoration);
+        });
+
         let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(surface) {
             unset_mode(mapped, surface)
