@@ -18,19 +18,42 @@ impl SelectionHandler for State {
         source: Option<SelectionSource>,
         _seat: Seat<State>,
     ) {
-        if let Some(xwm) = self
+        let Some(xwm_id) = self
             .common
             .xwayland_state
-            .as_mut()
-            .and_then(|xstate| xstate.xwm.as_mut())
-        {
-            if let Some(source) = &source {
+            .as_ref()
+            .and_then(|xstate| xstate.xwm.as_ref())
+            .map(|xwm| xwm.id())
+        else {
+            return;
+        };
+
+        let x_has_focus = self.common.has_x_keyboard_focus(xwm_id);
+
+        let xstate = self.common.xwayland_state.as_mut().unwrap();
+        let xwm = xstate.xwm.as_mut().unwrap();
+
+        if let Some(source) = &source {
+            if x_has_focus {
                 if let Err(err) = xwm.new_selection(target, Some(source.mime_types())) {
                     warn!(?err, "Failed to set Xwayland clipboard selection.");
                 }
-            } else if let Err(err) = xwm.new_selection(target, None) {
+            } else {
+                match target {
+                    SelectionTarget::Clipboard => {
+                        xstate.clipboard_selection_dirty = Some(source.mime_types())
+                    }
+                    SelectionTarget::Primary => {
+                        xstate.primary_selection_dirty = Some(source.mime_types())
+                    }
+                };
+            }
+        } else {
+            if let Err(err) = xwm.new_selection(target, None) {
                 warn!(?err, "Failed to clear Xwayland selection.");
             }
+            xstate.clipboard_selection_dirty = None;
+            xstate.primary_selection_dirty = None;
         }
     }
 

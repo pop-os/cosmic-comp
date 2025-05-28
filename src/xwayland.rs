@@ -64,6 +64,8 @@ pub struct XWaylandState {
     pub pressed_keys: Vec<Keycode>,
     pub pressed_buttons: Vec<u32>,
     pub last_modifier_state: Option<ModifiersState>,
+    pub clipboard_selection_dirty: Option<Vec<String>>,
+    pub primary_selection_dirty: Option<Vec<String>>,
 }
 
 impl State {
@@ -108,6 +110,8 @@ impl State {
                         pressed_keys: Vec::new(),
                         pressed_buttons: Vec::new(),
                         last_modifier_state: None,
+                        clipboard_selection_dirty: None,
+                        primary_selection_dirty: None,
                     });
 
                     let wm = match X11Wm::start_wm(
@@ -244,7 +248,7 @@ impl XWaylandState {
 }
 
 impl Common {
-    fn has_x_keyboard_focus(&self, xwmid: XwmId) -> bool {
+    pub fn has_x_keyboard_focus(&self, xwmid: XwmId) -> bool {
         let keyboard = self
             .shell
             .read()
@@ -290,10 +294,37 @@ impl Common {
             if target
                 .as_ref()
                 .is_some_and(|target| matches!(target, KeyboardFocusTarget::LockSurface(_)))
-                || (!self.has_x_keyboard_focus(xwm_id)
-                    && target.as_ref().is_some_and(|target| target.is_xwm(xwm_id)))
             {
                 self.xwayland_reset_eavesdropping(serial);
+                return;
+            }
+
+            if !self.has_x_keyboard_focus(xwm_id)
+                && target.as_ref().is_some_and(|target| target.is_xwm(xwm_id))
+            {
+                self.xwayland_reset_eavesdropping(serial);
+
+                let xstate = self.xwayland_state.as_mut().unwrap();
+                if let Some(mime_types) = xstate.clipboard_selection_dirty.take() {
+                    if let Err(err) = xstate
+                        .xwm
+                        .as_mut()
+                        .unwrap()
+                        .new_selection(SelectionTarget::Clipboard, Some(mime_types))
+                    {
+                        warn!(?err, "Failed to set Xwayland clipboard selection.");
+                    }
+                }
+                if let Some(mime_types) = xstate.primary_selection_dirty.take() {
+                    if let Err(err) = xstate
+                        .xwm
+                        .as_mut()
+                        .unwrap()
+                        .new_selection(SelectionTarget::Primary, Some(mime_types))
+                    {
+                        warn!(?err, "Failed to set Xwayland clipboard selection.");
+                    }
+                }
             }
         }
     }
