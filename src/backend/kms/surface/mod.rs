@@ -45,7 +45,7 @@ use smithay::{
                 element::TextureShaderElement, GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform,
             },
             glow::GlowRenderer,
-            multigpu::{Error as MultiError, GpuManager},
+            multigpu::{ApiDevice, Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
             Bind, Blit, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
@@ -1749,6 +1749,10 @@ impl SurfaceThreadState {
                 compositor.reset_buffers();
                 anyhow::bail!("Rendering failed: {}", err);
             }
+        }
+
+        for device in self.api.devices_mut()? {
+            device.renderer_mut().cleanup_texture_cache()?;
         }
 
         Ok(())
