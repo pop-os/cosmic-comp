@@ -13,7 +13,7 @@ use smithay::{
     },
     utils::Transform,
 };
-use std::{collections::HashMap, ops::Range};
+use std::{collections::HashMap, num::NonZeroU32, ops::Range, str::FromStr};
 
 pub fn display_configuration(
     device: &mut impl ControlDevice,
@@ -184,6 +184,41 @@ pub fn edid_info(device: &impl ControlDevice, connector: connector::Handle) -> R
     }
 
     edid.ok_or(anyhow!("No EDID found"))
+}
+
+// For MST connector, return parent connector handle, and ports
+//
+// https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/drm_connector.c defines
+// the format of `PATH`.
+pub fn mst_path(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+) -> Option<(connector::Handle, Vec<u32>)> {
+    let path_prop = get_prop(device, connector, "PATH").ok()?;
+    let path_info = device.get_property(path_prop).ok()?;
+
+    let props = device.get_properties(connector).ok()?;
+    let (ids, vals) = props.as_props_and_values();
+    for (&id, &val) in ids.iter().zip(vals.iter()) {
+        if id == path_prop {
+            if let property::Value::Blob(edid_blob) = path_info.value_type().convert_value(val) {
+                let blob = device.get_property_blob(edid_blob).ok()?;
+                let (parent, ports) = std::str::from_utf8(&blob)
+                    .ok()?
+                    .strip_suffix('\0')?
+                    .strip_prefix("mst:")?
+                    .split_once('-')?;
+                let parent_connector = connector::Handle::from(parent.parse::<NonZeroU32>().ok()?);
+                let ports = ports
+                    .split('-')
+                    .map(|i| u32::from_str(i).ok())
+                    .collect::<Option<Vec<u32>>>()?;
+                return Some((parent_connector, ports));
+            }
+            break;
+        }
+    }
+    None
 }
 
 pub fn get_prop(
