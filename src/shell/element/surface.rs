@@ -217,6 +217,13 @@ impl CosmicSurface {
     pub fn is_decorated(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
+                let kde_state = with_states(toplevel.wl_surface(), |states| {
+                    states
+                        .data_map
+                        .get::<KdeDecorationData>()
+                        .and_then(|data| data.lock().unwrap().mode.map(|m| m != KdeMode::Server))
+                });
+
                 let xdg_state = if pending {
                     toplevel.with_pending_state(|pending| {
                         pending
@@ -230,16 +237,7 @@ impl CosmicSurface {
                         .map(|mode| mode == DecorationMode::ClientSide)
                 };
 
-                xdg_state
-                    .or_else(|| {
-                        with_states(toplevel.wl_surface(), |states| {
-                            states
-                                .data_map
-                                .get::<KdeDecorationData>()
-                                .map(|data| data.lock().unwrap().mode != KdeMode::Server)
-                        })
-                    })
-                    .unwrap_or(true)
+                kde_state.or(xdg_state).unwrap_or(true)
             }
             WindowSurface::X11(surface) => surface.is_decorated(),
         }

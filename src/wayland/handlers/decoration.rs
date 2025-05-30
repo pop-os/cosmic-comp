@@ -21,7 +21,7 @@ use smithay::{
 };
 use wayland_backend::protocol::WEnum;
 
-use crate::{shell::CosmicMapped, state::State};
+use crate::state::State;
 
 pub struct PreferredDecorationMode(RefCell<Option<XdgMode>>);
 
@@ -58,73 +58,15 @@ impl PreferredDecorationMode {
 pub type KdeDecorationData = Mutex<KdeDecorationSurfaceState>;
 #[derive(Debug)]
 pub struct KdeDecorationSurfaceState {
-    pub mode: KdeMode,
+    pub mode: Option<KdeMode>,
     pub objs: Vec<OrgKdeKwinServerDecoration>,
 }
 
 impl Default for KdeDecorationSurfaceState {
     fn default() -> Self {
         KdeDecorationSurfaceState {
-            mode: KdeMode::Client,
+            mode: None,
             objs: Vec::new(),
-        }
-    }
-}
-
-pub fn new_decoration(mapped: &CosmicMapped, surface: &WlSurface) -> KdeMode {
-    if mapped.is_stack() {
-        if let Some((window, _)) = mapped
-            .windows()
-            .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
-        {
-            if let Some(toplevel) = window.0.toplevel() {
-                toplevel
-                    .with_pending_state(|state| state.decoration_mode = Some(XdgMode::ServerSide));
-                toplevel.send_configure();
-            }
-        }
-        KdeMode::Server
-    } else {
-        if let Some((window, _)) = mapped
-            .windows()
-            .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
-        {
-            if let Some(toplevel) = window.0.toplevel() {
-                toplevel
-                    .with_pending_state(|state| state.decoration_mode = Some(XdgMode::ClientSide));
-                toplevel.send_configure();
-            }
-        }
-        KdeMode::Client
-    }
-}
-
-pub fn request_mode(mapped: &CosmicMapped, surface: &WlSurface, mode: XdgMode) {
-    if let Some((window, _)) = mapped
-        .windows()
-        .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
-    {
-        if let Some(toplevel) = window.0.toplevel() {
-            PreferredDecorationMode::update(&window.0, Some(mode));
-            toplevel.with_pending_state(|state| {
-                state.decoration_mode = Some(mode);
-            });
-            toplevel.send_configure();
-        }
-    }
-}
-
-pub fn unset_mode(mapped: &CosmicMapped, surface: &WlSurface) {
-    if let Some((window, _)) = mapped
-        .windows()
-        .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
-    {
-        if let Some(toplevel) = window.0.toplevel() {
-            PreferredDecorationMode::update(&window.0, None);
-            toplevel.with_pending_state(|state| {
-                state.decoration_mode = None;
-            });
-            toplevel.send_configure();
         }
     }
 }
@@ -133,14 +75,41 @@ impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
         let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface()) {
-            new_decoration(mapped, toplevel.wl_surface());
+            let mode = if mapped.is_stack() {
+                XdgMode::ServerSide
+            } else {
+                XdgMode::ClientSide
+            };
+
+            if let Some((window, _)) = mapped
+                .windows()
+                .find(|(window, _)| window.wl_surface().as_deref() == Some(toplevel.wl_surface()))
+            {
+                if let Some(toplevel) = window.0.toplevel() {
+                    toplevel.with_pending_state(|state| {
+                        state.decoration_mode = Some(mode);
+                    });
+                    toplevel.send_configure();
+                }
+            }
         }
     }
 
     fn request_mode(&mut self, toplevel: ToplevelSurface, mode: XdgMode) {
         let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface()) {
-            request_mode(mapped, toplevel.wl_surface(), mode);
+            if let Some((window, _)) = mapped
+                .windows()
+                .find(|(window, _)| window.wl_surface().as_deref() == Some(toplevel.wl_surface()))
+            {
+                if let Some(toplevel) = window.0.toplevel() {
+                    PreferredDecorationMode::update(&window.0, Some(mode));
+                    toplevel.with_pending_state(|state| {
+                        state.decoration_mode = Some(mode);
+                    });
+                    toplevel.send_configure();
+                }
+            }
         } else {
             toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
         }
@@ -149,7 +118,18 @@ impl XdgDecorationHandler for State {
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
         let shell = self.common.shell.read();
         if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface()) {
-            unset_mode(mapped, toplevel.wl_surface())
+            if let Some((window, _)) = mapped
+                .windows()
+                .find(|(window, _)| window.wl_surface().as_deref() == Some(toplevel.wl_surface()))
+            {
+                if let Some(toplevel) = window.0.toplevel() {
+                    PreferredDecorationMode::update(&window.0, None);
+                    toplevel.with_pending_state(|state| {
+                        state.decoration_mode = None;
+                    });
+                    toplevel.send_configure();
+                }
+            }
         }
     }
 }
@@ -160,23 +140,30 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
+        let mode = if let Some(mapped) = self.common.shell.read().element_for_surface(surface) {
+            if mapped.is_stack() {
+                KdeMode::Server
+            } else {
+                KdeMode::Client
+            }
+        } else {
+            KdeMode::Client
+        };
+
         with_states(surface, |states| {
-            states
+            let mut state = states
                 .data_map
-                .get_or_insert::<KdeDecorationData, _>(Default::default)
+                .get_or_insert_threadsafe::<KdeDecorationData, _>(Default::default)
                 .lock()
-                .unwrap()
-                .objs
-                .push(decoration.clone())
+                .unwrap();
+
+            state.objs.push(decoration.clone());
+            if state.mode.is_none() {
+                state.mode = Some(mode)
+            }
         });
 
-        let shell = self.common.shell.read();
-        if let Some(mapped) = shell.element_for_surface(surface) {
-            let mode = new_decoration(mapped, surface);
-            decoration.mode(mode);
-        } else {
-            decoration.mode(KdeMode::Client);
-        }
+        decoration.mode(mode);
     }
 
     fn request_mode(
@@ -189,42 +176,28 @@ impl KdeDecorationHandler for State {
             with_states(surface, |states| {
                 states
                     .data_map
-                    .get_or_insert::<KdeDecorationData, _>(Default::default)
+                    .get_or_insert_threadsafe::<KdeDecorationData, _>(Default::default)
                     .lock()
                     .unwrap()
-                    .mode = mode
+                    .mode = Some(mode);
             });
-
-            let shell = self.common.shell.read();
-            if let Some(mapped) = shell.element_for_surface(surface) {
-                request_mode(
-                    mapped,
-                    surface,
-                    match mode {
-                        KdeMode::Server => XdgMode::ServerSide,
-                        _ => XdgMode::ClientSide,
-                    },
-                );
-            }
             decoration.mode(mode);
         }
     }
 
     fn release(&mut self, decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
         with_states(surface, |states| {
-            states
+            let mut state = states
                 .data_map
-                .get_or_insert::<KdeDecorationData, _>(Default::default)
+                .get_or_insert_threadsafe::<KdeDecorationData, _>(Default::default)
                 .lock()
-                .unwrap()
-                .objs
-                .retain(|obj| obj != decoration);
-        });
+                .unwrap();
 
-        let shell = self.common.shell.read();
-        if let Some(mapped) = shell.element_for_surface(surface) {
-            unset_mode(mapped, surface)
-        }
+            state.objs.retain(|obj| obj != decoration);
+            if state.objs.is_empty() {
+                state.mode.take();
+            }
+        });
     }
 }
 
