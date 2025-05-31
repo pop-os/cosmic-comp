@@ -46,7 +46,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fmt,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
     time::Duration,
 };
@@ -144,7 +144,7 @@ pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
 }
 
 impl State {
-    pub fn device_added(&mut self, dev: dev_t, path: PathBuf, dh: &DisplayHandle) -> Result<()> {
+    pub fn device_added(&mut self, dev: dev_t, path: &Path, dh: &DisplayHandle) -> Result<()> {
         if !self.backend.kms().session.is_active() {
             return Ok(());
         }
@@ -337,13 +337,7 @@ impl State {
             // TODO atomic commit all surfaces together and drop surfaces, if it fails due to bandwidth
 
             let kms = self.backend.kms();
-            let was_empty = kms.drm_devices.is_empty();
             kms.drm_devices.insert(drm_node, device);
-            if was_empty {
-                if let Err(err) = kms.select_primary_gpu(dh) {
-                    warn!("Failed to determine a new primary gpu: {}", err);
-                }
-            }
         }
 
         self.common
@@ -497,12 +491,11 @@ impl State {
                 dh.remove_global::<State>(socket.drm_global);
             }
             backend.api.as_mut().remove_node(&device.render_node);
-            let was_primary = *backend.primary_node.read().unwrap() == Some(device.render_node);
-            if was_primary {
-                if let Err(err) = backend.select_primary_gpu(dh) {
-                    warn!("Failed to determine a new primary gpu: {}", err);
-                }
-            }
+            backend
+                .primary_node
+                .write()
+                .unwrap()
+                .take_if(|node| node == &device.render_node);
         }
         self.common
             .output_configuration_state

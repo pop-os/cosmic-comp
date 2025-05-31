@@ -136,6 +136,10 @@ pub fn init_backend(
         }
     }
 
+    if let Err(err) = state.backend.kms().select_primary_gpu(dh) {
+        warn!("Failed to determine primary gpu: {}", err);
+    }
+
     // start x11
     let primary = state.backend.kms().primary_node.read().unwrap().clone();
     state.launch_xwayland(primary);
@@ -254,7 +258,10 @@ fn init_udev(
     let dispatcher = Dispatcher::new(udev_backend, move |event, _, state: &mut State| {
         let dh = state.common.display_handle.clone();
         match match event {
-            UdevEvent::Added { device_id, path } => state
+            UdevEvent::Added {
+                device_id,
+                ref path,
+            } => state
                 .device_added(device_id, path, &dh)
                 .with_context(|| format!("Failed to add drm device: {}", device_id)),
             UdevEvent::Changed { device_id } => state
@@ -265,7 +272,15 @@ fn init_udev(
                 .with_context(|| format!("Failed to remove drm device: {}", device_id)),
         } {
             Ok(()) => {
-                trace!("Successfully handled udev event.")
+                trace!("Successfully handled udev event.");
+                let backend = state.backend.kms();
+                if matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. })
+                    && backend.primary_node.read().unwrap().is_none()
+                {
+                    if let Err(err) = state.backend.kms().select_primary_gpu(&dh) {
+                        warn!("Failed to determine a new primary gpu: {}", err);
+                    }
+                }
             }
             Err(err) => {
                 error!(?err, "Error while handling udev event.")
