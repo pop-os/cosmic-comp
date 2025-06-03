@@ -5,8 +5,10 @@ use crate::{
         element::CosmicWindow, grabs::ReleaseMode, CosmicMapped, CosmicSurface, ManagedLayer,
         PendingWindow,
     },
+    state::ClientState,
     utils::prelude::*,
     wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
+    backend::render::SecurityContextIndicatorSettings,
 };
 use smithay::{
     delegate_xdg_shell,
@@ -19,6 +21,7 @@ use smithay::{
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
         wayland_server::protocol::{wl_output::WlOutput, wl_seat::WlSeat},
+        wayland_server::Resource,
     },
     utils::{Logical, Point, Serial},
     wayland::{
@@ -48,6 +51,45 @@ impl XdgShellHandler for State {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
         let window = CosmicSurface::from(surface);
+
+        // Get security context data
+        if let Some(client) = window.wl_surface().unwrap().client() {
+            let client_data = self
+                .common
+                .display_handle
+                .backend_handle()
+                .get_client_data(client.id().clone())
+                .ok();
+
+            if let Some(security_context) = client_data
+                .as_ref()
+                .and_then(|data| data.downcast_ref::<ClientState>())
+                .and_then(|data| data.security_context.as_ref()) {
+                // Try to find a security context rule by sandbox engine and appid
+                let sandbox_engine = security_context
+                    .sandbox_engine
+                    .as_deref()
+                    .unwrap_or_default();
+                let app_id = security_context.app_id.as_deref().unwrap_or_default();
+                let border_color = self
+                    .common.config.cosmic_conf.security_context.rules
+                    .iter()
+                    .find(|config| {
+                        config.sandbox_engine == sandbox_engine && config.app_id == app_id
+                    })
+                    .map(|config| config.border_color.clone());
+
+                if let Some(color) = border_color {
+                    // Add security context indicator settings to the user data
+                    let indicator = SecurityContextIndicatorSettings {
+                        border_color: color,
+                        border_size: self.common.config.cosmic_conf.security_context.border_size,
+                    };
+                    window.user_data().get_or_insert_threadsafe(|| indicator.clone());
+                }
+            }
+        }
+
         shell.pending_windows.push(PendingWindow {
             surface: window,
             seat,

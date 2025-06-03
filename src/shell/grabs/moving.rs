@@ -3,6 +3,7 @@
 use crate::{
     backend::render::{
         cursor::CursorState, element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage,
+        SecurityContextIndicatorSettings,
     },
     shell::{
         element::{
@@ -108,22 +109,60 @@ impl MoveGrabState {
             + self.window_offset
             - scaling_offset;
 
+        // Security context indicator
+        let mut secctx_element = None;
+        let mut secctx_border_size = 0;
+        if self.window.is_window() {
+            let surface = self.window.active_window();
+            if let Some(secctx_settings) = surface.user_data().get::<SecurityContextIndicatorSettings>() {
+                secctx_border_size = secctx_settings.border_size;
+                secctx_element = Some(
+                    CosmicMappedRenderElement::from(IndicatorShader::focus_element(
+                        renderer,
+                        Key::Window(Usage::SecurityContextIndicator, self.window.key()),
+                        Rectangle::new(
+                            render_location,
+                            self.window
+                                .geometry()
+                                .size
+                                .to_f64()
+                                .upscale(scale)
+                                .to_i32_round(),
+                        )
+                        .as_local(),
+                        secctx_settings.border_size,
+                        alpha,
+                        secctx_settings.border_color,
+                    ))
+                    .into(),
+                );
+            }
+        }
+
         let active_window_hint = crate::theme::active_window_hint(theme);
         let focus_element = if self.indicator_thickness > 0 {
+            let mut indicator_geometry = Rectangle::new(
+                render_location,
+                self.window
+                    .geometry()
+                    .size
+                    .to_f64()
+                    .upscale(scale)
+                    .to_i32_round(),
+            ).as_local();
+            let mut radius = self.indicator_thickness * 2;
+            if secctx_border_size > self.indicator_thickness {
+                // Align the focus indicator with the outer edge of the security context indicator when it is enabled
+                let size = (secctx_border_size - self.indicator_thickness) as i32;
+                indicator_geometry.loc -= (size, size).into();
+                indicator_geometry.size += (size * 2, size * 2).into();
+                radius = secctx_border_size as u8 * 2;
+            }
             Some(
-                CosmicMappedRenderElement::from(IndicatorShader::focus_element(
+                CosmicMappedRenderElement::from(IndicatorShader::focus_element_with_radius(
                     renderer,
                     Key::Window(Usage::MoveGrabIndicator, self.window.key()),
-                    Rectangle::new(
-                        render_location,
-                        self.window
-                            .geometry()
-                            .size
-                            .to_f64()
-                            .upscale(scale)
-                            .to_i32_round(),
-                    )
-                    .as_local(),
+                    indicator_geometry,
                     self.indicator_thickness,
                     alpha,
                     [
@@ -131,6 +170,7 @@ impl MoveGrabState {
                         active_window_hint.green,
                         active_window_hint.blue,
                     ],
+                    radius,
                 ))
                 .into(),
             )
@@ -210,6 +250,7 @@ impl MoveGrabState {
             })
             .chain(p_elements)
             .chain(focus_element)
+            .chain(secctx_element)
             .chain(w_elements.into_iter().map(|elem| match elem {
                 CosmicMappedRenderElement::Stack(stack) => {
                     CosmicMappedRenderElement::GrabbedStack(
