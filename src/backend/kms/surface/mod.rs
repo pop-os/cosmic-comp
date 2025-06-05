@@ -22,10 +22,18 @@ use anyhow::{Context, Result};
 use calloop::channel::Channel;
 use smithay::{
     backend::{
-        allocator::{format::FormatSet, gbm::GbmAllocator, Fourcc},
+        allocator::{
+            format::FormatSet,
+            gbm::{GbmAllocator, GbmBuffer},
+            Fourcc,
+        },
         drm::{
-            compositor::{BlitFrameResultError, FrameError, FrameFlags, PrimaryPlaneElement},
+            compositor::{
+                BlitFrameResultError, FrameError, FrameFlags, PrimaryPlaneElement,
+                RenderFrameResult,
+            },
             exporter::gbm::GbmFramebufferExporter,
+            gbm::GbmFramebuffer,
             output::DrmOutput,
             DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
         },
@@ -221,6 +229,14 @@ pub enum ThreadCommand {
 pub enum SurfaceCommand {
     SendFrames(usize),
     RenderStates(RenderElementStates),
+}
+
+#[derive(Debug, Default)]
+struct PrePostprocessData {
+    states: Option<RenderElementStates>,
+    texture: Option<GlesTexture>,
+    cursor_texture: Option<GlesTexture>,
+    cursor_geometry: Option<Rectangle<i32, Physical>>,
 }
 
 impl Surface {
@@ -1107,14 +1123,6 @@ impl SurfaceThreadState {
                     || !self.screen_filter.is_noop()
             });
 
-        #[derive(Debug, Default)]
-        struct PrePostprocessData {
-            states: Option<RenderElementStates>,
-            texture: Option<GlesTexture>,
-            cursor_texture: Option<GlesTexture>,
-            cursor_geometry: Option<Rectangle<i32, Physical>>,
-        }
-
         let mut pre_postprocess_data = PrePostprocessData::default();
 
         let res = if let Some(source_output) = source_output {
@@ -1454,257 +1462,18 @@ impl SurfaceThreadState {
                             };
                         }
 
-                        for (session, frame, res) in frames {
-                            let damage = match res {
-                                Ok((damage, _)) => damage,
-                                Err(err) => {
-                                    tracing::warn!(?err, "Failed to screencopy");
-                                    session
-                                        .user_data()
-                                        .get::<SessionData>()
-                                        .unwrap()
-                                        .lock()
-                                        .unwrap()
-                                        .reset();
-                                    frame.fail(FailureReason::Unknown);
-                                    continue;
-                                }
-                            };
-
-                            let mut sync = SyncPoint::default();
-                            let mut dmabuf_clone;
-                            let mut render_buffer;
-                            let buffer = frame.buffer();
-                            let mut shm_buffer = false;
-                            let mut fb = if let Ok(dmabuf) = get_dmabuf(&buffer) {
-                                dmabuf_clone = dmabuf.clone();
-                                Some(renderer
-                                    .bind(&mut dmabuf_clone)
-                                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?)
-                            } else {
-                                shm_buffer = true;
-                                let size = buffer_dimensions(&buffer).ok_or(RenderError::<
-                                    <GlMultiRenderer as RendererSuper>::Error,
-                                >::Rendering(
-                                    MultiError::ImportFailed,
-                                ))?;
-                                let format =
-                                    with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
-                                        .map_err(|_| OutputNoMode)? // eh, we have to do some error
-                                        .expect("We should be able to convert all hardcoded shm screencopy formats");
-
-                                if pre_postprocess_data
-                                    .texture
-                                    .as_ref()
-                                    .is_some_and(|tex| tex.format() == Some(format))
-                                    && (session.draw_cursor() == false
-                                        || pre_postprocess_data.cursor_texture.is_none())
-                                {
-                                    None
-                                } else {
-                                    render_buffer =
-                                        Offscreen::<GlesRenderbuffer>::create_buffer(
-                                            &mut renderer,
-                                            format,
-                                            size,
-                                        )
-                                        .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
-                                    Some(renderer
-                                        .bind(&mut render_buffer)
-                                        .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?)
-                                }
-                            };
-
-                            if let Some(ref damage) = damage {
-                                let (output_size, output_scale, output_transform) = (
-                                    self.output.current_mode().ok_or(OutputNoMode)?.size,
-                                    self.output.current_scale().fractional_scale(),
-                                    self.output.current_transform(),
-                                );
-
-                                let filter = (!session.draw_cursor())
-                                    .then(|| {
-                                        elements.iter().filter_map(|elem| {
-                                            if let CosmicElement::Cursor(_) = elem {
-                                                Some(elem.id().clone())
-                                            } else {
-                                                None
-                                            }
-                                        })
-                                    })
-                                    .into_iter()
-                                    .flatten();
-
-                                // If the screen is rotated, we must convert damage to match output.
-                                let adjusted = damage
-                                    .iter()
-                                    .copied()
-                                    .map(|mut d| {
-                                        d.size = d
-                                            .size
-                                            .to_logical(1)
-                                            .to_buffer(1, output_transform)
-                                            .to_logical(1, Transform::Normal)
-                                            .to_physical(1);
-                                        d
-                                    })
-                                    .collect::<Vec<_>>();
-
-                                if let Some(tex) = pre_postprocess_data.texture.as_mut() {
-                                    let mut tex_fb = renderer.bind(tex).map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
-
-                                    if let Some(fb) = fb.as_mut() {
-                                        for rect in adjusted.iter().copied() {
-                                            renderer
-                                                .blit(
-                                                    &mut tex_fb,
-                                                    fb,
-                                                    rect,
-                                                    rect,
-                                                    TextureFilter::Linear,
-                                                )
-                                                .map_err(
-                                                    RenderError::<
-                                                        <GlMultiRenderer as RendererSuper>::Error,
-                                                    >::Rendering,
-                                                )?;
-                                        }
-                                        if let Some(cursor_geometry) = pre_postprocess_data
-                                            .cursor_geometry
-                                            .as_ref()
-                                            .filter(|_| session.draw_cursor())
-                                        {
-                                            let cursor_damage = adjusted
-                                                .iter()
-                                                .filter_map(|rect| {
-                                                    cursor_geometry.intersection(*rect)
-                                                })
-                                                .map(|rect| {
-                                                    Rectangle::new(
-                                                        rect.loc - cursor_geometry.loc,
-                                                        rect.size,
-                                                    )
-                                                })
-                                                .collect::<Vec<_>>();
-                                            let mut frame = renderer
-                                                .render(fb, output_size, output_transform)
-                                                .map_err(
-                                                    RenderError::<
-                                                        <GlMultiRenderer as RendererSuper>::Error,
-                                                    >::Rendering,
-                                                )?;
-                                            frame
-                                                .as_mut()
-                                                .render_texture_from_to(
-                                                    pre_postprocess_data
-                                                        .cursor_texture
-                                                        .as_ref()
-                                                        .unwrap(),
-                                                    Rectangle::new(
-                                                        Point::from((0., 0.)),
-                                                        cursor_geometry
-                                                            .size
-                                                            .to_logical(1)
-                                                            .to_buffer(1, Transform::Normal)
-                                                            .to_f64(),
-                                                    ),
-                                                    *cursor_geometry,
-                                                    &cursor_damage,
-                                                    &[*cursor_geometry],
-                                                    Transform::Normal,
-                                                    1.0,
-                                                )
-                                                .map_err(GlMultiError::Render)
-                                                .map_err(
-                                                    RenderError::<
-                                                        <GlMultiRenderer as RendererSuper>::Error,
-                                                    >::Rendering,
-                                                )?;
-                                            let sync = frame.finish().map_err(
-                                                RenderError::<
-                                                    <GlMultiRenderer as RendererSuper>::Error,
-                                                >::Rendering,
-                                            )?;
-                                            renderer.wait(&sync).map_err(
-                                                RenderError::<
-                                                    <GlMultiRenderer as RendererSuper>::Error,
-                                                >::Rendering,
-                                            )?;
-                                        }
-                                    } else {
-                                        fb = Some(tex_fb);
-                                    }
-                                } else {
-                                    match frame_result
-                                        .blit_frame_result(
-                                            output_size,
-                                            output_transform,
-                                            output_scale,
-                                            &mut renderer,
-                                            fb.as_mut().unwrap(),
-                                            adjusted,
-                                            filter,
-                                        )
-                                        .map_err(|err| match err {
-                                            BlitFrameResultError::Rendering(err) => RenderError::<
-                                                <GlMultiRenderer as RendererSuper>::Error,
-                                            >::Rendering(
-                                                err
-                                            ),
-                                            BlitFrameResultError::Export(_) => RenderError::<
-                                                <GlMultiRenderer as RendererSuper>::Error,
-                                            >::Rendering(
-                                                MultiError::DeviceMissing,
-                                            ),
-                                        }) {
-                                        Ok(new_sync) => {
-                                            sync = new_sync;
-                                        }
-                                        Err(err) => {
-                                            tracing::warn!(?err, "Failed to screencopy");
-                                            session
-                                                .user_data()
-                                                .get::<SessionData>()
-                                                .unwrap()
-                                                .lock()
-                                                .unwrap()
-                                                .reset();
-                                            frame.fail(FailureReason::Unknown);
-                                            continue;
-                                        }
-                                    };
-                                };
-                            }
-
-                            let transform = self.output.current_transform();
-
-                            match submit_buffer(
-                                frame,
+                        let now = self.clock.now();
+                        for frame in frames {
+                            send_screencopy_result(
                                 &mut renderer,
-                                shm_buffer.then_some(fb.as_mut().unwrap()),
-                                transform,
-                                damage.as_deref(),
-                                sync,
-                            ) {
-                                Ok(Some((frame, damage))) => {
-                                    if frame_result.is_empty {
-                                        frame.success(transform, damage, self.clock.now());
-                                    } else {
-                                        let _ = tx.send((frame, damage));
-                                    }
-                                }
-                                Ok(None) => {}
-                                Err(err) => {
-                                    session
-                                        .user_data()
-                                        .get::<SessionData>()
-                                        .unwrap()
-                                        .lock()
-                                        .unwrap()
-                                        .reset();
-                                    tracing::warn!(?err, "Failed to screencopy");
-                                }
-                            }
+                                &self.output,
+                                &mut pre_postprocess_data,
+                                &tx,
+                                &frame_result,
+                                &elements,
+                                frame,
+                                now.into(),
+                            )?;
                         }
 
                         if self.mirroring.is_none() {
@@ -1940,4 +1709,240 @@ fn get_surface_dmabuf_feedback(
         scanout_feedback,
         primary_scanout_feedback,
     }
+}
+
+fn send_screencopy_result<'a>(
+    renderer: &mut GlMultiRenderer<'a>,
+    output: &Output,
+    pre_postprocess_data: &mut PrePostprocessData,
+    tx: &std::sync::mpsc::Sender<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+    frame_result: &RenderFrameResult<GbmBuffer, GbmFramebuffer, CosmicElement<GlMultiRenderer<'a>>>,
+    elements: &[CosmicElement<GlMultiRenderer>],
+    (session, frame, res): (
+        ScreencopySessionRef,
+        ScreencopyFrame,
+        Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
+    ),
+    presentation_time: Duration,
+) -> Result<()> {
+    let damage = match res {
+        Ok((damage, _)) => damage,
+        Err(err) => {
+            tracing::warn!(?err, "Failed to screencopy");
+            session
+                .user_data()
+                .get::<SessionData>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .reset();
+            frame.fail(FailureReason::Unknown);
+            return Ok(());
+        }
+    };
+
+    let mut sync = SyncPoint::default();
+    let mut dmabuf_clone;
+    let mut render_buffer;
+    let buffer = frame.buffer();
+    let mut shm_buffer = false;
+    let mut fb = if let Ok(dmabuf) = get_dmabuf(&buffer) {
+        dmabuf_clone = dmabuf.clone();
+        Some(
+            renderer
+                .bind(&mut dmabuf_clone)
+                .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?,
+        )
+    } else {
+        shm_buffer = true;
+        let size =
+            buffer_dimensions(&buffer).ok_or(RenderError::<
+                <GlMultiRenderer as RendererSuper>::Error,
+            >::Rendering(MultiError::ImportFailed))?;
+        let format = with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
+            .map_err(|_| OutputNoMode)? // eh, we have to do some error
+            .expect("We should be able to convert all hardcoded shm screencopy formats");
+
+        if pre_postprocess_data
+            .texture
+            .as_ref()
+            .is_some_and(|tex| tex.format() == Some(format))
+            && (session.draw_cursor() == false || pre_postprocess_data.cursor_texture.is_none())
+        {
+            None
+        } else {
+            render_buffer = Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
+                .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
+            Some(
+                renderer
+                    .bind(&mut render_buffer)
+                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?,
+            )
+        }
+    };
+
+    if let Some(ref damage) = damage {
+        let (output_size, output_scale, output_transform) = (
+            output.current_mode().ok_or(OutputNoMode)?.size,
+            output.current_scale().fractional_scale(),
+            output.current_transform(),
+        );
+
+        let filter = (!session.draw_cursor())
+            .then(|| {
+                elements.iter().filter_map(|elem| {
+                    if let CosmicElement::Cursor(_) = elem {
+                        Some(elem.id().clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .into_iter()
+            .flatten();
+
+        // If the screen is rotated, we must convert damage to match output.
+        let adjusted = damage
+            .iter()
+            .copied()
+            .map(|mut d| {
+                d.size = d
+                    .size
+                    .to_logical(1)
+                    .to_buffer(1, output_transform)
+                    .to_logical(1, Transform::Normal)
+                    .to_physical(1);
+                d
+            })
+            .collect::<Vec<_>>();
+
+        if let Some(tex) = pre_postprocess_data.texture.as_mut() {
+            let mut tex_fb = renderer
+                .bind(tex)
+                .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
+
+            if let Some(fb) = fb.as_mut() {
+                for rect in adjusted.iter().copied() {
+                    renderer
+                        .blit(&mut tex_fb, fb, rect, rect, TextureFilter::Linear)
+                        .map_err(
+                            RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering,
+                        )?;
+                }
+                if let Some(cursor_geometry) = pre_postprocess_data
+                    .cursor_geometry
+                    .as_ref()
+                    .filter(|_| session.draw_cursor())
+                {
+                    let cursor_damage = adjusted
+                        .iter()
+                        .filter_map(|rect| cursor_geometry.intersection(*rect))
+                        .map(|rect| Rectangle::new(rect.loc - cursor_geometry.loc, rect.size))
+                        .collect::<Vec<_>>();
+                    let mut frame = renderer.render(fb, output_size, output_transform).map_err(
+                        RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering,
+                    )?;
+                    frame
+                        .as_mut()
+                        .render_texture_from_to(
+                            pre_postprocess_data.cursor_texture.as_ref().unwrap(),
+                            Rectangle::new(
+                                Point::from((0., 0.)),
+                                cursor_geometry
+                                    .size
+                                    .to_logical(1)
+                                    .to_buffer(1, Transform::Normal)
+                                    .to_f64(),
+                            ),
+                            *cursor_geometry,
+                            &cursor_damage,
+                            &[*cursor_geometry],
+                            Transform::Normal,
+                            1.0,
+                        )
+                        .map_err(GlMultiError::Render)
+                        .map_err(
+                            RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering,
+                        )?;
+                    let sync = frame.finish().map_err(
+                        RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering,
+                    )?;
+                    renderer.wait(&sync).map_err(
+                        RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering,
+                    )?;
+                }
+            } else {
+                fb = Some(tex_fb);
+            }
+        } else {
+            match frame_result
+                .blit_frame_result(
+                    output_size,
+                    output_transform,
+                    output_scale,
+                    renderer,
+                    fb.as_mut().unwrap(),
+                    adjusted,
+                    filter,
+                )
+                .map_err(|err| match err {
+                    BlitFrameResultError::Rendering(err) => {
+                        RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering(err)
+                    }
+                    BlitFrameResultError::Export(_) => {
+                        RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering(
+                            MultiError::DeviceMissing,
+                        )
+                    }
+                }) {
+                Ok(new_sync) => {
+                    sync = new_sync;
+                }
+                Err(err) => {
+                    tracing::warn!(?err, "Failed to screencopy");
+                    session
+                        .user_data()
+                        .get::<SessionData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap()
+                        .reset();
+                    frame.fail(FailureReason::Unknown);
+                    return Ok(());
+                }
+            };
+        };
+    }
+
+    let transform = output.current_transform();
+
+    match submit_buffer(
+        frame,
+        renderer,
+        shm_buffer.then_some(fb.as_mut().unwrap()),
+        transform,
+        damage.as_deref(),
+        sync,
+    ) {
+        Ok(Some((frame, damage))) => {
+            if frame_result.is_empty {
+                frame.success(transform, damage, presentation_time);
+            } else {
+                let _ = tx.send((frame, damage));
+            }
+        }
+        Ok(None) => {}
+        Err(err) => {
+            session
+                .user_data()
+                .get::<SessionData>()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .reset();
+            tracing::warn!(?err, "Failed to screencopy");
+        }
+    }
+
+    Ok(())
 }
