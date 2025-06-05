@@ -1290,106 +1290,14 @@ impl SurfaceThreadState {
                 .context("Failed to draw to offscreen render target")?;
 
             renderer = self.api.single_renderer(&self.target_node).unwrap();
-            let postprocess_texture_shader = Borrow::<GlesRenderer>::borrow(renderer.as_ref())
-                .egl_context()
-                .user_data()
-                .get::<PostprocessShader>()
-                .expect("OffscreenShader should be available through `init_shaders`");
 
-            elements = {
-                let mut elements: [Option<TextureShaderElement>; 2] = [None, None];
-                if let Some(cursor_texture) = postprocess_state.cursor_texture.as_ref() {
-                    let cursor_geometry = pre_postprocess_data.cursor_geometry.unwrap();
-                    let texture_elem = TextureRenderElement::from_texture_render_buffer(
-                        cursor_geometry.loc.to_f64(),
-                        cursor_texture,
-                        None,
-                        Some(Rectangle::new(
-                            Point::from((0., 0.)),
-                            cursor_geometry.size.to_logical(1).to_f64(),
-                        )),
-                        Some(
-                            cursor_geometry
-                                .size
-                                .to_f64()
-                                .to_logical(self.output.current_scale().fractional_scale())
-                                .to_i32_round(),
-                        ),
-                        Kind::Cursor,
-                    );
-
-                    elements[0] = Some(TextureShaderElement::new(
-                        texture_elem,
-                        postprocess_texture_shader.0.clone(),
-                        vec![
-                            Uniform::new(
-                                "invert",
-                                if self.screen_filter.inverted { 1. } else { 0. },
-                            ),
-                            Uniform::new(
-                                "color_mode",
-                                self.screen_filter
-                                    .color_filter
-                                    .map(|val| val as u8 as f32)
-                                    .unwrap_or(0.),
-                            ),
-                        ],
-                    ));
-                }
-
-                let texture_elem = TextureRenderElement::from_texture_render_buffer(
-                    (0., 0.),
-                    &postprocess_state.texture,
-                    None,
-                    Some(Rectangle::new(
-                        Point::from((0., 0.)),
-                        postprocess_state.output_config.size.to_logical(1).to_f64(),
-                    )),
-                    Some(
-                        postprocess_state
-                            .output_config
-                            .size
-                            .to_f64()
-                            .to_logical(postprocess_state.output_config.fractional_scale)
-                            .to_i32_round(),
-                    ),
-                    Kind::Unspecified,
-                );
-                elements[1] = Some(TextureShaderElement::new(
-                    texture_elem,
-                    postprocess_texture_shader.0.clone(),
-                    vec![
-                        Uniform::new("invert", if self.screen_filter.inverted { 1. } else { 0. }),
-                        Uniform::new(
-                            "color_mode",
-                            self.screen_filter
-                                .color_filter
-                                .map(|val| val as u8 as f32)
-                                .unwrap_or(0.),
-                        ),
-                    ],
-                ));
-
-                constrain_render_elements(
-                    elements.into_iter().flatten(),
-                    (0, 0),
-                    Rectangle::from_size(
-                        self.output
-                            .geometry()
-                            .size
-                            .as_logical()
-                            .to_physical_precise_round(
-                                self.output.current_scale().fractional_scale(),
-                            ),
-                    ),
-                    Rectangle::new(Point::from((0, 0)), postprocess_state.output_config.size),
-                    ConstrainScaleBehavior::Fit,
-                    ConstrainAlign::CENTER,
-                    postprocess_state.output_config.fractional_scale,
-                )
-                .map(CosmicElement::Postprocess)
-                .collect::<Vec<_>>()
-            };
+            elements = postprocess_elements(
+                &mut renderer,
+                &self.output,
+                &pre_postprocess_data,
+                &postprocess_state,
+                &self.screen_filter,
+            );
 
             if let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr)) {
                 warn!("Unable to set adaptive VRR state: {}", err);
@@ -1945,4 +1853,106 @@ fn send_screencopy_result<'a>(
     }
 
     Ok(())
+}
+
+fn postprocess_elements<'a>(
+    renderer: &mut GlMultiRenderer<'a>,
+    output: &Output,
+    pre_postprocess_data: &PrePostprocessData,
+    postprocess_state: &PostprocessState,
+    screen_filter: &ScreenFilter,
+) -> Vec<CosmicElement<GlMultiRenderer<'a>>> {
+    let postprocess_texture_shader = Borrow::<GlesRenderer>::borrow(renderer.as_ref())
+        .egl_context()
+        .user_data()
+        .get::<PostprocessShader>()
+        .expect("OffscreenShader should be available through `init_shaders`");
+
+    let mut elements: [Option<TextureShaderElement>; 2] = [None, None];
+    if let Some(cursor_texture) = postprocess_state.cursor_texture.as_ref() {
+        let cursor_geometry = pre_postprocess_data.cursor_geometry.unwrap();
+        let texture_elem = TextureRenderElement::from_texture_render_buffer(
+            cursor_geometry.loc.to_f64(),
+            cursor_texture,
+            None,
+            Some(Rectangle::new(
+                Point::from((0., 0.)),
+                cursor_geometry.size.to_logical(1).to_f64(),
+            )),
+            Some(
+                cursor_geometry
+                    .size
+                    .to_f64()
+                    .to_logical(output.current_scale().fractional_scale())
+                    .to_i32_round(),
+            ),
+            Kind::Cursor,
+        );
+
+        elements[0] = Some(TextureShaderElement::new(
+            texture_elem,
+            postprocess_texture_shader.0.clone(),
+            vec![
+                Uniform::new("invert", if screen_filter.inverted { 1. } else { 0. }),
+                Uniform::new(
+                    "color_mode",
+                    screen_filter
+                        .color_filter
+                        .map(|val| val as u8 as f32)
+                        .unwrap_or(0.),
+                ),
+            ],
+        ));
+    }
+
+    let texture_elem = TextureRenderElement::from_texture_render_buffer(
+        (0., 0.),
+        &postprocess_state.texture,
+        None,
+        Some(Rectangle::new(
+            Point::from((0., 0.)),
+            postprocess_state.output_config.size.to_logical(1).to_f64(),
+        )),
+        Some(
+            postprocess_state
+                .output_config
+                .size
+                .to_f64()
+                .to_logical(postprocess_state.output_config.fractional_scale)
+                .to_i32_round(),
+        ),
+        Kind::Unspecified,
+    );
+    elements[1] = Some(TextureShaderElement::new(
+        texture_elem,
+        postprocess_texture_shader.0.clone(),
+        vec![
+            Uniform::new("invert", if screen_filter.inverted { 1. } else { 0. }),
+            Uniform::new(
+                "color_mode",
+                screen_filter
+                    .color_filter
+                    .map(|val| val as u8 as f32)
+                    .unwrap_or(0.),
+            ),
+        ],
+    ));
+
+    constrain_render_elements(
+        elements.into_iter().flatten(),
+        (0, 0),
+        Rectangle::from_size(
+            output
+                .geometry()
+                .size
+                .as_logical()
+                .to_physical_precise_round(output.current_scale().fractional_scale()),
+        ),
+        Rectangle::new(Point::from((0, 0)), postprocess_state.output_config.size),
+        ConstrainScaleBehavior::Fit,
+        ConstrainAlign::CENTER,
+        postprocess_state.output_config.fractional_scale,
+    )
+    .map(CosmicElement::<GlMultiRenderer>::Postprocess)
+    .collect::<Vec<_>>()
 }
