@@ -1371,17 +1371,26 @@ impl SurfaceThreadState {
                         }
 
                         let now = self.clock.now();
-                        for frame in frames {
-                            send_screencopy_result(
+                        for (session, frame, res) in frames {
+                            if let Err(err) = send_screencopy_result(
                                 &mut renderer,
                                 &self.output,
                                 &mut pre_postprocess_data,
                                 &tx,
                                 &frame_result,
                                 &elements,
-                                frame,
+                                (&session, frame, res),
                                 now.into(),
-                            )?;
+                            ) {
+                                session
+                                    .user_data()
+                                    .get::<SessionData>()
+                                    .unwrap()
+                                    .lock()
+                                    .unwrap()
+                                    .reset();
+                                tracing::warn!(?err, "Failed to screencopy");
+                            }
                         }
 
                         if self.mirroring.is_none() {
@@ -1627,27 +1636,13 @@ fn send_screencopy_result<'a>(
     frame_result: &RenderFrameResult<GbmBuffer, GbmFramebuffer, CosmicElement<GlMultiRenderer<'a>>>,
     elements: &[CosmicElement<GlMultiRenderer>],
     (session, frame, res): (
-        ScreencopySessionRef,
+        &ScreencopySessionRef,
         ScreencopyFrame,
         Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
     ),
     presentation_time: Duration,
 ) -> Result<()> {
-    let damage = match res {
-        Ok((damage, _)) => damage,
-        Err(err) => {
-            tracing::warn!(?err, "Failed to screencopy");
-            session
-                .user_data()
-                .get::<SessionData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .reset();
-            frame.fail(FailureReason::Unknown);
-            return Ok(());
-        }
-    };
+    let (damage, _) = res?;
 
     let mut sync = SyncPoint::default();
     let mut dmabuf_clone;
@@ -1783,7 +1778,7 @@ fn send_screencopy_result<'a>(
                 fb = Some(tex_fb);
             }
         } else {
-            match frame_result
+            sync = frame_result
                 .blit_frame_result(
                     output_size,
                     output_transform,
@@ -1802,53 +1797,24 @@ fn send_screencopy_result<'a>(
                             MultiError::DeviceMissing,
                         )
                     }
-                }) {
-                Ok(new_sync) => {
-                    sync = new_sync;
-                }
-                Err(err) => {
-                    tracing::warn!(?err, "Failed to screencopy");
-                    session
-                        .user_data()
-                        .get::<SessionData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap()
-                        .reset();
-                    frame.fail(FailureReason::Unknown);
-                    return Ok(());
-                }
-            };
+                })?;
         };
     }
 
     let transform = output.current_transform();
 
-    match submit_buffer(
+    if let Some((frame, damage)) = submit_buffer(
         frame,
         renderer,
         shm_buffer.then_some(fb.as_mut().unwrap()),
         transform,
         damage.as_deref(),
         sync,
-    ) {
-        Ok(Some((frame, damage))) => {
-            if frame_result.is_empty {
-                frame.success(transform, damage, presentation_time);
-            } else {
-                let _ = tx.send((frame, damage));
-            }
-        }
-        Ok(None) => {}
-        Err(err) => {
-            session
-                .user_data()
-                .get::<SessionData>()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .reset();
-            tracing::warn!(?err, "Failed to screencopy");
+    )? {
+        if frame_result.is_empty {
+            frame.success(transform, damage, presentation_time);
+        } else {
+            let _ = tx.send((frame, damage));
         }
     }
 
