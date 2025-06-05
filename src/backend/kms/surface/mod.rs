@@ -1044,73 +1044,11 @@ impl SurfaceThreadState {
         // we can't use the elements after `compositor.render_frame`,
         // so let's collect everything we need for screencopy now
         let mut has_cursor_mode_none = false;
-        let frames: Vec<(
-            ScreencopySessionRef,
-            ScreencopyFrame,
-            Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
-        )> = self
+        let frames = self
             .mirroring
             .is_none()
-            .then(|| {
-                self.output
-                    .take_pending_frames()
-                    .into_iter()
-                    .map(|(session, frame)| {
-                        let additional_damage = frame.damage();
-                        let session_data = session.user_data().get::<SessionData>().unwrap();
-                        let mut damage_tracking = session_data.lock().unwrap();
-
-                        let old_len = if !additional_damage.is_empty() {
-                            let area = self
-                                .output
-                                .current_mode()
-                                .unwrap()
-                                /* TODO: Mode is Buffer..., why is this Physical in the first place */
-                                .size
-                                .to_logical(1)
-                                .to_buffer(1, Transform::Normal)
-                                .to_f64();
-
-                            let old_len = elements.len();
-                            elements.extend(
-                                additional_damage
-                                    .into_iter()
-                                    .map(|rect| {
-                                        rect.to_f64()
-                                            .to_logical(
-                                                self.output.current_scale().fractional_scale(),
-                                                self.output.current_transform(),
-                                                &area,
-                                            )
-                                            .to_i32_round()
-                                    })
-                                    .map(DamageElement::new)
-                                    .map(Into::into),
-                            );
-
-                            Some(old_len)
-                        } else {
-                            None
-                        };
-
-                        let buffer = frame.buffer();
-                        let age = damage_tracking.age_for_buffer(&buffer);
-                        let res = damage_tracking.dt.damage_output(age, &elements);
-
-                        if let Some(old_len) = old_len {
-                            elements.truncate(old_len);
-                        }
-
-                        if !session.draw_cursor() {
-                            has_cursor_mode_none = true;
-                        }
-
-                        let res = res.map(|(a, b)| (a.cloned(), b));
-                        std::mem::drop(damage_tracking);
-                        (session, frame, res)
-                    })
-                    .collect()
-            }).unwrap_or_default();
+            .then(|| take_screencopy_frames(&self.output, &mut elements, &mut has_cursor_mode_none))
+            .unwrap_or_default();
 
         // actual rendering
         let source_output = self
@@ -1626,6 +1564,75 @@ fn get_surface_dmabuf_feedback(
         scanout_feedback,
         primary_scanout_feedback,
     }
+}
+
+// TODO: Don't mutate `elements`
+fn take_screencopy_frames(
+    output: &Output,
+    elements: &mut Vec<CosmicElement<GlMultiRenderer>>,
+    has_cursor_mode_none: &mut bool,
+) -> Vec<(
+    ScreencopySessionRef,
+    ScreencopyFrame,
+    Result<(Option<Vec<Rectangle<i32, Physical>>>, RenderElementStates), OutputNoMode>,
+)> {
+    output
+        .take_pending_frames()
+        .into_iter()
+        .map(|(session, frame)| {
+            let additional_damage = frame.damage();
+            let session_data = session.user_data().get::<SessionData>().unwrap();
+            let mut damage_tracking = session_data.lock().unwrap();
+
+            let old_len = if !additional_damage.is_empty() {
+                let area = output
+                    .current_mode()
+                    .unwrap()
+                    /* TODO: Mode is Buffer..., why is this Physical in the first place */
+                    .size
+                    .to_logical(1)
+                    .to_buffer(1, Transform::Normal)
+                    .to_f64();
+
+                let old_len = elements.len();
+                elements.extend(
+                    additional_damage
+                        .into_iter()
+                        .map(|rect| {
+                            rect.to_f64()
+                                .to_logical(
+                                    output.current_scale().fractional_scale(),
+                                    output.current_transform(),
+                                    &area,
+                                )
+                                .to_i32_round()
+                        })
+                        .map(DamageElement::new)
+                        .map(Into::into),
+                );
+
+                Some(old_len)
+            } else {
+                None
+            };
+
+            let buffer = frame.buffer();
+            let age = damage_tracking.age_for_buffer(&buffer);
+            let res = damage_tracking.dt.damage_output(age, &elements);
+
+            if let Some(old_len) = old_len {
+                elements.truncate(old_len);
+            }
+
+            if !session.draw_cursor() {
+                *has_cursor_mode_none = true;
+            }
+
+            let res = res.map(|(a, b)| (a.cloned(), b));
+            std::mem::drop(damage_tracking);
+            (session, frame, res)
+        })
+        .collect()
 }
 
 fn send_screencopy_result<'a>(
