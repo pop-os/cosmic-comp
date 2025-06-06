@@ -377,19 +377,15 @@ impl SeatExt for Seat<State> {
     }
 
     fn cursor_image_status(&self) -> CursorImageStatus {
-        self.user_data()
-            .get::<Mutex<CursorImageStatus>>()
-            // Reset the cursor if the surface is no longer alive
-            .map(|lock| {
-                let mut cursor_status = lock.lock().unwrap();
-                if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                    if !surface.alive() {
-                        *cursor_status = CursorImageStatus::default_named();
-                    }
-                }
-                cursor_status.clone()
-            })
-            .unwrap_or(CursorImageStatus::default_named())
+        let lock = self.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+        // Reset the cursor if the surface is no longer alive
+        let mut cursor_status = lock.lock().unwrap();
+        if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+            if !surface.alive() {
+                *cursor_status = CursorImageStatus::default_named();
+            }
+        }
+        cursor_status.clone()
     }
 
     fn set_cursor_image_status(&self, status: CursorImageStatus) {
