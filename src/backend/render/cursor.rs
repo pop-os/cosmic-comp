@@ -20,8 +20,7 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface,
     render_elements,
     utils::{
-        Buffer as BufferCoords, IsAlive, Logical, Monotonic, Physical, Point, Scale, Size, Time,
-        Transform,
+        Buffer as BufferCoords, Logical, Monotonic, Physical, Point, Scale, Size, Time, Transform,
     },
     wayland::compositor::{get_role, with_states},
 };
@@ -266,20 +265,7 @@ where
     R::TextureId: Send + Clone + 'static,
 {
     // draw the cursor as relevant
-    // reset the cursor if the surface is no longer alive
-    let cursor_status = seat
-        .user_data()
-        .get::<Mutex<CursorImageStatus>>()
-        .map(|lock| {
-            let mut cursor_status = lock.lock().unwrap();
-            if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                if !surface.alive() {
-                    *cursor_status = CursorImageStatus::default_named();
-                }
-            }
-            cursor_status.clone()
-        })
-        .unwrap_or(CursorImageStatus::default_named());
+    let cursor_status = seat.cursor_image_status();
 
     let seat_userdata = seat.user_data();
     let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();

@@ -711,8 +711,7 @@ impl PointerTarget<State> for CosmicWindow {
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
                 cursor_state.lock().unwrap().set_shape(next.cursor_shape());
-                let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
-                *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
+                seat.set_cursor_image_status(CursorImageStatus::default_named());
             }
         });
 
@@ -736,8 +735,7 @@ impl PointerTarget<State> for CosmicWindow {
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
                 cursor_state.lock().unwrap().set_shape(next.cursor_shape());
-                let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
-                *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
+                seat.set_cursor_image_status(CursorImageStatus::default_named());
             }
         });
 

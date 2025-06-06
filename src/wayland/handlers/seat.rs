@@ -4,12 +4,12 @@ use crate::{
     shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     shell::Devices,
     state::State,
+    utils::prelude::SeatExt,
 };
 use smithay::{
     delegate_cursor_shape, delegate_seat,
     input::{keyboard::LedState, pointer::CursorImageStatus, SeatHandler, SeatState},
 };
-use std::sync::Mutex;
 
 impl SeatHandler for State {
     type KeyboardFocus = KeyboardFocusTarget;
@@ -20,17 +20,8 @@ impl SeatHandler for State {
         &mut self.common.seat_state
     }
 
-    fn cursor_image(
-        &mut self,
-        seat: &smithay::input::Seat<Self>,
-        image: smithay::input::pointer::CursorImageStatus,
-    ) {
-        *seat
-            .user_data()
-            .get::<Mutex<CursorImageStatus>>()
-            .unwrap()
-            .lock()
-            .unwrap() = image;
+    fn cursor_image(&mut self, seat: &smithay::input::Seat<Self>, image: CursorImageStatus) {
+        seat.set_cursor_image_status(image);
     }
 
     fn focus_changed(
