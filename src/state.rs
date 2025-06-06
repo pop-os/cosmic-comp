@@ -12,7 +12,7 @@ use crate::{
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
     wayland::{
-        handlers::screencopy::SessionHolder,
+        handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
         protocols::{
             a11y::A11yState,
             atspi::AtspiState,
@@ -1047,6 +1047,16 @@ impl Common {
                         window.send_frame(output, time, throttle(&window), should_send);
                     }
                 }
+            }
+
+            if let Some(icon) = get_dnd_icon(seat) {
+                send_frames_surface_tree(
+                    &icon.surface,
+                    output,
+                    time,
+                    Some(Duration::ZERO),
+                    should_send,
+                )
             }
         }
 
