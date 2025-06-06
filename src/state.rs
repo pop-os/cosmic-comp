@@ -756,6 +756,10 @@ impl Common {
                     }
                 }
             }
+
+            if let Some(icon) = get_dnd_icon(seat) {
+                with_surfaces_surface_tree(&icon.surface, processor);
+            }
         }
 
         // sticky window
