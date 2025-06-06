@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::State;
+use crate::{state::State, utils::prelude::SeatExt};
 use smithay::{
     delegate_data_device,
     input::{
@@ -70,26 +70,20 @@ impl ClientDndGrabHandler for State {
         let user_data = seat.user_data();
         user_data.insert_if_missing_threadsafe::<Mutex<Option<DnDIcon>>, _>(|| Default::default());
 
-        let offset = seat
-            .user_data()
-            .get::<Mutex<CursorImageStatus>>()
-            .map(|guard| {
-                if let CursorImageStatus::Surface(ref surface) = *guard.lock().unwrap() {
-                    compositor::with_states(surface, |states| {
-                        let hotspot = states
-                            .data_map
-                            .get::<CursorImageSurfaceData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap()
-                            .hotspot;
-                        Point::from((-hotspot.x, -hotspot.y))
-                    })
-                } else {
-                    (0, 0).into()
-                }
+        let offset = if let CursorImageStatus::Surface(ref surface) = seat.cursor_image_status() {
+            compositor::with_states(surface, |states| {
+                let hotspot = states
+                    .data_map
+                    .get::<CursorImageSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .hotspot;
+                Point::from((-hotspot.x, -hotspot.y))
             })
-            .unwrap_or_default();
+        } else {
+            (0, 0).into()
+        };
 
         *user_data
             .get::<Mutex<Option<DnDIcon>>>()

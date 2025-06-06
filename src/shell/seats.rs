@@ -252,6 +252,8 @@ pub trait SeatExt {
         loc: impl Into<Point<f64, Buffer>>,
         time: Time<Monotonic>,
     ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)>;
+    fn cursor_image_status(&self) -> CursorImageStatus;
+    fn set_cursor_image_status(&self, status: CursorImageStatus);
 }
 
 impl SeatExt for Seat<State> {
@@ -337,21 +339,7 @@ impl SeatExt for Seat<State> {
     ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)> {
         let location = loc.into().to_i32_round();
 
-        let cursor_status = self
-            .user_data()
-            .get::<Mutex<CursorImageStatus>>()
-            .map(|lock| {
-                let mut cursor_status = lock.lock().unwrap();
-                if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                    if !surface.alive() {
-                        *cursor_status = CursorImageStatus::default_named();
-                    }
-                }
-                cursor_status.clone()
-            })
-            .unwrap_or(CursorImageStatus::default_named());
-
-        match cursor_status {
+        match self.cursor_image_status() {
             CursorImageStatus::Surface(surface) => {
                 let hotspot = with_states(&surface, |states| {
                     states
@@ -386,5 +374,26 @@ impl SeatExt for Seat<State> {
             }
             CursorImageStatus::Hidden => None,
         }
+    }
+
+    fn cursor_image_status(&self) -> CursorImageStatus {
+        self.user_data()
+            .get::<Mutex<CursorImageStatus>>()
+            // Reset the cursor if the surface is no longer alive
+            .map(|lock| {
+                let mut cursor_status = lock.lock().unwrap();
+                if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+                    if !surface.alive() {
+                        *cursor_status = CursorImageStatus::default_named();
+                    }
+                }
+                cursor_status.clone()
+            })
+            .unwrap_or(CursorImageStatus::default_named())
+    }
+
+    fn set_cursor_image_status(&self, status: CursorImageStatus) {
+        let cursor_status = self.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+        *cursor_status.lock().unwrap() = status;
     }
 }

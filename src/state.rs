@@ -70,7 +70,7 @@ use smithay::{
             Client, DisplayHandle, Resource,
         },
     },
-    utils::{Clock, IsAlive, Monotonic, Point},
+    utils::{Clock, Monotonic, Point},
     wayland::{
         alpha_modifier::AlphaModifierState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
@@ -118,7 +118,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     process::Child,
-    sync::{atomic::AtomicBool, Arc, Mutex, Once},
+    sync::{atomic::AtomicBool, Arc, Once},
     time::{Duration, Instant},
 };
 
@@ -729,19 +729,7 @@ impl Common {
             .iter()
             .filter(|seat| &seat.active_output() == output)
         {
-            let cursor_status = seat
-                .user_data()
-                .get::<Mutex<CursorImageStatus>>()
-                .map(|lock| {
-                    let mut cursor_status = lock.lock().unwrap();
-                    if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                        if !surface.alive() {
-                            *cursor_status = CursorImageStatus::default_named();
-                        }
-                    }
-                    cursor_status.clone()
-                })
-                .unwrap_or(CursorImageStatus::default_named());
+            let cursor_status = seat.cursor_image_status();
 
             // cursor ...
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
@@ -1021,19 +1009,7 @@ impl Common {
             .iter()
             .filter(|seat| &seat.active_output() == output)
         {
-            let cursor_status = seat
-                .user_data()
-                .get::<Mutex<CursorImageStatus>>()
-                .map(|lock| {
-                    let mut cursor_status = lock.lock().unwrap();
-                    if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                        if !surface.alive() {
-                            *cursor_status = CursorImageStatus::default_named();
-                        }
-                    }
-                    cursor_status.clone()
-                })
-                .unwrap_or(CursorImageStatus::default_named());
+            let cursor_status = seat.cursor_image_status();
 
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
                 send_frames_surface_tree(
