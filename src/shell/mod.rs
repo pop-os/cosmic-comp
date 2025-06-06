@@ -12,7 +12,7 @@ use std::{
 use wayland_backend::server::ClientId;
 
 use crate::wayland::{
-    handlers::data_device,
+    handlers::data_device::{self, get_dnd_icon},
     protocols::workspace::{State as WState, WorkspaceCapabilities},
 };
 use cosmic_comp_config::{
@@ -1831,6 +1831,38 @@ impl Shell {
                         .unwrap()
                         .mapped()
                         .any(|e| e.has_surface(surface, WindowSurfaceType::ALL))
+                })
+            })
+            // cursor and drag surfaces
+            .or_else(|| {
+                self.outputs().find(|o| {
+                    self.seats
+                        .iter()
+                        .filter(|seat| seat.active_output() == **o)
+                        .any(|seat| {
+                            let cursor_status = seat.cursor_image_status();
+                            if let CursorImageStatus::Surface(s) = cursor_status {
+                                if s == *surface {
+                                    return true;
+                                }
+                            }
+
+                            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                                if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                                    for (window, _) in grab_state.element().windows() {
+                                        let mut matches = false;
+                                        window.0.with_surfaces(|s, _| {
+                                            matches |= s == surface;
+                                        });
+                                        if matches {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+
+                            get_dnd_icon(seat).is_some_and(|icon| icon.surface == *surface)
+                        })
                 })
             })
     }
