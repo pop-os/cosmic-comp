@@ -1427,12 +1427,7 @@ impl Common {
             }
 
             let is_cursor_image = shell.seats.iter().any(|seat| {
-                seat.user_data()
-                .get::<Mutex<CursorImageStatus>>()
-                .map(|guard| {
-                    matches!(*guard.lock().unwrap(), CursorImageStatus::Surface(ref cursor_surface) if cursor_surface == surface)
-                })
-                .unwrap_or(false)
+                    matches!(seat.cursor_image_status(), CursorImageStatus::Surface(ref cursor_surface) if cursor_surface == surface)
             });
 
             if is_cursor_image {
