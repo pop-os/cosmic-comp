@@ -32,7 +32,7 @@ impl SecurityContextHandler for State {
                     .map(|data| data.privileged)
                     .unwrap_or(false);
 
-                let new_state = state.new_client_state();
+                let new_state = state.new_client_state(&client_stream);
 
                 let drm_node = client_data
                     .as_ref()
