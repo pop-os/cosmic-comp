@@ -59,6 +59,10 @@ impl Window for CosmicSurface {
         CosmicSurface::global_geometry(self)
     }
 
+    fn pid(&self) -> Option<u32> {
+        CosmicSurface::pid(self)
+    }
+
     fn user_data(&self) -> &UserDataMap {
         CosmicSurface::user_data(self)
     }
