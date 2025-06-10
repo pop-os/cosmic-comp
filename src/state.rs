@@ -826,6 +826,50 @@ impl Common {
             .iter()
             .filter(|seat| &seat.active_output() == output)
         {
+            let cursor_status = seat.cursor_image_status();
+
+            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+                if let Some(feedback) =
+                    advertised_node_for_surface(&wl_surface, &self.display_handle)
+                        .and_then(|source| dmabuf_feedback(source))
+                {
+                    send_dmabuf_feedback_surface_tree(
+                        &wl_surface,
+                        output,
+                        surface_primary_scanout_output,
+                        |surface, _| {
+                            select_dmabuf_feedback(
+                                surface,
+                                render_element_states,
+                                &feedback.render_feedback,
+                                &feedback.scanout_feedback,
+                            )
+                        },
+                    );
+                }
+            }
+
+            if let Some(icon) = get_dnd_icon(seat) {
+                if let Some(feedback) =
+                    advertised_node_for_surface(&icon.surface, &self.display_handle)
+                        .and_then(|source| dmabuf_feedback(source))
+                {
+                    send_dmabuf_feedback_surface_tree(
+                        &icon.surface,
+                        output,
+                        surface_primary_scanout_output,
+                        |surface, _| {
+                            select_dmabuf_feedback(
+                                surface,
+                                render_element_states,
+                                &feedback.render_feedback,
+                                &feedback.scanout_feedback,
+                            )
+                        },
+                    );
+                }
+            }
+
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
                 if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
                     for (window, _) in grab_state.element().windows() {
