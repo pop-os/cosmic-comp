@@ -49,6 +49,9 @@ use cosmic_comp_config::{
     XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
 };
 
+/// Offset used to convert Linux scancode to X11 keycode.
+pub(crate) const X11_KEYCODE_OFFSET: u32 = 8;
+
 #[derive(Debug)]
 pub struct Config {
     pub dynamic_conf: DynamicConfig,
@@ -776,9 +779,6 @@ pub fn change_modifier_state(
     scan_code: u32,
     state: &mut State,
 ) {
-    /// Offset used to convert Linux scancode to X11 keycode.
-    const X11_KEYCODE_OFFSET: u32 = 8;
-
     let mut input = |key_state, scan_code| {
         let time = state.common.clock.now().as_millis();
         let _ = keyboard.input(
