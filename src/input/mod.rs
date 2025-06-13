@@ -7,7 +7,7 @@ use crate::{
             cosmic_keystate_from_smithay, cosmic_modifiers_eq_smithay,
             cosmic_modifiers_from_smithay,
         },
-        Action, Config, PrivateAction,
+        Action, Config, PrivateAction, X11_KEYCODE_OFFSET,
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
@@ -35,8 +35,8 @@ use calloop::{
     RegistrationToken,
 };
 use cosmic_comp_config::{workspace::WorkspaceLayout, NumlockState};
-use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
+use cosmic_settings_config::{shortcuts, Binding};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
@@ -213,11 +213,32 @@ impl State {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
                     let keycode = event.key_code();
+
                     let state = event.state();
                     trace!(?keycode, ?state, "key");
 
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time_msec(&event);
+
+                    const POWER_OFF: u32 = 116;
+                    // if power key is pressed, just use the system action for power off
+                    // this is a workaround for the fact that the power key is not
+                    // available in the keymap, so we cannot use the keymap to determine
+                    // if the key is pressed
+                    if keycode.raw() == POWER_OFF + X11_KEYCODE_OFFSET && state == KeyState::Pressed
+                    {
+                        self.handle_action(
+                            Action::Shortcut(shortcuts::Action::System(
+                                shortcuts::action::System::PowerOff,
+                            )),
+                            &seat,
+                            serial,
+                            time,
+                            Binding::default(),
+                            None,
+                        );
+                    }
+
                     let keyboard = seat.get_keyboard().unwrap();
                     let previous_modifiers = keyboard.modifier_state();
                     if let Some((action, pattern)) = keyboard
