@@ -118,4 +118,5 @@
     (modifiers: [], key: "XF86AudioPlay"): System(PlayPause),
     (modifiers: [], key: "XF86AudioPrev"): System(PlayPrev),
     (modifiers: [], key: "XF86AudioNext"): System(PlayNext),
+    (modifiers: [], key: "XF86PowerOff"): System(PowerOff),
 }
