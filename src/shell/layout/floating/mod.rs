@@ -24,7 +24,7 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, IndicatorShader, Key, Usage},
+    backend::render::{element::AsGlowRenderer, IndicatorShader, Key, Usage, SecurityContextIndicatorSettings},
     shell::{
         element::{
             resize_indicator::ResizeIndicator,
@@ -1544,6 +1544,24 @@ impl FloatingLayout {
                     .collect();
             }
 
+            // Security context indicator
+            let mut secctx_border_size = 0;
+            if elem.is_window() {
+                let surface = elem.active_window();
+                if let Some(secctx_settings) = surface.user_data().get::<SecurityContextIndicatorSettings>() {
+                    secctx_border_size = secctx_settings.border_size;
+                    let element = IndicatorShader::focus_element(
+                        renderer,
+                        Key::Window(Usage::SecurityContextIndicator, elem.key()),
+                        geometry,
+                        secctx_settings.border_size,
+                        alpha,
+                        secctx_settings.border_color,
+                    );
+                    window_elements.insert(0, element.into());
+                }
+            }
+
             if focused == Some(elem) && !elem.is_maximized(false) {
                 if let Some((mode, resize)) = resize_indicator.as_mut() {
                     let mut resize_geometry = geometry.clone();
@@ -1571,10 +1589,19 @@ impl FloatingLayout {
                 let active_window_hint = crate::theme::active_window_hint(theme);
 
                 if indicator_thickness > 0 {
-                    let element = IndicatorShader::focus_element(
+                    let mut indicator_geometry = geometry.clone();
+                    let mut radius = indicator_thickness * 2;
+                    if secctx_border_size > indicator_thickness {
+                        // Align the focus indicator with the outer edge of the security context indicator when it is enabled
+                        let size = (secctx_border_size - indicator_thickness) as i32;
+                        indicator_geometry.loc -= (size, size).into();
+                        indicator_geometry.size += (size * 2, size * 2).into();
+                        radius = secctx_border_size as u8 * 2;
+                    }
+                    let element = IndicatorShader::focus_element_with_radius(
                         renderer,
                         Key::Window(Usage::FocusIndicator, elem.key()),
-                        geometry,
+                        indicator_geometry,
                         indicator_thickness,
                         alpha,
                         [
@@ -1582,6 +1609,7 @@ impl FloatingLayout {
                             active_window_hint.green,
                             active_window_hint.blue,
                         ],
+                        radius,
                     );
                     window_elements.insert(0, element.into());
                 }
