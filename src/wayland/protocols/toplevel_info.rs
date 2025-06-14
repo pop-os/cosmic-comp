@@ -38,6 +38,7 @@ pub trait Window: IsAlive + Clone + PartialEq + Send {
     fn is_sticky(&self) -> bool;
     fn is_resizing(&self) -> bool;
     fn global_geometry(&self) -> Option<Rectangle<i32, Global>>;
+    fn pid(&self) -> Option<u32>;
     fn user_data(&self) -> &UserDataMap;
 }
 
@@ -312,7 +313,7 @@ where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + Clone + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelInfoV1, _>(
-            3,
+            4,
             ToplevelInfoGlobalData {
                 filter: Box::new(client_filter.clone()),
             },
@@ -609,6 +610,12 @@ where
         }
     }
     handle_state.workspaces = state.workspaces.clone();
+
+    if instance.version() >= zcosmic_toplevel_handle_v1::EVT_PID_SINCE {
+        if let Some(pid) = window.pid() {
+            instance.pid(pid);
+        }
+    }
 
     if changed {
         if instance.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE {

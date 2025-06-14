@@ -34,7 +34,7 @@ use smithay::{
             },
         },
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::Mode as KdeMode,
-        wayland_server::protocol::wl_surface::WlSurface,
+        wayland_server::{protocol::wl_surface::WlSurface, Resource},
     },
     utils::{
         user_data::UserDataMap, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
@@ -49,9 +49,10 @@ use smithay::{
 use tracing::trace;
 
 use crate::{
-    state::{State, SurfaceDmabufFeedback},
+    state::{ClientState, State, SurfaceDmabufFeedback},
     utils::prelude::*,
     wayland::handlers::decoration::{KdeDecorationData, PreferredDecorationMode},
+    xwayland::X11SurfacePid,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -741,6 +742,16 @@ impl CosmicSurface {
 
     pub fn x11_surface(&self) -> Option<&X11Surface> {
         self.0.x11_surface()
+    }
+
+    pub fn pid(&self) -> Option<u32> {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                let surface = toplevel.wl_surface();
+                surface.client()?.get_data::<ClientState>()?.pid
+            }
+            WindowSurface::X11(surface) => surface.user_data().get::<X11SurfacePid>().map(|x| x.0),
+        }
     }
 }
 

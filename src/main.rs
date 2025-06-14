@@ -248,7 +248,7 @@ fn init_wayland_display(
     event_loop
         .handle()
         .insert_source(source, |client_stream, _, state| {
-            let client_state = state.new_client_state();
+            let client_state = state.new_client_state(&client_stream);
             if let Err(err) = state
                 .common
                 .display_handle
