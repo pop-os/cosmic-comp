@@ -108,6 +108,7 @@ impl XdgActivationHandler for State {
     ) {
         if let Some(context) = token_data.user_data.get::<ActivationContext>() {
             let mut shell = self.common.shell.write();
+            // TODO: Fullscreen
             if let Some(element) = shell.element_for_surface(&surface).cloned() {
                 match context {
                     ActivationContext::UrgentOnly => {
@@ -121,7 +122,11 @@ impl XdgActivationHandler for State {
                         let current_output = seat.active_output();
 
                         if element.is_minimized() {
-                            shell.unminimize_request(&element, &seat);
+                            shell.unminimize_request(
+                                &surface,
+                                &seat,
+                                &self.common.event_loop_handle,
+                            );
                         }
 
                         let element_workspace = shell.space_for(&element).map(|w| w.handle.clone());
@@ -156,7 +161,7 @@ impl XdgActivationHandler for State {
                         if in_current_workspace {
                             if seat.get_keyboard().unwrap().current_focus()
                                 != Some(element.clone().into())
-                                && current_workspace.is_tiled(&element)
+                                && current_workspace.is_tiled(&surface)
                             {
                                 for mapped in current_workspace
                                     .mapped()

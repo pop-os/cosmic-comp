@@ -1,5 +1,5 @@
 use crate::{
-    shell::{element::CosmicMapped, Shell},
+    shell::{element::CosmicMapped, MinimizedWindow, Shell},
     state::Common,
     utils::prelude::*,
     wayland::handlers::xdg_shell::PopupGrabData,
@@ -109,12 +109,6 @@ impl Shell {
     ) {
         let element = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
-            Some(KeyboardFocusTarget::Fullscreen(window)) => state
-                .common
-                .shell
-                .read()
-                .element_for_surface(window)
-                .cloned(),
             _ => None,
         };
 
@@ -172,6 +166,8 @@ impl Shell {
                 if matches!(
                     seat.get_keyboard().unwrap().current_focus(),
                     Some(KeyboardFocusTarget::Group(_))
+                        | Some(KeyboardFocusTarget::Fullscreen(_))
+                        | Some(KeyboardFocusTarget::LockSurface(_))
                 ) {
                     return None;
                 }
@@ -193,12 +189,33 @@ impl Shell {
                 window.set_activated(focused_windows.contains(&window));
                 window.configure();
             }
-            for m in set.minimized_windows.iter() {
-                m.window.set_activated(false);
-                m.window.configure();
+            for window in set
+                .minimized_windows
+                .iter()
+                .flat_map(MinimizedWindow::mapped)
+            {
+                window.set_activated(false);
+                window.configure();
             }
 
             let workspace = &mut set.workspaces[set.active];
+            if let Some(fullscreen) = workspace.get_fullscreen() {
+                if self.seats.iter().any(|seat| {
+                    if let Some(KeyboardFocusTarget::Fullscreen(s)) =
+                        seat.get_keyboard().unwrap().current_focus()
+                    {
+                        &s == fullscreen
+                    } else {
+                        false
+                    }
+                }) {
+                    fullscreen.set_activated(true);
+                    fullscreen.send_configure();
+                } else {
+                    fullscreen.set_activated(false);
+                    fullscreen.send_configure();
+                }
+            }
             for focused in focused_windows.iter() {
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
@@ -207,8 +224,15 @@ impl Shell {
                 window.configure();
             }
             for m in workspace.minimized_windows.iter() {
-                m.window.set_activated(false);
-                m.window.configure();
+                if let Some(window) = m.mapped() {
+                    window.set_activated(false);
+                    window.configure();
+                } else {
+                    for surface in m.windows() {
+                        surface.set_activated(false);
+                        surface.send_configure();
+                    }
+                }
             }
 
             for (i, workspace) in set.workspaces.iter().enumerate() {
@@ -523,13 +547,7 @@ fn focus_target_is_valid(
             .has_node(&node),
         KeyboardFocusTarget::Fullscreen(window) => {
             let workspace = shell.active_space(&output).unwrap();
-            let focus_stack = workspace.focus_stack.get(&seat);
-
-            focus_stack
-                .last()
-                .map(|m| m.has_active_window(&window))
-                .unwrap_or(false)
-                && workspace.get_fullscreen().is_some()
+            workspace.get_fullscreen().is_some_and(|w| w == &window)
         }
         KeyboardFocusTarget::Popup(_) => true,
         KeyboardFocusTarget::LockSurface(_) => false,

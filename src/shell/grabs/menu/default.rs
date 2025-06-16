@@ -41,7 +41,7 @@ fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
         .and_then(|i| i.checked_sub(1))
         .and_then(|i| shell.workspaces.get(i, &output).map(|s| s.handle));
     if let Some(prev_handle) = maybe_handle {
-        let res = shell.move_window(
+        let res = shell.move_element(
             Some(&seat),
             mapped,
             &current_handle,
@@ -74,7 +74,7 @@ fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
         .next()
         .map(|space| space.handle);
     if let Some(next_handle) = maybe_handle {
-        let res = shell.move_window(
+        let res = shell.move_element(
             Some(&seat),
             mapped,
             &current_handle,
@@ -198,7 +198,11 @@ pub fn window_items(
             Item::new(fl!("window-menu-minimize"), move |handle| {
                 let mapped = minimize_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    state.common.shell.write().minimize_request(&mapped);
+                    state
+                        .common
+                        .shell
+                        .write()
+                        .minimize_request(&mapped.active_window());
                 });
             })
             .shortcut(config.shortcut_for_action(&Action::Minimize)),
@@ -209,7 +213,7 @@ pub fn window_items(
                 let _ = handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
-                    shell.maximize_toggle(&mapped, &seat);
+                    shell.maximize_toggle(&mapped, &seat, &state.common.event_loop_handle);
                 });
             })
             .shortcut(config.shortcut_for_action(&Action::Maximize))

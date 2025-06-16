@@ -75,7 +75,7 @@ impl MoveGrabState {
         CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {
-        let scale = if self.previous == ManagedLayer::Tiling {
+        let scale = if matches!(self.previous, ManagedLayer::Tiling) {
             0.6 + ((1.0
                 - (Instant::now().duration_since(self.start).as_millis() as f64
                     / RESCALE_ANIMATION_DURATION)
@@ -432,7 +432,8 @@ impl MoveGrab {
                 }
             }
 
-            let indicator_location = shell.stacking_indicator(&current_output, self.previous);
+            let indicator_location =
+                shell.stacking_indicator(&current_output, self.previous.clone());
             if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
                     let element = stack_hover(
@@ -451,7 +452,7 @@ impl MoveGrab {
             }
 
             // Check for overlapping with zones
-            if grab_state.previous == ManagedLayer::Floating {
+            if matches!(grab_state.previous, ManagedLayer::Floating) {
                 let output_geometry = current_output.geometry().to_local(&current_output);
                 grab_state.snapping_zone = [
                     SnappingZone::Maximize,
@@ -731,7 +732,7 @@ impl MoveGrab {
             start: Instant::now(),
             stacking_indicator: None,
             snapping_zone: None,
-            previous: previous_layer,
+            previous: previous_layer.clone(),
             location: start_data.location(),
             cursor_output: cursor_output.clone(),
         };
@@ -762,7 +763,7 @@ impl MoveGrab {
     }
 
     pub fn is_tiling_grab(&self) -> bool {
-        self.previous == ManagedLayer::Tiling
+        matches!(self.previous, ManagedLayer::Tiling)
     }
 
     pub fn is_touch_grab(&self) -> bool {
@@ -779,7 +780,7 @@ impl Drop for MoveGrab {
         let output = self.cursor_output.clone();
         let seat = self.seat.clone();
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
-        let previous = self.previous;
+        let previous = self.previous.clone();
         let window = self.window.clone();
         let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
 
@@ -801,7 +802,7 @@ impl Drop for MoveGrab {
 
                     for (window, _) in grab_state.window.windows() {
                         toplevel_enter_output(&window, &output);
-                        if previous != ManagedLayer::Sticky {
+                        if !matches!(previous, ManagedLayer::Sticky) {
                             toplevel_enter_workspace(&window, &workspace_handle);
                         }
                     }
@@ -841,10 +842,14 @@ impl Drop for MoveGrab {
                                 window_location.to_local(&workspace.output),
                             );
 
-                            if previous == ManagedLayer::Floating {
+                            if matches!(previous, ManagedLayer::Floating) {
                                 if let Some(sz) = grab_state.snapping_zone {
                                     if sz == SnappingZone::Maximize {
-                                        shell.maximize_toggle(&window, &seat);
+                                        shell.maximize_toggle(
+                                            &window,
+                                            &seat,
+                                            &state.common.event_loop_handle,
+                                        );
                                     } else {
                                         let directions = match sz {
                                             SnappingZone::Maximize => vec![],

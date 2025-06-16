@@ -13,6 +13,7 @@ use smithay::{
 use crate::{
     backend::render::ElementFilter,
     shell::{
+        focus::target::KeyboardFocusTarget,
         layout::{floating::FloatingLayout, tiling::ANIMATION_DURATION},
         Shell, Workspace, WorkspaceDelta,
     },
@@ -110,6 +111,13 @@ fn render_input_order_internal<R: 'static>(
         .as_ref()
         .filter(|f| !f.is_animating())
         .is_some();
+    let has_focused_fullscreen = shell
+        .seats
+        .last_active()
+        .get_keyboard()
+        .unwrap()
+        .current_focus()
+        .is_some_and(|target| matches!(target, KeyboardFocusTarget::Fullscreen(_)));
 
     let (previous, current_offset) = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
@@ -163,7 +171,7 @@ fn render_input_order_internal<R: 'static>(
     };
 
     // Top-level layer shell popups
-    if !has_fullscreen {
+    if !has_focused_fullscreen {
         for (layer, popup, location) in layer_popups(output, Layer::Top, element_filter) {
             callback(Stage::LayerPopup {
                 layer,
@@ -193,7 +201,7 @@ fn render_input_order_internal<R: 'static>(
         }
 
         // sticky window popups
-        if !has_fullscreen {
+        if !has_focused_fullscreen {
             callback(Stage::StickyPopups(&set.sticky_layer))?;
         }
     }
@@ -222,7 +230,7 @@ fn render_input_order_internal<R: 'static>(
         })?;
     }
 
-    if !has_fullscreen {
+    if !has_focused_fullscreen {
         // bottom layer popups
         for (layer, popup, location) in layer_popups(output, Layer::Bottom, element_filter) {
             callback(Stage::LayerPopup {
@@ -271,7 +279,7 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if !has_fullscreen {
+    if !has_focused_fullscreen {
         // top-layer shell
         for (layer, location) in layer_surfaces(output, Layer::Top, element_filter) {
             callback(Stage::LayerSurface { layer, location })?;
@@ -302,7 +310,7 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if !has_fullscreen {
+    if !has_focused_fullscreen {
         // bottom layer
         for (layer, mut location) in layer_surfaces(output, Layer::Bottom, element_filter) {
             location += current_offset.as_global();

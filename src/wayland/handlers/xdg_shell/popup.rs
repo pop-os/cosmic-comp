@@ -32,7 +32,7 @@ impl Shell {
                         (
                             elem_geo.to_global(workspace.output()),
                             workspace.output.clone(),
-                            workspace.is_tiled(elem),
+                            workspace.is_tiled(&elem.active_window()),
                         )
                     } else if let Some((output, set)) = self
                         .workspaces
