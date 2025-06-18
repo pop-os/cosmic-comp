@@ -53,6 +53,7 @@ use smithay::{
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
         xdg_activation::XdgActivationState,
+        xwayland_keyboard_grab::XWaylandKeyboardGrab,
     },
     xwayland::X11Surface,
 };
@@ -266,6 +267,7 @@ pub struct Shell {
     pub session_lock: Option<SessionLock>,
     pub seats: Seats,
     pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,
+    pub xwayland_keyboard_grab: Option<XWaylandKeyboardGrab<State>>,
 
     theme: cosmic::Theme,
     pub active_hint: bool,
@@ -1474,6 +1476,7 @@ impl Shell {
             override_redirect_windows: Vec::new(),
             session_lock: None,
             previous_workspace_idx: None,
+            xwayland_keyboard_grab: None,
 
             theme,
             active_hint: config.cosmic_conf.active_hint,
@@ -1661,7 +1664,10 @@ impl Shell {
             }?;
 
             focus_target = KeyboardFocusTarget::Element(new_target);
-        };
+        } else if let KeyboardFocusTarget::XWaylandGrab(surface) = &focus_target {
+            let new_target = self.element_for_surface(surface)?.clone();
+            focus_target = KeyboardFocusTarget::Element(new_target);
+        }
 
         match focus_target {
             KeyboardFocusTarget::Element(elem) => {
@@ -1726,6 +1732,7 @@ impl Shell {
                 .iter()
                 .find_map(|(output, s)| (s == &surface).then_some(output))
                 .cloned(),
+            KeyboardFocusTarget::XWaylandGrab(_) => unreachable!(),
             KeyboardFocusTarget::Popup(_) => unreachable!(),
         }
     }

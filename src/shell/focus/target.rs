@@ -74,6 +74,7 @@ pub enum KeyboardFocusTarget {
     LayerSurface(LayerSurface),
     Popup(PopupKind),
     LockSurface(LockSurface),
+    XWaylandGrab(WlSurface),
 }
 
 // TODO: This should be TryFrom, but PopupGrab needs to be able to convert. Fix this in smithay
@@ -234,6 +235,7 @@ impl IsAlive for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => l.alive(),
             KeyboardFocusTarget::Popup(p) => p.alive(),
             KeyboardFocusTarget::LockSurface(l) => l.alive(),
+            KeyboardFocusTarget::XWaylandGrab(g) => g.alive(),
         }
     }
 }
@@ -680,6 +682,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::LockSurface(l) => {
                 KeyboardTarget::enter(l.wl_surface(), seat, data, keys, serial)
             }
+            KeyboardFocusTarget::XWaylandGrab(g) => {
+                KeyboardTarget::enter(g, seat, data, keys, serial)
+            }
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
@@ -696,6 +701,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::LockSurface(l) => {
                 KeyboardTarget::leave(l.wl_surface(), seat, data, serial)
             }
+            KeyboardFocusTarget::XWaylandGrab(g) => KeyboardTarget::leave(g, seat, data, serial),
         }
     }
     fn key(
@@ -724,6 +730,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::LockSurface(l) => {
                 KeyboardTarget::key(l.wl_surface(), seat, data, key, state, serial, time)
             }
+            KeyboardFocusTarget::XWaylandGrab(g) => {
+                KeyboardTarget::key(g, seat, data, key, state, serial, time)
+            }
         }
     }
     fn modifiers(
@@ -749,6 +758,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
             KeyboardFocusTarget::LockSurface(l) => {
                 KeyboardTarget::modifiers(l.wl_surface(), seat, data, modifiers, serial)
+            }
+            KeyboardFocusTarget::XWaylandGrab(g) => {
+                KeyboardTarget::modifiers(g, seat, data, modifiers, serial)
             }
         }
     }
@@ -781,6 +793,7 @@ impl WaylandFocus for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
             KeyboardFocusTarget::Popup(p) => Some(Cow::Borrowed(p.wl_surface())),
             KeyboardFocusTarget::LockSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
+            KeyboardFocusTarget::XWaylandGrab(g) => Some(Cow::Borrowed(g)),
         }
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
@@ -791,6 +804,7 @@ impl WaylandFocus for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
             KeyboardFocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
             KeyboardFocusTarget::LockSurface(l) => l.wl_surface().id().same_client_as(object_id),
+            KeyboardFocusTarget::XWaylandGrab(g) => g.id().same_client_as(object_id),
         }
     }
 }
