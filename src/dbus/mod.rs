@@ -6,6 +6,7 @@ use futures_util::stream::StreamExt;
 use std::collections::HashMap;
 use zbus::blocking::{fdo::DBusProxy, Connection};
 
+mod login1_manager;
 mod power;
 
 pub fn init(
@@ -13,6 +14,8 @@ pub fn init(
     executor: &ThreadPool,
 ) -> Result<Vec<RegistrationToken>> {
     let mut tokens = Vec::new();
+
+    executor.spawn_ok(login1_manager::inhibit_buttons());
 
     match block_on(power::init()) {
         Ok(power_daemon) => {
