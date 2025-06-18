@@ -592,7 +592,9 @@ impl State {
         );
         let workspace_state = WorkspaceState::new(dh, client_is_privileged);
 
-        if let Err(err) = crate::dbus::init(&handle) {
+        let async_executor = ThreadPool::builder().pool_size(1).create().unwrap();
+
+        if let Err(err) = crate::dbus::init(&handle, &async_executor) {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
 
@@ -608,7 +610,7 @@ impl State {
                 display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
-                async_executor: ThreadPool::builder().pool_size(1).create().unwrap(),
+                async_executor,
 
                 popups: PopupManager::default(),
                 shell,

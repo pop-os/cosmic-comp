@@ -1,15 +1,20 @@
 use crate::state::{BackendData, Common, State};
 use anyhow::{Context, Result};
 use calloop::{InsertError, LoopHandle, RegistrationToken};
+use futures_executor::{block_on, ThreadPool};
+use futures_util::stream::StreamExt;
 use std::collections::HashMap;
 use zbus::blocking::{fdo::DBusProxy, Connection};
 
 mod power;
 
-pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>> {
+pub fn init(
+    evlh: &LoopHandle<'static, State>,
+    executor: &ThreadPool,
+) -> Result<Vec<RegistrationToken>> {
     let mut tokens = Vec::new();
 
-    match power::init() {
+    match block_on(power::init()) {
         Ok(power_daemon) => {
             let (tx, rx) = calloop::channel::channel();
 
@@ -35,29 +40,17 @@ pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>>
                 .with_context(|| "Failed to add channel to event_loop")?;
 
             // start helper thread
-            let result = std::thread::Builder::new()
-                .name("system76-power-hotplug".to_string())
-                .spawn(move || {
-                    if let Ok(mut msg_iter) = power_daemon.receive_hot_plug_detect() {
-                        while let Some(msg) = msg_iter.next() {
-                            if tx.send(msg).is_err() {
-                                break;
-                            }
+            executor.spawn_ok(async move {
+                if let Ok(mut msg_iter) = power_daemon.receive_hot_plug_detect().await {
+                    while let Some(msg) = msg_iter.next().await {
+                        if tx.send(msg).is_err() {
+                            break;
                         }
                     }
-                })
-                .with_context(|| "Failed to start helper thread");
+                }
+            });
 
-            match result {
-                Ok(_handle) => {
-                    tokens.push(token);
-                    // detach thread
-                }
-                Err(err) => {
-                    evlh.remove(token);
-                    return Err(err);
-                }
-            }
+            tokens.push(token);
         }
         Err(err) => {
             tracing::info!(?err, "Failed to connect to com.system76.PowerDaemon");

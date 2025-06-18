@@ -67,6 +67,7 @@ reis = { version = "0.5", features = ["calloop"] }
 clap_lex = "0.7"
 parking_lot = "0.12.3"
 futures-executor = { version = "0.3.31", features = ["thread-pool"] }
+futures-util = "0.3.31"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
