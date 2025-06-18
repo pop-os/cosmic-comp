@@ -246,6 +246,7 @@ impl State {
                                                 .map(|inhibitor| inhibitor.is_active())
                                         })
                                         .unwrap_or(false)
+                                        || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
                                 });
                                 let sym = handle.modified_sym();
 
@@ -685,6 +686,7 @@ impl State {
                                 .map(|inhibitor| inhibitor.is_active())
                         })
                         .unwrap_or(false)
+                        || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
                 });
 
                 let serial = SERIAL_COUNTER.next_serial();
@@ -1536,6 +1538,7 @@ impl State {
                         .map(|inhibitor| inhibitor.is_active())
                 })
                 .unwrap_or(false)
+                || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
         });
 
         self.common.atspi_ei.input(
