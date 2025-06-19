@@ -356,7 +356,6 @@ where
         &mut self,
         group: &WorkspaceGroupHandle,
         tiling: zcosmic_workspace_handle_v2::TilingState,
-        // TODO way to add id to workspace that doesn't have it
         ext_id: Option<String>,
     ) -> Option<WorkspaceHandle> {
         if let Some(group) = self.0.groups.iter_mut().find(|g| g.id == group.id) {
@@ -597,6 +596,25 @@ where
             workspace.tiling = state;
         }
     }
+
+    pub fn set_id(
+        &mut self,
+        workspace: &WorkspaceHandle,
+        id: &str,
+    ) -> Result<(), WorkspaceIdAlreadySetError> {
+        if let Some(workspace) = self
+            .0
+            .groups
+            .iter_mut()
+            .find_map(|g| g.workspaces.iter_mut().find(|w| w.id == workspace.id))
+        {
+            if workspace.ext_id.is_some() {
+                return Err(WorkspaceIdAlreadySetError);
+            }
+            workspace.ext_id = Some(id.to_owned());
+        }
+        Ok(())
+    }
 }
 
 impl<'a, D> Drop for WorkspaceUpdateGuard<'a, D>
@@ -607,6 +625,9 @@ where
         self.0.done();
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct WorkspaceIdAlreadySetError;
 
 macro_rules! delegate_workspace {
     ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {

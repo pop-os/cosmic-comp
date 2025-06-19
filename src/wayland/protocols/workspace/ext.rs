@@ -51,6 +51,7 @@ pub struct WorkspaceDataInner {
     capabilities: Option<ext_workspace_handle_v1::WorkspaceCapabilities>,
     coordinates: Vec<u32>,
     states: Option<ext_workspace_handle_v1::State>,
+    ext_id: Option<String>,
     pub(super) cosmic_v2_handle: Option<Weak<ZcosmicWorkspaceHandleV2>>,
 }
 
@@ -404,9 +405,6 @@ where
                     },
                 ) {
                     mngr.workspace(&handle);
-                    if let Some(id) = workspace.ext_id.clone() {
-                        handle.id(id);
-                    }
                     workspace.ext_instances.push(handle);
                     workspace.ext_instances.last_mut().unwrap()
                 } else {
@@ -492,8 +490,12 @@ where
         handle_state.states = Some(states);
         changed = true;
     }
-    // TODO ext_workspace_handle_v1::id
-    // TODO send id if pinned
+
+    if handle_state.ext_id.is_none() {
+        if let Some(id) = workspace.ext_id.clone() {
+            instance.id(id);
+        }
+    }
 
     if let Some(cosmic_v2_handle) = handle_state
         .cosmic_v2_handle
