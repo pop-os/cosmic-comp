@@ -400,8 +400,7 @@ fn create_workspace_from_pinned(
             } else {
                 TilingState::FloatingOnly
             },
-            // TODO Set id for persistent workspaces
-            None,
+            pinned.id.clone(),
         )
         .unwrap();
     state.add_workspace_state(&workspace_handle, WState::Pinned);

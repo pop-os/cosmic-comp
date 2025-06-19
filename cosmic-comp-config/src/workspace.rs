@@ -43,5 +43,6 @@ pub struct OutputMatch {
 pub struct PinnedWorkspace {
     pub output: OutputMatch,
     pub tiling_enabled: bool,
-    // TODO: name, id
+    pub id: Option<String>,
+    // TODO: name
 }
