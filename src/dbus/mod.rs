@@ -6,6 +6,7 @@ use futures_util::stream::StreamExt;
 use std::collections::HashMap;
 use zbus::blocking::{fdo::DBusProxy, Connection};
 
+mod name_owners;
 mod power;
 
 pub fn init(
