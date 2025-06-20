@@ -8,6 +8,7 @@ use zbus::blocking::{fdo::DBusProxy, Connection};
 
 #[cfg(feature = "systemd")]
 pub mod logind;
+mod name_owners;
 mod power;
 
 pub fn init(
