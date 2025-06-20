@@ -13,6 +13,7 @@ use zbus::blocking::{Connection, fdo::DBusProxy};
 
 #[cfg(feature = "systemd")]
 pub mod logind;
+mod name_owners;
 mod power;
 
 pub fn init(
