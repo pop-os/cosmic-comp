@@ -86,3 +86,21 @@ pub fn ready(common: &Common) -> Result<()> {
 
     Ok(())
 }
+
+/*
+/// Serve interfaces on session socket
+///
+/// (Currently only the a11y keyboard monitor interface)
+fn serve_interfaces(executor: &ThreadPool) {
+    let executor_clone = executor.clone();
+    executor.spawn_ok(async move {
+        serve_interfaces_inner(&executor_clone);
+    });
+}
+
+async fn serve_interfaces_inner(executor: &ThreadPool, a11y_clients: Arc<Mutex<a11y_keyboard_monitor::Clients>>) -> zbus::Result<()> {
+    let conn = zbus::Connection::session().await?;
+    name_owners::NameOwners::new(&conn, executor).await?;
+    Ok(())
+}
+*/
