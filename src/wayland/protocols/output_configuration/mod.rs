@@ -251,6 +251,7 @@ where
                 if let Some(inner) = output.user_data().get::<OutputState>() {
                     let mut inner = inner.lock().unwrap();
                     inner.enabled = false;
+                    output.leave_all();
                     if let Some(global) = inner.global.take() {
                         remove_global_with_timer(&self.dh, &self.event_loop_handle, global);
                     }
