@@ -868,6 +868,33 @@ impl State {
                 }
             }
 
+            Action::Fullscreen => {
+                let Some(focused_output) = seat.focused_output() else {
+                    return;
+                };
+                let mut shell = self.common.shell.write();
+                let workspace = shell.active_space(&focused_output).unwrap();
+                let focus_stack = workspace.focus_stack.get(seat);
+                let focused_window = focus_stack.last().cloned();
+                match focused_window {
+                    Some(FocusTarget::Window(window)) => {
+                        let output = workspace.output.clone();
+                        if let Some(target) = shell.fullscreen_request(
+                            &window.active_window(),
+                            output,
+                            &self.common.event_loop_handle,
+                        ) {
+                            std::mem::drop(shell);
+                            Shell::set_focus(self, Some(&target), seat, Some(serial), true);
+                        }
+                    }
+                    Some(FocusTarget::Fullscreen(surface)) => {
+                        shell.unfullscreen_request(&surface, &self.common.event_loop_handle);
+                    }
+                    _ => {}
+                }
+            }
+
             Action::Resizing(direction) => self.common.shell.write().set_resize_mode(
                 Some((pattern, direction)),
                 &self.common.config,

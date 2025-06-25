@@ -233,6 +233,7 @@ pub fn window_items(
 ) -> impl Iterator<Item = Item> {
     let minimize_clone = window.clone();
     let maximize_clone = window.clone();
+    let fullscreen_clone = window.clone();
     let tile_clone = window.clone();
     let move_prev_clone = window.clone();
     let move_next_clone = window.clone();
@@ -289,6 +290,26 @@ pub fn window_items(
             })
             .shortcut(config.shortcut_for_action(&Action::Maximize))
             .toggled(window.is_maximized(false)),
+        ),
+        Some(
+            Item::new(fl!("window-menu-fullscreen"), move |handle| {
+                let mapped = fullscreen_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    let mut shell = state.common.shell.write();
+                    let seat = shell.seats.last_active().clone();
+                    let output = seat.active_output();
+                    if let Some(target) = shell.fullscreen_request(
+                        &mapped.active_window(),
+                        output,
+                        &state.common.event_loop_handle,
+                    ) {
+                        std::mem::drop(shell);
+                        Shell::set_focus(state, Some(&target), &seat, None, false);
+                    }
+                });
+            })
+            .shortcut(config.shortcut_for_action(&Action::Fullscreen))
+            .toggled(false),
         ),
         (tiling_enabled && !is_sticky).then_some(
             Item::new(fl!("window-menu-tiled"), move |handle| {
