@@ -13,10 +13,15 @@ use smithay::{
 use crate::{
     backend::render::ElementFilter,
     shell::{
+        focus::target::KeyboardFocusTarget,
         layout::{floating::FloatingLayout, tiling::ANIMATION_DURATION},
-        Shell, Workspace, WorkspaceDelta,
+        SeatExt, Shell, Workspace, WorkspaceDelta,
     },
-    utils::{geometry::*, prelude::OutputExt, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
+    utils::{
+        geometry::*,
+        prelude::OutputExt,
+        quirks::{workspace_overview_is_open, WORKSPACE_OVERVIEW_NAMESPACE},
+    },
     wayland::protocols::workspace::WorkspaceHandle,
 };
 
@@ -105,11 +110,32 @@ fn render_input_order_internal<R: 'static>(
         return ControlFlow::Break(Err(OutputNoMode));
     };
     let output_size = output.geometry().size;
-    let has_fullscreen = workspace
-        .fullscreen
-        .as_ref()
-        .filter(|f| !f.is_animating())
-        .is_some();
+
+    // this is more hacky than I would like..
+    let fullscreen = workspace.fullscreen.as_ref().filter(|f| !f.is_animating());
+    let seat = shell.seats.last_active();
+    let is_active_workspace = seat.focused_output().is_some_and(|output| {
+        shell
+            .active_space(&output)
+            .is_some_and(|w| w.handle == workspace.handle)
+    });
+    let focus_stack_is_valid_fullscreen = workspace
+        .focus_stack
+        .get(seat)
+        .last()
+        .zip(fullscreen)
+        .is_some_and(|(target, fullscreen)| target == &fullscreen.surface);
+    let overview_is_open = workspace_overview_is_open(&output);
+    let has_focused_fullscreen = if is_active_workspace {
+        let current_focus = seat.get_keyboard().unwrap().current_focus();
+        matches!(current_focus, Some(KeyboardFocusTarget::Fullscreen(_)))
+            || (current_focus.is_none()
+                && focus_stack_is_valid_fullscreen
+                && !workspace_overview_is_open(&output))
+    } else {
+        focus_stack_is_valid_fullscreen && !overview_is_open
+    };
+    let has_fullscreen = fullscreen.is_some() && !overview_is_open;
 
     let (previous, current_offset) = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
@@ -163,7 +189,7 @@ fn render_input_order_internal<R: 'static>(
     };
 
     // Top-level layer shell popups
-    if !has_fullscreen {
+    if !has_focused_fullscreen {
         for (layer, popup, location) in layer_popups(output, Layer::Top, element_filter) {
             callback(Stage::LayerPopup {
                 layer,
@@ -193,7 +219,7 @@ fn render_input_order_internal<R: 'static>(
         }
 
         // sticky window popups
-        if !has_fullscreen {
+        if !has_focused_fullscreen {
             callback(Stage::StickyPopups(&set.sticky_layer))?;
         }
     }
@@ -222,7 +248,7 @@ fn render_input_order_internal<R: 'static>(
         })?;
     }
 
-    if !has_fullscreen {
+    if !has_focused_fullscreen {
         // bottom layer popups
         for (layer, popup, location) in layer_popups(output, Layer::Bottom, element_filter) {
             callback(Stage::LayerPopup {
@@ -271,7 +297,7 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if !has_fullscreen {
+    if !has_focused_fullscreen {
         // top-layer shell
         for (layer, location) in layer_surfaces(output, Layer::Top, element_filter) {
             callback(Stage::LayerSurface { layer, location })?;
@@ -302,7 +328,7 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if !has_fullscreen {
+    if !has_focused_fullscreen {
         // bottom layer
         for (layer, mut location) in layer_surfaces(output, Layer::Bottom, element_filter) {
             location += current_offset.as_global();

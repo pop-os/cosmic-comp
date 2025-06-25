@@ -432,7 +432,8 @@ impl MoveGrab {
                 }
             }
 
-            let indicator_location = shell.stacking_indicator(&current_output, self.previous);
+            let indicator_location =
+                shell.stacking_indicator(&current_output, self.previous.clone());
             if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
                     let element = stack_hover(
@@ -731,7 +732,7 @@ impl MoveGrab {
             start: Instant::now(),
             stacking_indicator: None,
             snapping_zone: None,
-            previous: previous_layer,
+            previous: previous_layer.clone(),
             location: start_data.location(),
             cursor_output: cursor_output.clone(),
         };
@@ -779,7 +780,7 @@ impl Drop for MoveGrab {
         let output = self.cursor_output.clone();
         let seat = self.seat.clone();
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
-        let previous = self.previous;
+        let previous = self.previous.clone();
         let window = self.window.clone();
         let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
 
@@ -841,10 +842,14 @@ impl Drop for MoveGrab {
                                 window_location.to_local(&workspace.output),
                             );
 
-                            if previous == ManagedLayer::Floating {
+                            if matches!(previous, ManagedLayer::Floating) {
                                 if let Some(sz) = grab_state.snapping_zone {
                                     if sz == SnappingZone::Maximize {
-                                        shell.maximize_toggle(&window, &seat);
+                                        shell.maximize_toggle(
+                                            &window,
+                                            &seat,
+                                            &state.common.event_loop_handle,
+                                        );
                                     } else {
                                         let directions = match sz {
                                             SnappingZone::Maximize => vec![],

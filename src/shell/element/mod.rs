@@ -20,7 +20,7 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, PopupManager, WindowSurfaceType},
+    desktop::{space::SpaceElement, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         Seat,
@@ -31,10 +31,7 @@ use smithay::{
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
     },
-    wayland::{
-        compositor::{with_surface_tree_downward, TraversalAction},
-        seat::WaylandFocus,
-    },
+    wayland::seat::WaylandFocus,
     xwayland::{xwm::X11Relatable, X11Surface},
 };
 use stack::CosmicStackInternal;
@@ -245,7 +242,10 @@ impl CosmicMapped {
             .cloned()
     }
 
-    pub fn set_active(&self, window: &CosmicSurface) {
+    pub fn set_active<S>(&self, window: &S)
+    where
+        CosmicSurface: PartialEq<S>,
+    {
         if let CosmicMappedInternal::Stack(stack) = &self.element {
             stack.set_active(window);
         }
@@ -259,41 +259,8 @@ impl CosmicMapped {
     }
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
-        self.windows().any(|(w, _)| {
-            let Some(toplevel) = w.wl_surface() else {
-                return false;
-            };
-
-            if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                if *toplevel == *surface {
-                    return true;
-                }
-            }
-
-            if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
-                use std::sync::atomic::Ordering;
-
-                let found = AtomicBool::new(false);
-                with_surface_tree_downward(
-                    &toplevel,
-                    surface,
-                    |_, _, search| TraversalAction::DoChildren(search),
-                    |s, _, search| {
-                        found.fetch_or(s == *search, Ordering::SeqCst);
-                    },
-                    |_, _, _| !found.load(Ordering::SeqCst),
-                );
-                if found.load(Ordering::SeqCst) {
-                    return true;
-                }
-            }
-
-            if surface_type.contains(WindowSurfaceType::POPUP) {
-                PopupManager::popups_for_surface(&toplevel).any(|(p, _)| p.wl_surface() == surface)
-            } else {
-                false
-            }
-        })
+        self.windows()
+            .any(|(w, _)| w.has_surface(surface, surface_type))
     }
 
     /// Give the pointer target under a relative offset into this element.
