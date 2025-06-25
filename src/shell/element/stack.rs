@@ -455,7 +455,10 @@ impl CosmicStack {
             .with_program(|p| p.group_focused.load(Ordering::SeqCst))
     }
 
-    pub fn set_active(&self, window: &CosmicSurface) {
+    pub fn set_active<S>(&self, window: &S)
+    where
+        CosmicSurface: PartialEq<S>,
+    {
         self.0.with_program(|p| {
             if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
                 let old = p.active.swap(val, Ordering::SeqCst);

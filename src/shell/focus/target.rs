@@ -181,6 +181,15 @@ impl KeyboardFocusTarget {
         }
     }
 
+    pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
+        match self {
+            KeyboardFocusTarget::Element(mapped) => Box::new(mapped.windows().map(|(s, _)| s))
+                as Box<dyn Iterator<Item = CosmicSurface>>,
+            KeyboardFocusTarget::Fullscreen(surface) => Box::new(std::iter::once(surface.clone())),
+            _ => Box::new(std::iter::empty()),
+        }
+    }
+
     pub fn is_xwm(&self, xwm: XwmId) -> bool {
         match self {
             KeyboardFocusTarget::Element(mapped) => {

@@ -3,8 +3,9 @@
 use crate::{
     config::{Action, PrivateAction},
     shell::{
-        focus::target::KeyboardFocusTarget, layout::tiling::SwapWindowGrab, FocusResult,
-        InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
+        focus::{target::KeyboardFocusTarget, FocusTarget},
+        layout::tiling::SwapWindowGrab,
+        FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
     },
     utils::prelude::*,
     wayland::{
@@ -288,13 +289,13 @@ impl State {
                     Action::MoveToWorkspace(x) | Action::SendToWorkspace(x) => x - 1,
                     _ => unreachable!(),
                 };
-                let res = self.common.shell.write().move_current_window(
+                let res = self.common.shell.write().move_current(
                     seat,
-                    &focused_output,
                     (&focused_output, Some(workspace as usize)),
                     follow,
                     None,
                     &mut self.common.workspace_state.update(),
+                    &self.common.event_loop_handle,
                 );
                 if let Ok(Some((target, _point))) = res {
                     Shell::set_focus(
@@ -313,13 +314,13 @@ impl State {
                 };
                 let mut shell = self.common.shell.write();
                 let workspace = shell.workspaces.len(&focused_output).saturating_sub(1);
-                let res = shell.move_current_window(
+                let res = shell.move_current(
                     seat,
-                    &focused_output,
                     (&focused_output, Some(workspace)),
                     matches!(x, Action::MoveToLastWorkspace),
                     None,
                     &mut self.common.workspace_state.update(),
+                    &self.common.event_loop_handle,
                 );
                 // If the active workspace changed, the cursor_follows_focus should probably be checked
                 if let Ok(Some((target, _point))) = res {
@@ -359,13 +360,13 @@ impl State {
                         .checked_add(1)
                         .ok_or(InvalidWorkspaceIndex)
                         .and_then(|workspace| {
-                            shell.move_current_window(
+                            shell.move_current(
                                 seat,
-                                &focused_output,
                                 (&focused_output, Some(workspace)),
                                 matches!(x, Action::MoveToNextWorkspace),
                                 direction,
                                 &mut self.common.workspace_state.update(),
+                                &self.common.event_loop_handle,
                             )
                         })
                 };
@@ -443,13 +444,13 @@ impl State {
                         .checked_sub(1)
                         .ok_or(InvalidWorkspaceIndex)
                         .and_then(|workspace| {
-                            shell.move_current_window(
+                            shell.move_current(
                                 seat,
-                                &focused_output,
                                 (&focused_output, Some(workspace)),
                                 matches!(x, Action::MoveToPreviousWorkspace),
                                 direction,
                                 &mut self.common.workspace_state.update(),
+                                &self.common.event_loop_handle,
                             )
                         })
                 };
@@ -539,16 +540,13 @@ impl State {
                     };
 
                     if let Ok(Some(new_pos)) = res {
-                        let new_target = shell
-                            .workspaces
-                            .active(&next_output)
-                            .unwrap()
-                            .1
+                        let workspace = shell.workspaces.active(&next_output).unwrap().1;
+                        let new_target = workspace
                             .focus_stack
                             .get(&seat)
                             .last()
                             .cloned()
-                            .map(KeyboardFocusTarget::from);
+                            .map(Into::<KeyboardFocusTarget>::into);
                         std::mem::drop(shell);
 
                         let move_cursor = if let Some(under) = new_target {
@@ -604,13 +602,13 @@ impl State {
                 if let Some(next_output) = next_output {
                     let res = {
                         let mut workspace_guard = self.common.workspace_state.update();
-                        let res = shell.move_current_window(
+                        let res = shell.move_current(
                             seat,
-                            &focused_output,
                             (&next_output, None),
                             is_move_action,
                             Some(direction),
                             &mut workspace_guard,
+                            &self.common.event_loop_handle,
                         );
 
                         if is_move_action && propagate {
@@ -808,8 +806,10 @@ impl State {
                         let current_output = seat.active_output();
                         let mut shell = self.common.shell.write();
                         let workspace = shell.active_space(&current_output).unwrap();
-                        if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
-                            if workspace.is_tiled(focused_window) {
+                        if let Some(FocusTarget::Window(focused_window)) =
+                            workspace.focus_stack.get(seat).last()
+                        {
+                            if workspace.is_tiled(&focused_window.active_window()) {
                                 shell.set_overview_mode(
                                     Some(Trigger::KeyboardMove(pattern.modifiers)),
                                     self.common.event_loop_handle.clone(),
@@ -827,11 +827,8 @@ impl State {
                 let mut shell = self.common.shell.write();
 
                 let workspace = shell.active_space_mut(&focused_output).unwrap();
-                if workspace.get_fullscreen().is_some() {
-                    return; // TODO, is this what we want? Maybe disengage fullscreen instead?
-                }
-
                 let keyboard_handle = seat.get_keyboard().unwrap();
+
                 if let Some(focus) = keyboard_handle.current_focus() {
                     if let Some(descriptor) = workspace.node_desc(focus) {
                         let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
@@ -853,9 +850,8 @@ impl State {
                 let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&focused_output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last().cloned();
-                if let Some(window) = focused_window {
-                    shell.minimize_request(&window);
+                if let Some(surface) = focus_stack.last().and_then(FocusTarget::wl_surface) {
+                    shell.minimize_request(&surface);
                 }
             }
 
@@ -867,8 +863,8 @@ impl State {
                 let workspace = shell.active_space(&focused_output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
                 let focused_window = focus_stack.last().cloned();
-                if let Some(window) = focused_window {
-                    shell.maximize_toggle(&window, seat);
+                if let Some(FocusTarget::Window(window)) = focused_window {
+                    shell.maximize_toggle(&window, seat, &self.common.event_loop_handle);
                 }
             }
 
@@ -896,7 +892,11 @@ impl State {
             }
 
             Action::ToggleStacking => {
-                let res = self.common.shell.write().toggle_stacking_focused(seat);
+                let res = self
+                    .common
+                    .shell
+                    .write()
+                    .toggle_stacking_focused(seat, &self.common.event_loop_handle);
                 if let Some(new_focus) = res {
                     Shell::set_focus(self, Some(&new_focus), seat, Some(serial), false);
                 }
