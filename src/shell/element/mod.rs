@@ -685,9 +685,9 @@ impl CosmicMapped {
                             ],
                         )
                         .show(ctx, |ui| {
-                            egui::Frame::none()
+                            egui::Frame::NONE
                                 .fill(egui::Color32::BLACK)
-                                .rounding(5.0)
+                                .corner_radius(5.0)
                                 .inner_margin(10.0)
                                 .show(ui, |ui| {
                                     ui.heading(window.title());
