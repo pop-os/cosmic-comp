@@ -184,9 +184,9 @@ pub fn fps_ui<'a>(
                         for seat in seats {
                             ui.label(egui::RichText::new(format!("\t{}", seat.name())).strong());
                             if let Some(ptr) = seat.get_pointer() {
-                                egui::Frame::none()
+                                egui::Frame::NONE
                                     .fill(egui::Color32::DARK_GRAY)
-                                    .rounding(5.)
+                                    .corner_radius(5.)
                                     .inner_margin(10.)
                                     .show(ui, |ui| {
                                         ui.label(
@@ -213,9 +213,9 @@ pub fn fps_ui<'a>(
                                     });
                             }
                             if let Some(kbd) = seat.get_keyboard() {
-                                egui::Frame::none()
+                                egui::Frame::NONE
                                     .fill(egui::Color32::DARK_GRAY)
-                                    .rounding(5.)
+                                    .corner_radius(5.)
                                     .inner_margin(10.)
                                     .show(ui, |ui| {
                                         let mut keysyms = format!(
