@@ -16,7 +16,7 @@ use crate::{
     config::ScreenFilter,
     shell::{
         element::CosmicMappedKey,
-        focus::{render_input_order, target::WindowGroup, Stage},
+        focus::{render_input_order, target::WindowGroup, FocusTarget, Stage},
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
         layout::tiling::ANIMATION_DURATION,
         zoom::ZoomState,
@@ -897,7 +897,12 @@ where
                         layout
                             .render(
                                 renderer,
-                                current_focus.as_ref().and_then(|stack| stack.last()),
+                                current_focus.as_ref().and_then(|stack| {
+                                    stack.last().and_then(|t| match t {
+                                        FocusTarget::Window(w) => Some(w),
+                                        _ => None,
+                                    })
+                                }),
                                 resize_indicator.clone(),
                                 active_hint,
                                 alpha,
@@ -913,7 +918,8 @@ where
                     elements.extend(
                         match workspace.render_popups(
                             renderer,
-                            (!move_active && is_active_space).then_some(last_active_seat),
+                            last_active_seat,
+                            !move_active && is_active_space,
                             overview.clone(),
                             &theme.cosmic(),
                         ) {
@@ -941,7 +947,8 @@ where
                     elements.extend(
                         match workspace.render(
                             renderer,
-                            (!move_active && is_active_space).then_some(last_active_seat),
+                            last_active_seat,
+                            !move_active && is_active_space,
                             overview.clone(),
                             resize_indicator.clone(),
                             active_hint,

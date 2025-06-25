@@ -390,9 +390,14 @@ impl State {
                         //If the pointer isn't grabbed, we should check if the focused element should be updated
                     } else if self.common.config.cosmic_conf.focus_follows_cursor {
                         let shell = self.common.shell.read();
-                        let old_keyboard_target =
-                            State::element_under(original_position, &current_output, &*shell);
-                        let new_keyboard_target = State::element_under(position, &output, &*shell);
+                        let old_keyboard_target = State::element_under(
+                            original_position,
+                            &current_output,
+                            &*shell,
+                            &seat,
+                        );
+                        let new_keyboard_target =
+                            State::element_under(position, &output, &*shell, &seat);
 
                         if old_keyboard_target != new_keyboard_target
                             && new_keyboard_target.is_some()
@@ -703,7 +708,7 @@ impl State {
                             seat.get_pointer().unwrap().current_location().as_global();
                         let under = {
                             let shell = self.common.shell.read();
-                            State::element_under(global_position, &output, &shell)
+                            State::element_under(global_position, &output, &shell, &seat)
                         };
                         if let Some(target) = under {
                             if let Some(surface) = target.toplevel().map(Cow::into_owned) {
@@ -1875,7 +1880,7 @@ impl State {
                                 for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
                                     old_workspace.tiling_layer.element_for_node(node_id)
                                 }) {
-                                    stack.append(elem);
+                                    stack.append(elem.clone());
                                 }
                             }
                             {
@@ -1883,7 +1888,7 @@ impl State {
                                 for elem in new_descriptor.focus_stack.iter().flat_map(|node_id| {
                                     new_workspace.tiling_layer.element_for_node(node_id)
                                 }) {
-                                    stack.append(elem);
+                                    stack.append(elem.clone());
                                 }
                             }
                             if let Some(focus) = TilingLayout::swap_trees(
@@ -1935,7 +1940,7 @@ impl State {
                                 for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
                                     old_workspace.tiling_layer.element_for_node(node_id)
                                 }) {
-                                    stack.append(elem);
+                                    stack.append(elem.clone());
                                 }
                             }
                             if let Some(focus) = TilingLayout::move_tree(
@@ -1965,6 +1970,7 @@ impl State {
         global_pos: Point<f64, Global>,
         output: &Output,
         shell: &Shell,
+        seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
         let (previous_workspace, workspace) = shell.workspaces.active(output)?;
         let (previous_idx, idx) = shell.workspaces.active_num(output);
@@ -2059,7 +2065,7 @@ impl State {
                                 geometry.contains(global_pos.to_local(output).to_i32_round())
                             })
                         {
-                            if let Some(element) = workspace.popup_element_under(location) {
+                            if let Some(element) = workspace.popup_element_under(location, seat) {
                                 return ControlFlow::Break(Ok(Some(element)));
                             }
                         }
@@ -2074,7 +2080,8 @@ impl State {
                                 geometry.contains(global_pos.to_local(output).to_i32_round())
                             })
                         {
-                            if let Some(element) = workspace.toplevel_element_under(location) {
+                            if let Some(element) = workspace.toplevel_element_under(location, seat)
+                            {
                                 return ControlFlow::Break(Ok(Some(element)));
                             }
                         }
@@ -2109,6 +2116,7 @@ impl State {
         let relative_pos = global_pos.to_local(output);
         let output_geo = output.geometry();
         let overview = shell.overview_mode().0;
+        let seat = shell.seats.last_active();
 
         render_input_order(
             shell,
@@ -2221,7 +2229,7 @@ impl State {
                     Stage::WorkspacePopups { workspace, offset } => {
                         let global_pos = global_pos + offset.to_f64().as_global();
                         if let Some(under) =
-                            workspace.popup_surface_under(global_pos, overview.clone())
+                            workspace.popup_surface_under(global_pos, overview.clone(), seat)
                         {
                             return ControlFlow::Break(Ok(Some(under)));
                         }
@@ -2229,7 +2237,7 @@ impl State {
                     Stage::Workspace { workspace, offset } => {
                         let global_pos = global_pos + offset.to_f64().as_global();
                         if let Some(under) =
-                            workspace.toplevel_surface_under(global_pos, overview.clone())
+                            workspace.toplevel_surface_under(global_pos, overview.clone(), seat)
                         {
                             return ControlFlow::Break(Ok(Some(under)));
                         }

@@ -6,10 +6,11 @@ use smithay::{
     output::Output,
     reexports::wayland_server::DisplayHandle,
     utils::{Point, Rectangle, Size, SERIAL_COUNTER},
+    wayland::seat::WaylandFocus,
 };
 
 use crate::{
-    shell::{element::CosmicWindow, CosmicSurface, Shell, WorkspaceDelta},
+    shell::{focus::target::KeyboardFocusTarget, CosmicSurface, Shell, WorkspaceDelta},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoHandler,
@@ -41,17 +42,13 @@ impl ToplevelManagementHandler for State {
                 .spaces_for_output(output)
                 .enumerate()
                 .find(|(_, w)| {
-                    w.mapped()
-                        .flat_map(|m| m.windows().map(|(s, _)| s))
-                        .any(|w| &w == window)
+                    w.get_fullscreen().is_some_and(|f| f == window)
+                        || w.mapped()
+                            .flat_map(|m| m.windows().map(|(s, _)| s))
+                            .any(|w| &w == window)
                 });
             if let Some((idx, workspace)) = maybe {
                 let seat = seat.unwrap_or(shell.seats.last_active().clone());
-                let mapped = workspace
-                    .mapped()
-                    .find(|m| m.windows().any(|(w, _)| &w == window))
-                    .unwrap()
-                    .clone();
 
                 let handle = workspace.handle;
                 let res = shell.activate(
@@ -62,8 +59,12 @@ impl ToplevelManagementHandler for State {
                 );
 
                 let workspace = shell.workspaces.space_for_handle_mut(&handle).unwrap();
-                if seat.get_keyboard().unwrap().current_focus() != Some(mapped.clone().into())
-                    && workspace.is_tiled(&mapped)
+                if seat
+                    .get_keyboard()
+                    .unwrap()
+                    .current_focus()
+                    .is_some_and(|focus| !focus.windows().any(|w| w == *window))
+                    && workspace.is_tiled(window)
                 {
                     for mapped in workspace
                         .mapped()
@@ -75,6 +76,13 @@ impl ToplevelManagementHandler for State {
                         workspace.unmaximize_request(&mapped);
                     }
                 }
+
+                let target = if let Some(mapped) = workspace.element_for_surface(window) {
+                    mapped.focus_window(window);
+                    KeyboardFocusTarget::Element(mapped.clone())
+                } else {
+                    KeyboardFocusTarget::Fullscreen(window.clone())
+                };
                 std::mem::drop(shell);
 
                 if seat.active_output() != *output {
@@ -102,8 +110,7 @@ impl ToplevelManagementHandler for State {
                     }
                 }
 
-                mapped.focus_window(window);
-                Shell::set_focus(self, Some(&mapped.clone().into()), &seat, None, false);
+                Shell::set_focus(self, Some(&target), &seat, None, false);
                 return;
             }
         }
@@ -121,44 +128,27 @@ impl ToplevelManagementHandler for State {
         _output: Output,
     ) {
         let mut shell = self.common.shell.write();
-        if let Some(mut mapped) = shell.element_for_surface(window).cloned() {
-            if let Some(from_workspace) = shell.space_for_mut(&mapped) {
-                // If window is part of a stack, remove it and map it outside the stack
-                if let Some(stack) = mapped.stack_ref() {
-                    stack.remove_window(&window);
-                    mapped = CosmicWindow::new(
-                        window.clone(),
-                        self.common.event_loop_handle.clone(),
-                        self.common.theme.clone(),
-                    )
-                    .into();
-                    if from_workspace.tiling_enabled {
-                        from_workspace.tiling_layer.map(
-                            mapped.clone(),
-                            None::<std::iter::Empty<_>>,
-                            None,
-                        );
-                    } else {
-                        from_workspace.floating_layer.map(mapped.clone(), None);
-                    }
-                }
+        let seat = shell.seats.last_active().clone();
+        let Some(surface) = window.wl_surface() else {
+            return;
+        };
+        let Some((from_workspace, _)) = shell.workspace_for_surface(&*surface) else {
+            return;
+        };
 
-                let from_handle = from_workspace.handle;
-                let seat = shell.seats.last_active().clone();
-                let res = shell.move_window(
-                    Some(&seat),
-                    &mapped,
-                    &from_handle,
-                    &to_handle,
-                    false,
-                    None,
-                    &mut self.common.workspace_state.update(),
-                );
-                if let Some((target, _)) = res {
-                    std::mem::drop(shell);
-                    Shell::set_focus(self, Some(&target), &seat, None, true);
-                }
-            }
+        let res = shell.move_window(
+            Some(&seat),
+            window,
+            &from_workspace,
+            &to_handle,
+            false,
+            None,
+            &mut self.common.workspace_state.update(),
+            &self.common.event_loop_handle,
+        );
+        if let Some((target, _)) = res {
+            std::mem::drop(shell);
+            Shell::set_focus(self, Some(&target), &seat, None, true);
         }
     }
 
@@ -170,23 +160,18 @@ impl ToplevelManagementHandler for State {
     ) {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
-        if let Some(mapped) = shell.element_for_surface(window).cloned() {
-            if let Some((output, workspace)) =
-                output.and_then(|output| shell.workspaces.active_mut(&output).map(|w| (output, w)))
-            {
-                let from = minimize_rectangle(&output, window);
-                workspace.fullscreen_request(window, None, from, &seat);
-            } else if let Some((output, handle)) = shell
-                .space_for(&mapped)
-                .map(|workspace| (workspace.output.clone(), workspace.handle.clone()))
-            {
-                let from = minimize_rectangle(&output, window);
-                shell
-                    .workspaces
-                    .space_for_handle_mut(&handle)
-                    .unwrap()
-                    .fullscreen_request(window, None, from, &seat);
-            }
+        let output = output
+            .or_else(|| {
+                window
+                    .wl_surface()
+                    .and_then(|surface| shell.visible_output_for_surface(&*surface).cloned())
+            })
+            .unwrap_or_else(|| seat.focused_or_active_output());
+        if let Some(target) =
+            shell.fullscreen_request(window, output, &self.common.event_loop_handle)
+        {
+            std::mem::drop(shell);
+            Shell::set_focus(self, Some(&target), &seat, None, true);
         }
     }
 
@@ -196,33 +181,14 @@ impl ToplevelManagementHandler for State {
         window: &<Self as ToplevelInfoHandler>::Window,
     ) {
         let mut shell = self.common.shell.write();
-        if let Some(mapped) = shell.element_for_surface(window).cloned() {
-            if let Some(workspace) = shell.space_for_mut(&mapped) {
-                if let Some((layer, previous_workspace)) = workspace.unfullscreen_request(window) {
-                    let old_handle = workspace.handle.clone();
-                    let new_workspace_handle = shell
-                        .workspaces
-                        .space_for_handle(&previous_workspace)
-                        .is_some()
-                        .then_some(previous_workspace)
-                        .unwrap_or(old_handle); // if the workspace doesn't exist anymore, we can still remap on the right layer
-
-                    shell.remap_unfullscreened_window(
-                        mapped,
-                        &old_handle,
-                        &new_workspace_handle,
-                        layer,
-                    );
-                }
-            }
-        }
+        shell.unfullscreen_request(window, &self.common.event_loop_handle);
     }
 
     fn maximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(window).cloned() {
             let seat = shell.seats.last_active().clone();
-            shell.maximize_request(&mapped, &seat, true);
+            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);
         }
     }
 
@@ -235,22 +201,13 @@ impl ToplevelManagementHandler for State {
 
     fn minimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         let mut shell = self.common.shell.write();
-        if let Some(mapped) = shell.element_for_surface(window).cloned() {
-            if !mapped.is_stack() || &mapped.active_window() == window {
-                shell.minimize_request(&mapped);
-            }
-        }
+        shell.minimize_request(window);
     }
 
     fn unminimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         let mut shell = self.common.shell.write();
-        if let Some(mapped) = shell.element_for_surface(window).cloned() {
-            let seat = shell.seats.last_active().clone();
-            shell.unminimize_request(&mapped, &seat);
-            if mapped.is_stack() {
-                mapped.stack_ref().unwrap().set_active(window);
-            }
-        }
+        let seat = shell.seats.last_active().clone();
+        shell.unminimize_request(window, &seat, &self.common.event_loop_handle);
     }
 
     fn set_sticky(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
