@@ -86,6 +86,7 @@
     (modifiers: [Super], key: "x"): SwapWindow,
 
     (modifiers: [Super], key: "m"): Maximize,
+    (modifiers: [Super], key: "F11"): Fullscreen,
     (modifiers: [Super], key: "r"): Resizing(Outwards),
     (modifiers: [Super, Shift], key: "r"): Resizing(Inwards),
 
