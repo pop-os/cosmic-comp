@@ -761,13 +761,16 @@ impl Common {
 
         // normal windows
         for space in shell.workspaces.spaces() {
+            if let Some(window) = space.get_fullscreen() {
+                window.with_surfaces(processor);
+            }
             space.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
                     window.with_surfaces(processor);
                 }
             });
             space.minimized_windows.iter().for_each(|m| {
-                for (window, _) in m.window.windows() {
+                for window in m.windows() {
                     window.with_surfaces(processor);
                 }
             })
@@ -919,6 +922,22 @@ impl Common {
             });
 
         if let Some(active) = shell.active_space(output) {
+            if let Some(window) = active.get_fullscreen() {
+                if let Some(feedback) = window
+                    .wl_surface()
+                    .and_then(|wl_surface| {
+                        advertised_node_for_surface(&wl_surface, &self.display_handle)
+                    })
+                    .and_then(|source| dmabuf_feedback(source))
+                {
+                    window.send_dmabuf_feedback(
+                        output,
+                        &feedback,
+                        render_element_states,
+                        surface_primary_scanout_output,
+                    );
+                }
+            }
             active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
                     if let Some(feedback) = window
@@ -1098,6 +1117,9 @@ impl Common {
             });
 
         if let Some(active) = shell.active_space(output) {
+            if let Some(window) = active.get_fullscreen() {
+                window.send_frame(output, time, throttle(window), should_send);
+            }
             active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
                     window.send_frame(output, time, throttle(&window), should_send);
@@ -1106,7 +1128,7 @@ impl Common {
 
             // other (throttled) windows
             active.minimized_windows.iter().for_each(|m| {
-                for (window, _) in m.window.windows() {
+                for window in m.windows() {
                     window.send_frame(output, time, throttle(&window), |_, _| None);
                 }
             });
@@ -1116,6 +1138,10 @@ impl Common {
                 .spaces_for_output(output)
                 .filter(|w| w.handle != active.handle)
             {
+                if let Some(window) = space.get_fullscreen() {
+                    let throttle = min(throttle(space), throttle(window));
+                    window.send_frame(output, time, throttle, |_, _| None);
+                }
                 space.mapped().for_each(|mapped| {
                     for (window, _) in mapped.windows() {
                         let throttle = min(throttle(space), throttle(&window));
@@ -1123,7 +1149,7 @@ impl Common {
                     }
                 });
                 space.minimized_windows.iter().for_each(|m| {
-                    for (window, _) in m.window.windows() {
+                    for window in m.windows() {
                         window.send_frame(output, time, throttle(&window), |_, _| None);
                     }
                 })

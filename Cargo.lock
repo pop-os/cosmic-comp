@@ -943,7 +943,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#243c36e9e66dcbec83fa63cb3adaceb3bea166a4"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#54b4418e1e7757d965166ae9dc00c522aebf4451"
 dependencies = [
  "cosmic-config",
  "ron",

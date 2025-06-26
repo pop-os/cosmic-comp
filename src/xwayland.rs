@@ -7,9 +7,7 @@ use crate::{
     },
     state::State,
     utils::prelude::*,
-    wayland::handlers::{
-        toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
-    },
+    wayland::handlers::xdg_activation::ActivationContext,
 };
 use cosmic_comp_config::{EavesdroppingKeyboardMode, XwaylandDescaling};
 use smithay::{
@@ -48,7 +46,7 @@ use smithay::{
         xdg_activation::XdgActivationToken,
     },
     xwayland::{
-        xwm::{Reorder, X11Relatable, XwmId},
+        xwm::{Reorder, XwmId},
         X11Surface, X11Wm, XWayland, XWaylandClientData, XWaylandEvent, XwmHandler,
     },
 };
@@ -485,7 +483,9 @@ impl Common {
     #[profiling::function]
     pub fn update_x11_stacking_order(&mut self) {
         let shell = self.shell.read();
-        let active_output = shell.seats.last_active().active_output();
+        let seat = shell.seats.last_active();
+        let active_output = seat.active_output();
+
         if let Some(xwm) = self
             .xwayland_state
             .as_mut()
@@ -534,31 +534,51 @@ impl Common {
                                         .filter(|(i, _)| *i != set.active),
                                 )
                                 .flat_map(|(_, workspace)| {
-                                    workspace.get_fullscreen().cloned().into_iter().chain(
-                                        workspace
-                                            .mapped()
-                                            .chain(
-                                                workspace
-                                                    .minimized_windows
-                                                    .iter()
-                                                    .map(|m| &m.window),
+                                    workspace
+                                        .get_fullscreen()
+                                        .filter(|f| {
+                                            workspace
+                                                .focus_stack
+                                                .get(seat)
+                                                .last()
+                                                .is_some_and(|t| &t == f)
+                                        })
+                                        .cloned()
+                                        .into_iter()
+                                        .chain(workspace.mapped().flat_map(|mapped| {
+                                            let active = mapped.active_window();
+                                            std::iter::once(active.clone()).chain(
+                                                mapped
+                                                    .is_stack()
+                                                    .then(move || {
+                                                        mapped
+                                                            .windows()
+                                                            .map(|(s, _)| s)
+                                                            .filter(move |s| s != &active)
+                                                    })
+                                                    .into_iter()
+                                                    .flatten(),
                                             )
-                                            .flat_map(|mapped| {
-                                                let active = mapped.active_window();
-                                                std::iter::once(active.clone()).chain(
-                                                    mapped
-                                                        .is_stack()
-                                                        .then(move || {
-                                                            mapped
-                                                                .windows()
-                                                                .map(|(s, _)| s)
-                                                                .filter(move |s| s != &active)
-                                                        })
-                                                        .into_iter()
-                                                        .flatten(),
-                                                )
-                                            }),
-                                    )
+                                        }))
+                                        .chain(
+                                            workspace
+                                                .get_fullscreen()
+                                                .filter(|f| {
+                                                    workspace
+                                                        .focus_stack
+                                                        .get(seat)
+                                                        .last()
+                                                        .is_none_or(|t| &t != f)
+                                                })
+                                                .cloned()
+                                                .into_iter(),
+                                        )
+                                        .chain(
+                                            workspace
+                                                .minimized_windows
+                                                .iter()
+                                                .flat_map(|m| m.windows()),
+                                        )
                                 }),
                         )
                 })
@@ -714,6 +734,7 @@ impl XwmHandler for State {
 
         let mut shell = self.common.shell.write();
         let startup_id = window.startup_id();
+        // TODO: Not correct for fullscreen (and minimized?)
         if shell.element_for_surface(&window).is_some() {
             return;
         }
@@ -831,6 +852,7 @@ impl XwmHandler for State {
         // We only allow floating X11 windows to resize themselves. Nothing else
         let shell = self.common.shell.read();
 
+        // TODO: Fullscreen
         if let Some(mapped) = shell
             .element_for_surface(&window)
             .filter(|mapped| !mapped.is_minimized())
@@ -838,7 +860,7 @@ impl XwmHandler for State {
             let current_geo = if let Some(workspace) = shell.space_for(mapped) {
                 workspace
                     .element_geometry(mapped)
-                    .filter(|_| workspace.is_floating(mapped))
+                    .filter(|_| workspace.is_floating(&window))
                     .map(|geo| geo.to_global(workspace.output()))
             } else if let Some((output, set)) = shell
                 .workspaces
@@ -996,7 +1018,7 @@ impl XwmHandler for State {
         let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             let seat = shell.seats.last_active().clone();
-            shell.maximize_request(&mapped, &seat, true);
+            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);
         } else if let Some(pending) = shell
             .pending_windows
             .iter_mut()
@@ -1021,74 +1043,50 @@ impl XwmHandler for State {
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
-        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
-            if !mapped.is_stack() || mapped.active_window().is_window(&window) {
-                shell.minimize_request(&mapped);
-            }
-        }
+        shell.minimize_request(&window);
     }
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
-        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
-            let seat = shell.seats.last_active().clone();
-            shell.unminimize_request(&mapped, &seat);
-            if mapped.is_stack() {
-                let maybe_surface = mapped.windows().find(|(w, _)| w.is_window(&window));
-                if let Some((surface, _)) = maybe_surface {
-                    mapped.stack_ref().unwrap().set_active(&surface);
-                }
-            }
-        }
+        let seat = shell.seats.last_active().clone();
+        shell.unminimize_request(&window, &seat, &self.common.event_loop_handle);
     }
 
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
-        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
-            if let Some((output, handle)) = shell
-                .space_for(&mapped)
-                .map(|workspace| (workspace.output.clone(), workspace.handle.clone()))
-            {
-                if let Some((surface, _)) = mapped
-                    .windows()
-                    .find(|(w, _)| w.x11_surface() == Some(&window))
+        let output = window
+            .wl_surface()
+            .and_then(|surface| shell.visible_output_for_surface(&surface).cloned())
+            .unwrap_or_else(|| seat.focused_or_active_output());
+
+        match shell.fullscreen_request(&window, output.clone(), &self.common.event_loop_handle) {
+            Some(target) => {
+                std::mem::drop(shell);
+                Shell::set_focus(self, Some(&target), &seat, None, true);
+            }
+            None => {
+                if let Some(pending) = shell
+                    .pending_windows
+                    .iter_mut()
+                    .find(|pending| pending.surface.x11_surface() == Some(&window))
                 {
-                    let from = minimize_rectangle(&output, &surface);
-                    shell
-                        .workspaces
-                        .space_for_handle_mut(&handle)
-                        .unwrap()
-                        .fullscreen_request(&surface, None, from, &seat);
+                    pending.fullscreen = Some(output);
                 }
             }
-        } else if let Some(pending) = shell
-            .pending_windows
-            .iter_mut()
-            .find(|pending| pending.surface.x11_surface() == Some(&window))
-        {
-            let output = seat.active_output();
-            pending.fullscreen = Some(output);
         }
     }
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
-        if let Some(mapped) = shell.element_for_surface(&window).cloned() {
-            if let Some(workspace) = shell.space_for_mut(&mapped) {
-                let (window, _) = mapped
-                    .windows()
-                    .find(|(w, _)| w.x11_surface() == Some(&window))
-                    .unwrap();
-                let previous = workspace.unfullscreen_request(&window);
-                assert!(previous.is_none());
+        if !shell.unfullscreen_request(&window, &self.common.event_loop_handle) {
+            if let Some(pending) = shell
+                .pending_windows
+                .iter_mut()
+                .find(|pending| pending.surface.x11_surface() == Some(&window))
+            {
+                pending.fullscreen.take();
             }
-        } else if let Some(pending) = shell
-            .pending_windows
-            .iter_mut()
-            .find(|pending| pending.surface.x11_surface() == Some(&window))
-        {
-            pending.fullscreen.take();
         }
     }
 

@@ -627,78 +627,46 @@ impl FloatingLayout {
         );
     }
 
-    pub fn unmap(&mut self, window: &CosmicMapped) -> Option<Size<i32, Logical>> {
-        let mut new_size = None;
+    pub fn unmap(
+        &mut self,
+        window: &CosmicMapped,
+        to: Option<Rectangle<i32, Local>>,
+    ) -> Option<Rectangle<i32, Local>> {
+        let _ = self.animations.remove(window);
+        let Some(mut mapped_geometry) = self.space.element_geometry(window).map(RectExt::as_local)
+        else {
+            return None;
+        };
 
         if let Some(_) = window.floating_tiled.lock().unwrap().take() {
             if let Some(last_size) = window.last_geometry.lock().unwrap().map(|geo| geo.size) {
-                if let Some(location) = self.space.element_location(window) {
-                    window.set_tiled(false);
-                    window.set_geometry(
-                        Rectangle::new(location, last_size.as_logical())
-                            .as_local()
-                            .to_global(self.space.outputs().next().unwrap()),
-                    );
-                    window.configure();
-                    new_size = Some(last_size.as_logical());
-                }
+                let geometry = Rectangle::new(mapped_geometry.loc, last_size);
+                window.set_tiled(false);
+                window.set_geometry(geometry.to_global(self.space.outputs().next().unwrap()));
+                window.configure();
+                mapped_geometry.size = last_size;
             }
-        } else if !window.is_maximized(true) && !window.is_fullscreen(true) {
-            if let Some(location) = self.space.element_location(window) {
-                *window.last_geometry.lock().unwrap() = Some(
-                    Rectangle::new(
-                        location,
-                        window
-                            .pending_size()
-                            .unwrap_or_else(|| window.geometry().size),
-                    )
-                    .as_local(),
-                )
-            }
+        } else if !window.is_maximized(true) {
+            *window.last_geometry.lock().unwrap() = Some(mapped_geometry);
         }
 
-        let _ = self.animations.remove(window);
-
-        let was_unmaped = self.space.elements().any(|e| e == window);
-        self.space.unmap_elem(&window);
-
-        if was_unmaped {
-            if let Some(pos) = self.spawn_order.iter().position(|w| w == window) {
-                self.spawn_order.truncate(pos);
-            }
-            window.moved_since_mapped.store(true, Ordering::SeqCst);
-            Some(new_size.unwrap_or_else(|| window.geometry().size))
-        } else {
-            None
-        }
-    }
-
-    pub fn unmap_minimize(
-        &mut self,
-        window: &CosmicMapped,
-        to: Rectangle<i32, Local>,
-    ) -> Option<(CosmicMapped, Point<i32, Local>)> {
-        let previous_geometry = self.space.element_geometry(window);
-        self.space.unmap_elem(&window);
-        if let Some(previous_geometry) = previous_geometry {
-            if let Some(pos) = self.spawn_order.iter().position(|w| w == window) {
-                self.spawn_order.truncate(pos);
-            }
-            window.moved_since_mapped.store(true, Ordering::SeqCst);
+        if let Some(to) = to {
             self.animations.insert(
                 window.clone(),
                 Animation::Minimize {
                     start: Instant::now(),
-                    previous_geometry: previous_geometry.as_local(),
+                    previous_geometry: mapped_geometry,
                     target_geometry: to,
                 },
             );
-
-            window.set_minimized(true);
-            Some((window.clone(), previous_geometry.loc.as_local()))
-        } else {
-            None
         }
+
+        self.space.unmap_elem(&window);
+        if let Some(pos) = self.spawn_order.iter().position(|w| w == window) {
+            self.spawn_order.truncate(pos);
+        }
+        window.moved_since_mapped.store(true, Ordering::SeqCst);
+        Some(mapped_geometry)
     }
 
     pub fn drop_window(
@@ -1027,7 +995,7 @@ impl FloatingLayout {
                 Some(geo.size),
                 None,
             );
-            focus_stack.append(&mapped);
+            focus_stack.append(mapped.clone());
             Some(KeyboardFocusTarget::Element(mapped))
         } else {
             // if we have a stack
@@ -1068,7 +1036,7 @@ impl FloatingLayout {
             self.space.refresh();
 
             for elem in new_elements.into_iter().rev() {
-                focus_stack.append(&elem);
+                focus_stack.append(elem);
             }
 
             Some(KeyboardFocusTarget::Element(mapped))
