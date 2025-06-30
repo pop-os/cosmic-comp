@@ -4452,6 +4452,11 @@ impl Shell {
                 Some(from),
             )
         } else if let Some(workspace) = self.space_for_mut(&mapped) {
+            if mapped.is_minimized() {
+                // TODO: Rewrite the `MinimizedWindow` to restore to fullscreen
+                return None;
+            }
+
             let from = workspace.element_geometry(&mapped).unwrap();
             let (surface, state) = workspace.unmap_surface(surface).unwrap();
             window = surface;
