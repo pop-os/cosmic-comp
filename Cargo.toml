@@ -118,6 +118,7 @@ inherits = "release"
 
 [profile.release]
 lto = "fat"
+strip = true
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
