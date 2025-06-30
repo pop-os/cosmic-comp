@@ -996,6 +996,8 @@ impl Workspace {
                                 .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
                 );
             }
+
+            fullscreen_state.surface.set_minimized(true);
             return Some(MinimizedWindow::Fullscreen {
                 surface: fullscreen_state.surface,
                 previous: fullscreen_state
@@ -1018,6 +1020,7 @@ impl Workspace {
         if let Some(elem) = maybe_elem {
             let was_maximized = self.floating_layer.unmap(&elem, None).is_some();
             let previous_state = self.tiling_layer.unmap(&elem, Some(to)).unwrap();
+            elem.set_minimized(true);
             return Some(MinimizedWindow::Tiling {
                 window: elem,
                 previous: TilingRestoreData {
@@ -1034,6 +1037,7 @@ impl Workspace {
             .cloned();
         if let Some(elem) = maybe_elem {
             let geometry = self.floating_layer.unmap(&elem, Some(to)).unwrap();
+            elem.set_minimized(true);
             return Some(MinimizedWindow::Floating {
                 window: elem,
                 previous: FloatingRestoreData {
@@ -1059,6 +1063,7 @@ impl Workspace {
         match window {
             MinimizedWindow::Fullscreen { previous, surface } => {
                 let old_fullscreen = self.remove_fullscreen();
+                surface.set_minimized(false);
                 self.fullscreen = Some(FullscreenSurface {
                     surface,
                     previous_state: previous.clone().map(|p| p.previous_state),
@@ -1072,6 +1077,7 @@ impl Workspace {
                 let current_output_size = self.output.geometry().size.as_logical();
                 let previous_position = previous.position_relative(current_output_size);
 
+                window.set_minimized(false);
                 self.floating_layer
                     .remap_minimized(window, from, previous_position);
                 None
@@ -1084,6 +1090,7 @@ impl Workspace {
                         was_maximized,
                     },
             } => {
+                window.set_minimized(false);
                 if self.tiling_enabled {
                     let focus_stack = self.focus_stack.get(seat);
                     self.tiling_layer
