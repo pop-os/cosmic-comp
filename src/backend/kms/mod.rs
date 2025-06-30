@@ -16,6 +16,7 @@ use smithay::{
         allocator::{
             dmabuf::Dmabuf,
             gbm::{GbmAllocator, GbmBufferFlags},
+            Buffer,
         },
         drm::{output::DrmOutputRenderElements, DrmDeviceFd, DrmNode, NodeType},
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
@@ -455,6 +456,17 @@ impl KmsState {
                 _egl = Some(init_egl(&device.gbm).context("Failed to initialize egl context")?);
                 &_egl.as_ref().unwrap().display
             };
+
+            if !egl_display
+                .dmabuf_texture_formats()
+                .contains(&dmabuf.format())
+            {
+                trace!(
+                    "Skipping import of dmabuf on {:?}: unsupported format",
+                    device.render_node
+                );
+                continue;
+            }
 
             let result = egl_display
                 .create_image_from_dmabuf(&dmabuf)
