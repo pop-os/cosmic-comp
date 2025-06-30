@@ -611,7 +611,6 @@ impl FloatingLayout {
             ));
         }
 
-        mapped.set_minimized(false);
         self.space
             .map_element(mapped.clone(), position.as_logical(), true);
         self.space.refresh();
