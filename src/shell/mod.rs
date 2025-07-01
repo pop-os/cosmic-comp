@@ -1961,6 +1961,33 @@ impl Shell {
         })
     }
 
+    pub fn is_surface_mapped<S>(&self, surface: &S) -> bool
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        self.workspaces.sets.values().any(|set| {
+            set.minimized_windows
+                .iter()
+                .any(|w| w.windows().any(|s| &s == surface))
+                || set
+                    .sticky_layer
+                    .mapped()
+                    .any(|m| m.windows().any(|(s, _)| &s == surface))
+                || set.workspaces.iter().any(|w| {
+                    w.get_fullscreen().is_some_and(|s| s == surface)
+                        || w.minimized_windows
+                            .iter()
+                            .any(|m| m.windows().any(|s| &s == surface))
+                        || w.floating_layer
+                            .mapped()
+                            .any(|m| m.windows().any(|(s, _)| &s == surface))
+                        || w.tiling_layer
+                            .mapped()
+                            .any(|(m, _)| m.windows().any(|(s, _)| &s == surface))
+                })
+        })
+    }
+
     pub fn space_for(&self, mapped: &CosmicMapped) -> Option<&Workspace> {
         self.workspaces.spaces().find(|workspace| {
             workspace.mapped().any(|m| m == mapped)

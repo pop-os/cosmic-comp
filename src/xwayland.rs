@@ -734,8 +734,11 @@ impl XwmHandler for State {
 
         let mut shell = self.common.shell.write();
         let startup_id = window.startup_id();
-        // TODO: Not correct for fullscreen (and minimized?)
-        if shell.element_for_surface(&window).is_some() {
+        if shell.is_surface_mapped(&window) {
+            warn!(
+                ?window,
+                "Got map_request for already mapped window? Ignoring"
+            );
             return;
         }
 
