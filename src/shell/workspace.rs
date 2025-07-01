@@ -1158,6 +1158,10 @@ impl Workspace {
         Option<Rectangle<i32, Local>>,
     )> {
         if let Some(surface) = self.fullscreen.as_mut() {
+            if surface.ended_at.is_some() {
+                return None;
+            }
+
             if surface.surface.alive() {
                 surface.surface.set_fullscreen(false);
                 if let Some(previous_geometry) = surface.previous_geometry.as_ref() {
