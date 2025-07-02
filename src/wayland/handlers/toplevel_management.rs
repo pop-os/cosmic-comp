@@ -68,7 +68,10 @@ impl ToplevelManagementHandler for State {
                 {
                     for mapped in workspace
                         .mapped()
-                        .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                        .filter(|m| {
+                            m.maximized_state.lock().unwrap().is_some()
+                                && !m.windows().any(|(ref w, _)| w == window)
+                        })
                         .cloned()
                         .collect::<Vec<_>>()
                         .into_iter()
