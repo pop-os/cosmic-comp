@@ -274,6 +274,7 @@ impl From<ManagedLayer> for WorkspaceRestoreData {
 pub struct FloatingRestoreData {
     pub geometry: Rectangle<i32, Local>,
     pub output_size: Size<i32, Logical>,
+    pub was_maximized: bool,
 }
 
 impl FloatingRestoreData {
@@ -571,10 +572,13 @@ impl Workspace {
     }
 
     pub fn unmap_element(&mut self, mapped: &CosmicMapped) -> Option<WorkspaceRestoreData> {
-        if mapped.maximized_state.lock().unwrap().is_some() {
+        let was_maximized = if mapped.maximized_state.lock().unwrap().is_some() {
             // If surface is maximized then unmaximize it, so it is assigned to only one layer
             let _ = self.unmaximize_request(&mapped);
-        }
+            true
+        } else {
+            false
+        };
 
         self.focus_stack
             .0
@@ -594,18 +598,13 @@ impl Workspace {
             });
         }
 
-        let was_maximized =
-            if let Some(floating_geometry) = self.floating_layer.unmap(&mapped, None) {
-                if mapped.maximized_state.lock().unwrap().is_none() {
-                    return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
-                        geometry: floating_geometry,
-                        output_size: self.output.geometry().size.as_logical(),
-                    })));
-                }
-                true
-            } else {
-                false
-            };
+        if let Some(floating_geometry) = self.floating_layer.unmap(&mapped, None) {
+            return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
+                geometry: floating_geometry,
+                output_size: self.output.geometry().size.as_logical(),
+                was_maximized,
+            })));
+        };
         if let Ok(state) = self.tiling_layer.unmap(&mapped, None) {
             return Some(WorkspaceRestoreData::Tiling(Some(TilingRestoreData {
                 state,
@@ -1012,37 +1011,37 @@ impl Workspace {
             });
         }
 
-        let maybe_elem = self
-            .tiling_layer
+        let mapped = self
             .mapped()
-            .find(|(m, _)| m.windows().any(|(ref s, _)| s == surface))
-            .map(|(s, _)| s.clone());
-        if let Some(elem) = maybe_elem {
-            let was_maximized = self.floating_layer.unmap(&elem, None).is_some();
-            let previous_state = self.tiling_layer.unmap(&elem, Some(to)).unwrap();
-            elem.set_minimized(true);
-            return Some(MinimizedWindow::Tiling {
-                window: elem,
-                previous: TilingRestoreData {
-                    state: previous_state,
+            .find(|m| m.windows().any(|(ref s, _)| s == surface))
+            .cloned()?;
+        let was_maximized = if mapped.maximized_state.lock().unwrap().is_some() {
+            // If surface is maximized then unmaximize it, so it is assigned to only one layer
+            let _ = self.unmaximize_request(&mapped);
+            true
+        } else {
+            false
+        };
+
+        if let Some(geometry) = self.floating_layer.unmap(&mapped, Some(to)) {
+            mapped.set_minimized(true);
+            return Some(MinimizedWindow::Floating {
+                window: mapped,
+                previous: FloatingRestoreData {
+                    geometry,
+                    output_size: self.output.geometry().size.as_logical(),
                     was_maximized,
                 },
             });
         }
 
-        let maybe_elem = self
-            .floating_layer
-            .mapped()
-            .find(|m| m.windows().any(|(ref s, _)| s == surface))
-            .cloned();
-        if let Some(elem) = maybe_elem {
-            let geometry = self.floating_layer.unmap(&elem, Some(to)).unwrap();
-            elem.set_minimized(true);
-            return Some(MinimizedWindow::Floating {
-                window: elem,
-                previous: FloatingRestoreData {
-                    geometry,
-                    output_size: self.output.geometry().size.as_logical(),
+        if let Ok(state) = self.tiling_layer.unmap(&mapped, Some(to)) {
+            mapped.set_minimized(true);
+            return Some(MinimizedWindow::Tiling {
+                window: mapped,
+                previous: TilingRestoreData {
+                    state,
+                    was_maximized,
                 },
             });
         }
@@ -1079,7 +1078,19 @@ impl Workspace {
 
                 window.set_minimized(false);
                 self.floating_layer
-                    .remap_minimized(window, from, previous_position);
+                    .remap_minimized(window.clone(), from, previous_position);
+
+                if previous.was_maximized {
+                    let geometry = self.floating_layer.element_geometry(&window).unwrap();
+                    let mut state = window.maximized_state.lock().unwrap();
+                    *state = Some(MaximizedState {
+                        original_geometry: geometry,
+                        original_layer: ManagedLayer::Floating,
+                    });
+                    std::mem::drop(state);
+                    self.floating_layer.map_maximized(window, geometry, false);
+                }
+
                 None
             }
             MinimizedWindow::Tiling {
@@ -1098,16 +1109,29 @@ impl Workspace {
                     if was_maximized {
                         let previous_geometry =
                             self.tiling_layer.element_geometry(&window).unwrap();
+                        let mut state = window.maximized_state.lock().unwrap();
+                        *state = Some(MaximizedState {
+                            original_geometry: previous_geometry,
+                            original_layer: ManagedLayer::Tiling,
+                        });
+                        std::mem::drop(state);
                         self.floating_layer
                             .map_maximized(window, previous_geometry, true);
                     }
                 } else {
+                    self.floating_layer.map(window.clone(), None);
+                    let geometry = self.floating_layer.element_geometry(&window).unwrap();
+
                     if was_maximized {
+                        let mut state = window.maximized_state.lock().unwrap();
+                        *state = Some(MaximizedState {
+                            original_geometry: geometry,
+                            original_layer: ManagedLayer::Floating,
+                        });
+                        std::mem::drop(state);
                         self.floating_layer.map_maximized(window, from, true);
                     } else {
-                        self.floating_layer.map(window.clone(), None);
                         // get the right animation
-                        let geometry = self.floating_layer.element_geometry(&window).unwrap();
                         self.floating_layer
                             .remap_minimized(window.clone(), from, geometry.loc);
                     }

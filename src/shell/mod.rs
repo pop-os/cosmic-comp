@@ -2443,7 +2443,7 @@ impl Shell {
                 window,
                 original_geometry.map(|rect| rect.loc),
                 original_geometry.map(|rect| rect.size.as_logical()),
-                None,
+                Some(set.output.geometry().to_local(&set.output)),
             );
             return;
         }
@@ -2465,6 +2465,7 @@ impl Shell {
             None => self.workspaces.active_mut(&seat.active_output()).unwrap(),
             Some(FullscreenRestoreState::Sticky { .. }) => unreachable!(),
         };
+        let fullscreen_geometry = workspace.output.geometry().to_local(&workspace.output);
 
         match state {
             None => {
@@ -2472,22 +2473,43 @@ impl Shell {
                 toplevel_enter_workspace(&window.active_window(), &workspace.handle);
 
                 if workspace.tiling_enabled {
-                    workspace.tiling_layer.map(
+                    workspace.tiling_layer.remap(
                         window,
-                        Some(workspace.focus_stack.get(seat).iter()),
+                        Some(fullscreen_geometry),
                         None,
+                        Some(workspace.focus_stack.get(seat).iter()),
                     );
                 } else {
-                    workspace.floating_layer.map(window, None);
+                    workspace.floating_layer.map_internal(
+                        window,
+                        None,
+                        None,
+                        Some(fullscreen_geometry),
+                    );
                 }
             }
-            Some(FullscreenRestoreState::Floating { .. }) => {
+            Some(FullscreenRestoreState::Floating {
+                state: FloatingRestoreData { was_maximized, .. },
+                ..
+            }) => {
                 workspace.floating_layer.map_internal(
-                    window,
+                    window.clone(),
                     original_geometry.map(|geo| geo.loc),
                     original_geometry.map(|geo| geo.size.as_logical()),
-                    None,
+                    Some(fullscreen_geometry),
                 );
+                if was_maximized {
+                    let geometry = workspace.floating_layer.element_geometry(&window).unwrap();
+                    let mut state = window.maximized_state.lock().unwrap();
+                    *state = Some(MaximizedState {
+                        original_geometry: geometry,
+                        original_layer: ManagedLayer::Floating,
+                    });
+                    std::mem::drop(state);
+                    workspace
+                        .floating_layer
+                        .map_maximized(window, fullscreen_geometry, true);
+                }
             }
             Some(FullscreenRestoreState::Tiling {
                 state:
@@ -2497,16 +2519,47 @@ impl Shell {
                     },
                 ..
             }) => {
-                let focus_stack = workspace.focus_stack.get(seat);
-                workspace
-                    .tiling_layer
-                    .remap(window.clone(), None, state, Some(focus_stack.iter()));
-                if was_maximized {
-                    let previous_geometry =
-                        workspace.tiling_layer.element_geometry(&window).unwrap();
-                    workspace
-                        .floating_layer
-                        .map_maximized(window, previous_geometry, true);
+                if workspace.tiling_enabled {
+                    let focus_stack = workspace.focus_stack.get(seat);
+                    workspace.tiling_layer.remap(
+                        window.clone(),
+                        Some(fullscreen_geometry),
+                        state,
+                        Some(focus_stack.iter()),
+                    );
+                    if was_maximized {
+                        let previous_geometry =
+                            workspace.tiling_layer.element_geometry(&window).unwrap();
+                        let mut state = window.maximized_state.lock().unwrap();
+                        *state = Some(MaximizedState {
+                            original_geometry: previous_geometry,
+                            original_layer: ManagedLayer::Tiling,
+                        });
+                        std::mem::drop(state);
+                        workspace
+                            .floating_layer
+                            .map_maximized(window, fullscreen_geometry, true);
+                    }
+                } else {
+                    workspace.floating_layer.map_internal(
+                        window.clone(),
+                        None,
+                        None,
+                        Some(fullscreen_geometry),
+                    );
+
+                    if was_maximized {
+                        let geometry = workspace.floating_layer.element_geometry(&window).unwrap();
+                        let mut state = window.maximized_state.lock().unwrap();
+                        *state = Some(MaximizedState {
+                            original_geometry: geometry,
+                            original_layer: ManagedLayer::Floating,
+                        });
+                        std::mem::drop(state);
+                        workspace
+                            .floating_layer
+                            .map_maximized(window, fullscreen_geometry, true);
+                    }
                 }
             }
             Some(FullscreenRestoreState::Sticky { .. }) => unreachable!(),
@@ -3940,6 +3993,7 @@ impl Shell {
                 previous: FloatingRestoreData {
                     geometry: geo,
                     output_size: set.output.geometry().size.as_logical(),
+                    was_maximized: false,
                 },
             });
         } else {
@@ -4474,6 +4528,7 @@ impl Shell {
                     state: FloatingRestoreData {
                         geometry: from,
                         output_size: workspace.output.geometry().size.as_logical(),
+                        was_maximized: false,
                     },
                 }),
                 Some(from),
