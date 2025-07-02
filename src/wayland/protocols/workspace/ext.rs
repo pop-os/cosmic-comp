@@ -46,6 +46,7 @@ pub struct WorkspaceGroupData {
 
 #[derive(Default)]
 pub struct WorkspaceDataInner {
+    pub(super) group: Option<ExtWorkspaceGroupHandleV1>,
     name: String,
     capabilities: Option<ext_workspace_handle_v1::WorkspaceCapabilities>,
     coordinates: Vec<u32>,
@@ -403,7 +404,6 @@ where
                     },
                 ) {
                     mngr.workspace(&handle);
-                    group.workspace_enter(&handle);
                     if let Some(id) = workspace.ext_id.clone() {
                         handle.id(id);
                     }
@@ -426,6 +426,14 @@ where
         .lock()
         .unwrap();
     let mut changed = false;
+
+    if handle_state.group.as_ref() != Some(group) {
+        if let Some(old_group) = &handle_state.group {
+            old_group.workspace_leave(&instance);
+        }
+        group.workspace_enter(&instance);
+        handle_state.group = Some(group.clone());
+    }
 
     if handle_state.name != workspace.name {
         instance.name(workspace.name.clone());
