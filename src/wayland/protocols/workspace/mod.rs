@@ -405,12 +405,9 @@ where
         for group in &mut self.0.groups {
             if let Some(workspace) = group.workspaces.iter().find(|w| w.id == workspace.id) {
                 for instance in &workspace.ext_instances {
-                    let manager = &instance.data::<WorkspaceData>().unwrap().manager;
-                    for group_instance in &group.ext_instances {
-                        if *manager == group_instance.data::<WorkspaceGroupData>().unwrap().manager
-                        {
-                            group_instance.workspace_leave(instance);
-                        }
+                    let workspace_data = instance.data::<WorkspaceData>().unwrap();
+                    if let Some(group_instance) = &workspace_data.inner.lock().unwrap().group {
+                        group_instance.workspace_leave(instance);
                     }
                     instance.removed();
                 }
@@ -432,35 +429,25 @@ where
         };
 
         // Find old group index, and remove the workspace
-        let Some((old_group_idx, workspace)) =
-            self.0.groups.iter_mut().enumerate().find_map(|(i, group)| {
-                let idx = group
-                    .workspaces
-                    .iter()
-                    .position(|w| w.id == workspace_handle.id)?;
-                let workspace = group.workspaces.remove(idx);
-                Some((i, workspace))
-            })
-        else {
+        let Some(workspace) = self.0.groups.iter_mut().find_map(|group| {
+            let idx = group
+                .workspaces
+                .iter()
+                .position(|w| w.id == workspace_handle.id)?;
+            Some(group.workspaces.remove(idx))
+        }) else {
             // Workspace not found in any group
             return;
         };
 
-        // Send `workspace_leave` for ever instance with old group, and `workspace_enter` for new
-        // one.
-        let old_group = &self.0.groups[old_group_idx];
-        let new_group = &self.0.groups[group_idx];
+        // Send `workspace_leave` for ever instance with old group.
+        //
+        // `workspace_enter` will be sent in `send_group_to_client`, but if a group is destroyed,
+        // we need to make sure `workspace_leave` is sent first.
         for instance in &workspace.ext_instances {
-            let manager = &instance.data::<WorkspaceData>().unwrap().manager;
-            for group_instance in &old_group.ext_instances {
-                if *manager == group_instance.data::<WorkspaceGroupData>().unwrap().manager {
-                    group_instance.workspace_leave(instance);
-                }
-            }
-            for group_instance in &new_group.ext_instances {
-                if *manager == group_instance.data::<WorkspaceGroupData>().unwrap().manager {
-                    group_instance.workspace_enter(instance);
-                }
+            let workspace_data = instance.data::<WorkspaceData>().unwrap();
+            if let Some(group_instance) = workspace_data.inner.lock().unwrap().group.take() {
+                group_instance.workspace_leave(instance);
             }
         }
 
