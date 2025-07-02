@@ -694,6 +694,8 @@ impl Common {
     }
 }
 
+pub struct X11SurfacePid(pub u32);
+
 impl XwmHandler for State {
     fn xwm_state(&mut self, _xwm: XwmId) -> &mut X11Wm {
         self.common
@@ -703,7 +705,18 @@ impl XwmHandler for State {
             .unwrap()
     }
 
-    fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
+    fn new_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        match window.get_client_pid() {
+            Ok(pid) => {
+                window
+                    .user_data()
+                    .insert_if_missing_threadsafe(|| X11SurfacePid(pid));
+            }
+            Err(err) => {
+                warn!(?window, ?err, "Failed to get pid for XWayland window");
+            }
+        };
+    }
     fn new_override_redirect_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
     fn destroyed_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
 
