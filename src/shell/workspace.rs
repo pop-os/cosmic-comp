@@ -799,7 +799,7 @@ impl Workspace {
             .toplevel_element_under(location)
             .or_else(|| self.tiling_layer.toplevel_element_under(location))
             .or_else(|| {
-                if !last_focused.is_none_or(|t| !matches!(t, FocusTarget::Fullscreen(_))) {
+                if last_focused.is_none_or(|t| !matches!(t, FocusTarget::Fullscreen(_))) {
                     if let Some(fullscreen) = self.fullscreen.as_ref() {
                         let geometry = self.fullscreen_geometry().unwrap();
                         return fullscreen_element_under(fullscreen, geometry);
