@@ -76,8 +76,7 @@ const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 // For stable workspace id, generate random 24-bit integer, as a hex string
 // Must be compared with existing workspaces work uniqueness.
-// TODO: Assign an id to any workspace that is pinned
-pub fn random_id() -> String {
+pub fn random_workspace_id() -> String {
     let id = rand::random_range(0..(2 << 24));
     format!("{:x}", id)
 }
@@ -110,6 +109,7 @@ pub struct Workspace {
     pub tiling_enabled: bool,
     pub fullscreen: Option<FullscreenSurface>,
     pub pinned: bool,
+    pub id: Option<String>,
 
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
@@ -280,6 +280,7 @@ impl Workspace {
             minimized_windows: Vec::new(),
             fullscreen: None,
             pinned: false,
+            id: None,
             handle,
             focus_stack: FocusStacks::default(),
             screencopy: ScreencopySessions::default(),
@@ -311,6 +312,7 @@ impl Workspace {
             minimized_windows: Vec::new(),
             fullscreen: None,
             pinned: true,
+            id: pinned.id.clone(),
             handle,
             focus_stack: FocusStacks::default(),
             screencopy: ScreencopySessions::default(),
@@ -328,6 +330,7 @@ impl Workspace {
     }
 
     pub fn to_pinned(&self) -> Option<PinnedWorkspace> {
+        debug_assert!(self.id.is_some());
         let output = self.explicit_output().clone();
         if self.pinned {
             Some(PinnedWorkspace {
@@ -336,6 +339,7 @@ impl Workspace {
                     edid: output.edid,
                 },
                 tiling_enabled: self.tiling_enabled,
+                id: self.id.clone(),
             })
         } else {
             None
