@@ -113,7 +113,7 @@ impl WinitState {
             .get::<RefCell<OutputConfig>>()
             .unwrap()
             .borrow_mut();
-        if dbg!(config.mode.0) != dbg!((size.w, size.h)) {
+        if config.mode.0 != (size.w, size.h) {
             if !test_only {
                 config.mode = ((size.w, size.h), None);
             }

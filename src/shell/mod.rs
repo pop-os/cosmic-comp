@@ -740,7 +740,6 @@ impl Workspaces {
 
         // If this is the first output added, create workspaces for pinned workspaces from config
         for pinned in std::mem::take(&mut self.persisted_workspaces) {
-            tracing::error!("pinned workspace: {:?}", pinned);
             let workspace = create_workspace_from_pinned(
                 &pinned,
                 workspace_state,

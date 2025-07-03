@@ -25,6 +25,7 @@ pub fn restore_nofile_limit() {
     };
 
     if let Err(err) = setrlimit(Resource::Nofile, limits) {
+        // Use `eprintln!` instead of `tracing` since this is used in `pre_exec`.
         eprintln!("Failed to restore nofile soft limit: {:?}", err);
     }
 }
