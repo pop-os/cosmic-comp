@@ -1680,6 +1680,12 @@ impl Shell {
         } else if let KeyboardFocusTarget::XWaylandGrab(surface) = &focus_target {
             if let Some(new_target) = self.element_for_surface(surface) {
                 focus_target = KeyboardFocusTarget::Element(new_target.clone());
+            } else if let Some(new_target) = self
+                .workspaces
+                .spaces()
+                .find_map(|w| w.get_fullscreen().filter(|s| *s == surface))
+            {
+                focus_target = KeyboardFocusTarget::Fullscreen(new_target.clone());
             } else if let Some(or) = self
                 .override_redirect_windows
                 .iter()
