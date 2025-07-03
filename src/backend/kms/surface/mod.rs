@@ -39,7 +39,7 @@ use smithay::{
         },
         egl::EGLContext,
         renderer::{
-            buffer_dimensions,
+            buffer_dimensions, buffer_type,
             damage::Error as RenderError,
             element::{
                 texture::TextureRenderElement,
@@ -56,7 +56,7 @@ use smithay::{
             multigpu::{ApiDevice, Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, Blit, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
+            Bind, Blit, BufferType, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
             TextureFilter,
         },
     },
@@ -1617,7 +1617,12 @@ fn take_screencopy_frames(
             };
 
             let buffer = frame.buffer();
-            let age = damage_tracking.age_for_buffer(&buffer);
+            let age = if matches!(buffer_type(&frame.buffer()), Some(BufferType::Shm)) {
+                // TODO re-use offscreen buffer to damage track screencopy to shm
+                0
+            } else {
+                damage_tracking.age_for_buffer(&buffer)
+            };
             let res = damage_tracking.dt.damage_output(age, &elements);
 
             if let Some(old_len) = old_len {
