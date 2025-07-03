@@ -889,7 +889,12 @@ impl State {
                         }
                     }
                     Some(FocusTarget::Fullscreen(surface)) => {
-                        shell.unfullscreen_request(&surface, &self.common.event_loop_handle);
+                        if let Some(target) =
+                            shell.unfullscreen_request(&surface, &self.common.event_loop_handle)
+                        {
+                            std::mem::drop(shell);
+                            Shell::set_focus(self, Some(&target), seat, Some(serial), true);
+                        }
                     }
                     _ => {}
                 }

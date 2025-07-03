@@ -184,7 +184,11 @@ impl ToplevelManagementHandler for State {
         window: &<Self as ToplevelInfoHandler>::Window,
     ) {
         let mut shell = self.common.shell.write();
-        shell.unfullscreen_request(window, &self.common.event_loop_handle);
+        if let Some(target) = shell.unfullscreen_request(window, &self.common.event_loop_handle) {
+            let seat = shell.seats.last_active().clone();
+            std::mem::drop(shell);
+            Shell::set_focus(self, Some(&target), &seat, None, true);
+        }
     }
 
     fn maximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {

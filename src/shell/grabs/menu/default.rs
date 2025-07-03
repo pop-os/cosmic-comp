@@ -589,10 +589,16 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
                 let window = fullscreen_clone.clone();
                 let _ = handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
-                    shell.unfullscreen_request(&window, &state.common.event_loop_handle);
+                    if let Some(target) =
+                        shell.unfullscreen_request(&window, &state.common.event_loop_handle)
+                    {
+                        let seat = shell.seats.last_active().clone();
+                        std::mem::drop(shell);
+                        Shell::set_focus(state, Some(&target), &seat, None, true);
+                    }
                 });
             })
-            //.shortcut(config.shortcut_for_action(&Action::Fullscreen))
+            .shortcut(config.shortcut_for_action(&Action::Fullscreen))
             .toggled(true),
         ),
         Some(Item::Separator),
