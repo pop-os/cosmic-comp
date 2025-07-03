@@ -2692,7 +2692,7 @@ impl TilingLayout {
                     data.add_window(bound_idx);
                     bound_idx
                 };
-                tree.make_nth_sibling(&new_id, dbg!(idx)).unwrap();
+                tree.make_nth_sibling(&new_id, idx).unwrap();
                 *window.tiling_node_id.lock().unwrap() = Some(new_id);
                 window
             }
