@@ -3489,7 +3489,9 @@ impl Shell {
 
             let mut new_size = if mapped.maximized_state.lock().unwrap().is_some() {
                 // If surface is maximized then unmaximize it
-                workspace.unmaximize_request(&mapped)
+                workspace
+                    .unmaximize_request(&mapped)
+                    .map(|geo| geo.size.as_logical())
             } else {
                 None
             };
@@ -4139,7 +4141,9 @@ impl Shell {
                 None
             }
         } else if let Some(workspace) = self.space_for_mut(mapped) {
-            workspace.unmaximize_request(mapped)
+            workspace
+                .unmaximize_request(mapped)
+                .map(|geo| geo.size.as_logical())
         } else {
             None
         }

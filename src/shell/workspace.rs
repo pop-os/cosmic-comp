@@ -574,10 +574,9 @@ impl Workspace {
     pub fn unmap_element(&mut self, mapped: &CosmicMapped) -> Option<WorkspaceRestoreData> {
         let was_maximized = if mapped.maximized_state.lock().unwrap().is_some() {
             // If surface is maximized then unmaximize it, so it is assigned to only one layer
-            let _ = self.unmaximize_request(&mapped);
-            true
+            self.unmaximize_request(&mapped)
         } else {
-            false
+            None
         };
 
         self.focus_stack
@@ -598,19 +597,23 @@ impl Workspace {
             });
         }
 
-        if let Some(floating_geometry) = self.floating_layer.unmap(&mapped, None) {
-            return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
-                geometry: floating_geometry,
-                output_size: self.output.geometry().size.as_logical(),
-                was_maximized,
-            })));
-        };
         if let Ok(state) = self.tiling_layer.unmap(&mapped, None) {
             return Some(WorkspaceRestoreData::Tiling(Some(TilingRestoreData {
                 state,
-                was_maximized,
+                was_maximized: was_maximized.is_some(),
             })));
         }
+
+        // unmaximize_request might have triggered a `floating_layer.refresh()`,
+        // which may have already removed a non-alive surface.
+        if let Some(floating_geometry) = self.floating_layer.unmap(&mapped, None).or(was_maximized)
+        {
+            return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
+                geometry: floating_geometry,
+                output_size: self.output.geometry().size.as_logical(),
+                was_maximized: was_maximized.is_some(),
+            })));
+        };
 
         None
     }
@@ -935,12 +938,12 @@ impl Workspace {
         self.floating_layer.recalculate();
     }
 
-    pub fn unmaximize_request(&mut self, elem: &CosmicMapped) -> Option<Size<i32, Logical>> {
+    pub fn unmaximize_request(&mut self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
         let mut state = elem.maximized_state.lock().unwrap();
         if let Some(state) = state.take() {
             if let Some(minimized) = self.minimized_windows.iter_mut().find(|m| *m == elem) {
                 minimized.unmaximize(state.original_geometry);
-                Some(state.original_geometry.size.as_logical())
+                Some(state.original_geometry)
             } else {
                 match state.original_layer {
                     ManagedLayer::Tiling if self.tiling_enabled => {
@@ -951,9 +954,7 @@ impl Workspace {
                         elem.set_geometry(state.original_geometry.to_global(&self.output));
                         elem.configure();
                         self.tiling_layer.recalculate();
-                        self.tiling_layer
-                            .element_geometry(&elem)
-                            .map(|geo| geo.size.as_logical())
+                        self.tiling_layer.element_geometry(&elem)
                     }
                     ManagedLayer::Sticky => unreachable!(),
                     _ => {
@@ -964,7 +965,7 @@ impl Workspace {
                             Some(state.original_geometry.size.as_logical()),
                             None,
                         );
-                        Some(state.original_geometry.size.as_logical())
+                        Some(state.original_geometry)
                     }
                 }
             }
