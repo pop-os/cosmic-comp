@@ -1157,6 +1157,10 @@ impl Workspace {
         window.set_fullscreen(true);
         window.set_geometry(self.output.geometry(), 0);
         window.send_configure();
+        window.output_enter(
+            &self.output,
+            Rectangle::new(Point::new(0, 0), self.output.geometry().size.as_logical()),
+        );
 
         if let Some(seat) = seat.into() {
             self.focus_stack.get_mut(seat).append(window.clone());
@@ -1187,6 +1191,7 @@ impl Workspace {
             }
 
             if surface.surface.alive() {
+                surface.surface.output_leave(&self.output);
                 surface.surface.set_fullscreen(false);
                 if let Some(previous_geometry) = surface.previous_geometry.as_ref() {
                     surface
