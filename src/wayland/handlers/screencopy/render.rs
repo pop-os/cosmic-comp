@@ -172,7 +172,12 @@ where
         })
         .transpose()?;
 
-    let age = session_damage_tracking.age_for_buffer(&buffer);
+    let age = if offscreen.is_some() {
+        // TODO re-use offscreen buffer to damage track screencopy to shm
+        0
+    } else {
+        session_damage_tracking.age_for_buffer(&buffer)
+    };
     let mut fb = offscreen
         .as_mut()
         .map(|tex| renderer.bind(tex).map_err(DTError::Rendering))
@@ -242,7 +247,7 @@ pub fn render_workspace_to_buffer(
         renderer: &mut R,
         offscreen: Option<&mut R::Framebuffer<'_>>,
         dt: &'d mut OutputDamageTracker,
-        mut age: usize,
+        age: usize,
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         draw_cursor: bool,
         common: &mut Common,
@@ -311,7 +316,6 @@ pub fn render_workspace_to_buffer(
             .map(|res| res.0)
         } else {
             let target = offscreen.expect("shm buffers should have an offscreen target");
-            age = 0;
             render_workspace(
                 None,
                 renderer,
