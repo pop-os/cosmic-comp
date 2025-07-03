@@ -4496,7 +4496,8 @@ impl Shell {
             .iter_mut()
             .find(|(_, set)| set.sticky_layer.mapped().any(|m| m == &mapped))
         {
-            let from = set.sticky_layer.element_geometry(&mapped).unwrap();
+            let mut from = set.sticky_layer.element_geometry(&mapped).unwrap();
+            let mut was_maximized = false;
             window = if mapped
                 .stack_ref()
                 .map(|stack| stack.len() > 1)
@@ -4507,7 +4508,18 @@ impl Shell {
                 stack.remove_window(&surface);
                 surface
             } else {
-                set.sticky_layer.unmap(&mapped, None);
+                if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
+                    mapped.set_maximized(false);
+                    set.sticky_layer.map_internal(
+                        mapped.clone(),
+                        Some(state.original_geometry.loc),
+                        Some(state.original_geometry.size.as_logical()),
+                        None,
+                    );
+                    was_maximized = true;
+                }
+
+                from = set.sticky_layer.unmap(&mapped, None).unwrap();
                 mapped.active_window()
             };
 
@@ -4526,7 +4538,7 @@ impl Shell {
                     state: FloatingRestoreData {
                         geometry: from,
                         output_size: workspace.output.geometry().size.as_logical(),
-                        was_maximized: false,
+                        was_maximized,
                     },
                 }),
                 Some(from),
