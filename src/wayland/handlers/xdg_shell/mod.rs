@@ -274,15 +274,15 @@ impl XdgShellHandler for State {
         let (output, clients) = {
             let mut shell = self.common.shell.write();
             let seat = shell.seats.last_active().clone();
+
+            let output = shell
+                .visible_output_for_surface(surface.wl_surface())
+                .cloned();
             shell.unmap_surface(
                 surface.wl_surface(),
                 &seat,
                 &mut self.common.toplevel_info_state,
             );
-
-            let output = shell
-                .visible_output_for_surface(surface.wl_surface())
-                .cloned();
             if let Some(output) = output.as_ref() {
                 shell.refresh_active_space(output);
             }
