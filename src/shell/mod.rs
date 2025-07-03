@@ -2419,7 +2419,6 @@ impl Shell {
         &mut self,
         surface: CosmicSurface,
         state: Option<FullscreenRestoreState>,
-        original_geometry: Option<Rectangle<i32, Local>>,
         loop_handle: &LoopHandle<'static, State>,
     ) {
         let window = CosmicMapped::from(CosmicWindow::new(
@@ -2428,7 +2427,7 @@ impl Shell {
             self.theme.clone(),
         ));
 
-        if let Some(FullscreenRestoreState::Sticky { output, .. }) = &state {
+        if let Some(FullscreenRestoreState::Sticky { output, state, .. }) = &state {
             let output = output
                 .upgrade()
                 .unwrap_or_else(|| self.seats.last_active().active_output());
@@ -2441,8 +2440,8 @@ impl Shell {
                 .unwrap();
             set.sticky_layer.map_internal(
                 window,
-                original_geometry.map(|rect| rect.loc),
-                original_geometry.map(|rect| rect.size.as_logical()),
+                Some(state.geometry.loc),
+                Some(state.geometry.size.as_logical()),
                 Some(set.output.geometry().to_local(&set.output)),
             );
             return;
@@ -2489,17 +2488,21 @@ impl Shell {
                 }
             }
             Some(FullscreenRestoreState::Floating {
-                state: FloatingRestoreData { was_maximized, .. },
+                state:
+                    FloatingRestoreData {
+                        was_maximized,
+                        geometry,
+                        ..
+                    },
                 ..
             }) => {
                 workspace.floating_layer.map_internal(
                     window.clone(),
-                    original_geometry.map(|geo| geo.loc),
-                    original_geometry.map(|geo| geo.size.as_logical()),
+                    Some(geometry.loc),
+                    Some(geometry.size.as_logical()),
                     Some(fullscreen_geometry),
                 );
                 if was_maximized {
-                    let geometry = workspace.floating_layer.element_geometry(&window).unwrap();
                     let mut state = window.maximized_state.lock().unwrap();
                     *state = Some(MaximizedState {
                         original_geometry: geometry,
@@ -2657,12 +2660,11 @@ impl Shell {
         let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);
 
         if should_be_fullscreen {
-            if let Some((surface, state, geometry)) =
-                workspace.map_fullscreen(&window, &seat, None, None)
+            if let Some((surface, state, _)) = workspace.map_fullscreen(&window, &seat, None, None)
             {
                 toplevel_leave_output(&surface, &workspace.output);
                 toplevel_leave_workspace(&surface, &workspace.handle);
-                self.remap_unfullscreened_window(surface, state, geometry, loop_handle);
+                self.remap_unfullscreened_window(surface, state, loop_handle);
             }
             if was_activated {
                 workspace_state.add_workspace_state(&workspace_handle, WState::Urgent);
@@ -3130,20 +3132,13 @@ impl Shell {
                 );
                 mapped.into()
             } else if let WorkspaceRestoreData::Fullscreen(previous) = window_state {
-                if let Some((old_surface, previous_state, previous_geometry)) = to_workspace
-                    .map_fullscreen(
-                        window,
-                        None,
-                        previous.clone().map(|p| p.previous_state),
-                        previous.map(|p| p.previous_geometry),
-                    )
-                {
-                    self.remap_unfullscreened_window(
-                        old_surface,
-                        previous_state,
-                        previous_geometry,
-                        evlh,
-                    );
+                if let Some((old_surface, previous_state, _)) = to_workspace.map_fullscreen(
+                    window,
+                    None,
+                    previous.clone().map(|p| p.previous_state),
+                    previous.map(|p| p.previous_geometry),
+                ) {
+                    self.remap_unfullscreened_window(old_surface, previous_state, evlh);
                 }
                 window.clone().into()
             } else {
@@ -3421,8 +3416,8 @@ impl Shell {
             .find(|w| w.get_fullscreen().is_some_and(|s| s == surface));
         if let Some(workspace) = maybe_fullscreen_workspace {
             element_geo = Some(workspace.fullscreen_geometry().unwrap());
-            let (surface, state, original_geometry) = workspace.remove_fullscreen().unwrap();
-            self.remap_unfullscreened_window(surface, state, original_geometry, evlh);
+            let (surface, state, _) = workspace.remove_fullscreen().unwrap();
+            self.remap_unfullscreened_window(surface, state, evlh);
         };
 
         let old_mapped = self.element_for_surface(surface).cloned()?;
@@ -4060,11 +4055,10 @@ impl Shell {
                 window.mapped().unwrap().set_active(surface);
             }
             let from = minimize_rectangle(workspace.output(), &window.active_window());
-            if let Some((surface, restore, previous_geo)) = workspace.unminimize(window, from, seat)
-            {
+            if let Some((surface, restore, _)) = workspace.unminimize(window, from, seat) {
                 toplevel_leave_output(&surface, &workspace.output);
                 toplevel_leave_workspace(&surface, &workspace.handle);
-                self.remap_unfullscreened_window(surface, restore, previous_geo, loop_handle);
+                self.remap_unfullscreened_window(surface, restore, loop_handle);
             }
         }
     }
@@ -4579,8 +4573,8 @@ impl Shell {
             return None;
         };
 
-        if let Some((old_fullscreen, restore, previous_geo)) = old_fullscreen {
-            self.remap_unfullscreened_window(old_fullscreen, restore, previous_geo, &loop_handle);
+        if let Some((old_fullscreen, restore, _)) = old_fullscreen {
+            self.remap_unfullscreened_window(old_fullscreen, restore, &loop_handle);
         }
 
         Some(KeyboardFocusTarget::Fullscreen(window))
@@ -4601,11 +4595,11 @@ impl Shell {
         });
 
         if let Some(workspace) = maybe_workspace {
-            let (old_fullscreen, restore, previous_geo) = workspace.remove_fullscreen().unwrap();
+            let (old_fullscreen, restore, _) = workspace.remove_fullscreen().unwrap();
             toplevel_leave_output(&old_fullscreen, &workspace.output);
             toplevel_leave_workspace(&old_fullscreen, &workspace.handle);
 
-            self.remap_unfullscreened_window(old_fullscreen, restore, previous_geo, loop_handle);
+            self.remap_unfullscreened_window(old_fullscreen, restore, loop_handle);
 
             true
         } else {
