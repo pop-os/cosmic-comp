@@ -261,7 +261,11 @@ impl XdgShellHandler for State {
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         let mut shell = self.common.shell.write();
 
-        if !shell.unfullscreen_request(&surface, &self.common.event_loop_handle) {
+        if let Some(target) = shell.unfullscreen_request(&surface, &self.common.event_loop_handle) {
+            let seat = shell.seats.last_active().clone();
+            std::mem::drop(shell);
+            Shell::set_focus(self, Some(&target), &seat, None, true);
+        } else {
             if let Some(pending) = shell.pending_windows.iter_mut().find(|pending| {
                 pending.surface.wl_surface().as_deref() == Some(surface.wl_surface())
             }) {

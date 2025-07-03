@@ -2420,7 +2420,7 @@ impl Shell {
         surface: CosmicSurface,
         state: Option<FullscreenRestoreState>,
         loop_handle: &LoopHandle<'static, State>,
-    ) {
+    ) -> CosmicMapped {
         let window = CosmicMapped::from(CosmicWindow::new(
             surface,
             loop_handle.clone(),
@@ -2439,12 +2439,12 @@ impl Shell {
                 .or_else(|| self.workspaces.backup_set.as_mut())
                 .unwrap();
             set.sticky_layer.map_internal(
-                window,
+                window.clone(),
                 Some(state.geometry.loc),
                 Some(state.geometry.size.as_logical()),
                 Some(set.output.geometry().to_local(&set.output)),
             );
-            return;
+            return window;
         }
 
         let seat = self.seats.last_active();
@@ -2473,14 +2473,14 @@ impl Shell {
 
                 if workspace.tiling_enabled {
                     workspace.tiling_layer.remap(
-                        window,
+                        window.clone(),
                         Some(fullscreen_geometry),
                         None,
                         Some(workspace.focus_stack.get(seat).iter()),
                     );
                 } else {
                     workspace.floating_layer.map_internal(
-                        window,
+                        window.clone(),
                         None,
                         None,
                         Some(fullscreen_geometry),
@@ -2509,9 +2509,11 @@ impl Shell {
                         original_layer: ManagedLayer::Floating,
                     });
                     std::mem::drop(state);
-                    workspace
-                        .floating_layer
-                        .map_maximized(window, fullscreen_geometry, true);
+                    workspace.floating_layer.map_maximized(
+                        window.clone(),
+                        fullscreen_geometry,
+                        true,
+                    );
                 }
             }
             Some(FullscreenRestoreState::Tiling {
@@ -2539,9 +2541,11 @@ impl Shell {
                             original_layer: ManagedLayer::Tiling,
                         });
                         std::mem::drop(state);
-                        workspace
-                            .floating_layer
-                            .map_maximized(window, fullscreen_geometry, true);
+                        workspace.floating_layer.map_maximized(
+                            window.clone(),
+                            fullscreen_geometry,
+                            true,
+                        );
                     }
                 } else {
                     workspace.floating_layer.map_internal(
@@ -2559,14 +2563,18 @@ impl Shell {
                             original_layer: ManagedLayer::Floating,
                         });
                         std::mem::drop(state);
-                        workspace
-                            .floating_layer
-                            .map_maximized(window, fullscreen_geometry, true);
+                        workspace.floating_layer.map_maximized(
+                            window.clone(),
+                            fullscreen_geometry,
+                            true,
+                        );
                     }
                 }
             }
             Some(FullscreenRestoreState::Sticky { .. }) => unreachable!(),
         }
+
+        window
     }
 
     #[must_use]
@@ -4596,7 +4604,7 @@ impl Shell {
         &mut self,
         surface: &S,
         loop_handle: &LoopHandle<'static, State>,
-    ) -> bool
+    ) -> Option<KeyboardFocusTarget>
     where
         CosmicSurface: PartialEq<S>,
     {
@@ -4611,11 +4619,10 @@ impl Shell {
             toplevel_leave_output(&old_fullscreen, &workspace.output);
             toplevel_leave_workspace(&old_fullscreen, &workspace.handle);
 
-            self.remap_unfullscreened_window(old_fullscreen, restore, loop_handle);
-
-            true
+            let window = self.remap_unfullscreened_window(old_fullscreen, restore, loop_handle);
+            Some(KeyboardFocusTarget::Element(window))
         } else {
-            false
+            None
         }
     }
 
