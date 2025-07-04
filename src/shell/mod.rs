@@ -4095,10 +4095,10 @@ impl Shell {
             let geometry = set.sticky_layer.element_geometry(mapped).unwrap();
             (ManagedLayer::Sticky, &mut set.sticky_layer, geometry)
         } else if let Some(workspace) = self.space_for_mut(&mapped) {
-            let layer = if workspace.is_floating(&mapped.active_window()) {
-                ManagedLayer::Floating
-            } else {
+            let layer = if workspace.is_tiled(&mapped.active_window()) {
                 ManagedLayer::Tiling
+            } else {
+                ManagedLayer::Floating
             };
             let geometry = workspace.element_geometry(mapped).unwrap();
             (layer, &mut workspace.floating_layer, geometry)
