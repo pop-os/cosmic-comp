@@ -948,21 +948,24 @@ impl Workspace {
                 match state.original_layer {
                     ManagedLayer::Tiling if self.tiling_enabled => {
                         // should still be mapped in tiling
-                        self.floating_layer.unmap(&elem, None);
+                        let geo = self.tiling_layer.element_geometry(&elem);
+                        self.floating_layer.unmap(&elem, geo);
                         elem.output_enter(&self.output, elem.bbox());
                         elem.set_maximized(false);
                         elem.set_geometry(state.original_geometry.to_global(&self.output));
                         elem.configure();
                         self.tiling_layer.recalculate();
-                        self.tiling_layer.element_geometry(&elem)
+                        geo
                     }
                     ManagedLayer::Sticky => unreachable!(),
-                    _ => {
+
+                    x => {
+                        let use_geometry = !matches!(x, ManagedLayer::Tiling);
                         elem.set_maximized(false);
                         self.floating_layer.map_internal(
                             elem.clone(),
-                            Some(state.original_geometry.loc),
-                            Some(state.original_geometry.size.as_logical()),
+                            use_geometry.then_some(state.original_geometry.loc),
+                            use_geometry.then_some(state.original_geometry.size.as_logical()),
                             None,
                         );
                         Some(state.original_geometry)
@@ -1016,38 +1019,54 @@ impl Workspace {
             .mapped()
             .find(|m| m.windows().any(|(ref s, _)| s == surface))
             .cloned()?;
-        let was_maximized = if mapped.maximized_state.lock().unwrap().is_some() {
-            // If surface is maximized then unmaximize it, so it is assigned to only one layer
-            let _ = self.unmaximize_request(&mapped);
-            true
+        let was_maximized = if let Some(MaximizedState {
+            original_geometry,
+            original_layer,
+        }) = mapped.maximized_state.lock().unwrap().take()
+        {
+            // we need to do this manually instead of calling `self.unmaximize_request`
+            // to get the correct animation in the tiling case.
+            match original_layer {
+                ManagedLayer::Tiling if self.tiling_enabled => {
+                    self.floating_layer.unmap(&mapped, Some(to));
+                }
+                _ => {}
+            }
+            mapped.set_geometry(original_geometry.to_global(&self.output));
+            mapped.set_maximized(false);
+            Some(original_geometry)
         } else {
-            false
+            None
         };
 
+        mapped.set_minimized(true);
+        mapped.configure();
+
         if let Some(geometry) = self.floating_layer.unmap(&mapped, Some(to)) {
-            mapped.set_minimized(true);
             return Some(MinimizedWindow::Floating {
                 window: mapped,
                 previous: FloatingRestoreData {
-                    geometry,
+                    geometry: was_maximized.unwrap_or(geometry),
                     output_size: self.output.geometry().size.as_logical(),
-                    was_maximized,
+                    was_maximized: was_maximized.is_some(),
                 },
             });
         }
 
-        if let Ok(state) = self.tiling_layer.unmap(&mapped, Some(to)) {
-            mapped.set_minimized(true);
+        if let Ok(state) = self
+            .tiling_layer
+            .unmap(&mapped, was_maximized.is_none().then_some(to))
+        {
             return Some(MinimizedWindow::Tiling {
                 window: mapped,
                 previous: TilingRestoreData {
                     state,
-                    was_maximized,
+                    was_maximized: was_maximized.is_some(),
                 },
             });
         }
 
-        None
+        unreachable!()
     }
 
     pub fn unminimize(
@@ -1089,7 +1108,7 @@ impl Workspace {
                         original_layer: ManagedLayer::Floating,
                     });
                     std::mem::drop(state);
-                    self.floating_layer.map_maximized(window, geometry, false);
+                    self.floating_layer.map_maximized(window, geometry, true);
                 }
 
                 None
@@ -1105,8 +1124,12 @@ impl Workspace {
                 window.set_minimized(false);
                 if self.tiling_enabled {
                     let focus_stack = self.focus_stack.get(seat);
-                    self.tiling_layer
-                        .remap(window.clone(), None, state, Some(focus_stack.iter()));
+                    self.tiling_layer.remap(
+                        window.clone(),
+                        (!was_maximized).then_some(from),
+                        state,
+                        Some(focus_stack.iter()),
+                    );
                     if was_maximized {
                         let previous_geometry =
                             self.tiling_layer.element_geometry(&window).unwrap();
@@ -1116,18 +1139,20 @@ impl Workspace {
                             original_layer: ManagedLayer::Tiling,
                         });
                         std::mem::drop(state);
-                        self.floating_layer
-                            .map_maximized(window, previous_geometry, true);
+                        self.floating_layer.map_maximized(window, from, true);
                     }
                 } else {
                     self.floating_layer.map(window.clone(), None);
-                    let geometry = self.floating_layer.element_geometry(&window).unwrap();
+                    let mut geometry = self.floating_layer.element_geometry(&window).unwrap();
+                    if let Some(pending_size) = window.pending_size() {
+                        geometry.size = pending_size.as_local();
+                    }
 
                     if was_maximized {
                         let mut state = window.maximized_state.lock().unwrap();
                         *state = Some(MaximizedState {
                             original_geometry: geometry,
-                            original_layer: ManagedLayer::Floating,
+                            original_layer: ManagedLayer::Tiling,
                         });
                         std::mem::drop(state);
                         self.floating_layer.map_maximized(window, from, true);
@@ -1275,12 +1300,7 @@ impl Workspace {
             let floating_windows = self.floating_layer.mapped().cloned().collect::<Vec<_>>();
 
             for window in floating_windows.iter().filter(|w| w.is_maximized(false)) {
-                let original_geometry = {
-                    let state = window.maximized_state.lock().unwrap();
-                    state.as_ref().unwrap().original_geometry.clone()
-                };
-                self.unmaximize_request(&window);
-                maximized_windows.push((window.clone(), ManagedLayer::Tiling, original_geometry));
+                maximized_windows.push((window.clone(), ManagedLayer::Tiling));
             }
 
             let focus_stack = self.focus_stack.get(seat);
@@ -1300,16 +1320,8 @@ impl Workspace {
                 .into_iter()
             {
                 if window.is_maximized(false) {
-                    let original_geometry = {
-                        let state = window.maximized_state.lock().unwrap();
-                        state.as_ref().unwrap().original_geometry.clone()
-                    };
                     self.unmaximize_request(&window);
-                    maximized_windows.push((
-                        window.clone(),
-                        ManagedLayer::Floating,
-                        original_geometry,
-                    ));
+                    maximized_windows.push((window.clone(), ManagedLayer::Floating));
                 }
                 let _ = self.tiling_layer.unmap(&window, None);
                 self.floating_layer.map(window, None);
@@ -1317,7 +1329,11 @@ impl Workspace {
             workspace_state.set_workspace_tiling_state(&self.handle, TilingState::FloatingOnly);
             self.tiling_enabled = false;
         }
-        for (window, original_layer, original_geometry) in maximized_windows {
+        for (window, original_layer) in maximized_windows {
+            let mut original_geometry = self.element_geometry(&window).unwrap();
+            if let Some(pending_size) = window.pending_size() {
+                original_geometry.size = pending_size.as_local();
+            }
             let mut state = window.maximized_state.lock().unwrap();
             *state = Some(MaximizedState {
                 original_geometry,
