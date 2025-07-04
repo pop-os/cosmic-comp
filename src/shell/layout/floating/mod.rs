@@ -354,13 +354,26 @@ impl FloatingLayout {
         mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
         if animate {
-            self.animations.insert(
-                mapped.clone(),
-                Animation::Tiled {
-                    start: Instant::now(),
-                    previous_geometry,
-                },
-            );
+            if let Some(existing_anim) = self.animations.get_mut(&mapped) {
+                match existing_anim {
+                    Animation::Unminimize {
+                        target_geometry, ..
+                    } => {
+                        *target_geometry = geometry;
+                    }
+                    Animation::Minimize { .. } | Animation::Tiled { .. } => {}
+                }
+            } else {
+                self.animations.insert(
+                    mapped.clone(),
+                    Animation::Tiled {
+                        start: Instant::now(),
+                        previous_geometry,
+                    },
+                );
+            }
+        } else {
+            self.animations.remove(&mapped);
         }
         if mapped.floating_tiled.lock().unwrap().take().is_some() {
             if let Some(state) = mapped.maximized_state.lock().unwrap().as_mut() {
@@ -631,11 +644,28 @@ impl FloatingLayout {
         window: &CosmicMapped,
         to: Option<Rectangle<i32, Local>>,
     ) -> Option<Rectangle<i32, Local>> {
-        let _ = self.animations.remove(window);
         let Some(mut mapped_geometry) = self.space.element_geometry(window).map(RectExt::as_local)
         else {
             return None;
         };
+        let _ = self.animations.remove(window);
+
+        if let Some(to) = to {
+            self.animations.insert(
+                window.clone(),
+                Animation::Minimize {
+                    start: Instant::now(),
+                    previous_geometry: if window.is_maximized(false) {
+                        let output = self.space.outputs().next().unwrap();
+                        let layers = layer_map_for_output(output);
+                        layers.non_exclusive_zone().as_local()
+                    } else {
+                        mapped_geometry
+                    },
+                    target_geometry: to,
+                },
+            );
+        }
 
         if let Some(_) = window.floating_tiled.lock().unwrap().take() {
             if let Some(last_size) = window.last_geometry.lock().unwrap().map(|geo| geo.size) {
@@ -650,17 +680,6 @@ impl FloatingLayout {
                 mapped_geometry.size = pending_size.as_local();
             }
             *window.last_geometry.lock().unwrap() = Some(mapped_geometry);
-        }
-
-        if let Some(to) = to {
-            self.animations.insert(
-                window.clone(),
-                Animation::Minimize {
-                    start: Instant::now(),
-                    previous_geometry: mapped_geometry,
-                    target_geometry: to,
-                },
-            );
         }
 
         self.space.unmap_elem(&window);
