@@ -18,7 +18,7 @@
 //!
 //! …consequently `zbus-xmlgen` did not generate code for the above interfaces.
 
-use zbus::blocking::Connection;
+use zbus::Connection;
 
 #[zbus::proxy(
     interface = "com.system76.PowerDaemon",
@@ -79,9 +79,9 @@ pub trait PowerDaemon {
     fn power_profile_switch(&self, profile: &str) -> zbus::Result<()>;
 }
 
-pub fn init() -> anyhow::Result<PowerDaemonProxyBlocking<'static>> {
-    let conn = Connection::system()?;
-    let proxy = PowerDaemonProxyBlocking::new(&conn)?;
-    proxy.0.introspect()?;
+pub async fn init() -> anyhow::Result<PowerDaemonProxy<'static>> {
+    let conn = Connection::system().await?;
+    let proxy = PowerDaemonProxy::new(&conn).await?;
+    proxy.0.introspect().await?;
     Ok(proxy)
 }
