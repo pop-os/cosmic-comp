@@ -1512,7 +1512,7 @@ impl Shell {
         idx: usize,
         workspace_delta: WorkspaceDelta,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+    ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
         match &mut self.workspaces.mode {
             WorkspaceMode::OutputBound => {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
@@ -1525,12 +1525,12 @@ impl Shell {
                     set.activate(idx, workspace_delta, workspace_state)?;
 
                     let output_geo = output.geometry();
-                    Ok(Some(
+                    Ok(
                         output_geo.loc
                             + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
-                    ))
+                    )
                 } else {
-                    Ok(None)
+                    Err(InvalidWorkspaceIndex)
                 }
             }
             WorkspaceMode::Global => {
@@ -1538,9 +1538,7 @@ impl Shell {
                     set.activate(idx, workspace_delta, workspace_state)?;
                 }
                 let output_geo = output.geometry();
-                Ok(Some(
-                    output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
-                ))
+                Ok(output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)))
             }
         }
     }
@@ -1565,7 +1563,7 @@ impl Shell {
         output: &Output,
         velocity: f64,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+    ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
         match &mut self.workspaces.mode {
             WorkspaceMode::OutputBound => {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
@@ -1605,12 +1603,12 @@ impl Shell {
                     }
 
                     let output_geo = output.geometry();
-                    Ok(Some(
+                    Ok(
                         output_geo.loc
                             + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
-                    ))
+                    )
                 } else {
-                    Ok(None)
+                    Err(InvalidWorkspaceIndex)
                 }
             }
             WorkspaceMode::Global => {
@@ -1644,7 +1642,7 @@ impl Shell {
                         }
                     }
                 }
-                Ok(None)
+                Err(InvalidWorkspaceIndex)
             }
         }
     }
@@ -2942,7 +2940,7 @@ impl Shell {
                                 WorkspaceDelta::new_shortcut(),
                                 workspace_state,
                             )
-                            .unwrap()
+                            .ok()
                         })
                 } else {
                     None
@@ -3099,7 +3097,7 @@ impl Shell {
                         WorkspaceDelta::new_shortcut(),
                         workspace_state,
                     )
-                    .unwrap()
+                    .ok()
                 })
         } else {
             None
@@ -3209,7 +3207,7 @@ impl Shell {
                         WorkspaceDelta::new_shortcut(),
                         workspace_state,
                     )
-                    .unwrap()
+                    .ok()
                 })
         } else {
             None
