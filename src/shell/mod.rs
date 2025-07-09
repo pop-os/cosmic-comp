@@ -1537,7 +1537,10 @@ impl Shell {
                 for set in self.workspaces.sets.values_mut() {
                     set.activate(idx, workspace_delta, workspace_state)?;
                 }
-                Ok(None)
+                let output_geo = output.geometry();
+                Ok(Some(
+                    output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
+                ))
             }
         }
     }
