@@ -539,7 +539,7 @@ impl State {
                         res
                     };
 
-                    if let Ok(Some(new_pos)) = res {
+                    if let Ok(new_pos) = res {
                         let workspace = shell.workspaces.active(&next_output).unwrap().1;
                         let new_target = workspace
                             .focus_stack
@@ -1080,7 +1080,7 @@ fn to_next_workspace(
     seat: &Seat<State>,
     gesture: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let workspace = shell
         .workspaces
@@ -1106,7 +1106,7 @@ fn to_previous_workspace(
     seat: &Seat<State>,
     gesture: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let workspace = shell
         .workspaces
