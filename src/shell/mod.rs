@@ -878,14 +878,14 @@ impl Workspaces {
     }
 
     // Move workspace from one output to another, explicitly by the user
-    fn migrate_workspace(
+    pub fn migrate_workspace(
         &mut self,
         from: &Output,
         to: &Output,
         handle: &WorkspaceHandle,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
-        if !self.sets.contains_key(to) {
+        if !self.sets.contains_key(to) || from == to {
             return;
         }
 
@@ -1352,19 +1352,6 @@ impl Common {
 
         std::mem::drop(shell);
         self.refresh(); // cleans up excess of workspaces and empty workspaces
-    }
-
-    pub fn migrate_workspace(&mut self, from: &Output, to: &Output, handle: &WorkspaceHandle) {
-        if from == to {
-            return;
-        }
-
-        let mut shell = self.shell.write();
-        shell
-            .workspaces
-            .migrate_workspace(from, to, handle, &mut self.workspace_state.update());
-
-        std::mem::drop(shell);
     }
 
     pub fn update_config(&mut self) {
