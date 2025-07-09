@@ -669,8 +669,41 @@ impl State {
                 };
 
                 if let Some(next_output) = next_output {
-                    self.common
-                        .migrate_workspace(&active_output, &next_output, &active);
+                    let mut shell = self.common.shell.write();
+                    let mut workspace_state = self.common.workspace_state.update();
+                    shell.workspaces.migrate_workspace(
+                        &active_output,
+                        &next_output,
+                        &active,
+                        &mut workspace_state,
+                    );
+                    // Activate workspace on new set, and set that output as active
+                    if let Some(new_idx) = shell
+                        .workspaces
+                        .sets
+                        .get(&next_output)
+                        .and_then(|set| set.workspaces.iter().position(|w| w.handle == active))
+                    {
+                        let res = shell.activate(
+                            &next_output,
+                            new_idx,
+                            WorkspaceDelta::new_shortcut(),
+                            &mut workspace_state,
+                        );
+                        drop(workspace_state);
+                        drop(shell);
+                        if res.is_ok() {
+                            self.handle_shortcut_action(
+                                Action::SwitchOutput(direction),
+                                seat,
+                                serial,
+                                time,
+                                pattern,
+                                Some(direction),
+                                true,
+                            )
+                        }
+                    }
                 }
             }
 
