@@ -549,16 +549,12 @@ impl State {
                             .map(Into::<KeyboardFocusTarget>::into);
                         std::mem::drop(shell);
 
-                        let move_cursor = if let Some(under) = new_target {
-                            let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
-                            Shell::set_focus(self, Some(&under), seat, None, update_cursor);
-                            !update_cursor
-                        } else {
-                            true
-                        };
+                        let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
+                        Shell::set_focus(self, new_target.as_ref(), seat, None, update_cursor);
 
                         if let Some(ptr) = seat.get_pointer() {
-                            if move_cursor {
+                            // Update cursor position if `set_focus` didn't already
+                            if !update_cursor {
                                 ptr.motion(
                                     self,
                                     None,
