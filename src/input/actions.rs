@@ -550,7 +550,7 @@ impl State {
                         std::mem::drop(shell);
 
                         let move_cursor = if let Some(under) = new_target {
-                            let update_cursor = self.common.config.cosmic_conf.focus_follows_cursor;
+                            let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
                             Shell::set_focus(self, Some(&under), seat, None, update_cursor);
                             !update_cursor
                         } else {
