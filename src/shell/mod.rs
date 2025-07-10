@@ -878,14 +878,14 @@ impl Workspaces {
     }
 
     // Move workspace from one output to another, explicitly by the user
-    fn migrate_workspace(
+    pub fn migrate_workspace(
         &mut self,
         from: &Output,
         to: &Output,
         handle: &WorkspaceHandle,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
-        if !self.sets.contains_key(to) {
+        if !self.sets.contains_key(to) || from == to {
             return;
         }
 
@@ -1354,19 +1354,6 @@ impl Common {
         self.refresh(); // cleans up excess of workspaces and empty workspaces
     }
 
-    pub fn migrate_workspace(&mut self, from: &Output, to: &Output, handle: &WorkspaceHandle) {
-        if from == to {
-            return;
-        }
-
-        let mut shell = self.shell.write();
-        shell
-            .workspaces
-            .migrate_workspace(from, to, handle, &mut self.workspace_state.update());
-
-        std::mem::drop(shell);
-    }
-
     pub fn update_config(&mut self) {
         let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
@@ -1512,7 +1499,7 @@ impl Shell {
         idx: usize,
         workspace_delta: WorkspaceDelta,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+    ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
         match &mut self.workspaces.mode {
             WorkspaceMode::OutputBound => {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
@@ -1525,19 +1512,20 @@ impl Shell {
                     set.activate(idx, workspace_delta, workspace_state)?;
 
                     let output_geo = output.geometry();
-                    Ok(Some(
+                    Ok(
                         output_geo.loc
                             + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
-                    ))
+                    )
                 } else {
-                    Ok(None)
+                    Err(InvalidWorkspaceIndex)
                 }
             }
             WorkspaceMode::Global => {
                 for set in self.workspaces.sets.values_mut() {
                     set.activate(idx, workspace_delta, workspace_state)?;
                 }
-                Ok(None)
+                let output_geo = output.geometry();
+                Ok(output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)))
             }
         }
     }
@@ -1562,7 +1550,7 @@ impl Shell {
         output: &Output,
         velocity: f64,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-    ) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+    ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
         match &mut self.workspaces.mode {
             WorkspaceMode::OutputBound => {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
@@ -1602,12 +1590,12 @@ impl Shell {
                     }
 
                     let output_geo = output.geometry();
-                    Ok(Some(
+                    Ok(
                         output_geo.loc
                             + Point::from((output_geo.size.w / 2, output_geo.size.h / 2)),
-                    ))
+                    )
                 } else {
-                    Ok(None)
+                    Err(InvalidWorkspaceIndex)
                 }
             }
             WorkspaceMode::Global => {
@@ -1641,7 +1629,7 @@ impl Shell {
                         }
                     }
                 }
-                Ok(None)
+                Err(InvalidWorkspaceIndex)
             }
         }
     }
@@ -2939,7 +2927,7 @@ impl Shell {
                                 WorkspaceDelta::new_shortcut(),
                                 workspace_state,
                             )
-                            .unwrap()
+                            .ok()
                         })
                 } else {
                     None
@@ -3096,7 +3084,7 @@ impl Shell {
                         WorkspaceDelta::new_shortcut(),
                         workspace_state,
                     )
-                    .unwrap()
+                    .ok()
                 })
         } else {
             None
@@ -3206,7 +3194,7 @@ impl Shell {
                         WorkspaceDelta::new_shortcut(),
                         workspace_state,
                     )
-                    .unwrap()
+                    .ok()
                 })
         } else {
             None

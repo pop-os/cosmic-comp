@@ -539,7 +539,7 @@ impl State {
                         res
                     };
 
-                    if let Ok(Some(new_pos)) = res {
+                    if let Ok(new_pos) = res {
                         let workspace = shell.workspaces.active(&next_output).unwrap().1;
                         let new_target = workspace
                             .focus_stack
@@ -549,16 +549,12 @@ impl State {
                             .map(Into::<KeyboardFocusTarget>::into);
                         std::mem::drop(shell);
 
-                        let move_cursor = if let Some(under) = new_target {
-                            let update_cursor = self.common.config.cosmic_conf.focus_follows_cursor;
-                            Shell::set_focus(self, Some(&under), seat, None, update_cursor);
-                            !update_cursor
-                        } else {
-                            true
-                        };
+                        let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
+                        Shell::set_focus(self, new_target.as_ref(), seat, None, update_cursor);
 
                         if let Some(ptr) = seat.get_pointer() {
-                            if move_cursor {
+                            // Update cursor position if `set_focus` didn't already
+                            if !update_cursor {
                                 ptr.motion(
                                     self,
                                     None,
@@ -669,8 +665,41 @@ impl State {
                 };
 
                 if let Some(next_output) = next_output {
-                    self.common
-                        .migrate_workspace(&active_output, &next_output, &active);
+                    let mut shell = self.common.shell.write();
+                    let mut workspace_state = self.common.workspace_state.update();
+                    shell.workspaces.migrate_workspace(
+                        &active_output,
+                        &next_output,
+                        &active,
+                        &mut workspace_state,
+                    );
+                    // Activate workspace on new set, and set that output as active
+                    if let Some(new_idx) = shell
+                        .workspaces
+                        .sets
+                        .get(&next_output)
+                        .and_then(|set| set.workspaces.iter().position(|w| w.handle == active))
+                    {
+                        let res = shell.activate(
+                            &next_output,
+                            new_idx,
+                            WorkspaceDelta::new_shortcut(),
+                            &mut workspace_state,
+                        );
+                        drop(workspace_state);
+                        drop(shell);
+                        if res.is_ok() {
+                            self.handle_shortcut_action(
+                                Action::SwitchOutput(direction),
+                                seat,
+                                serial,
+                                time,
+                                pattern,
+                                Some(direction),
+                                true,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1080,7 +1109,7 @@ fn to_next_workspace(
     seat: &Seat<State>,
     gesture: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let workspace = shell
         .workspaces
@@ -1106,7 +1135,7 @@ fn to_previous_workspace(
     seat: &Seat<State>,
     gesture: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let workspace = shell
         .workspaces

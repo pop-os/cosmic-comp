@@ -90,7 +90,7 @@ impl ToplevelManagementHandler for State {
 
                 if seat.active_output() != *output {
                     match res {
-                        Ok(Some(new_pos)) => {
+                        Ok(new_pos) => {
                             seat.set_active_output(&output);
                             if let Some(ptr) = seat.get_pointer() {
                                 let serial = SERIAL_COUNTER.next_serial();
@@ -105,9 +105,6 @@ impl ToplevelManagementHandler for State {
                                 );
                                 ptr.frame(self);
                             }
-                        }
-                        Ok(None) => {
-                            seat.set_active_output(&output);
                         }
                         _ => {}
                     }
