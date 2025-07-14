@@ -438,6 +438,8 @@ impl TilingLayout {
     ) {
         let gaps = self.gaps();
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
+        window.output_enter(&self.output, window.bbox());
+        window.set_bounds(self.output.geometry().size.as_logical());
 
         if let Some(RestoreTilingState {
             parent,
