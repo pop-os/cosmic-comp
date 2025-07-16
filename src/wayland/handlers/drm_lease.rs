@@ -27,10 +27,11 @@ impl DrmLeaseHandler for State {
         request: DrmLeaseRequest,
     ) -> Result<DrmLeaseBuilder, LeaseRejected> {
         let kms = self.backend.kms();
-        let backend = kms
+        let mut backend = kms
             .drm_devices
             .get_mut(&node)
-            .ok_or(LeaseRejected::default())?;
+            .ok_or(LeaseRejected::default())?
+            .lock();
         let mut renderer = match kms.api.single_renderer(&backend.render_node) {
             Ok(renderer) => renderer,
             Err(err) => {
@@ -108,6 +109,7 @@ impl DrmLeaseHandler for State {
     fn lease_destroyed(&mut self, node: DrmNode, lease: u32) {
         let kms = self.backend.kms();
         if let Some(backend) = kms.drm_devices.get_mut(&node) {
+            let mut backend = backend.lock();
             backend.active_leases.retain(|l| l.id() != lease);
 
             if backend.active_leases.is_empty() {

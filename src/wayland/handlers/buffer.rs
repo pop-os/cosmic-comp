@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{state::BackendData, utils::prelude::*};
+use crate::{
+    backend::kms::MaybeLockedDevice,
+    state::{BackendData, State},
+};
 use smithay::{
     reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource},
     wayland::buffer::BufferHandler,
