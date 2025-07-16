@@ -100,10 +100,11 @@ impl WinitState {
         Ok(())
     }
 
-    pub fn apply_config_for_outputs(
-        &mut self,
-        test_only: bool,
-    ) -> Result<Vec<Output>, anyhow::Error> {
+    pub fn all_outputs(&self) -> Vec<Output> {
+        vec![self.output.clone()]
+    }
+
+    pub fn apply_config_for_outputs(&mut self, test_only: bool) -> Result<(), anyhow::Error> {
         // TODO: if we ever have multiple winit outputs, don't ignore config.enabled
         // reset size
         let size = self.backend.window_size();
@@ -119,7 +120,7 @@ impl WinitState {
             }
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
-            Ok(vec![self.output.clone()])
+            Ok(())
         }
     }
 

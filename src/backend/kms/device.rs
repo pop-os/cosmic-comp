@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
+    backend::{
+        kms::render::gles::GbmGlowBackend,
+        render::{init_shaders, output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
+    },
     config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState, ScreenFilter},
     shell::Shell,
     utils::{env::dev_list_var, prelude::*},
@@ -20,10 +23,11 @@ use smithay::{
         drm::{
             compositor::{FrameError, FrameFlags},
             exporter::gbm::GbmFramebufferExporter,
-            output::DrmOutputManager,
+            output::{DrmOutputManager, LockedDrmOutputManager},
             DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
         },
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
+        renderer::glow::GlowRenderer,
         session::Session,
     },
     desktop::utils::OutputPresentationFeedback,
@@ -43,6 +47,7 @@ use smithay::{
 use tracing::{error, info, warn};
 
 use std::{
+    borrow::BorrowMut,
     cell::RefCell,
     collections::{HashMap, HashSet},
     fmt,
@@ -59,6 +64,18 @@ pub struct EGLInternals {
     pub device: EGLDevice,
     pub context: EGLContext,
 }
+
+pub type LockedGbmDrmOutputManager<'a> = LockedDrmOutputManager<
+    'a,
+    GbmAllocator<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
+    Option<(
+        OutputPresentationFeedback,
+        Receiver<(Frame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Duration,
+    )>,
+    DrmDeviceFd,
+>;
 
 pub type GbmDrmOutputManager = DrmOutputManager<
     GbmAllocator<DrmDeviceFd>,
@@ -109,6 +126,22 @@ impl fmt::Debug for Device {
             .field("socket", &self.socket)
             .finish()
     }
+}
+
+pub struct LockedDevice<'a> {
+    pub dev_node: &'a DrmNode,
+    pub render_node: &'a DrmNode,
+    pub egl: &'a mut Option<EGLInternals>,
+
+    pub outputs: &'a HashMap<connector::Handle, Output>,
+    pub surfaces: &'a mut HashMap<crtc::Handle, Surface>,
+    pub drm: LockedGbmDrmOutputManager<'a>,
+    pub gbm: &'a GbmDevice<DrmDeviceFd>,
+
+    pub leased_connectors: &'a mut Vec<(connector::Handle, crtc::Handle)>,
+    pub leasing_global: &'a mut Option<DrmLeaseState>,
+    pub active_leases: &'a mut Vec<DrmLease>,
+    pub active_buffers: &'a HashSet<Weak<WlBuffer>>,
 }
 
 pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
@@ -496,13 +529,13 @@ impl State {
                 .write()
                 .unwrap()
                 .take_if(|node| node == &device.render_node);
-        }
+        };
         self.common
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
         backend.refresh_used_devices()?;
 
-        if self.backend.kms().session.is_active() {
+        if backend.session.is_active() {
             for output in outputs_removed {
                 self.common.remove_output(&output);
             }
@@ -570,107 +603,24 @@ impl Device {
         Ok(OutputChanges { added, removed })
     }
 
-    pub fn connector_added(
-        &mut self,
-        primary_node: Arc<RwLock<Option<DrmNode>>>,
-        conn: connector::Handle,
-        maybe_crtc: Option<crtc::Handle>,
-        position: (u32, u32),
-        evlh: &LoopHandle<'static, State>,
-        screen_filter: ScreenFilter,
-        shell: Arc<parking_lot::RwLock<Shell>>,
-        startup_done: Arc<AtomicBool>,
-    ) -> Result<(Output, bool)> {
-        let output = self
-            .outputs
-            .get(&conn)
-            .cloned()
-            .map(|output| Ok(output))
-            .unwrap_or_else(|| create_output_for_conn(self.drm.device_mut(), conn))
-            .context("Failed to create `Output`")?;
-
-        let non_desktop =
-            match drm_helpers::get_property_val(self.drm.device_mut(), conn, "non-desktop") {
-                Ok((val_type, value)) => val_type.convert_value(value).as_boolean().unwrap(),
-                Err(err) => {
-                    warn!(
-                        ?err,
-                        "Failed to determine if connector is meant desktop usage, assuming so."
-                    );
-                    false
-                }
-            };
-
-        if non_desktop {
-            if let Some(crtc) = maybe_crtc {
-                self.leased_connectors.push((conn, crtc));
-                info!(
-                    "Connector {} is non-desktop, setting up for leasing",
-                    output.name()
-                );
-                if let Some(lease_state) = self.leasing_global.as_mut() {
-                    let physical = output.physical_properties();
-                    lease_state.add_connector::<State>(
-                        conn,
-                        output.name(),
-                        format!("{} {}", physical.make, physical.model),
-                    );
-                }
-            } else {
-                warn!(
-                    "Connector {} is non-desktop, but we don't have a free crtc: not leasing",
-                    output.name()
-                );
-            }
-
-            Ok((output, false))
-        } else {
-            output
-                .user_data()
-                .insert_if_missing(|| RefCell::new(OutputConfig::default()));
-
-            populate_modes(self.drm.device_mut(), &output, conn, position)
-                .with_context(|| "Failed to enumerate connector modes")?;
-
-            let has_surface = if let Some(crtc) = maybe_crtc {
-                match Surface::new(
-                    &output,
-                    crtc,
-                    conn,
-                    primary_node,
-                    self.dev_node,
-                    self.render_node,
-                    evlh,
-                    screen_filter,
-                    shell,
-                    startup_done,
-                ) {
-                    Ok(data) => {
-                        self.surfaces.insert(crtc, data);
-                        true
-                    }
-                    Err(err) => {
-                        error!(?crtc, "Failed to initialize surface: {}", err);
-                        false
-                    }
-                }
-            } else {
-                false
-            };
-
-            if !has_surface {
-                output
-                    .user_data()
-                    .get::<RefCell<OutputConfig>>()
-                    .unwrap()
-                    .borrow_mut()
-                    .enabled = OutputState::Disabled;
-            }
-
-            Ok((output, true))
+    pub fn lock(&mut self) -> LockedDevice<'_> {
+        LockedDevice {
+            dev_node: &self.dev_node,
+            render_node: &self.render_node,
+            egl: &mut self.egl,
+            outputs: &self.outputs,
+            surfaces: &mut self.surfaces,
+            drm: self.drm.lock(),
+            gbm: &self.gbm,
+            leased_connectors: &mut self.leased_connectors,
+            leasing_global: &mut self.leasing_global,
+            active_leases: &mut self.active_leases,
+            active_buffers: &mut self.active_buffers,
         }
     }
+}
 
+impl<'a> LockedDevice<'a> {
     fn allow_frame_flags(
         &mut self,
         flag: bool,
@@ -692,9 +642,7 @@ impl Device {
                 .map(|(crtc, surface)| (*crtc, surface.output.clone()))
                 .collect::<HashMap<_, _>>();
 
-            let mut drm = self.drm.lock();
-            let map = drm.compositors();
-            for (crtc, compositor) in map.iter() {
+            for (crtc, compositor) in self.drm.compositors().iter() {
                 let elements = match output_map.get(crtc) {
                     Some(output) => output_elements(
                         Some(&self.render_node),
@@ -753,9 +701,7 @@ impl Device {
             shell,
         )?;
 
-        let mut drm = self.drm.lock();
-        let maps = drm.compositors();
-        for (crtc, comp) in maps {
+        for (crtc, comp) in self.drm.compositors() {
             let Some(surface) = self.surfaces.get_mut(crtc) else {
                 continue;
             };
@@ -777,11 +723,363 @@ impl Device {
 
         Ok(())
     }
+}
 
-    pub fn in_use(&self, primary: Option<&DrmNode>) -> bool {
+pub trait MaybeLockedDevice {
+    fn dev_node(&self) -> DrmNode;
+    fn render_node(&self) -> DrmNode;
+    fn output(&self, conn: &connector::Handle) -> Option<&Output>;
+    fn drm_device_mut(&mut self) -> &mut DrmDevice;
+    fn gbm(&self) -> &GbmDevice<DrmDeviceFd>;
+    fn egl(&mut self) -> &mut Option<EGLInternals>;
+    fn insert_surface(&mut self, crtc: crtc::Handle, surface: Surface);
+
+    fn in_use(&self, primary: Option<&DrmNode>) -> bool;
+    fn add_leased_connector(
+        &mut self,
+        crtc: crtc::Handle,
+        conn: connector::Handle,
+        output: &Output,
+    );
+
+    fn connector_added(
+        &mut self,
+        primary_node: Arc<RwLock<Option<DrmNode>>>,
+        conn: connector::Handle,
+        maybe_crtc: Option<crtc::Handle>,
+        position: (u32, u32),
+        evlh: &LoopHandle<'static, State>,
+        screen_filter: ScreenFilter,
+        shell: Arc<parking_lot::RwLock<Shell>>,
+        startup_done: Arc<AtomicBool>,
+    ) -> Result<(Output, bool)> {
+        let output = self
+            .output(&conn)
+            .cloned()
+            .map(|output| Ok(output))
+            .unwrap_or_else(|| create_output_for_conn(self.drm_device_mut(), conn))
+            .context("Failed to create `Output`")?;
+
+        let non_desktop =
+            match drm_helpers::get_property_val(self.drm_device_mut(), conn, "non-desktop") {
+                Ok((val_type, value)) => val_type.convert_value(value).as_boolean().unwrap(),
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        "Failed to determine if connector is meant desktop usage, assuming so."
+                    );
+                    false
+                }
+            };
+
+        if non_desktop {
+            if let Some(crtc) = maybe_crtc {
+                self.add_leased_connector(crtc, conn, &output);
+            } else {
+                warn!(
+                    "Connector {} is non-desktop, but we don't have a free crtc: not leasing",
+                    output.name()
+                );
+            }
+
+            Ok((output, false))
+        } else {
+            output
+                .user_data()
+                .insert_if_missing(|| RefCell::new(OutputConfig::default()));
+
+            populate_modes(self.drm_device_mut(), &output, conn, position)
+                .with_context(|| "Failed to enumerate connector modes")?;
+
+            let has_surface = if let Some(crtc) = maybe_crtc {
+                match Surface::new(
+                    &output,
+                    crtc,
+                    conn,
+                    primary_node,
+                    self.dev_node(),
+                    self.render_node(),
+                    evlh,
+                    screen_filter,
+                    shell,
+                    startup_done,
+                ) {
+                    Ok(data) => {
+                        self.insert_surface(crtc, data);
+                        true
+                    }
+                    Err(err) => {
+                        error!(?crtc, "Failed to initialize surface: {}", err);
+                        false
+                    }
+                }
+            } else {
+                false
+            };
+
+            if !has_surface {
+                output
+                    .user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow_mut()
+                    .enabled = OutputState::Disabled;
+            }
+
+            Ok((output, true))
+        }
+    }
+
+    fn update_egl(
+        &mut self,
+        primary_node: Option<&DrmNode>,
+        api: &mut GbmGlowBackend<DrmDeviceFd>,
+    ) -> Result<bool> {
+        if self.in_use(primary_node) {
+            if self.egl().is_none() {
+                let egl = init_egl(self.gbm()).context("Failed to create EGL context")?;
+                let mut renderer = unsafe {
+                    GlowRenderer::new(
+                        EGLContext::new_shared_with_priority(
+                            &egl.display,
+                            &egl.context,
+                            ContextPriority::High,
+                        )
+                        .context("Failed to create shared EGL context")?,
+                    )
+                    .context("Failed to create GL renderer")?
+                };
+                init_shaders(renderer.borrow_mut()).context("Failed to compile shaders")?;
+                api.add_node(
+                    self.render_node(),
+                    GbmAllocator::new(
+                        self.gbm().clone(),
+                        // SCANOUT because stride bugs
+                        GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+                    ),
+                    renderer,
+                );
+                *self.egl() = Some(egl);
+            }
+            Ok(true)
+        } else {
+            if self.egl().is_some() {
+                let _ = self.egl().take();
+                api.remove_node(&self.render_node());
+            }
+            Ok(false)
+        }
+    }
+
+    fn update_surface_nodes<'b>(
+        &mut self,
+        used_devices: &HashSet<DrmNode>,
+        others: impl Iterator<Item = &'b Self>,
+    ) -> Result<()>
+    where
+        Self: 'b;
+}
+
+impl MaybeLockedDevice for Device {
+    fn dev_node(&self) -> DrmNode {
+        self.dev_node
+    }
+
+    fn render_node(&self) -> DrmNode {
+        self.render_node
+    }
+
+    fn output(&self, conn: &connector::Handle) -> Option<&Output> {
+        self.outputs.get(conn)
+    }
+
+    fn drm_device_mut(&mut self) -> &mut DrmDevice {
+        self.drm.device_mut()
+    }
+
+    fn gbm(&self) -> &GbmDevice<DrmDeviceFd> {
+        &self.gbm
+    }
+
+    fn egl(&mut self) -> &mut Option<EGLInternals> {
+        &mut self.egl
+    }
+
+    fn insert_surface(&mut self, crtc: crtc::Handle, surface: Surface) {
+        self.surfaces.insert(crtc, surface);
+    }
+
+    fn in_use(&self, primary: Option<&DrmNode>) -> bool {
         Some(&self.render_node) == primary
             || !self.surfaces.is_empty()
             || !self.active_buffers.is_empty()
+    }
+
+    fn add_leased_connector(
+        &mut self,
+        crtc: crtc::Handle,
+        conn: connector::Handle,
+        output: &Output,
+    ) {
+        self.leased_connectors.push((conn, crtc));
+        info!(
+            "Connector {} is non-desktop, setting up for leasing",
+            output.name()
+        );
+        if let Some(lease_state) = self.leasing_global.as_mut() {
+            let physical = output.physical_properties();
+            lease_state.add_connector::<State>(
+                conn,
+                output.name(),
+                format!("{} {}", physical.make, physical.model),
+            );
+        }
+    }
+
+    fn update_surface_nodes<'b>(
+        &mut self,
+        used_devices: &HashSet<DrmNode>,
+        mut others: impl Iterator<Item = &'b Device>,
+    ) -> Result<()> {
+        for surface in self.surfaces.values_mut() {
+            let known_nodes = surface.known_nodes().clone();
+            for gone_device in known_nodes.difference(&used_devices) {
+                surface.remove_node(*gone_device);
+            }
+            for new_device in used_devices.difference(&known_nodes) {
+                let (render_node, egl, gbm) = if self.render_node == *new_device {
+                    // we need to make sure to do partial borrows here, as device.surfaces is borrowed mutable
+                    (
+                        self.render_node,
+                        self.egl.as_ref().unwrap(),
+                        self.gbm.clone(),
+                    )
+                } else {
+                    let device = others.find(|d| d.render_node == *new_device).unwrap();
+                    (
+                        device.render_node,
+                        device.egl.as_ref().unwrap(),
+                        device.gbm.clone(),
+                    )
+                };
+
+                surface.add_node(
+                    render_node,
+                    GbmAllocator::new(gbm, GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT),
+                    EGLContext::new_shared_with_priority(
+                        &egl.display,
+                        &egl.context,
+                        ContextPriority::High,
+                    )
+                    .context("Failed to create shared EGL context")?,
+                );
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a> MaybeLockedDevice for LockedDevice<'a> {
+    fn dev_node(&self) -> DrmNode {
+        *self.dev_node
+    }
+
+    fn render_node(&self) -> DrmNode {
+        *self.render_node
+    }
+
+    fn output(&self, conn: &connector::Handle) -> Option<&Output> {
+        self.outputs.get(conn)
+    }
+
+    fn drm_device_mut(&mut self) -> &mut DrmDevice {
+        self.drm.device_mut()
+    }
+
+    fn gbm(&self) -> &GbmDevice<DrmDeviceFd> {
+        self.gbm
+    }
+
+    fn egl(&mut self) -> &mut Option<EGLInternals> {
+        self.egl
+    }
+
+    fn insert_surface(&mut self, crtc: crtc::Handle, surface: Surface) {
+        self.surfaces.insert(crtc, surface);
+    }
+
+    fn in_use(&self, primary: Option<&DrmNode>) -> bool {
+        Some(self.render_node) == primary
+            || !self.surfaces.is_empty()
+            || !self.active_buffers.is_empty()
+    }
+
+    fn add_leased_connector(
+        &mut self,
+        crtc: crtc::Handle,
+        conn: connector::Handle,
+        output: &Output,
+    ) {
+        self.leased_connectors.push((conn, crtc));
+        info!(
+            "Connector {} is non-desktop, setting up for leasing",
+            output.name()
+        );
+        if let Some(lease_state) = self.leasing_global.as_mut() {
+            let physical = output.physical_properties();
+            lease_state.add_connector::<State>(
+                conn,
+                output.name(),
+                format!("{} {}", physical.make, physical.model),
+            );
+        }
+    }
+
+    fn update_surface_nodes<'b>(
+        &mut self,
+        used_devices: &HashSet<DrmNode>,
+        mut others: impl Iterator<Item = &'b LockedDevice<'a>>,
+    ) -> Result<()>
+    where
+        'a: 'b,
+    {
+        for surface in self.surfaces.values_mut() {
+            let known_nodes = surface.known_nodes().clone();
+            for gone_device in known_nodes.difference(&used_devices) {
+                surface.remove_node(*gone_device);
+            }
+            for new_device in used_devices.difference(&known_nodes) {
+                let (render_node, egl, gbm) = if *self.render_node == *new_device {
+                    // we need to make sure to do partial borrows here, as device.surfaces is borrowed mutable
+                    (
+                        self.render_node,
+                        self.egl.as_ref().unwrap(),
+                        self.gbm.clone(),
+                    )
+                } else {
+                    let device = others.find(|d| d.render_node == new_device).unwrap();
+                    (
+                        device.render_node,
+                        device.egl.as_ref().unwrap(),
+                        device.gbm.clone(),
+                    )
+                };
+
+                surface.add_node(
+                    *render_node,
+                    GbmAllocator::new(gbm, GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT),
+                    EGLContext::new_shared_with_priority(
+                        &egl.display,
+                        &egl.context,
+                        ContextPriority::High,
+                    )
+                    .context("Failed to create shared EGL context")?,
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 

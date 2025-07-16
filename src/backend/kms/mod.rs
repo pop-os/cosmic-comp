@@ -13,13 +13,9 @@ use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{
     backend::{
-        allocator::{
-            dmabuf::Dmabuf,
-            gbm::{GbmAllocator, GbmBufferFlags},
-            Buffer,
-        },
-        drm::{output::DrmOutputRenderElements, DrmDeviceFd, DrmNode, NodeType},
-        egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
+        allocator::{dmabuf::Dmabuf, format::FormatSet, Buffer},
+        drm::{output::DrmOutputRenderElements, DrmDeviceFd, DrmNode, NodeType, VrrSupport},
+        egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{glow::GlowRenderer, multigpu::GpuManager},
@@ -47,7 +43,6 @@ use surface::GbmDrmOutput;
 use tracing::{error, info, trace, warn};
 
 use std::{
-    borrow::BorrowMut,
     collections::{HashMap, HashSet},
     path::Path,
     sync::{atomic::AtomicBool, Arc, RwLock},
@@ -59,11 +54,12 @@ pub mod render;
 mod socket;
 mod surface;
 pub(crate) use surface::Surface;
-
-use device::*;
 pub use surface::Timings;
 
-use super::render::{init_shaders, output_elements, CursorMode, CLEAR_COLOR};
+pub use device::MaybeLockedDevice;
+use device::*;
+
+use super::render::{output_elements, CursorMode, CLEAR_COLOR};
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -78,6 +74,13 @@ pub struct KmsState {
     libinput: Libinput,
 
     pub syncobj_state: Option<DrmSyncobjState>,
+}
+
+pub struct KmsGuard<'a> {
+    pub drm_devices: IndexMap<DrmNode, LockedDevice<'a>>,
+    pub primary_node: Arc<RwLock<Option<DrmNode>>>,
+    api: &'a mut GpuManager<GbmGlowBackend<DrmDeviceFd>>,
+    session: &'a LibSeatSession,
 }
 
 pub fn init_backend(
@@ -515,47 +518,33 @@ impl KmsState {
             .copied()
     }
 
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
+        for device in self.drm_devices.values_mut() {
+            for surface in device.surfaces.values_mut() {
+                surface.set_screen_filter(screen_filter.clone());
+            }
+        }
+
+        // We don't expect this to fail in a meaningful way.
+        // The shader is already compiled at this point and we don't rely on any features,
+        // that might not be available for any filters we currently expose.
+        //
+        // But we might conditionally fail here in the future.
+        Ok(())
+    }
+
     pub fn refresh_used_devices(&mut self) -> Result<()> {
+        let primary_node = self.primary_node.read().unwrap();
         let mut used_devices = HashSet::new();
 
         for device in self.drm_devices.values_mut() {
-            if device.in_use(self.primary_node.read().unwrap().as_ref()) {
-                if device.egl.is_none() {
-                    let egl = init_egl(&device.gbm).context("Failed to create EGL context")?;
-                    let mut renderer = unsafe {
-                        GlowRenderer::new(
-                            EGLContext::new_shared_with_priority(
-                                &egl.display,
-                                &egl.context,
-                                ContextPriority::High,
-                            )
-                            .context("Failed to create shared EGL context")?,
-                        )
-                        .context("Failed to create GL renderer")?
-                    };
-                    init_shaders(renderer.borrow_mut()).context("Failed to compile shaders")?;
-                    self.api.as_mut().add_node(
-                        device.render_node,
-                        GbmAllocator::new(
-                            device.gbm.clone(),
-                            // SCANOUT because stride bugs
-                            GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
-                        ),
-                        renderer,
-                    );
-                    device.egl = Some(egl);
-                }
-                used_devices.insert(device.render_node);
-            } else {
-                if device.egl.is_some() {
-                    let _ = device.egl.take();
-                    self.api.as_mut().remove_node(&device.render_node);
-                }
+            if device.update_egl(primary_node.as_ref(), self.api.as_mut())? {
+                used_devices.insert(device.render_node());
             }
         }
 
         // trigger re-evaluation... urgh
-        if let Some(primary_node) = self.primary_node.read().unwrap().as_ref() {
+        if let Some(primary_node) = primary_node.as_ref() {
             let _ = self.api.single_renderer(primary_node);
         }
 
@@ -566,52 +555,90 @@ impl KmsState {
             .map(|d| d.render_node)
             .collect::<Vec<_>>();
         for node in all_devices {
-            let (mut device, mut others) = self
+            let (mut device, others) = self
                 .drm_devices
                 .values_mut()
                 .partition::<Vec<_>, _>(|d| d.render_node == node);
-            let device = &mut device[0];
-
-            for surface in device.surfaces.values_mut() {
-                let known_nodes = surface.known_nodes().clone();
-                for gone_device in known_nodes.difference(&used_devices) {
-                    surface.remove_node(*gone_device);
-                }
-                for new_device in used_devices.difference(&known_nodes) {
-                    let (render_node, egl, gbm) = if node == *new_device {
-                        // we need to make sure to do partial borrows here, as device.surfaces is borrowed mutable
-                        (
-                            device.render_node,
-                            device.egl.as_ref().unwrap(),
-                            device.gbm.clone(),
-                        )
-                    } else {
-                        let device = others
-                            .iter_mut()
-                            .find(|d| d.render_node == *new_device)
-                            .unwrap();
-                        (
-                            device.render_node,
-                            device.egl.as_ref().unwrap(),
-                            device.gbm.clone(),
-                        )
-                    };
-
-                    surface.add_node(
-                        render_node,
-                        GbmAllocator::new(gbm, GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT),
-                        EGLContext::new_shared_with_priority(
-                            &egl.display,
-                            &egl.context,
-                            ContextPriority::High,
-                        )
-                        .context("Failed to create shared EGL context")?,
-                    );
-                }
-            }
+            device[0].update_surface_nodes(&used_devices, others.iter().map(|device| &**device))?;
         }
 
         Ok(())
+    }
+
+    pub fn lock_devices(&mut self) -> KmsGuard<'_> {
+        KmsGuard {
+            drm_devices: self
+                .drm_devices
+                .iter_mut()
+                .map(|(node, device)| (*node, device.lock()))
+                .collect(),
+            primary_node: self.primary_node.clone(),
+            api: &mut self.api,
+            session: &self.session,
+        }
+    }
+}
+
+impl<'a> KmsGuard<'a> {
+    pub fn schedule_render(&mut self, output: &Output) {
+        for surface in self
+            .drm_devices
+            .values()
+            .flat_map(|d| d.surfaces.values())
+            .filter(|s| s.output == *output || s.output.mirroring().is_some_and(|o| &o == output))
+        {
+            surface.schedule_render();
+        }
+    }
+
+    pub fn refresh_used_devices(&mut self) -> Result<()> {
+        let primary_node = self.primary_node.read().unwrap();
+        let mut used_devices = HashSet::new();
+
+        for device in self.drm_devices.values_mut() {
+            if device.update_egl(primary_node.as_ref(), self.api.as_mut())? {
+                used_devices.insert(device.render_node());
+            }
+        }
+
+        // trigger re-evaluation... urgh
+        if let Some(primary_node) = primary_node.as_ref() {
+            let _ = self.api.single_renderer(primary_node);
+        }
+
+        // I hate this. I want partial borrows of hashmap values
+        let all_devices = self
+            .drm_devices
+            .values()
+            .map(|d| d.render_node)
+            .collect::<Vec<_>>();
+        for node in all_devices {
+            let (mut device, others) = self
+                .drm_devices
+                .values_mut()
+                .partition::<Vec<_>, _>(|d| d.render_node == node);
+            device[0].update_surface_nodes(&used_devices, others.iter().map(|device| &**device))?;
+        }
+
+        Ok(())
+    }
+
+    pub fn all_outputs(&self) -> Vec<Output> {
+        self.drm_devices
+            .values()
+            .flat_map(|device| {
+                device
+                    .outputs
+                    .iter()
+                    .filter(|(conn, _)| {
+                        !device
+                            .leased_connectors
+                            .iter()
+                            .any(|(leased_conn, _)| *conn == leased_conn)
+                    })
+                    .map(|(_, output)| output.clone())
+            })
+            .collect()
     }
 
     pub fn apply_config_for_outputs(
@@ -622,9 +649,9 @@ impl KmsState {
         shell: Arc<parking_lot::RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
         clock: &Clock<Monotonic>,
-    ) -> Result<Vec<Output>, anyhow::Error> {
+    ) -> Result<(), anyhow::Error> {
         if !self.session.is_active() {
-            return Ok(Vec::new());
+            return Ok(());
         }
 
         for device in self.drm_devices.values_mut() {
@@ -771,7 +798,7 @@ impl KmsState {
             for (crtc, surface) in device.surfaces.iter_mut() {
                 let output_config = surface.output.config();
 
-                let drm = &mut device.drm.lock();
+                let drm = &mut device.drm;
                 let conn = surface.connector;
                 let conn_info = drm.device().get_connector(conn, false)?;
                 let mode = conn_info
@@ -861,34 +888,61 @@ impl KmsState {
                         let vrr = output_config.vrr;
                         std::mem::drop(output_config);
 
-                        match surface.resume(compositor) {
-                            Ok(_) => {
-                                surface.output.set_adaptive_sync_support(
-                                    surface.adaptive_sync_support().ok(),
-                                );
-                                if surface.use_adaptive_sync(vrr)? {
-                                    surface.output.set_adaptive_sync(vrr);
-                                } else {
-                                    surface.output.config_mut().vrr = AdaptiveSync::Disabled;
-                                    surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
-                                }
+                        let compositor_ref = drm.compositors().get(crtc).unwrap().lock().unwrap();
+                        let vrr_support = compositor_ref
+                            .vrr_supported(
+                                compositor_ref
+                                    .pending_connectors()
+                                    .into_iter()
+                                    .next()
+                                    .unwrap(),
+                            )
+                            .ok();
+                        surface.resume(
+                            compositor,
+                            compositor_ref.surface().plane_info().formats.clone(),
+                            compositor_ref
+                                .surface()
+                                .planes()
+                                .overlay
+                                .iter()
+                                .flat_map(|p| p.formats.iter().cloned())
+                                .collect::<FormatSet>(),
+                        );
+
+                        surface.output.set_adaptive_sync_support(vrr_support);
+                        if match vrr_support {
+                            Some(VrrSupport::RequiresModeset) if vrr == AdaptiveSync::Enabled => {
+                                false
                             }
-                            Err(err) => {
-                                surface.output.config_mut().enabled = OutputState::Disabled;
-                                return Err(err).context("Failed to create surface");
-                            }
+                            Some(VrrSupport::NotSupported) => false,
+                            _ => true,
+                        } {
+                            surface.use_adaptive_sync(vrr);
+                            surface.output.set_adaptive_sync(vrr);
+                        } else {
+                            surface.use_adaptive_sync(AdaptiveSync::Disabled);
+                            surface.output.config_mut().vrr = AdaptiveSync::Disabled;
+                            surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
                         }
                     } else {
                         let vrr = output_config.vrr;
                         std::mem::drop(output_config);
                         if vrr != surface.output.adaptive_sync() {
-                            if surface.use_adaptive_sync(vrr)? {
-                                surface.output.set_adaptive_sync(vrr);
-                            } else if vrr != AdaptiveSync::Disabled {
+                            if match surface.output.adaptive_sync_support() {
+                                Some(VrrSupport::RequiresModeset)
+                                    if vrr == AdaptiveSync::Enabled =>
+                                {
+                                    true
+                                }
+                                Some(VrrSupport::NotSupported) => true,
+                                _ => false,
+                            } {
                                 anyhow::bail!("Requested VRR mode unsupported");
-                            } else {
-                                surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
                             }
+
+                            surface.use_adaptive_sync(vrr);
+                            surface.output.set_adaptive_sync(vrr);
                         }
 
                         let mut renderer = self
@@ -956,7 +1010,6 @@ impl KmsState {
 
                 if let Err(err) = device
                     .drm
-                    .lock()
                     .try_to_restore_modifiers(&mut renderer, &elements)
                 {
                     warn!(?err, "Failed to restore modifiers");
@@ -988,21 +1041,6 @@ impl KmsState {
             }
         }
 
-        Ok(all_outputs)
-    }
-
-    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
-        for device in self.drm_devices.values_mut() {
-            for surface in device.surfaces.values_mut() {
-                surface.set_screen_filter(screen_filter.clone());
-            }
-        }
-
-        // We don't expect this to fail in a meaningful way.
-        // The shader is already compiled at this point and we don't rely on any features,
-        // that might not be available for any filters we currently expose.
-        //
-        // But we might conditionally fail here in the future.
         Ok(())
     }
 }
