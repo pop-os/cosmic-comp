@@ -204,7 +204,6 @@ pub enum ThreadCommand {
     Suspend(SyncSender<()>),
     Resume {
         compositor: GbmDrmOutput,
-        result: SyncSender<Result<()>>,
     },
     NodeAdded {
         node: DrmNode,
@@ -220,7 +219,7 @@ pub enum ThreadCommand {
     ScheduleRender,
     AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
     UseAdaptiveSync(AdaptiveSync),
-    AllowFrameFlags(bool, FrameFlags, SyncSender<()>),
+    AllowFrameFlags(bool, FrameFlags),
     End,
     DpmsOff,
 }
@@ -404,31 +403,16 @@ impl Surface {
         rx.recv().context("Surface thread died")?
     }
 
-    pub fn use_adaptive_sync(&mut self, vrr: AdaptiveSync) -> Result<bool> {
-        if vrr != AdaptiveSync::Disabled {
-            let (tx, rx) = std::sync::mpsc::sync_channel(1);
-            let _ = self
-                .thread_command
-                .send(ThreadCommand::AdaptiveSyncAvailable(tx));
-            match rx.recv().context("Surface thread died")?? {
-                VrrSupport::RequiresModeset if vrr == AdaptiveSync::Enabled => return Ok(false),
-                VrrSupport::NotSupported => return Ok(false),
-                _ => {}
-            };
-        }
-
+    pub fn use_adaptive_sync(&mut self, vrr: AdaptiveSync) {
         let _ = self
             .thread_command
             .send(ThreadCommand::UseAdaptiveSync(vrr));
-        Ok(true)
     }
 
     pub fn allow_frame_flags(&mut self, flag: bool, flags: FrameFlags) {
-        let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let _ = self
             .thread_command
-            .send(ThreadCommand::AllowFrameFlags(flag, flags, tx));
-        let _ = rx.recv();
+            .send(ThreadCommand::AllowFrameFlags(flag, flags));
     }
 
     pub fn suspend(&mut self) {
@@ -437,27 +421,19 @@ impl Surface {
         let _ = rx.recv();
     }
 
-    pub fn resume(&mut self, compositor: GbmDrmOutput) -> Result<()> {
-        let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        (self.primary_plane_formats, self.overlay_plane_formats) =
-            compositor.with_compositor(|c| {
-                (
-                    c.surface().plane_info().formats.clone(),
-                    c.surface()
-                        .planes()
-                        .overlay
-                        .iter()
-                        .flat_map(|p| p.formats.iter().cloned())
-                        .collect::<FormatSet>(),
-                )
-            });
+    pub fn resume(
+        &mut self,
+        compositor: GbmDrmOutput,
+        primary_plane_formats: FormatSet,
+        overlay_plane_formats: FormatSet,
+    ) {
+        self.primary_plane_formats = primary_plane_formats;
+        self.overlay_plane_formats = overlay_plane_formats;
+        self.active.store(true, Ordering::SeqCst);
 
-        let _ = self.thread_command.send(ThreadCommand::Resume {
-            compositor,
-            result: tx,
-        });
-
-        rx.recv().context("Surface thread died")?
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::Resume { compositor });
     }
 
     pub fn get_dpms(&mut self) -> bool {
@@ -564,8 +540,8 @@ fn surface_thread(
         .handle()
         .insert_source(thread_receiver, move |command, _, state| match command {
             Event::Msg(ThreadCommand::Suspend(tx)) => state.suspend(tx),
-            Event::Msg(ThreadCommand::Resume { compositor, result }) => {
-                let _ = result.send(state.resume(compositor));
+            Event::Msg(ThreadCommand::Resume { compositor }) => {
+                state.resume(compositor);
             }
             Event::Msg(ThreadCommand::NodeAdded { node, gbm, egl }) => {
                 if let Err(err) = state.node_added(node, gbm, egl) {
@@ -631,7 +607,7 @@ fn surface_thread(
                     };
                 }
             }
-            Event::Msg(ThreadCommand::AllowFrameFlags(flag, mut flags, tx)) => {
+            Event::Msg(ThreadCommand::AllowFrameFlags(flag, mut flags)) => {
                 if crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false) {
                     flags.remove(FrameFlags::ALLOW_SCANOUT);
                 }
@@ -644,7 +620,6 @@ fn surface_thread(
                 } else {
                     state.frame_flags.remove(flags);
                 }
-                let _ = tx.send(());
             }
             Event::Closed | Event::Msg(ThreadCommand::End) => {
                 signal.stop();
@@ -680,7 +655,7 @@ impl SurfaceThreadState {
         let _ = tx.send(());
     }
 
-    fn resume(&mut self, compositor: GbmDrmOutput) -> Result<()> {
+    fn resume(&mut self, compositor: GbmDrmOutput) {
         let (mode, min_hz) = compositor.with_compositor(|c| {
             (
                 c.surface().pending_mode(),
@@ -710,9 +685,7 @@ impl SurfaceThreadState {
             self.frame_flags
                 .remove(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
         }
-        self.active.store(true, Ordering::SeqCst);
         self.compositor = Some(compositor);
-        Ok(())
     }
 
     fn node_added(

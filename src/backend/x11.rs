@@ -162,10 +162,11 @@ impl X11State {
         }
     }
 
-    pub fn apply_config_for_outputs(
-        &mut self,
-        test_only: bool,
-    ) -> Result<Vec<Output>, anyhow::Error> {
+    pub fn all_outputs(&self) -> Vec<Output> {
+        self.surfaces.iter().map(|s| s.output.clone()).collect()
+    }
+
+    pub fn apply_config_for_outputs(&mut self, test_only: bool) -> Result<(), anyhow::Error> {
         // TODO: if we ever have multiple winit outputs, don't juse use the first and don't ignore OutputState
 
         let surface = self.surfaces.first().unwrap();
@@ -184,7 +185,7 @@ impl X11State {
             }
             Err(anyhow::anyhow!("Cannot set window size"))
         } else {
-            Ok(vec![surface.output.clone()])
+            Ok(())
         }
     }
 
