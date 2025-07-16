@@ -7,8 +7,8 @@ use smithay::{
 };
 
 impl PrimarySelectionHandler for State {
-    fn primary_selection_state(&self) -> &PrimarySelectionState {
-        &self.common.primary_selection_state
+    fn primary_selection_state(&mut self) -> &mut PrimarySelectionState {
+        &mut self.common.primary_selection_state
     }
 }
 

@@ -7,8 +7,8 @@ use smithay::{
 };
 
 impl DataControlHandler for State {
-    fn data_control_state(&self) -> &DataControlState {
-        self.common.data_control_state.as_ref().unwrap()
+    fn data_control_state(&mut self) -> &mut DataControlState {
+        self.common.data_control_state.as_mut().unwrap()
     }
 }
 
