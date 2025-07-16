@@ -264,7 +264,7 @@ impl State {
                 gbm.clone(),
                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
             ),
-            GbmFramebufferExporter::new(gbm.clone(), Some(drm_node)),
+            GbmFramebufferExporter::new(gbm.clone(), drm_node.into()),
             Some(gbm.clone()),
             [
                 Fourcc::Abgr2101010,
@@ -692,38 +692,31 @@ impl Device {
                 .map(|(crtc, surface)| (*crtc, surface.output.clone()))
                 .collect::<HashMap<_, _>>();
 
-            self.drm.with_compositors::<Result<()>>(|map| {
-                for (crtc, compositor) in map.iter() {
-                    let elements = match output_map.get(crtc) {
-                        Some(output) => output_elements(
-                            Some(&self.render_node),
-                            renderer,
-                            shell,
-                            now,
-                            &output,
-                            CursorMode::All,
-                            None,
-                        )
-                        .with_context(|| "Failed to render outputs")?,
-                        None => Vec::new(),
-                    };
-
-                    let mut compositor = compositor.lock().unwrap();
-                    compositor.render_frame(
+            let mut drm = self.drm.lock();
+            let map = drm.compositors();
+            for (crtc, compositor) in map.iter() {
+                let elements = match output_map.get(crtc) {
+                    Some(output) => output_elements(
+                        Some(&self.render_node),
                         renderer,
-                        &elements,
-                        CLEAR_COLOR,
-                        FrameFlags::empty(),
-                    )?;
-                    if let Err(err) = compositor.commit_frame() {
-                        if !matches!(err, FrameError::EmptyFrame) {
-                            return Err(err.into());
-                        }
+                        shell,
+                        now,
+                        &output,
+                        CursorMode::All,
+                        None,
+                    )
+                    .with_context(|| "Failed to render outputs")?,
+                    None => Vec::new(),
+                };
+
+                let mut compositor = compositor.lock().unwrap();
+                compositor.render_frame(renderer, &elements, CLEAR_COLOR, FrameFlags::empty())?;
+                if let Err(err) = compositor.commit_frame() {
+                    if !matches!(err, FrameError::EmptyFrame) {
+                        return Err(err.into());
                     }
                 }
-
-                Ok(())
-            })?;
+            }
         }
 
         Ok(())
@@ -760,27 +753,27 @@ impl Device {
             shell,
         )?;
 
-        self.drm.with_compositors(|comps| {
-            for (crtc, comp) in comps {
-                let Some(surface) = self.surfaces.get_mut(crtc) else {
-                    continue;
-                };
-                let comp = comp.lock().unwrap();
-                surface.primary_plane_formats = if flag {
-                    comp.surface().plane_info().formats.clone()
-                } else {
-                    // This certainly isn't perfect and might still miss the happy path,
-                    // but it is surprisingly difficult to hack an api into smithay,
-                    // to get the actual framebuffer format
-                    let code = comp.format();
-                    FormatSet::from_iter(comp.modifiers().iter().map(|mo| Format {
-                        code,
-                        modifier: *mo,
-                    }))
-                };
-                surface.feedback.clear();
-            }
-        });
+        let mut drm = self.drm.lock();
+        let maps = drm.compositors();
+        for (crtc, comp) in maps {
+            let Some(surface) = self.surfaces.get_mut(crtc) else {
+                continue;
+            };
+            let comp = comp.lock().unwrap();
+            surface.primary_plane_formats = if flag {
+                comp.surface().plane_info().formats.clone()
+            } else {
+                // This certainly isn't perfect and might still miss the happy path,
+                // but it is surprisingly difficult to hack an api into smithay,
+                // to get the actual framebuffer format
+                let code = comp.format();
+                FormatSet::from_iter(comp.modifiers().iter().map(|mo| Format {
+                    code,
+                    modifier: *mo,
+                }))
+            };
+            surface.feedback.clear();
+        }
 
         Ok(())
     }

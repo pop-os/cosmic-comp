@@ -310,7 +310,7 @@ impl State {
         }
         // active drm, resume leases
         for device in backend.drm_devices.values_mut() {
-            if let Err(err) = device.drm.activate(true) {
+            if let Err(err) = device.drm.lock().activate(true) {
                 error!(?err, "Failed to resume drm device");
             }
             if let Some(lease_state) = device.leasing_global.as_mut() {
@@ -771,7 +771,7 @@ impl KmsState {
             for (crtc, surface) in device.surfaces.iter_mut() {
                 let output_config = surface.output.config();
 
-                let drm = &mut device.drm;
+                let drm = &mut device.drm.lock();
                 let conn = surface.connector;
                 let conn_info = drm.device().get_connector(conn, false)?;
                 let mode = conn_info
@@ -956,6 +956,7 @@ impl KmsState {
 
                 if let Err(err) = device
                     .drm
+                    .lock()
                     .try_to_restore_modifiers(&mut renderer, &elements)
                 {
                     warn!(?err, "Failed to restore modifiers");
