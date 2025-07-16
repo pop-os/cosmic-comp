@@ -9,6 +9,7 @@ stack-windows = Empilhar janelas
 unknown-keybinding = <não configurado>
 window-menu-minimize = Minimizar
 window-menu-maximize = Maximizar
+window-menu-fullscreen = Tela cheia
 window-menu-tiled = Janela flutuante
 window-menu-screenshot = Fazer captura de tela
 window-menu-move = Mover
