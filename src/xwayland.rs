@@ -1082,10 +1082,24 @@ impl XwmHandler for State {
 
     fn unfullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
+        let seat = shell.seats.last_active().clone();
+        let should_focus = seat
+            .get_keyboard()
+            .unwrap()
+            .current_focus()
+            .is_some_and(|target| {
+                if let KeyboardFocusTarget::Fullscreen(s) = target {
+                    s == window
+                } else {
+                    false
+                }
+            });
+
         if let Some(target) = shell.unfullscreen_request(&window, &self.common.event_loop_handle) {
-            let seat = shell.seats.last_active().clone();
             std::mem::drop(shell);
-            Shell::set_focus(self, Some(&target), &seat, None, true);
+            if should_focus {
+                Shell::set_focus(self, Some(&target), &seat, None, true);
+            }
         } else {
             if let Some(pending) = shell
                 .pending_windows
