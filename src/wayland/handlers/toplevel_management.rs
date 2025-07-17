@@ -181,11 +181,9 @@ impl ToplevelManagementHandler for State {
         window: &<Self as ToplevelInfoHandler>::Window,
     ) {
         let mut shell = self.common.shell.write();
-        if let Some(target) = shell.unfullscreen_request(window, &self.common.event_loop_handle) {
-            let seat = shell.seats.last_active().clone();
-            std::mem::drop(shell);
-            Shell::set_focus(self, Some(&target), &seat, None, true);
-        }
+        let _ = shell.unfullscreen_request(window, &self.common.event_loop_handle);
+        // don't switch focus because of a programmatic action.
+        // If the toplevel-management client intends to focus the now unfullscreened toplevel, it can send an `activate`-request.
     }
 
     fn maximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {

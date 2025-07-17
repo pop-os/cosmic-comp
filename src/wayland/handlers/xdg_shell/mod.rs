@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{grabs::ReleaseMode, CosmicSurface, PendingWindow},
+    shell::{focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow},
     utils::prelude::*,
 };
 use smithay::{
@@ -260,11 +260,24 @@ impl XdgShellHandler for State {
 
     fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
         let mut shell = self.common.shell.write();
+        let seat = shell.seats.last_active().clone();
+        let should_focus = seat
+            .get_keyboard()
+            .unwrap()
+            .current_focus()
+            .is_some_and(|target| {
+                if let KeyboardFocusTarget::Fullscreen(s) = target {
+                    s == surface
+                } else {
+                    false
+                }
+            });
 
         if let Some(target) = shell.unfullscreen_request(&surface, &self.common.event_loop_handle) {
-            let seat = shell.seats.last_active().clone();
             std::mem::drop(shell);
-            Shell::set_focus(self, Some(&target), &seat, None, true);
+            if should_focus {
+                Shell::set_focus(self, Some(&target), &seat, None, true);
+            }
         } else {
             if let Some(pending) = shell.pending_windows.iter_mut().find(|pending| {
                 pending.surface.wl_surface().as_deref() == Some(surface.wl_surface())
