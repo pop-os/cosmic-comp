@@ -2,10 +2,10 @@
 
 use crate::{
     backend::render::{output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
-    config::{AdaptiveSync, OutputConfig, OutputState},
+    config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState, ScreenFilter},
     shell::Shell,
-    utils::prelude::*,
-    wayland::protocols::screencopy::Frame as ScreencopyFrame,
+    utils::{env::dev_list_var, prelude::*},
+    wayland::protocols::screencopy::Frame,
 };
 
 use anyhow::{Context, Result};
@@ -19,8 +19,9 @@ use smithay::{
         },
         drm::{
             compositor::{FrameError, FrameFlags},
+            exporter::gbm::GbmFramebufferExporter,
             output::DrmOutputManager,
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode,
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
         },
         egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
         session::Session,
@@ -45,8 +46,9 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fmt,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
+    time::Duration,
 };
 
 use super::{drm_helpers, socket::Socket, surface::Surface};
@@ -60,10 +62,11 @@ pub struct EGLInternals {
 
 pub type GbmDrmOutputManager = DrmOutputManager<
     GbmAllocator<DrmDeviceFd>,
-    GbmDevice<DrmDeviceFd>,
+    GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
-        Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Receiver<(Frame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Duration,
     )>,
     DrmDeviceFd,
 >;
@@ -141,9 +144,51 @@ pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
 }
 
 impl State {
-    pub fn device_added(&mut self, dev: dev_t, path: PathBuf, dh: &DisplayHandle) -> Result<()> {
+    pub fn device_added(&mut self, dev: dev_t, path: &Path, dh: &DisplayHandle) -> Result<()> {
         if !self.backend.kms().session.is_active() {
             return Ok(());
+        }
+
+        if let Some(allowlist) = dev_list_var("COSMIC_DRM_ALLOW_DEVICES") {
+            let mut matched = false;
+            if let Ok(node) = DrmNode::from_dev_id(dev) {
+                let node = node
+                    .node_with_type(NodeType::Render)
+                    .map(|res| res.ok())
+                    .flatten()
+                    .unwrap_or(node);
+                for ident in allowlist {
+                    if ident.matches(&node) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
+                    info!(
+                        "Skipping device {} due to COSMIC_DRM_ALLOW_DEVICE list.",
+                        path.display()
+                    );
+                    return Ok(());
+                }
+            }
+        }
+        if let Some(blocklist) = dev_list_var("COSMIC_DRM_BLOCK_DEVICES") {
+            if let Ok(node) = DrmNode::from_dev_id(dev) {
+                let node = node
+                    .node_with_type(NodeType::Render)
+                    .map(|res| res.ok())
+                    .flatten()
+                    .unwrap_or(node);
+                for ident in blocklist {
+                    if ident.matches(&node) {
+                        info!(
+                            "Skipping device {} due to COSMIC_DRM_BLOCK_DEVICE list.",
+                            path.display()
+                        );
+                        return Ok(());
+                    }
+                }
+            }
         }
 
         let fd = DrmDeviceFd::new(DeviceFd::from(
@@ -219,7 +264,7 @@ impl State {
                 gbm.clone(),
                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
             ),
-            gbm.clone(),
+            GbmFramebufferExporter::new(gbm.clone(), Some(drm_node)),
             Some(gbm.clone()),
             [
                 Fourcc::Abgr2101010,
@@ -262,16 +307,17 @@ impl State {
 
         let connectors = device.enumerate_surfaces()?.added; // There are no removed outputs on newly added devices
         let mut wl_outputs = Vec::new();
-        let mut w = self.common.shell.read().unwrap().global_space().size.w as u32;
+        let mut w = self.common.shell.read().global_space().size.w as u32;
 
         {
             for (conn, maybe_crtc) in connectors {
                 match device.connector_added(
-                    self.backend.kms().primary_node.as_ref(),
+                    self.backend.kms().primary_node.clone(),
                     conn,
                     maybe_crtc,
                     (w, 0),
                     &self.common.event_loop_handle,
+                    self.common.config.dynamic_conf.screen_filter().clone(),
                     self.common.shell.clone(),
                     self.common.startup_done.clone(),
                 ) {
@@ -290,7 +336,8 @@ impl State {
 
             // TODO atomic commit all surfaces together and drop surfaces, if it fails due to bandwidth
 
-            self.backend.kms().drm_devices.insert(drm_node, device);
+            let kms = self.backend.kms();
+            kms.drm_devices.insert(drm_node, device);
         }
 
         self.common
@@ -327,7 +374,7 @@ impl State {
             if let Some(device) = backend.drm_devices.get_mut(&drm_node) {
                 let changes = device.enumerate_surfaces()?;
 
-                let mut w = self.common.shell.read().unwrap().global_space().size.w as u32;
+                let mut w = self.common.shell.read().global_space().size.w as u32;
                 for conn in changes.removed {
                     // contains conns with updated crtcs, just drop the surface and re-create
                     if let Some(pos) = device
@@ -360,11 +407,12 @@ impl State {
 
                 for (conn, maybe_crtc) in changes.added {
                     match device.connector_added(
-                        backend.primary_node.as_ref(),
+                        backend.primary_node.clone(),
                         conn,
                         maybe_crtc,
                         (w, 0),
                         &self.common.event_loop_handle,
+                        self.common.config.dynamic_conf.screen_filter().clone(),
                         self.common.shell.clone(),
                         self.common.startup_done.clone(),
                     ) {
@@ -416,10 +464,16 @@ impl State {
     }
 
     pub fn device_removed(&mut self, dev: dev_t, dh: &DisplayHandle) -> Result<()> {
-        let drm_node = DrmNode::from_dev_id(dev)?;
-        let mut outputs_removed = Vec::new();
         let backend = self.backend.kms();
-        if let Some(mut device) = backend.drm_devices.remove(&drm_node) {
+        // we can't use DrmNode::from_node_id, because that assumes the node is still on sysfs
+        let drm_node = backend
+            .drm_devices
+            .values()
+            .find_map(|device| (device.dev_node.dev_id() == dev).then_some(device.dev_node))
+            .with_context(|| format!("Couldn't find drm node for {}", dev))?;
+
+        let mut outputs_removed = Vec::new();
+        if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
             if let Some(mut leasing_global) = device.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
@@ -436,10 +490,17 @@ impl State {
                     .destroy_global::<State>(dh, socket.dmabuf_global);
                 dh.remove_global::<State>(socket.drm_global);
             }
+            backend.api.as_mut().remove_node(&device.render_node);
+            backend
+                .primary_node
+                .write()
+                .unwrap()
+                .take_if(|node| node == &device.render_node);
         }
         self.common
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
+        backend.refresh_used_devices()?;
 
         if self.backend.kms().session.is_active() {
             for output in outputs_removed {
@@ -511,12 +572,13 @@ impl Device {
 
     pub fn connector_added(
         &mut self,
-        primary_node: Option<&DrmNode>,
+        primary_node: Arc<RwLock<Option<DrmNode>>>,
         conn: connector::Handle,
         maybe_crtc: Option<crtc::Handle>,
         position: (u32, u32),
         evlh: &LoopHandle<'static, State>,
-        shell: Arc<RwLock<Shell>>,
+        screen_filter: ScreenFilter,
+        shell: Arc<parking_lot::RwLock<Shell>>,
         startup_done: Arc<AtomicBool>,
     ) -> Result<(Output, bool)> {
         let output = self
@@ -575,10 +637,11 @@ impl Device {
                     &output,
                     crtc,
                     conn,
-                    primary_node.copied().unwrap_or(self.render_node),
+                    primary_node,
                     self.dev_node,
                     self.render_node,
                     evlh,
+                    screen_filter,
                     shell,
                     startup_done,
                 ) {
@@ -614,7 +677,7 @@ impl Device {
         flags: FrameFlags,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         for surface in self.surfaces.values_mut() {
             surface.allow_frame_flags(flag, flags);
@@ -671,7 +734,7 @@ impl Device {
         flag: bool,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         self.allow_frame_flags(
             flag,
@@ -687,7 +750,7 @@ impl Device {
         flag: bool,
         renderer: &mut GlMultiRenderer,
         clock: &Clock<Monotonic>,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
         self.allow_frame_flags(
             flag,
@@ -739,7 +802,7 @@ fn create_output_for_conn(drm: &mut DrmDevice, conn: connector::Handle) -> Resul
         .ok();
     let (phys_w, phys_h) = conn_info.size().unwrap_or((0, 0));
 
-    Ok(Output::new(
+    let output = Output::new(
         interface,
         PhysicalProperties {
             size: (phys_w as i32, phys_h as i32).into(),
@@ -760,7 +823,13 @@ fn create_output_for_conn(drm: &mut DrmDevice, conn: connector::Handle) -> Resul
                 .and_then(|info| info.model())
                 .unwrap_or_else(|| String::from("Unknown")),
         },
-    ))
+    );
+    if let Some(edid) = edid_info.as_ref().and_then(|x| x.edid()) {
+        output
+            .user_data()
+            .insert_if_missing(|| EdidProduct::from(edid.vendor_product()));
+    }
+    Ok(output)
 }
 
 fn populate_modes(

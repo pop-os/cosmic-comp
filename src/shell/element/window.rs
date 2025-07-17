@@ -77,7 +77,6 @@ pub struct CosmicWindowInternal {
     activated: Arc<AtomicBool>,
     /// TODO: This needs to be per seat
     pointer_entered: Arc<AtomicU8>,
-    last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
     last_title: Arc<Mutex<String>>,
 }
 
@@ -88,7 +87,6 @@ impl fmt::Debug for CosmicWindowInternal {
             .field("activated", &self.activated.load(Ordering::SeqCst))
             .field("pointer_entered", &self.pointer_entered)
             // skip seat to avoid loop
-            .field("last_seat", &"...")
             .finish()
     }
 }
@@ -169,9 +167,15 @@ impl CosmicWindowInternal {
     pub fn current_focus(&self) -> Option<Focus> {
         unsafe { Focus::from_u8(self.pointer_entered.load(Ordering::SeqCst)) }
     }
+
     /// returns if the window has any current or pending server-side decorations
     pub fn has_ssd(&self, pending: bool) -> bool {
         !self.window.is_decorated(pending)
+    }
+
+    /// returns if the window is currently or pending tiled
+    pub fn is_tiled(&self, pending: bool) -> bool {
+        self.window.is_tiled(pending).unwrap_or(false)
     }
 }
 
@@ -189,7 +193,6 @@ impl CosmicWindow {
                 window,
                 activated: Arc::new(AtomicBool::new(false)),
                 pointer_entered: Arc::new(AtomicU8::new(0)),
-                last_seat: Arc::new(Mutex::new(None)),
                 last_title: Arc::new(Mutex::new(last_title)),
             },
             (width, SSD_HEIGHT),
@@ -243,16 +246,20 @@ impl CosmicWindow {
         self.0.with_program(|p| {
             let mut offset = Point::from((0., 0.));
             let mut window_ui = None;
-            if p.has_ssd(false) && surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+            let has_ssd = p.has_ssd(false);
+            if (has_ssd || p.is_tiled(false)) && surface_type.contains(WindowSurfaceType::TOPLEVEL)
+            {
                 let geo = p.window.geometry();
 
                 let point_i32 = relative_pos.to_i32_round::<i32>();
+                let ssd_height = has_ssd.then_some(SSD_HEIGHT).unwrap_or(0);
+
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
                         && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                    || (point_i32.y - geo.loc.y >= geo.size.h + SSD_HEIGHT
-                        && point_i32.y - geo.loc.y < geo.size.h + SSD_HEIGHT + RESIZE_BORDER)
+                    || (point_i32.y - geo.loc.y >= geo.size.h + ssd_height
+                        && point_i32.y - geo.loc.y < geo.size.h + ssd_height + RESIZE_BORDER)
                 {
                     window_ui = Some((
                         PointerFocusTarget::WindowUI(self.clone()),
@@ -260,7 +267,7 @@ impl CosmicWindow {
                     ));
                 }
 
-                if point_i32.y - geo.loc.y < SSD_HEIGHT {
+                if has_ssd && (point_i32.y - geo.loc.y < SSD_HEIGHT) {
                     window_ui = Some((
                         PointerFocusTarget::WindowUI(self.clone()),
                         Point::from((0., 0.)),
@@ -268,7 +275,7 @@ impl CosmicWindow {
                 }
             }
 
-            if p.has_ssd(false) {
+            if has_ssd {
                 relative_pos.y -= SSD_HEIGHT as f64;
                 offset.y += SSD_HEIGHT as f64;
             }
@@ -315,7 +322,7 @@ impl CosmicWindow {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));
@@ -346,7 +353,7 @@ impl CosmicWindow {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));
@@ -427,13 +434,14 @@ impl Program for CosmicWindowInternal {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<State>, Serial)>,
     ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                         loop_handle.insert_idle(move |state| {
-                            let res = state.common.shell.write().unwrap().move_request(
+                            let res = state.common.shell.write().move_request(
                                 &surface,
                                 &seat,
                                 serial,
@@ -441,7 +449,6 @@ impl Program for CosmicWindowInternal {
                                 false,
                                 &state.common.config,
                                 &state.common.event_loop_handle,
-                                &state.common.xdg_activation_state,
                                 false,
                             );
                             if let Some((grab, focus)) = res {
@@ -460,30 +467,28 @@ impl Program for CosmicWindowInternal {
             Message::Minimize => {
                 if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
-                        if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
-                            shell.minimize_request(&mapped)
-                        }
+                        let mut shell = state.common.shell.write();
+                        shell.minimize_request(&surface)
                     });
                 }
             }
             Message::Maximize => {
                 if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                             let seat = shell.seats.last_active().clone();
-                            shell.maximize_toggle(&mapped, &seat)
+                            shell.maximize_toggle(&mapped, &seat, &state.common.event_loop_handle)
                         }
                     });
                 }
             }
             Message::Close => self.window.close(),
             Message::Menu => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                         loop_handle.insert_idle(move |state| {
-                            let shell = state.common.shell.read().unwrap();
+                            let shell = state.common.shell.read();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                                 let position = if let Some((output, set)) =
                                     shell.workspaces.sets.iter().find(|(_, set)| {
@@ -541,23 +546,19 @@ impl Program for CosmicWindowInternal {
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
         let mut header = cosmic::widget::header_bar()
-            .start(cosmic::widget::horizontal_space().width(32))
             .title(self.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
             .on_close(Message::Close)
             .focused(self.window.is_activated(false))
             .on_double_click(Message::Maximize)
-            .on_right_click(Message::Menu);
+            .on_right_click(Message::Menu)
+            .is_ssd(true);
 
         if cosmic::config::show_minimize() {
-            header = header
-                .on_minimize(Message::Minimize)
-                .start(cosmic::widget::horizontal_space().width(40)); // 32 + 8 spacing
+            header = header.on_minimize(Message::Minimize)
         }
         if cosmic::config::show_maximize() {
-            header = header
-                .on_maximize(Message::Maximize)
-                .start(cosmic::widget::horizontal_space().width(40)); // 32 + 8 spacing
+            header = header.on_maximize(Message::Maximize)
         }
 
         header.into()
@@ -574,11 +575,16 @@ impl SpaceElement for CosmicWindow {
     fn bbox(&self) -> Rectangle<i32, Logical> {
         self.0.with_program(|p| {
             let mut bbox = SpaceElement::bbox(&p.window);
-            if p.has_ssd(false) {
+            let has_ssd = p.has_ssd(false);
+
+            if has_ssd || p.is_tiled(false) {
                 bbox.loc -= Point::from((RESIZE_BORDER, RESIZE_BORDER));
                 bbox.size += Size::from((RESIZE_BORDER * 2, RESIZE_BORDER * 2));
+            }
+            if has_ssd {
                 bbox.size.h += SSD_HEIGHT;
             }
+
             bbox
         })
     }
@@ -624,9 +630,12 @@ impl SpaceElement for CosmicWindow {
     }
     #[profiling::function]
     fn refresh(&self) {
-        SpaceElement::refresh(&self.0);
         if self.0.with_program(|p| {
             SpaceElement::refresh(&p.window);
+            if !p.has_ssd(true) {
+                return false;
+            }
+
             let title = p.window.title();
             let mut last_title = p.last_title.lock().unwrap();
             if *last_title != title {
@@ -637,6 +646,8 @@ impl SpaceElement for CosmicWindow {
             }
         }) {
             self.0.force_update();
+        } else {
+            SpaceElement::refresh(&self.0);
         }
     }
 }
@@ -684,17 +695,22 @@ impl PointerTarget<State> for CosmicWindow {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
         self.0.with_program(|p| {
-            if p.has_ssd(false) {
-                let Some(next) = Focus::under(&p.window, SSD_HEIGHT, event.location) else {
+            let has_ssd = p.has_ssd(false);
+            if has_ssd || p.is_tiled(false) {
+                let Some(next) = Focus::under(
+                    &p.window,
+                    has_ssd.then_some(SSD_HEIGHT).unwrap_or(0),
+                    event.location,
+                ) else {
                     return;
                 };
+
                 let old_focus = p.swap_focus(Some(next));
                 assert_eq!(old_focus, None);
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
                 cursor_state.lock().unwrap().set_shape(next.cursor_shape());
-                let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
-                *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
+                seat.set_cursor_image_status(CursorImageStatus::default_named());
             }
         });
 
@@ -705,16 +721,20 @@ impl PointerTarget<State> for CosmicWindow {
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
         let mut event = event.clone();
         self.0.with_program(|p| {
-            if p.has_ssd(false) {
-                let Some(next) = Focus::under(&p.window, SSD_HEIGHT, event.location) else {
+            let has_ssd = p.has_ssd(false);
+            if has_ssd || p.is_tiled(false) {
+                let Some(next) = Focus::under(
+                    &p.window,
+                    has_ssd.then_some(SSD_HEIGHT).unwrap_or(0),
+                    event.location,
+                ) else {
                     return;
                 };
                 let _previous = p.swap_focus(Some(next));
 
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
                 cursor_state.lock().unwrap().set_shape(next.cursor_shape());
-                let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
-                *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
+                seat.set_cursor_image_status(CursorImageStatus::default_named());
             }
         });
 
@@ -732,12 +752,7 @@ impl PointerTarget<State> for CosmicWindow {
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self.0.with_program(|p| p.current_focus()) {
-            Some(Focus::Header) => {
-                self.0.with_program(|p| {
-                    *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-                });
-                PointerTarget::button(&self.0, seat, data, event)
-            }
+            Some(Focus::Header) => PointerTarget::button(&self.0, seat, data, event),
             Some(x) => {
                 let serial = event.serial;
                 let seat = seat.clone();
@@ -745,7 +760,7 @@ impl PointerTarget<State> for CosmicWindow {
                     return;
                 };
                 self.0.loop_handle().insert_idle(move |state| {
-                    let res = state.common.shell.write().unwrap().resize_request(
+                    let res = state.common.shell.write().resize_request(
                         &surface,
                         &seat,
                         serial,
@@ -872,7 +887,6 @@ impl TouchTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             event.location -= p.window.geometry().loc.to_f64();
-            *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
         });
         TouchTarget::down(&self.0, seat, data, &event, seq)
     }

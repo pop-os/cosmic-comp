@@ -1,7 +1,11 @@
+use std::sync::Mutex;
+
 use smithay::{
     output::Output,
     utils::{Coordinate, Logical, Point, Rectangle, Size},
 };
+
+use crate::shell::zoom::OutputZoomState;
 
 use super::prelude::OutputExt;
 
@@ -20,6 +24,7 @@ pub trait PointExt<C: Coordinate> {
 
 pub trait PointGlobalExt<C: Coordinate> {
     fn to_local(self, output: &Output) -> Point<C, Local>;
+    fn to_zoomed(self, output: &Output) -> Point<C, Local>;
     fn as_logical(self) -> Point<C, Logical>;
 }
 
@@ -62,6 +67,21 @@ impl<C: Coordinate> PointExt<C> for Point<C, Logical> {
 impl<C: Coordinate> PointGlobalExt<C> for Point<C, Global> {
     fn to_local(self, output: &Output) -> Point<C, Local> {
         let point = (self.to_f64() - output.geometry().loc.to_f64()).as_logical();
+        (C::from_f64(point.x), C::from_f64(point.y)).into()
+    }
+
+    fn to_zoomed(self, output: &Output) -> Point<C, Local> {
+        let zoomed_output_geometry = output.zoomed_geometry().unwrap();
+        let level = output
+            .user_data()
+            .get::<Mutex<OutputZoomState>>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .current_level();
+        let point = (self.to_f64() - zoomed_output_geometry.loc.to_f64())
+            .upscale(level)
+            .as_logical();
         (C::from_f64(point.x), C::from_f64(point.y)).into()
     }
 

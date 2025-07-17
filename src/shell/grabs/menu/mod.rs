@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+use std::{
+    fmt,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use calloop::LoopHandle;
@@ -14,7 +17,7 @@ use cosmic::{
 };
 use smithay::{
     backend::{
-        input::ButtonState,
+        input::{ButtonState, TouchSlot},
         renderer::{
             element::{memory::MemoryRenderBufferRenderElement, AsRenderElements},
             ImportMem, Renderer,
@@ -26,26 +29,29 @@ use smithay::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
-            PointerTarget, RelativeMotionEvent,
+            GrabStartData as PointerGrabStartData, MotionEvent as PointerMotionEvent, PointerGrab,
+            PointerInnerHandle, PointerTarget, RelativeMotionEvent,
+        },
+        touch::{
+            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
+            TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
         },
         Seat,
     },
     output::Output,
-    utils::{Logical, Point, Rectangle, Size},
+    utils::{Logical, Point, Rectangle, Serial, Size},
 };
 
 use crate::{
-    shell::focus::target::PointerFocusTarget,
-    shell::SeatExt,
+    shell::{focus::target::PointerFocusTarget, SeatExt},
     state::State,
     utils::{
         iced::{IcedElement, Program},
-        prelude::{Global, OutputExt, PointGlobalExt, PointLocalExt, SizeExt},
+        prelude::*,
     },
 };
 
-use super::ResizeEdge;
+use super::{GrabStartData, ResizeEdge};
 
 mod default;
 mod item;
@@ -53,6 +59,8 @@ pub use self::default::*;
 
 pub struct MenuGrabState {
     elements: Arc<Mutex<Vec<Element>>>,
+    screen_space_relative: Option<Output>,
+    scale: Arc<Mutex<f64>>,
 }
 pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
@@ -60,7 +68,7 @@ impl MenuGrabState {
     pub fn render<I, R>(&self, renderer: &mut R, output: &Output) -> Vec<I>
     where
         R: Renderer + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         I: From<MemoryRenderBufferRenderElement<R>>,
     {
         let scale = output.current_scale().fractional_scale();
@@ -80,6 +88,10 @@ impl MenuGrabState {
                 )
             })
             .collect()
+    }
+
+    pub fn is_in_screen_space(&self) -> bool {
+        self.screen_space_relative.is_some()
     }
 
     pub fn set_theme(&self, theme: cosmic::Theme) {
@@ -104,6 +116,35 @@ pub enum Item {
         submenu: bool,
         disabled: bool,
     },
+}
+
+impl fmt::Debug for Item {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Separator => write!(f, "Separator"),
+            Self::Submenu { title, items } => f
+                .debug_struct("Submenu")
+                .field("title", title)
+                .field("items", items)
+                .finish(),
+            Self::Entry {
+                title,
+                shortcut,
+                on_press: _,
+                toggled,
+                submenu,
+                disabled,
+            } => f
+                .debug_struct("Entry")
+                .field("title", title)
+                .field("shortcut", shortcut)
+                .field("on_press", &"...")
+                .field("toggled", toggled)
+                .field("submenu", submenu)
+                .field("disabled", disabled)
+                .finish(),
+        }
+    }
 }
 
 impl Item {
@@ -162,9 +203,8 @@ impl Item {
 }
 
 /// Menu that comes up when:
-/// - Right-clicking an application header bar
-/// - Super + Middle-clicking a window
-/// - Super + Shift + Right-clicking a window
+/// - Right-clicking an application header bar, or
+/// - Super + Right-clicking a window
 pub struct ContextMenu {
     items: Vec<Item>,
     selected: AtomicBool,
@@ -178,6 +218,10 @@ impl ContextMenu {
             selected: AtomicBool::new(false),
             row_width: Mutex::new(None),
         }
+    }
+
+    pub fn set_row_width(&self, width: f32) {
+        *self.row_width.lock().unwrap() = Some(width);
     }
 }
 
@@ -205,6 +249,7 @@ impl Program for ContextMenu {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<State>, Serial)>,
     ) -> Task<Self::Message> {
         match message {
             Message::ItemPressed(idx) => {
@@ -212,124 +257,119 @@ impl Program for ContextMenu {
                     (on_press)(loop_handle);
                     self.selected.store(true, Ordering::SeqCst);
                 }
+                // TODO: If Submenu, then also expand on "Pressed" for touch events.
+                // But right now we don't have any touch responsive menus with submenus
             }
             Message::ItemEntered(idx, bounds) => {
                 if let Some(Item::Submenu { items, .. }) = self.items.get_mut(idx) {
-                    let items = items.clone();
-                    let _ = loop_handle.insert_idle(move |state| {
-                        let seat = state
-                            .common
-                            .shell
-                            .read()
-                            .unwrap()
-                            .seats
-                            .last_active()
-                            .clone();
-                        let grab_state = seat
-                            .user_data()
-                            .get::<SeatMenuGrabState>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
+                    if let Some((seat, _)) = last_seat.cloned() {
+                        let items = items.clone();
+                        let _ = loop_handle.insert_idle(move |state| {
+                            let grab_state = seat
+                                .user_data()
+                                .get::<SeatMenuGrabState>()
+                                .unwrap()
+                                .lock()
+                                .unwrap();
 
-                        if let Some(grab_state) = &*grab_state {
-                            let mut elements = grab_state.elements.lock().unwrap();
+                            if let Some(grab_state) = &*grab_state {
+                                let mut elements = grab_state.elements.lock().unwrap();
 
-                            let position = elements.last().unwrap().position;
-                            let element = IcedElement::new(
-                                ContextMenu::new(items),
-                                Size::default(),
-                                state.common.event_loop_handle.clone(),
-                                state.common.theme.clone(),
-                            );
+                                let position = elements.last().unwrap().position;
+                                let element = IcedElement::new(
+                                    ContextMenu::new(items),
+                                    Size::default(),
+                                    state.common.event_loop_handle.clone(),
+                                    state.common.theme.clone(),
+                                );
 
-                            let min_size = element.minimum_size();
-                            element.with_program(|p| {
-                                *p.row_width.lock().unwrap() = Some(min_size.w as f32);
-                            });
-                            element.resize(min_size);
+                                let min_size = element.minimum_size();
+                                element.with_program(|p| {
+                                    *p.row_width.lock().unwrap() = Some(min_size.w as f32);
+                                });
+                                element.resize(min_size);
 
-                            let output = seat.active_output();
-                            let position = [
-                                // to the right -> down
-                                Rectangle::new(
-                                    position
-                                        + Point::from((
-                                            bounds.width.ceil() as i32,
-                                            bounds.y.ceil() as i32,
-                                        )),
-                                    min_size.as_global(),
-                                ),
-                                // to the right -> up
-                                Rectangle::new(
-                                    position
-                                        + Point::from((
-                                            bounds.width.ceil() as i32,
-                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
-                                                - min_size.h,
-                                        )),
-                                    min_size.as_global(),
-                                ),
-                                // to the left -> down
-                                Rectangle::new(
-                                    position + Point::from((-min_size.w, bounds.y.ceil() as i32)),
-                                    min_size.as_global(),
-                                ),
-                                // to the left -> up
-                                Rectangle::new(
-                                    position
-                                        + Point::from((
-                                            -min_size.w,
-                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
-                                                - min_size.h,
-                                        )),
-                                    min_size.as_global(),
-                                ),
-                            ]
-                            .iter()
-                            .rev() // preference of max_by_key is backwards
-                            .max_by_key(|rect| {
-                                output
-                                    .geometry()
-                                    .intersection(**rect)
-                                    .map(|rect| rect.size.w * rect.size.h)
-                            })
-                            .unwrap()
-                            .loc;
-                            element.output_enter(&output, element.bbox());
+                                let output = seat.active_output();
+                                let position = [
+                                    // to the right -> down
+                                    Rectangle::new(
+                                        position
+                                            + Point::from((
+                                                bounds.width.ceil() as i32,
+                                                bounds.y.ceil() as i32,
+                                            )),
+                                        min_size.as_global(),
+                                    ),
+                                    // to the right -> up
+                                    Rectangle::new(
+                                        position
+                                            + Point::from((
+                                                bounds.width.ceil() as i32,
+                                                bounds.y.ceil() as i32
+                                                    + bounds.height.ceil() as i32
+                                                    - min_size.h,
+                                            )),
+                                        min_size.as_global(),
+                                    ),
+                                    // to the left -> down
+                                    Rectangle::new(
+                                        position
+                                            + Point::from((-min_size.w, bounds.y.ceil() as i32)),
+                                        min_size.as_global(),
+                                    ),
+                                    // to the left -> up
+                                    Rectangle::new(
+                                        position
+                                            + Point::from((
+                                                -min_size.w,
+                                                bounds.y.ceil() as i32
+                                                    + bounds.height.ceil() as i32
+                                                    - min_size.h,
+                                            )),
+                                        min_size.as_global(),
+                                    ),
+                                ]
+                                .iter()
+                                .rev() // preference of max_by_key is backwards
+                                .max_by_key(|rect| {
+                                    output
+                                        .geometry()
+                                        .intersection(**rect)
+                                        .map(|rect| rect.size.w * rect.size.h)
+                                })
+                                .unwrap()
+                                .loc;
+                                element.output_enter(&output, element.bbox());
+                                element.set_additional_scale(*grab_state.scale.lock().unwrap());
 
-                            elements.push(Element {
-                                iced: element,
-                                position,
-                                pointer_entered: false,
-                            })
-                        }
-                    });
+                                elements.push(Element {
+                                    iced: element,
+                                    position,
+                                    pointer_entered: false,
+                                    touch_entered: None,
+                                })
+                            }
+                        });
+                    }
                 }
             }
             Message::ItemLeft(idx, _) => {
                 if let Some(Item::Submenu { .. }) = self.items.get_mut(idx) {
-                    let _ = loop_handle.insert_idle(|state| {
-                        let seat = state
-                            .common
-                            .shell
-                            .read()
-                            .unwrap()
-                            .seats
-                            .last_active()
-                            .clone();
-                        let grab_state = seat
-                            .user_data()
-                            .get::<SeatMenuGrabState>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
+                    if let Some((seat, _)) = last_seat.cloned() {
+                        let _ = loop_handle.insert_idle(move |_| {
+                            let grab_state = seat
+                                .user_data()
+                                .get::<SeatMenuGrabState>()
+                                .unwrap()
+                                .lock()
+                                .unwrap();
 
-                        if let Some(grab_state) = &*grab_state {
-                            let mut elements = grab_state.elements.lock().unwrap();
-                            elements.pop();
-                        }
-                    });
+                            if let Some(grab_state) = &*grab_state {
+                                let mut elements = grab_state.elements.lock().unwrap();
+                                elements.pop();
+                            }
+                        });
+                    }
                 }
             }
         };
@@ -460,12 +500,15 @@ pub struct Element {
     iced: IcedElement<ContextMenu>,
     position: Point<i32, Global>,
     pointer_entered: bool,
+    touch_entered: Option<TouchSlot>,
 }
 
 pub struct MenuGrab {
     elements: Arc<Mutex<Vec<Element>>>,
-    start_data: PointerGrabStartData<State>,
+    start_data: GrabStartData,
     seat: Seat<State>,
+    screen_space_relative: Option<Output>,
+    scale: Arc<Mutex<f64>>,
 }
 
 impl PointerGrab<State> for MenuGrab {
@@ -474,21 +517,36 @@ impl PointerGrab<State> for MenuGrab {
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &MotionEvent,
+        event: &PointerMotionEvent,
     ) {
         {
             let mut guard = self.elements.lock().unwrap();
             let elements = &mut *guard;
+            let event_location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if state.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
             if let Some(i) = elements.iter().position(|elem| {
                 let mut bbox = elem.iced.bbox();
                 bbox.loc = elem.position.as_logical();
 
-                bbox.contains(event.location.to_i32_round())
+                bbox.contains(event_location.to_i32_round())
             }) {
                 let element = &mut elements[i];
 
-                let new_event = MotionEvent {
-                    location: event.location - element.position.as_logical().to_f64(),
+                let new_event = PointerMotionEvent {
+                    location: event_location - element.position.as_logical().to_f64(),
                     serial: event.serial,
                     time: event.time,
                 };
@@ -496,7 +554,7 @@ impl PointerGrab<State> for MenuGrab {
                     PointerTarget::enter(&element.iced, &self.seat, state, &new_event);
                     element.pointer_entered = true;
                 } else {
-                    element.iced.motion(&self.seat, state, &new_event);
+                    PointerTarget::motion(&element.iced, &self.seat, state, &new_event);
                 }
             } else {
                 elements.iter_mut().for_each(|element| {
@@ -548,7 +606,7 @@ impl PointerGrab<State> for MenuGrab {
                 let elements = self.elements.lock().unwrap();
                 let mut selected = false;
                 for element in elements.iter().filter(|elem| elem.pointer_entered) {
-                    element.iced.button(&self.seat, state, event);
+                    PointerTarget::button(&element.iced, &self.seat, state, event);
                     selected = true;
                 }
                 selected
@@ -647,18 +705,323 @@ impl PointerGrab<State> for MenuGrab {
     }
 
     fn start_data(&self) -> &PointerGrabStartData<State> {
-        &self.start_data
+        match &self.start_data {
+            GrabStartData::Pointer(start_data) => start_data,
+            _ => unreachable!(),
+        }
     }
 
     fn unset(&mut self, _data: &mut State) {}
 }
 
+impl TouchGrab<State> for MenuGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &DownEvent,
+        seq: Serial,
+    ) {
+        {
+            let mut guard = self.elements.lock().unwrap();
+            let elements = &mut *guard;
+            let event_location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if data.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(event_location.to_i32_round())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = DownEvent {
+                    slot: event.slot,
+                    location: event_location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+                if element.touch_entered.is_none() {
+                    TouchTarget::down(&element.iced, &self.seat, data, &new_event, seq);
+                    element.touch_entered = Some(event.slot);
+                }
+            }
+        }
+        handle.down(data, None, event, seq);
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &UpEvent,
+        seq: Serial,
+    ) {
+        {
+            let elements = self.elements.lock().unwrap();
+            for element in elements.iter().filter(|elem| {
+                elem.touch_entered
+                    .as_ref()
+                    .is_some_and(|slot| *slot == event.slot)
+            }) {
+                TouchTarget::up(&element.iced, &self.seat, data, event, seq);
+            }
+        }
+        handle.unset_grab(self, data);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &TouchMotionEvent,
+        seq: Serial,
+    ) {
+        {
+            let elements = self.elements.lock().unwrap();
+            for element in elements.iter().filter(|elem| {
+                elem.touch_entered
+                    .as_ref()
+                    .is_some_and(|slot| *slot == event.slot)
+            }) {
+                TouchTarget::motion(&element.iced, &self.seat, data, event, seq);
+            }
+        }
+        handle.motion(data, None, event, seq);
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        handle.frame(data, seq);
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        {
+            let mut elements = self.elements.lock().unwrap();
+            for element in elements.iter_mut() {
+                let _ = element.touch_entered.take();
+            }
+        }
+        handle.cancel(data, seq);
+    }
+
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &smithay::input::touch::ShapeEvent,
+        seq: Serial,
+    ) {
+        handle.shape(data, event, seq);
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &smithay::input::touch::OrientationEvent,
+        seq: Serial,
+    ) {
+        handle.orientation(data, event, seq);
+    }
+
+    fn start_data(&self) -> &TouchGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::Touch(start_data) => start_data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn unset(&mut self, _data: &mut State) {}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MenuAlignment {
+    pub x: AxisAlignment,
+    pub y: AxisAlignment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisAlignment {
+    Corner(u32),
+    Centered,
+    PreferCentered,
+}
+
+impl MenuAlignment {
+    pub const CORNER: Self = MenuAlignment {
+        x: AxisAlignment::Corner(0),
+        y: AxisAlignment::Corner(0),
+    };
+    pub const PREFER_CENTERED: Self = MenuAlignment {
+        x: AxisAlignment::PreferCentered,
+        y: AxisAlignment::PreferCentered,
+    };
+    pub const CENTERED: Self = MenuAlignment {
+        x: AxisAlignment::Centered,
+        y: AxisAlignment::Centered,
+    };
+    pub const HORIZONTALLY_CENTERED: Self = MenuAlignment {
+        x: AxisAlignment::Centered,
+        y: AxisAlignment::Corner(0),
+    };
+    pub const VERTICALLY_CENTERED: Self = MenuAlignment {
+        x: AxisAlignment::Corner(0),
+        y: AxisAlignment::Centered,
+    };
+
+    pub fn horizontally_centered(offset: u32, fixed: bool) -> MenuAlignment {
+        MenuAlignment {
+            x: if fixed {
+                AxisAlignment::Centered
+            } else {
+                AxisAlignment::PreferCentered
+            },
+            y: AxisAlignment::Corner(offset),
+        }
+    }
+
+    pub fn vertically_centered(offset: u32, fixed: bool) -> MenuAlignment {
+        MenuAlignment {
+            x: AxisAlignment::Corner(offset),
+            y: if fixed {
+                AxisAlignment::Centered
+            } else {
+                AxisAlignment::PreferCentered
+            },
+        }
+    }
+
+    fn rectangles(
+        &self,
+        position: Point<i32, Global>,
+        size: Size<i32, Global>,
+    ) -> Vec<Rectangle<i32, Global>> {
+        fn for_alignment(
+            position: Point<i32, Global>,
+            size: Size<i32, Global>,
+            x: AxisAlignment,
+            y: AxisAlignment,
+        ) -> Vec<Rectangle<i32, Global>> {
+            match (x, y) {
+                (AxisAlignment::Corner(x_offset), AxisAlignment::Corner(y_offset)) => {
+                    let offset = Point::from((x_offset as i32, y_offset as i32));
+                    vec![
+                        Rectangle::new(position + offset, size), // normal
+                        Rectangle::new(
+                            position - Point::from((size.w, 0))
+                                + Point::from((-(x_offset as i32), y_offset as i32)),
+                            size,
+                        ), // flipped left
+                        Rectangle::new(
+                            position
+                                - Point::from((0, size.h))
+                                - Point::from((x_offset as i32, -(y_offset as i32))),
+                            size,
+                        ), // flipped up
+                        Rectangle::new(position - size.to_point() - offset, size), // flipped left & up
+                    ]
+                }
+                (AxisAlignment::Centered, AxisAlignment::Corner(offset)) => {
+                    let x = position.x - ((size.w as f64 / 2.).round() as i32);
+                    vec![
+                        Rectangle::new(Point::from((x, position.y + offset as i32)), size), // below
+                        Rectangle::new(Point::from((x, position.y - size.h - offset as i32)), size), // above
+                    ]
+                }
+                (AxisAlignment::Corner(offset), AxisAlignment::Centered) => {
+                    let y = position.y - ((size.h as f64 / 2.).round() as i32);
+                    vec![
+                        Rectangle::new(Point::from((position.x + offset as i32, y)), size), // left
+                        Rectangle::new(Point::from((position.x - size.w - offset as i32, y)), size), // right
+                    ]
+                }
+                (AxisAlignment::Centered, AxisAlignment::Centered) => {
+                    vec![Rectangle::new(
+                        position - size.to_f64().downscale(2.).to_i32_round().to_point(),
+                        size,
+                    )]
+                }
+                (AxisAlignment::PreferCentered, AxisAlignment::PreferCentered) => for_alignment(
+                    position,
+                    size,
+                    AxisAlignment::Centered,
+                    AxisAlignment::Centered,
+                )
+                .into_iter()
+                .chain(
+                    for_alignment(
+                        position,
+                        size,
+                        AxisAlignment::Centered,
+                        AxisAlignment::Corner(0),
+                    )
+                    .into_iter(),
+                )
+                .chain(
+                    for_alignment(
+                        position,
+                        size,
+                        AxisAlignment::Corner(0),
+                        AxisAlignment::Centered,
+                    )
+                    .into_iter(),
+                )
+                .chain(
+                    for_alignment(
+                        position,
+                        size,
+                        AxisAlignment::Corner(0),
+                        AxisAlignment::Corner(0),
+                    )
+                    .into_iter(),
+                )
+                .collect(),
+                (AxisAlignment::PreferCentered, y) => {
+                    for_alignment(position, size, AxisAlignment::Centered, y)
+                        .into_iter()
+                        .chain(
+                            for_alignment(position, size, AxisAlignment::Corner(0), y).into_iter(),
+                        )
+                        .collect()
+                }
+                (x, AxisAlignment::PreferCentered) => {
+                    for_alignment(position, size, x, AxisAlignment::Centered)
+                        .into_iter()
+                        .chain(
+                            for_alignment(position, size, x, AxisAlignment::Corner(0)).into_iter(),
+                        )
+                        .collect()
+                }
+            }
+        }
+
+        for_alignment(position, size, self.x, self.y)
+    }
+}
+
 impl MenuGrab {
     pub fn new(
-        start_data: PointerGrabStartData<State>,
+        start_data: GrabStartData,
         seat: &Seat<State>,
         items: impl Iterator<Item = Item>,
         position: Point<i32, Global>,
+        alignment: MenuAlignment,
+        screen_space_relative: Option<f64>,
         handle: LoopHandle<'static, crate::state::State>,
         theme: cosmic::Theme,
     ) -> MenuGrab {
@@ -671,42 +1034,46 @@ impl MenuGrab {
         element.resize(min_size);
 
         let output = seat.active_output();
-        let position = [
-            Rectangle::new(position, min_size.as_global()), // normal
-            Rectangle::new(
-                position - Point::from((min_size.w, 0)),
-                min_size.as_global(),
-            ), // flipped left
-            Rectangle::new(
-                position - Point::from((0, min_size.h)),
-                min_size.as_global(),
-            ), // flipped up
-            Rectangle::new(
-                position - Point::from((min_size.w, min_size.h)),
-                min_size.as_global(),
-            ), // flipped left & up
-        ]
-        .iter()
-        .rev() // preference of max_by_key is backwards
-        .max_by_key(|rect| {
-            output
-                .geometry()
-                .intersection(**rect)
-                .map(|rect| rect.size.w * rect.size.h)
-        })
-        .unwrap()
-        .loc;
+        // TODO: This feels a lot like cheap xdg-positioner. Refactor and unify
+        let position = alignment
+            .rectangles(
+                position,
+                min_size
+                    .to_f64()
+                    .upscale(screen_space_relative.unwrap_or(1.))
+                    .to_i32_round()
+                    .as_global(),
+            )
+            .iter()
+            .rev() // preference of max_by_key is backwards
+            .max_by_key(|rect| {
+                output
+                    .geometry()
+                    .intersection(**rect)
+                    .map(|rect| rect.size.w * rect.size.h)
+            })
+            .unwrap()
+            .loc;
 
         element.output_enter(&output, element.bbox());
+        if let Some(scale) = screen_space_relative {
+            element.set_additional_scale(scale);
+        }
 
         let elements = Arc::new(Mutex::new(vec![Element {
             iced: element,
             position,
             pointer_entered: false,
+            touch_entered: None,
         }]));
+
+        let scale = Arc::new(Mutex::new(screen_space_relative.unwrap_or(1.)));
+        let screen_space_relative = screen_space_relative.is_some().then_some(output);
 
         let grab_state = MenuGrabState {
             elements: elements.clone(),
+            screen_space_relative: screen_space_relative.clone(),
+            scale: scale.clone(),
         };
 
         *seat
@@ -720,6 +1087,22 @@ impl MenuGrab {
             elements,
             start_data,
             seat: seat.clone(),
+            screen_space_relative,
+            scale,
+        }
+    }
+
+    pub fn set_additional_scale(&self, scale: f64) {
+        *self.scale.lock().unwrap() = scale;
+        for element in &*self.elements.lock().unwrap() {
+            element.iced.set_additional_scale(scale);
+        }
+    }
+
+    pub fn is_touch_grab(&self) -> bool {
+        match self.start_data {
+            GrabStartData::Touch(_) => true,
+            GrabStartData::Pointer(_) => false,
         }
     }
 }

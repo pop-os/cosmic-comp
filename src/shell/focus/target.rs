@@ -4,6 +4,7 @@ use crate::{
     shell::{
         element::{CosmicMapped, CosmicStack, CosmicWindow},
         layout::tiling::ResizeForkTarget,
+        zoom::ZoomFocusTarget,
         CosmicSurface, SeatExt,
     },
     utils::prelude::*,
@@ -27,9 +28,12 @@ use smithay::{
         },
         Seat,
     },
-    reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface, Resource},
+    reexports::wayland_server::{
+        backend::ObjectId, protocol::wl_surface::WlSurface, Client, Resource,
+    },
     utils::{IsAlive, Logical, Point, Serial, Transform},
     wayland::{seat::WaylandFocus, session_lock::LockSurface},
+    xwayland::xwm::XwmId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +45,7 @@ pub enum PointerFocusTarget {
     StackUI(CosmicStack),
     WindowUI(CosmicWindow),
     ResizeFork(ResizeForkTarget),
+    ZoomUI(ZoomFocusTarget),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +74,7 @@ pub enum KeyboardFocusTarget {
     LayerSurface(LayerSurface),
     Popup(PopupKind),
     LockSurface(LockSurface),
+    XWaylandGrab(WlSurface),
 }
 
 // TODO: This should be TryFrom, but PopupGrab needs to be able to convert. Fix this in smithay
@@ -153,6 +159,15 @@ impl PointerFocusTarget {
             _ => None,
         }
     }
+
+    pub fn is_client(&self, client: &Client) -> bool {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                surface.client().is_some_and(|c| c == *client)
+            }
+            _ => false,
+        }
+    }
 }
 
 impl KeyboardFocusTarget {
@@ -164,6 +179,33 @@ impl KeyboardFocusTarget {
             }
             _ => None,
         }
+    }
+
+    pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
+        match self {
+            KeyboardFocusTarget::Element(mapped) => Box::new(mapped.windows().map(|(s, _)| s))
+                as Box<dyn Iterator<Item = CosmicSurface>>,
+            KeyboardFocusTarget::Fullscreen(surface) => Box::new(std::iter::once(surface.clone())),
+            _ => Box::new(std::iter::empty()),
+        }
+    }
+
+    pub fn is_xwm(&self, xwm: XwmId) -> bool {
+        match self {
+            KeyboardFocusTarget::Element(mapped) => {
+                if let Some(surface) = mapped.active_window().x11_surface() {
+                    return surface.xwm_id().unwrap() == xwm;
+                }
+            }
+            KeyboardFocusTarget::Fullscreen(surface) => {
+                if let Some(surface) = surface.x11_surface() {
+                    return surface.xwm_id().unwrap() == xwm;
+                }
+            }
+            _ => {}
+        }
+
+        false
     }
 }
 
@@ -188,6 +230,7 @@ impl IsAlive for PointerFocusTarget {
             PointerFocusTarget::StackUI(e) => e.alive(),
             PointerFocusTarget::WindowUI(e) => e.alive(),
             PointerFocusTarget::ResizeFork(f) => f.alive(),
+            PointerFocusTarget::ZoomUI(_) => true,
         }
     }
 }
@@ -201,13 +244,14 @@ impl IsAlive for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => l.alive(),
             KeyboardFocusTarget::Popup(p) => p.alive(),
             KeyboardFocusTarget::LockSurface(l) => l.alive(),
+            KeyboardFocusTarget::XWaylandGrab(g) => g.alive(),
         }
     }
 }
 
 impl PointerTarget<State> for PointerFocusTarget {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
-        let toplevel = self.toplevel(&*data.common.shell.read().unwrap());
+        let toplevel = self.toplevel(&*data.common.shell.read());
         if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(Some(
@@ -233,10 +277,11 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::StackUI(u) => PointerTarget::enter(u, seat, data, event),
             PointerFocusTarget::WindowUI(u) => PointerTarget::enter(u, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::enter(f, seat, data, event),
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::enter(e, seat, data, event),
         }
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
-        let toplevel = self.toplevel(&*data.common.shell.read().unwrap());
+        let toplevel = self.toplevel(&*data.common.shell.read());
         if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(Some(
@@ -262,6 +307,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::StackUI(u) => PointerTarget::motion(u, seat, data, event),
             PointerFocusTarget::WindowUI(u) => PointerTarget::motion(u, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::motion(f, seat, data, event),
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::motion(e, seat, data, event),
         }
     }
     fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
@@ -274,6 +320,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::relative_motion(f, seat, data, event)
             }
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::relative_motion(e, seat, data, event),
         }
     }
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
@@ -284,6 +331,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::StackUI(u) => PointerTarget::button(u, seat, data, event),
             PointerFocusTarget::WindowUI(u) => PointerTarget::button(u, seat, data, event),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::button(f, seat, data, event),
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::button(e, seat, data, event),
         }
     }
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
@@ -294,6 +342,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::StackUI(u) => PointerTarget::axis(u, seat, data, frame),
             PointerFocusTarget::WindowUI(u) => PointerTarget::axis(u, seat, data, frame),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::axis(f, seat, data, frame),
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::axis(e, seat, data, frame),
         }
     }
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
@@ -304,10 +353,11 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::StackUI(u) => PointerTarget::frame(u, seat, data),
             PointerFocusTarget::WindowUI(u) => PointerTarget::frame(u, seat, data),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::frame(f, seat, data),
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::frame(e, seat, data),
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
-        let toplevel = self.toplevel(&*data.common.shell.read().unwrap());
+        let toplevel = self.toplevel(&*data.common.shell.read());
         if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(None);
@@ -322,6 +372,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::StackUI(u) => PointerTarget::leave(u, seat, data, serial, time),
             PointerFocusTarget::WindowUI(u) => PointerTarget::leave(u, seat, data, serial, time),
             PointerFocusTarget::ResizeFork(f) => PointerTarget::leave(f, seat, data, serial, time),
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::leave(e, seat, data, serial, time),
         }
     }
     fn gesture_swipe_begin(
@@ -342,6 +393,9 @@ impl PointerTarget<State> for PointerFocusTarget {
             }
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_swipe_begin(f, seat, data, event)
+            }
+            PointerFocusTarget::ZoomUI(e) => {
+                PointerTarget::gesture_swipe_begin(e, seat, data, event)
             }
         }
     }
@@ -364,6 +418,9 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_swipe_update(f, seat, data, event)
             }
+            PointerFocusTarget::ZoomUI(e) => {
+                PointerTarget::gesture_swipe_update(e, seat, data, event)
+            }
         }
     }
     fn gesture_swipe_end(
@@ -385,6 +442,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_swipe_end(f, seat, data, event)
             }
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::gesture_swipe_end(e, seat, data, event),
         }
     }
     fn gesture_pinch_begin(
@@ -405,6 +463,9 @@ impl PointerTarget<State> for PointerFocusTarget {
             }
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_pinch_begin(f, seat, data, event)
+            }
+            PointerFocusTarget::ZoomUI(e) => {
+                PointerTarget::gesture_pinch_begin(e, seat, data, event)
             }
         }
     }
@@ -427,6 +488,9 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_pinch_update(f, seat, data, event)
             }
+            PointerFocusTarget::ZoomUI(e) => {
+                PointerTarget::gesture_pinch_update(e, seat, data, event)
+            }
         }
     }
     fn gesture_pinch_end(
@@ -448,6 +512,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_pinch_end(f, seat, data, event)
             }
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::gesture_pinch_end(e, seat, data, event),
         }
     }
     fn gesture_hold_begin(
@@ -469,6 +534,9 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_hold_begin(f, seat, data, event)
             }
+            PointerFocusTarget::ZoomUI(e) => {
+                PointerTarget::gesture_hold_begin(e, seat, data, event)
+            }
         }
     }
     fn gesture_hold_end(&self, seat: &Seat<State>, data: &mut State, event: &GestureHoldEndEvent) {
@@ -483,6 +551,7 @@ impl PointerTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(f) => {
                 PointerTarget::gesture_hold_end(f, seat, data, event)
             }
+            PointerFocusTarget::ZoomUI(e) => PointerTarget::gesture_hold_end(e, seat, data, event),
         }
     }
 }
@@ -498,6 +567,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             }
             PointerFocusTarget::StackUI(stack) => TouchTarget::down(stack, seat, data, event, seq),
             PointerFocusTarget::ResizeFork(fork) => TouchTarget::down(fork, seat, data, event, seq),
+            PointerFocusTarget::ZoomUI(elem) => TouchTarget::down(elem, seat, data, event, seq),
         }
     }
 
@@ -509,6 +579,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WindowUI(window) => TouchTarget::up(window, seat, data, event, seq),
             PointerFocusTarget::StackUI(stack) => TouchTarget::up(stack, seat, data, event, seq),
             PointerFocusTarget::ResizeFork(fork) => TouchTarget::up(fork, seat, data, event, seq),
+            PointerFocusTarget::ZoomUI(elem) => TouchTarget::up(elem, seat, data, event, seq),
         }
     }
 
@@ -526,6 +597,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(fork) => {
                 TouchTarget::motion(fork, seat, data, event, seq)
             }
+            PointerFocusTarget::ZoomUI(elem) => TouchTarget::motion(elem, seat, data, event, seq),
         }
     }
 
@@ -537,6 +609,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WindowUI(window) => TouchTarget::frame(window, seat, data, seq),
             PointerFocusTarget::StackUI(stack) => TouchTarget::frame(stack, seat, data, seq),
             PointerFocusTarget::ResizeFork(fork) => TouchTarget::frame(fork, seat, data, seq),
+            PointerFocusTarget::ZoomUI(elem) => TouchTarget::frame(elem, seat, data, seq),
         }
     }
 
@@ -548,6 +621,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::WindowUI(window) => TouchTarget::cancel(window, seat, data, seq),
             PointerFocusTarget::StackUI(stack) => TouchTarget::cancel(stack, seat, data, seq),
             PointerFocusTarget::ResizeFork(fork) => TouchTarget::cancel(fork, seat, data, seq),
+            PointerFocusTarget::ZoomUI(elem) => TouchTarget::cancel(elem, seat, data, seq),
         }
     }
 
@@ -563,6 +637,7 @@ impl TouchTarget<State> for PointerFocusTarget {
             PointerFocusTarget::ResizeFork(fork) => {
                 TouchTarget::shape(fork, seat, data, event, seq)
             }
+            PointerFocusTarget::ZoomUI(elem) => TouchTarget::shape(elem, seat, data, event, seq),
         }
     }
 
@@ -585,6 +660,9 @@ impl TouchTarget<State> for PointerFocusTarget {
             }
             PointerFocusTarget::ResizeFork(fork) => {
                 TouchTarget::orientation(fork, seat, data, event, seq)
+            }
+            PointerFocusTarget::ZoomUI(elem) => {
+                TouchTarget::orientation(elem, seat, data, event, seq)
             }
         }
     }
@@ -613,6 +691,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::LockSurface(l) => {
                 KeyboardTarget::enter(l.wl_surface(), seat, data, keys, serial)
             }
+            KeyboardFocusTarget::XWaylandGrab(g) => {
+                KeyboardTarget::enter(g, seat, data, keys, serial)
+            }
         }
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
@@ -629,6 +710,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::LockSurface(l) => {
                 KeyboardTarget::leave(l.wl_surface(), seat, data, serial)
             }
+            KeyboardFocusTarget::XWaylandGrab(g) => KeyboardTarget::leave(g, seat, data, serial),
         }
     }
     fn key(
@@ -657,6 +739,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             KeyboardFocusTarget::LockSurface(l) => {
                 KeyboardTarget::key(l.wl_surface(), seat, data, key, state, serial, time)
             }
+            KeyboardFocusTarget::XWaylandGrab(g) => {
+                KeyboardTarget::key(g, seat, data, key, state, serial, time)
+            }
         }
     }
     fn modifiers(
@@ -682,6 +767,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
             }
             KeyboardFocusTarget::LockSurface(l) => {
                 KeyboardTarget::modifiers(l.wl_surface(), seat, data, modifiers, serial)
+            }
+            KeyboardFocusTarget::XWaylandGrab(g) => {
+                KeyboardTarget::modifiers(g, seat, data, modifiers, serial)
             }
         }
     }
@@ -714,6 +802,7 @@ impl WaylandFocus for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
             KeyboardFocusTarget::Popup(p) => Some(Cow::Borrowed(p.wl_surface())),
             KeyboardFocusTarget::LockSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
+            KeyboardFocusTarget::XWaylandGrab(g) => Some(Cow::Borrowed(g)),
         }
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
@@ -724,6 +813,7 @@ impl WaylandFocus for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
             KeyboardFocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
             KeyboardFocusTarget::LockSurface(l) => l.wl_surface().id().same_client_as(object_id),
+            KeyboardFocusTarget::XWaylandGrab(g) => g.id().same_client_as(object_id),
         }
     }
 }
@@ -734,7 +824,8 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => Cow::Borrowed(surface),
             PointerFocusTarget::ResizeFork(_)
             | PointerFocusTarget::StackUI(_)
-            | PointerFocusTarget::WindowUI(_) => {
+            | PointerFocusTarget::WindowUI(_)
+            | PointerFocusTarget::ZoomUI(_) => {
                 return None;
             }
         })
@@ -751,7 +842,7 @@ impl WaylandFocus for PointerFocusTarget {
                 .wl_surface()
                 .map(|s| s.id().same_client_as(object_id))
                 .unwrap_or(false),
-            PointerFocusTarget::ResizeFork(_) => false,
+            PointerFocusTarget::ResizeFork(_) | PointerFocusTarget::ZoomUI(_) => false,
         }
     }
 }

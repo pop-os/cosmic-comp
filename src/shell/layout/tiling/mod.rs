@@ -18,7 +18,7 @@ use crate::{
         },
         focus::{
             target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
-            FocusStackMut,
+            FocusStackMut, FocusTarget,
         },
         grabs::ResizeEdge,
         layout::Orientation,
@@ -130,7 +130,7 @@ impl TreeQueue {
 pub struct TilingLayout {
     output: Output,
     queue: TreeQueue,
-    placeholder_id: Id,
+    backdrop_id: Id,
     swapping_stack_surface_id: Id,
     last_overview_hover: Option<(Option<Instant>, TargetZone)>,
     pub theme: cosmic::Theme,
@@ -157,9 +157,16 @@ pub enum Data {
         minimize_rect: Option<Rectangle<i32, Local>>,
     },
     Placeholder {
+        id: Id,
         last_geometry: Rectangle<i32, Local>,
-        initial_placeholder: bool,
+        type_: PlaceholderType,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum PlaceholderType {
+    GrabbedWindow,
+    DropZone,
 }
 
 impl Data {
@@ -331,8 +338,8 @@ enum FocusedNodeData {
     Window(CosmicMapped),
 }
 
-#[derive(Debug)]
-pub struct MinimizedTilingState {
+#[derive(Debug, Clone)]
+pub struct RestoreTilingState {
     pub parent: Option<id_tree::NodeId>,
     pub sibling: Option<id_tree::NodeId>,
     pub orientation: Orientation,
@@ -352,7 +359,7 @@ impl TilingLayout {
                 animation_start: None,
             },
             output: output.clone(),
-            placeholder_id: Id::new(),
+            backdrop_id: Id::new(),
             swapping_stack_surface_id: Id::new(),
             last_overview_hover: None,
             theme,
@@ -383,7 +390,7 @@ impl TilingLayout {
     pub fn map<'a>(
         &mut self,
         window: CosmicMapped,
-        focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
+        focus_stack: Option<impl Iterator<Item = &'a FocusTarget> + 'a>,
         direction: Option<Direction>,
     ) {
         window.output_enter(&self.output, window.bbox());
@@ -394,7 +401,7 @@ impl TilingLayout {
     pub fn map_internal<'a>(
         &mut self,
         window: impl Into<CosmicMapped>,
-        focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
+        focus_stack: Option<impl Iterator<Item = &'a FocusTarget> + 'a>,
         direction: Option<Direction>,
         minimize_rect: Option<Rectangle<i32, Local>>,
     ) {
@@ -422,18 +429,19 @@ impl TilingLayout {
         self.queue.push_tree(tree, duration, blocker);
     }
 
-    pub fn remap_minimized<'a>(
+    pub fn remap<'a>(
         &mut self,
         window: CosmicMapped,
-        from: Rectangle<i32, Local>,
-        tiling_state: Option<MinimizedTilingState>,
-        focus_stack: Option<impl Iterator<Item = &'a CosmicMapped> + 'a>,
+        from: Option<Rectangle<i32, Local>>,
+        tiling_state: Option<RestoreTilingState>,
+        focus_stack: Option<impl Iterator<Item = &'a FocusTarget> + 'a>,
     ) {
-        window.set_minimized(false);
         let gaps = self.gaps();
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
+        window.output_enter(&self.output, window.bbox());
+        window.set_bounds(self.output.geometry().size.as_logical());
 
-        if let Some(MinimizedTilingState {
+        if let Some(RestoreTilingState {
             parent,
             sibling,
             orientation,
@@ -475,7 +483,7 @@ impl TilingLayout {
                     let new_node = Node::new(Data::Mapped {
                         mapped: window.clone(),
                         last_geometry: Rectangle::from_size((100, 100).into()),
-                        minimize_rect: Some(from),
+                        minimize_rect: from,
                     });
                     let new_id = tree
                         .insert(new_node, InsertBehavior::UnderNode(&parent_id))
@@ -498,7 +506,7 @@ impl TilingLayout {
                 let new_node = Node::new(Data::Mapped {
                     mapped: window.clone(),
                     last_geometry: Rectangle::from_size((100, 100).into()),
-                    minimize_rect: Some(from),
+                    minimize_rect: from,
                 });
 
                 let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
@@ -530,7 +538,7 @@ impl TilingLayout {
         }
 
         // else add as new_window
-        self.map_internal(window, focus_stack, None, Some(from));
+        self.map_internal(window, focus_stack, None, from);
     }
 
     fn map_to_tree(
@@ -637,7 +645,7 @@ impl TilingLayout {
         other: &mut Self,
         other_handle: &WorkspaceHandle,
         seat: &Seat<State>,
-        focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
+        focus_stack: impl Iterator<Item = &'a FocusTarget> + 'a,
         desc: NodeDesc,
         direction: Option<Direction>,
     ) -> Option<KeyboardFocusTarget> {
@@ -658,7 +666,7 @@ impl TilingLayout {
                 let this_stack = this_mapped.stack_ref()?;
                 this_stack.remove_window(&stack_surface);
                 if !this_stack.alive() {
-                    this.unmap(&this_mapped);
+                    let _ = this.unmap(&this_mapped, None);
                 }
 
                 let mapped: CosmicMapped =
@@ -1051,7 +1059,7 @@ impl TilingLayout {
                         toplevel_leave_workspace(&surface, &other_desc.handle);
                         toplevel_enter_workspace(&surface, &this_desc.handle);
                     }
-                    this_stack.add_window(surface, Some(this_idx + i));
+                    this_stack.add_window(surface, Some(this_idx + i), None);
                 }
                 if this.output != other_output {
                     this_surface.output_leave(&this.output);
@@ -1138,7 +1146,7 @@ impl TilingLayout {
                         toplevel_leave_workspace(&surface, &this_desc.handle);
                         toplevel_enter_workspace(&surface, &other_desc.handle);
                     }
-                    other_stack.add_window(surface, Some(other_idx + i));
+                    other_stack.add_window(surface, Some(other_idx + i), None);
                 }
                 if this.output != other_output {
                     other_surface.output_leave(&other_output);
@@ -1209,9 +1217,9 @@ impl TilingLayout {
                     .unwrap();
                 let this_was_active = &this_stack.active() == this_surface;
                 let other_was_active = &other_stack.active() == other_surface;
-                this_stack.add_window(other_surface.clone(), Some(this_idx));
-                this_stack.remove_window(&this_surface);
-                other_stack.add_window(this_surface.clone(), Some(other_idx));
+                this_stack.add_window(other_surface.clone(), Some(this_idx), None);
+                this_stack.remove_window(this_surface);
+                other_stack.add_window(this_surface.clone(), Some(other_idx), None);
 
                 if this.output != other_output {
                     toplevel_leave_output(this_surface, &this.output);
@@ -1226,12 +1234,12 @@ impl TilingLayout {
                     toplevel_enter_workspace(other_surface, &this_desc.handle);
                 }
 
-                other_stack.remove_window(&other_surface);
+                other_stack.remove_window(other_surface);
                 if this_was_active {
-                    this_stack.set_active(&other_surface);
+                    this_stack.set_active(other_surface);
                 }
                 if other_was_active {
-                    other_stack.set_active(&this_surface);
+                    other_stack.set_active(this_surface);
                 }
 
                 return other
@@ -1289,45 +1297,17 @@ impl TilingLayout {
         &self.queue.trees.back().unwrap().0
     }
 
-    pub fn unmap(&mut self, window: &CosmicMapped) -> bool {
-        if self.unmap_window_internal(window, false) {
-            window.output_leave(&self.output);
-            window.set_tiled(false);
-            *window.tiling_node_id.lock().unwrap() = None;
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn unmap_as_placeholder(&mut self, window: &CosmicMapped) -> Option<NodeId> {
-        let node_id = window.tiling_node_id.lock().unwrap().take()?;
-
-        let data = self
-            .queue
-            .trees
-            .back_mut()
-            .unwrap()
-            .0
-            .get_mut(&node_id)
-            .unwrap()
-            .data_mut();
-        *data = Data::Placeholder {
-            last_geometry: data.geometry().clone(),
-            initial_placeholder: true,
-        };
-
-        window.output_leave(&self.output);
-        window.set_tiled(false);
-        Some(node_id)
-    }
-
-    pub fn unmap_minimize(
+    pub fn unmap(
         &mut self,
         window: &CosmicMapped,
-        to: Rectangle<i32, Local>,
-    ) -> Option<MinimizedTilingState> {
-        let node_id = window.tiling_node_id.lock().unwrap().clone()?;
+        to: Option<Rectangle<i32, Local>>,
+    ) -> Result<Option<RestoreTilingState>, NodeIdError> {
+        let node_id = window
+            .tiling_node_id
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or(NodeIdError::NodeIdNoLongerValid)?;
         let state = {
             let tree = &self.queue.trees.back().unwrap().0;
             tree.get(&node_id).unwrap().parent().and_then(|parent_id| {
@@ -1343,7 +1323,7 @@ impl TilingLayout {
                 {
                     if sizes.len() == 2 {
                         // this group will be flattened
-                        Some(MinimizedTilingState {
+                        Some(RestoreTilingState {
                             parent: None,
                             sibling: parent.children().iter().cloned().find(|id| id != &node_id),
                             orientation: *orientation,
@@ -1351,7 +1331,7 @@ impl TilingLayout {
                             sizes: sizes.clone(),
                         })
                     } else {
-                        Some(MinimizedTilingState {
+                        Some(RestoreTilingState {
                             parent: Some(parent_id.clone()),
                             sibling: None,
                             orientation: *orientation,
@@ -1365,24 +1345,58 @@ impl TilingLayout {
             })
         };
 
-        if self.unmap_window_internal(window, true) {
-            let tree = &mut self
-                .queue
-                .trees
-                .get_mut(self.queue.trees.len() - 2)
-                .unwrap()
-                .0;
-            if let Data::Mapped {
-                minimize_rect: minimize_to,
-                ..
-            } = tree.get_mut(&node_id).unwrap().data_mut()
-            {
-                *minimize_to = Some(to);
+        if self.unmap_window_internal(window, to.is_some()) {
+            if let Some(to) = to {
+                let tree = &mut self
+                    .queue
+                    .trees
+                    .get_mut(self.queue.trees.len() - 2)
+                    .unwrap()
+                    .0;
+                if let Data::Mapped {
+                    minimize_rect: minimize_to,
+                    ..
+                } = tree.get_mut(&node_id).unwrap().data_mut()
+                {
+                    *minimize_to = Some(to);
+                }
             }
-            window.set_minimized(true);
+
+            window.output_leave(&self.output);
+            window.set_tiled(false);
+            *window.tiling_node_id.lock().unwrap() = None;
+        } else {
+            return Err(NodeIdError::InvalidNodeIdForTree);
         }
 
-        state
+        Ok(state)
+    }
+
+    pub fn unmap_as_placeholder(
+        &mut self,
+        window: &CosmicMapped,
+        type_: PlaceholderType,
+    ) -> Option<NodeId> {
+        let node_id = window.tiling_node_id.lock().unwrap().take()?;
+
+        let data = self
+            .queue
+            .trees
+            .back_mut()
+            .unwrap()
+            .0
+            .get_mut(&node_id)
+            .unwrap()
+            .data_mut();
+        *data = Data::Placeholder {
+            id: Id::new(),
+            last_geometry: data.geometry().clone(),
+            type_,
+        };
+
+        window.output_leave(&self.output);
+        window.set_tiled(false);
+        Some(node_id)
     }
 
     fn unmap_window_internal(&mut self, mapped: &CosmicMapped, minimizing: bool) -> bool {
@@ -1681,6 +1695,7 @@ impl TilingLayout {
                             Direction::Right => Some(0),
                             _ => None,
                         },
+                        Some(seat),
                     );
                     tree.get_mut(&og_parent)
                         .unwrap()
@@ -1809,7 +1824,7 @@ impl TilingLayout {
         &self,
         direction: FocusDirection,
         seat: &Seat<State>,
-        focus_stack: impl Iterator<Item = &'a CosmicMapped> + 'a,
+        focus_stack: impl Iterator<Item = &'a FocusTarget> + 'a,
         swap_desc: Option<NodeDesc>,
     ) -> FocusResult {
         let tree = &self.queue.trees.back().unwrap().0;
@@ -1825,16 +1840,6 @@ impl TilingLayout {
         };
 
         let (last_node_id, data) = focused;
-
-        // stacks may handle focus internally
-        if let FocusedNodeData::Window(window) = data.clone() {
-            if window.handle_focus(
-                direction,
-                swap_desc.clone().filter(|desc| desc.node == last_node_id),
-            ) {
-                return FocusResult::Handled;
-            }
-        }
 
         if direction == FocusDirection::In {
             if swap_desc
@@ -2136,7 +2141,7 @@ impl TilingLayout {
             match tree.get_mut(&node_id).unwrap().data_mut() {
                 Data::Mapped { mapped, .. } => {
                     mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone());
-                    focus_stack.append(&mapped);
+                    focus_stack.append(mapped.clone());
                     KeyboardFocusTarget::Element(mapped.clone())
                 }
                 _ => unreachable!(),
@@ -2207,7 +2212,7 @@ impl TilingLayout {
             };
 
             for elem in new_elements.iter().rev() {
-                focus_stack.append(elem);
+                focus_stack.append(elem.clone());
             }
 
             match tree.get(&node_id).unwrap().data() {
@@ -2295,7 +2300,7 @@ impl TilingLayout {
                     let mapped = CosmicMapped::from(stack);
                     *mapped.last_geometry.lock().unwrap() = Some(geo);
                     *mapped.tiling_node_id.lock().unwrap() = Some(last_active);
-                    focus_stack.append(&mapped);
+                    focus_stack.append(mapped.clone());
                     *data = Data::Mapped {
                         mapped: mapped.clone(),
                         last_geometry: geo,
@@ -2701,7 +2706,7 @@ impl TilingLayout {
                     data.add_window(bound_idx);
                     bound_idx
                 };
-                tree.make_nth_sibling(&new_id, dbg!(idx)).unwrap();
+                tree.make_nth_sibling(&new_id, idx).unwrap();
                 *window.tiling_node_id.lock().unwrap() = Some(new_id);
                 window
             }
@@ -2748,7 +2753,7 @@ impl TilingLayout {
                             unreachable!()
                         };
                         for surface in window.windows().map(|s| s.0) {
-                            stack.add_window(surface, None);
+                            stack.add_window(surface, None, None);
                         }
                         mapped.clone()
                     }
@@ -2794,14 +2799,23 @@ impl TilingLayout {
 
     fn last_active_window<'a>(
         tree: &Tree<Data>,
-        mut focus_stack: impl Iterator<Item = &'a CosmicMapped>,
+        mut focus_stack: impl Iterator<Item = &'a FocusTarget>,
     ) -> Option<(NodeId, CosmicMapped)> {
-        focus_stack
-            .find_map(|mapped| tree.root_node_id()
-                .and_then(|root| tree.traverse_pre_order_ids(root).unwrap()
-                    .find(|id| matches!(tree.get(id).map(|n| n.data()), Ok(Data::Mapped { mapped: m, .. }) if m == mapped))
-                ).map(|id| (id, mapped.clone()))
-            )
+        focus_stack.find_map(|target| {
+            tree.root_node_id().and_then(|root| {
+                tree.traverse_pre_order_ids(root).unwrap().find_map(|id| {
+                    let Ok(Data::Mapped { mapped, .. }) = tree.get(&id).map(|n| n.data()) else {
+                        return None;
+                    };
+
+                    if target == mapped {
+                        Some((id, mapped.clone()))
+                    } else {
+                        None
+                    }
+                })
+            })
+        })
     }
 
     fn currently_focused_node(
@@ -3169,6 +3183,9 @@ impl TilingLayout {
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                     continue;
                 }
+                if mapped.is_maximized(false) {
+                    continue;
+                }
                 if let Some((target, surface_offset)) = mapped.focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
@@ -3197,6 +3214,9 @@ impl TilingLayout {
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
+                    continue;
+                }
+                if mapped.is_maximized(false) {
                     continue;
                 }
                 if let Some((target, surface_offset)) = mapped.focus_under(
@@ -3317,7 +3337,6 @@ impl TilingLayout {
     ) {
         let gaps = self.gaps();
         let last_overview_hover = &mut self.last_overview_hover;
-        let placeholder_id = &self.placeholder_id;
         let tree = &self.queue.trees.back().unwrap().0;
         let Some(root) = tree.root_node_id() else {
             return;
@@ -3349,8 +3368,7 @@ impl TilingLayout {
                 None,
                 1.0,
                 overview.alpha().unwrap(),
-                1.0,
-                placeholder_id,
+                &self.backdrop_id,
                 Some(None),
                 None,
                 None,
@@ -3376,7 +3394,7 @@ impl TilingLayout {
                         matches!(
                             child.data(),
                             Data::Placeholder {
-                                initial_placeholder: false,
+                                type_: PlaceholderType::DropZone,
                                 ..
                             }
                         )
@@ -3411,7 +3429,7 @@ impl TilingLayout {
                                 matches!(
                                     child.data(),
                                     Data::Placeholder {
-                                        initial_placeholder: false,
+                                        type_: PlaceholderType::DropZone,
                                         ..
                                     }
                                 )
@@ -3568,7 +3586,7 @@ impl TilingLayout {
 
                         let third_width = (last_geometry.size.w as f64 / 3.0).round() as i32;
                         let third_height = (last_geometry.size.h as f64 / 3.0).round() as i32;
-                        let stack_region = Rectangle::from_extemities(
+                        let stack_region = Rectangle::from_extremities(
                             (
                                 last_geometry.loc.x + third_width,
                                 last_geometry.loc.y + third_height,
@@ -3624,7 +3642,7 @@ impl TilingLayout {
                                 .unwrap()
                                 .find(|id| match tree.get(id).unwrap().data() {
                                     Data::Placeholder {
-                                        initial_placeholder: true,
+                                        type_: PlaceholderType::GrabbedWindow,
                                         ..
                                     } => true,
                                     _ => false,
@@ -3683,7 +3701,7 @@ impl TilingLayout {
                                             let matches = matches!(
                                                 tree.get(&id).unwrap().data(),
                                                 Data::Placeholder {
-                                                    initial_placeholder: false,
+                                                    type_: PlaceholderType::DropZone,
                                                     ..
                                                 }
                                             );
@@ -3728,10 +3746,11 @@ impl TilingLayout {
                                     let id = tree
                                         .insert(
                                             Node::new(Data::Placeholder {
+                                                id: Id::new(),
                                                 last_geometry: Rectangle::from_size(
                                                     (100, 100).into(),
                                                 ),
-                                                initial_placeholder: false,
+                                                type_: PlaceholderType::DropZone,
                                             }),
                                             InsertBehavior::UnderNode(node_id),
                                         )
@@ -3945,7 +3964,7 @@ impl TilingLayout {
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -4005,8 +4024,7 @@ impl TilingLayout {
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
                     1.0 - transition,
                     transition,
-                    output_scale,
-                    &self.placeholder_id,
+                    &self.backdrop_id,
                     is_mouse_tiling,
                     swap_desc.clone(),
                     overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
@@ -4043,8 +4061,7 @@ impl TilingLayout {
                 seat,
                 transition,
                 transition,
-                output_scale,
-                &self.placeholder_id,
+                &self.backdrop_id,
                 is_mouse_tiling,
                 swap_desc.clone(),
                 overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
@@ -4082,7 +4099,7 @@ impl TilingLayout {
             resize_indicator,
             swap_desc.clone(),
             &self.swapping_stack_surface_id,
-            &self.placeholder_id,
+            &self.backdrop_id,
             theme,
         ));
 
@@ -4105,7 +4122,7 @@ impl TilingLayout {
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -4156,8 +4173,7 @@ impl TilingLayout {
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
                     1.0 - transition,
                     transition,
-                    output_scale,
-                    &self.placeholder_id,
+                    &self.backdrop_id,
                     is_mouse_tiling,
                     swap_desc.clone(),
                     overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
@@ -4192,8 +4208,7 @@ impl TilingLayout {
                 seat,
                 transition,
                 transition,
-                output_scale,
-                &self.placeholder_id,
+                &self.backdrop_id,
                 is_mouse_tiling,
                 swap_desc.clone(),
                 overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
@@ -4267,8 +4282,7 @@ fn geometries_for_groupview<'a, R>(
     seat: Option<&Seat<State>>,
     alpha: f32,
     transition: f32,
-    output_scale: f64,
-    placeholder_id: &Id,
+    backdrop_id: &Id,
     mouse_tiling: Option<Option<&TargetZone>>,
     swap_desc: Option<NodeDesc>,
     swap_tree: Option<&Tree<Data>>,
@@ -4279,7 +4293,7 @@ fn geometries_for_groupview<'a, R>(
 )
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer + 'a,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
 {
@@ -4468,7 +4482,6 @@ where
                                     4,
                                     if render_active_child { 16 } else { 8 },
                                     alpha * if render_potential_group { 0.40 } else { 1.0 },
-                                    output_scale,
                                     group_color,
                                 )
                                 .into(),
@@ -4486,7 +4499,6 @@ where
                                     4,
                                     8,
                                     alpha * 0.40,
-                                    output_scale,
                                     group_color,
                                 )
                                 .into(),
@@ -4550,7 +4562,6 @@ where
                                         4,
                                         8,
                                         alpha * 0.15,
-                                        output_scale,
                                         group_color,
                                     )
                                     .into(),
@@ -4605,7 +4616,7 @@ where
                                 elements.push(
                                     BackdropShader::element(
                                         *renderer,
-                                        placeholder_id.clone(),
+                                        backdrop_id.clone(),
                                         pill_geo,
                                         8.,
                                         alpha * 0.4,
@@ -4708,7 +4719,7 @@ where
                                                 elements.push(
                                                     BackdropShader::element(
                                                         *renderer,
-                                                        placeholder_id.clone(),
+                                                        backdrop_id.clone(),
                                                         Rectangle::new(
                                                             (geo.loc.x, geo.loc.y - 8).into(),
                                                             (geo.size.w, 16).into(),
@@ -4750,7 +4761,7 @@ where
                                                 elements.push(
                                                     BackdropShader::element(
                                                         *renderer,
-                                                        placeholder_id.clone(),
+                                                        backdrop_id.clone(),
                                                         Rectangle::new(
                                                             (geo.loc.x - 8, geo.loc.y).into(),
                                                             (16, geo.size.h).into(),
@@ -4787,7 +4798,6 @@ where
                                     4,
                                     8,
                                     alpha * 0.40,
-                                    output_scale,
                                     group_color,
                                 )
                                 .into(),
@@ -4868,7 +4878,7 @@ where
 
                     geometries.insert(node_id.clone(), geo);
                 }
-                Data::Placeholder { .. } => {
+                Data::Placeholder { id, .. } => {
                     geo.loc += (element_gap_left, element_gap_up).into();
                     geo.size -= (element_gap_left, element_gap_up).into();
                     geo.size -= (element_gap_right, element_gap_down).into();
@@ -4879,7 +4889,7 @@ where
                         elements.push(
                             BackdropShader::element(
                                 *renderer,
-                                placeholder_id.clone(),
+                                id.clone(),
                                 geo,
                                 8.,
                                 alpha * 0.4,
@@ -4909,7 +4919,7 @@ fn render_old_tree_popups<R>(
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -4952,7 +4962,7 @@ fn render_old_tree_windows<R>(
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5011,7 +5021,6 @@ where
                         Key::Window(Usage::FocusIndicator, mapped.clone().key()),
                         geo,
                         indicator_thickness,
-                        output_scale,
                         alpha,
                         [window_hint.red, window_hint.green, window_hint.blue],
                     ),
@@ -5054,6 +5063,7 @@ fn render_old_tree(
                     _ => unreachable!(),
                 },
             )
+            .filter(|(mapped, _, _, _)| !mapped.is_maximized(false))
             .filter(|(mapped, _, _, _)| {
                 if let Some(root) = target_tree.root_node_id() {
                     is_swap_mode
@@ -5117,7 +5127,7 @@ fn render_new_tree_popups<R>(
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5178,12 +5188,12 @@ fn render_new_tree_windows<R>(
     mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
     swap_desc: Option<NodeDesc>,
     swapping_stack_surface_id: &Id,
-    placeholder_id: &Id,
+    backdrop_id: &Id,
     theme: &cosmic::theme::CosmicTheme,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5243,7 +5253,7 @@ where
         window_elements.push(
             BackdropShader::element(
                 renderer,
-                placeholder_id.clone(),
+                backdrop_id.clone(),
                 focused_geo,
                 8.,
                 transition.unwrap_or(1.0) * 0.4,
@@ -5278,7 +5288,6 @@ where
                 Key::Static(swapping_stack_surface_id.clone()),
                 swap_geo,
                 4,
-                output_scale,
                 transition.unwrap_or(1.0),
                 [window_hint.red, window_hint.green, window_hint.blue],
             ),
@@ -5371,7 +5380,6 @@ where
                             } else {
                                 indicator_thickness
                             },
-                            output_scale,
                             alpha,
                             [window_hint.red, window_hint.green, window_hint.blue],
                         ));
@@ -5716,6 +5724,11 @@ fn render_new_tree(
                 (new_geo, percentage, false)
             };
 
+            if let Data::Mapped { mapped, .. } = data {
+                if mapped.is_maximized(false) {
+                    return;
+                }
+            }
             processor(node_id, data, geo, original_geo, alpha, animating)
         });
 }

@@ -33,7 +33,7 @@ use std::{
     fs::OpenOptions,
     io::Write,
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{atomic::AtomicBool, Arc},
 };
 use tracing::{error, warn};
 
@@ -43,9 +43,10 @@ pub use key_bindings::{Action, PrivateAction};
 mod types;
 pub use self::types::*;
 use cosmic::config::CosmicTk;
+pub use cosmic_comp_config::output::EdidProduct;
 use cosmic_comp_config::{
     input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
-    XkbConfig,
+    XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -68,6 +69,7 @@ pub struct Config {
 pub struct DynamicConfig {
     outputs: (Option<PathBuf>, OutputsConfig),
     numlock: (Option<PathBuf>, NumlockStateConfig),
+    accessibility_filter: (Option<PathBuf>, ScreenFilter),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -139,6 +141,8 @@ pub struct OutputConfig {
     pub enabled: OutputState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bpc: Option<u32>,
+    #[serde(default)]
+    pub xwayland_primary: bool,
 }
 
 impl Default for OutputConfig {
@@ -151,6 +155,7 @@ impl Default for OutputConfig {
             position: (0, 0),
             enabled: OutputState::Enabled,
             max_bpc: None,
+            xwayland_primary: false,
         }
     }
 }
@@ -176,6 +181,29 @@ impl OutputConfig {
     }
 }
 
+#[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
+pub struct ScreenFilter {
+    pub inverted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_filter: Option<ColorFilter>,
+}
+
+impl ScreenFilter {
+    pub fn is_noop(&self) -> bool {
+        self.inverted == false && self.color_filter.is_none()
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+// these values need to match with offscreen.frag
+pub enum ColorFilter {
+    Greyscale = 1,
+    Protanopia = 2,
+    Deuteranopia = 3,
+    Tritanopia = 4,
+}
+
 impl Config {
     pub fn load(loop_handle: &LoopHandle<'_, State>) -> Config {
         let config = cosmic_config::Config::new("com.system76.CosmicComp", 1).unwrap();
@@ -186,7 +214,6 @@ impl Config {
             })
             .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new().ok();
-        let workspace = get_config::<WorkspaceConfig>(&config, "workspaces");
 
         let cosmic_comp_config =
             CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
@@ -200,7 +227,7 @@ impl Config {
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
             fn handle_new_toolkit_config(config: CosmicTk, state: &mut State) {
                 let mut workspace_guard = state.common.workspace_state.update();
-                state.common.shell.write().unwrap().update_toolkit(
+                state.common.shell.write().update_toolkit(
                     config,
                     &state.common.xdg_activation_state,
                     &mut workspace_guard,
@@ -235,10 +262,7 @@ impl Config {
         // Source key bindings from com.system76.CosmicSettings.Shortcuts
         let settings_context = shortcuts::context().expect("Failed to load shortcuts config");
         let system_actions = shortcuts::system_actions(&settings_context);
-        let mut shortcuts = shortcuts::shortcuts(&settings_context);
-
-        // Add any missing default shortcuts recommended by the compositor.
-        key_bindings::add_default_bindings(&mut shortcuts, workspace.workspace_layout);
+        let shortcuts = shortcuts::shortcuts(&settings_context);
 
         // Listen for updates to the keybindings config.
         match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
@@ -248,11 +272,7 @@ impl Config {
                         match key.as_str() {
                             // Reload the keyboard shortcuts config.
                             "custom" | "defaults" => {
-                                let mut shortcuts = shortcuts::shortcuts(&config);
-                                let layout = get_config::<WorkspaceConfig>(&config, "workspaces")
-                                    .workspace_layout;
-                                key_bindings::add_default_bindings(&mut shortcuts, layout);
-                                state.common.config.shortcuts = shortcuts;
+                                state.common.config.shortcuts = shortcuts::shortcuts(&config);
                             }
 
                             "system_actions" => {
@@ -288,14 +308,9 @@ impl Config {
                             "tiling_exception_defaults" | "tiling_exception_custom" => {
                                 let new_exceptions = window_rules::tiling_exceptions(&config);
                                 state.common.config.tiling_exceptions = new_exceptions;
-                                state
-                                    .common
-                                    .shell
-                                    .write()
-                                    .unwrap()
-                                    .update_tiling_exceptions(
-                                        state.common.config.tiling_exceptions.iter(),
-                                    );
+                                state.common.shell.write().update_tiling_exceptions(
+                                    state.common.config.tiling_exceptions.iter(),
+                                );
                             }
                             _ => (),
                         }
@@ -312,6 +327,18 @@ impl Config {
                 "failed to create config watch source for com.system76.CosmicSettings.WindowRules"
             ),
         };
+
+        let _ = loop_handle.insert_idle(|state| {
+            let filter_conf = state.common.config.dynamic_conf.screen_filter();
+            state
+                .common
+                .a11y_state
+                .set_screen_inverted(filter_conf.inverted);
+            state
+                .common
+                .a11y_state
+                .set_screen_filter(filter_conf.color_filter);
+        });
 
         Config {
             dynamic_conf: Self::load_dynamic(xdg.as_ref()),
@@ -332,9 +359,16 @@ impl Config {
             xdg.and_then(|base| base.place_state_file("cosmic-comp/numlock.ron").ok());
         let numlock = Self::load_numlock(&numlock_path);
 
+        let filter_path = xdg.and_then(|base| {
+            base.place_state_file("cosmic-comp/a11y_screen_filter.ron")
+                .ok()
+        });
+        let filter = Self::load_filter_state(&filter_path);
+
         DynamicConfig {
             outputs: (output_path, outputs),
             numlock: (numlock_path, numlock),
+            accessibility_filter: (filter_path, filter),
         }
     }
 
@@ -400,6 +434,29 @@ impl Config {
             .unwrap_or_default()
     }
 
+    fn load_filter_state(path: &Option<PathBuf>) -> ScreenFilter {
+        if let Some(path) = path.as_ref() {
+            if path.exists() {
+                match ron::de::from_reader::<_, ScreenFilter>(
+                    OpenOptions::new().read(true).open(path).unwrap(),
+                ) {
+                    Ok(config) => return config,
+                    Err(err) => {
+                        warn!(?err, "Failed to read screen_filter state, resetting..");
+                        if let Err(err) = std::fs::remove_file(path) {
+                            error!(?err, "Failed to remove screen_filter state.");
+                        }
+                    }
+                };
+            }
+        }
+
+        ScreenFilter {
+            inverted: false,
+            color_filter: None,
+        }
+    }
+
     pub fn shortcut_for_action(&self, action: &shortcuts::Action) -> Option<String> {
         self.shortcuts.shortcut_for_action(action)
     }
@@ -408,7 +465,7 @@ impl Config {
         &mut self,
         output_state: &mut OutputConfigurationState<State>,
         backend: &mut BackendData,
-        shell: &Arc<RwLock<Shell>>,
+        shell: &Arc<parking_lot::RwLock<Shell>>,
         loop_handle: &LoopHandle<'static, State>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
         xdg_activation_state: &XdgActivationState,
@@ -451,6 +508,7 @@ impl Config {
             if let Err(err) = backend.apply_config_for_outputs(
                 false,
                 loop_handle,
+                self.dynamic_conf.screen_filter(),
                 shell.clone(),
                 workspace_state,
                 xdg_activation_state,
@@ -476,6 +534,7 @@ impl Config {
                 if let Err(err) = backend.apply_config_for_outputs(
                     false,
                     loop_handle,
+                    self.dynamic_conf.screen_filter(),
                     shell.clone(),
                     workspace_state,
                     xdg_activation_state,
@@ -507,6 +566,12 @@ impl Config {
         } else {
             // we don't have a config, so lets generate somewhat sane positions
             let mut w = 0;
+            if !outputs.iter().any(|o| o.config().xwayland_primary) {
+                // if we don't have a primary output for xwayland from a previous config, pick one
+                if let Some(primary) = outputs.iter().find(|o| o.mirroring().is_none()) {
+                    primary.config_mut().xwayland_primary = true;
+                }
+            }
             for output in outputs.iter().filter(|o| o.mirroring().is_none()) {
                 {
                     let mut config = output.config_mut();
@@ -518,6 +583,7 @@ impl Config {
             if let Err(err) = backend.apply_config_for_outputs(
                 false,
                 loop_handle,
+                self.dynamic_conf.screen_filter(),
                 shell.clone(),
                 workspace_state,
                 xdg_activation_state,
@@ -674,6 +740,17 @@ impl DynamicConfig {
     pub fn numlock_mut(&mut self) -> PersistenceGuard<'_, NumlockStateConfig> {
         PersistenceGuard(self.numlock.0.clone(), &mut self.numlock.1)
     }
+
+    pub fn screen_filter(&self) -> &ScreenFilter {
+        &self.accessibility_filter.1
+    }
+
+    pub fn screen_filter_mut(&mut self) -> PersistenceGuard<'_, ScreenFilter> {
+        PersistenceGuard(
+            self.accessibility_filter.0.clone(),
+            &mut self.accessibility_filter.1,
+        )
+    }
 }
 
 fn get_config<T: Default + serde::de::DeserializeOwned>(
@@ -727,7 +804,6 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .iter()
                     .cloned()
@@ -761,7 +837,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "keyboard_config" => {
                 let value = get_config::<KeyboardConfig>(&config, "keyboard_config");
                 state.common.config.cosmic_conf.keyboard_config = value;
-                let shell = state.common.shell.read().unwrap();
+                let shell = state.common.shell.read();
                 let seat = shell.seats.last_active();
                 state.common.config.dynamic_conf.numlock_mut().last_state =
                     seat.get_keyboard().unwrap().modifier_state().num_lock;
@@ -791,7 +867,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.autotile {
                     state.common.config.cosmic_conf.autotile = new;
 
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let shell_ref = &mut *shell;
                     shell_ref.workspaces.update_autotile(
                         new,
@@ -805,7 +881,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.autotile_behavior {
                     state.common.config.cosmic_conf.autotile_behavior = new;
 
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let shell_ref = &mut *shell;
                     shell_ref.workspaces.update_autotile_behavior(
                         new,
@@ -822,10 +898,19 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
             }
             "descale_xwayland" => {
-                let new = get_config::<bool>(&config, "descale_xwayland");
+                let new = get_config::<XwaylandDescaling>(&config, "descale_xwayland");
                 if new != state.common.config.cosmic_conf.descale_xwayland {
                     state.common.config.cosmic_conf.descale_xwayland = new;
                     state.common.update_xwayland_scale();
+                }
+            }
+            "xwayland_eavesdropping" => {
+                let new = get_config::<XwaylandEavesdropping>(&config, "xwayland_eavesdropping");
+                if new != state.common.config.cosmic_conf.xwayland_eavesdropping {
+                    state.common.config.cosmic_conf.xwayland_eavesdropping = new;
+                    state
+                        .common
+                        .xwayland_reset_eavesdropping(SERIAL_COUNTER.next_serial());
                 }
             }
             "focus_follows_cursor" => {
@@ -850,6 +935,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<u32>(&config, "edge_snap_threshold");
                 if new != state.common.config.cosmic_conf.edge_snap_threshold {
                     state.common.config.cosmic_conf.edge_snap_threshold = new;
+                }
+            }
+            "accessibility_zoom" => {
+                let new = get_config::<ZoomConfig>(&config, "accessibility_zoom");
+                if new != state.common.config.cosmic_conf.accessibility_zoom {
+                    state.common.config.cosmic_conf.accessibility_zoom = new;
+                    state.common.update_config();
                 }
             }
             _ => {}

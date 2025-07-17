@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use calloop::timer::{TimeoutAction, Timer};
 use smithay::{
     reexports::{
         calloop::{generic::Generic, EventLoop, Interest, Mode, PostAction},
@@ -9,12 +10,23 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
-use state::State;
-use std::{env, ffi::OsString, os::unix::process::CommandExt, process, sync::Arc};
+use state::{LastRefresh, State};
+use std::{
+    env,
+    ffi::OsString,
+    os::unix::process::CommandExt,
+    process,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{error, info, warn};
 use wayland::protocols::overlap_notify::OverlapNotifyState;
 
 use crate::wayland::handlers::compositor::client_compositor_state;
+
+use clap_lex::RawArgs;
+
+use std::error::Error;
 
 pub mod backend;
 pub mod config;
@@ -87,14 +99,37 @@ impl State {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
+    let raw_args = RawArgs::from_args();
+    let mut cursor = raw_args.cursor();
+    let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
+
+    // Parse the arguments
+    while let Some(arg) = raw_args.next_os(&mut cursor) {
+        match arg.to_str() {
+            Some("--help") | Some("-h") => {
+                print_help(env!("CARGO_PKG_VERSION"), git_hash);
+                return Ok(());
+            }
+            Some("--version") | Some("-V") => {
+                println!(
+                    "cosmic-comp {} (git commit {})",
+                    env!("CARGO_PKG_VERSION"),
+                    git_hash
+                );
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     // setup logger
     logger::init_logger()?;
     info!("Cosmic starting up!");
 
-    #[cfg(feature = "profile-with-tracy")]
-    profiling::tracy_client::Client::start();
     profiling::register_thread!("Main Thread");
+    #[cfg(feature = "profile-with-tracy")]
+    tracy_client::Client::start();
 
     utils::rlimit::increase_nofile_limit();
 
@@ -127,20 +162,18 @@ fn main() -> Result<()> {
         }
 
         // trigger routines
-        let clients = state.common.shell.write().unwrap().update_animations();
+        let clients = state.common.shell.write().update_animations();
         {
             let dh = state.common.display_handle.clone();
             for client in clients.values() {
                 client_compositor_state(&client).blocker_cleared(state, &dh);
             }
         }
-        state.common.refresh();
-        state::Common::refresh_focus(state);
-        OverlapNotifyState::refresh(state);
-        state.common.update_x11_stacking_order();
+
+        refresh(state);
 
         {
-            let shell = state.common.shell.read().unwrap();
+            let shell = state.common.shell.read();
             if shell.animations_going() {
                 for output in shell.outputs().cloned().collect::<Vec<_>>().into_iter() {
                     state.backend.schedule_render(&output);
@@ -187,6 +220,21 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn print_help(version: &str, git_rev: &str) {
+    println!(
+        r#"cosmic-comp {version} (git commit {git_rev})
+System76 <info@system76.com>
+	    
+Designed for the COSMIC™ desktop environment, cosmic-comp is a Wayland Compositor.
+	    
+Project home page: https://github.com/pop-os/cosmic-comp
+	    
+Options:
+  -h, --help     Show this message
+  -v, --version  Show the version of cosmic-comp"#
+    );
+}
+
 fn init_wayland_display(
     event_loop: &mut EventLoop<state::State>,
 ) -> Result<(DisplayHandle, OsString)> {
@@ -229,4 +277,32 @@ fn init_wayland_display(
         .with_context(|| "Failed to init the wayland event source.")?;
 
     Ok((handle, socket_name))
+}
+
+fn refresh(state: &mut State) {
+    if matches!(state.last_refresh, LastRefresh::Scheduled(_)) {
+        return;
+    }
+
+    if matches!(state.last_refresh, LastRefresh::At(instant) if Instant::now().duration_since(instant) < Duration::from_millis(150))
+    {
+        if let Ok(token) = state.common.event_loop_handle.insert_source(
+            Timer::from_duration(Duration::from_millis(150)),
+            |_, _, state| {
+                state.last_refresh = LastRefresh::None;
+                TimeoutAction::Drop
+            },
+        ) {
+            state.last_refresh = LastRefresh::Scheduled(token);
+            return;
+        } else {
+            warn!("Failed to schedule refresh");
+        }
+    }
+
+    state.common.refresh();
+    state::Common::refresh_focus(state);
+    OverlapNotifyState::refresh(state);
+    state.common.update_x11_stacking_order();
+    state.last_refresh = LastRefresh::At(Instant::now());
 }

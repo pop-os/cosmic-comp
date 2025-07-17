@@ -5,7 +5,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     ops::ControlFlow,
-    sync::{Arc, RwLock, Weak},
+    sync::{Arc, Weak},
     time::Instant,
 };
 
@@ -13,11 +13,13 @@ use std::{
 use crate::debug::fps_ui;
 use crate::{
     backend::{kms::render::gles::GbmGlowBackend, render::element::DamageElement},
+    config::ScreenFilter,
     shell::{
         element::CosmicMappedKey,
-        focus::{render_input_order, target::WindowGroup, Stage},
+        focus::{render_input_order, target::WindowGroup, FocusTarget, Stage},
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
         layout::tiling::ANIMATION_DURATION,
+        zoom::ZoomState,
         CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
         WorkspaceRenderElement,
     },
@@ -35,35 +37,37 @@ use cosmic::Theme;
 use element::FromGlesError;
 use smithay::{
     backend::{
-        allocator::dmabuf::Dmabuf,
+        allocator::{dmabuf::Dmabuf, Fourcc},
         drm::{DrmDeviceFd, DrmNode},
         renderer::{
-            buffer_dimensions,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-                utils::{CropRenderElement, Relocate, RelocateRenderElement},
+                texture::{TextureRenderBuffer, TextureRenderElement},
+                utils::{
+                    constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior,
+                    CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
+                },
                 AsRenderElements, Element, Id, Kind, RenderElement,
             },
             gles::{
-                element::PixelShaderElement, GlesError, GlesPixelProgram, GlesRenderer, Uniform,
+                element::{PixelShaderElement, TextureShaderElement},
+                GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
                 UniformName, UniformType,
             },
             glow::GlowRenderer,
             multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
             sync::SyncPoint,
-            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
             TextureFilter,
         },
     },
     input::Seat,
-    output::{Output, OutputNoMode},
-    utils::{IsAlive, Logical, Monotonic, Point, Rectangle, Scale, Time, Transform},
-    wayland::{
-        dmabuf::get_dmabuf,
-        session_lock::LockSurface,
-        shm::{shm_format_to_fourcc, with_buffer_contents},
+    output::{Output, OutputModeSource, OutputNoMode},
+    utils::{
+        IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
     },
+    wayland::{dmabuf::get_dmabuf, session_lock::LockSurface},
 };
 
 #[cfg(feature = "debug")]
@@ -79,8 +83,8 @@ use super::kms::Timings;
 
 pub type GlMultiRenderer<'a> =
     MultiRenderer<'a, 'a, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
-pub type GlMultiFrame<'a, 'frame> =
-    MultiFrame<'a, 'a, 'frame, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
+pub type GlMultiFrame<'a, 'frame, 'buffer> =
+    MultiFrame<'a, 'a, 'frame, 'buffer, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
 pub type GlMultiError = MultiError<GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
 
 pub enum RendererRef<'a> {
@@ -109,6 +113,7 @@ impl<'a> AsMut<GlowRenderer> for RendererRef<'a> {
 pub static CLEAR_COLOR: Color32F = Color32F::new(0.153, 0.161, 0.165, 1.0);
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
+pub static POSTPROCESS_SHADER: &str = include_str!("./shaders/offscreen.frag");
 pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
 pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
 
@@ -189,7 +194,6 @@ impl IndicatorShader {
         key: impl Into<Key>,
         mut element_geo: Rectangle<i32, Local>,
         thickness: u8,
-        scale: f64,
         alpha: f32,
         active_window_hint: [f32; 3],
     ) -> PixelShaderElement {
@@ -204,7 +208,6 @@ impl IndicatorShader {
             thickness,
             thickness * 2,
             alpha,
-            scale,
             active_window_hint,
         )
     }
@@ -216,12 +219,8 @@ impl IndicatorShader {
         thickness: u8,
         radius: u8,
         alpha: f32,
-        scale: f64,
         color: [f32; 3],
     ) -> PixelShaderElement {
-        let thickness = (thickness as f64 * scale).round() as u8;
-        let radius = (radius as f64 * scale).round() as u8;
-
         let settings = IndicatorSettings {
             thickness,
             radius,
@@ -356,11 +355,14 @@ impl BackdropShader {
     }
 }
 
+pub struct PostprocessShader(pub GlesTexProgram);
+
 pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     {
         let egl_context = renderer.egl_context();
         if egl_context.user_data().get::<IndicatorShader>().is_some()
             && egl_context.user_data().get::<BackdropShader>().is_some()
+            && egl_context.user_data().get::<PostprocessShader>().is_some()
         {
             return Ok(());
         }
@@ -381,6 +383,13 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("radius", UniformType::_1f),
         ],
     )?;
+    let postprocess_shader = renderer.compile_custom_texture_shader(
+        POSTPROCESS_SHADER,
+        &[
+            UniformName::new("invert", UniformType::_1f),
+            UniformName::new("color_mode", UniformType::_1f),
+        ],
+    )?;
 
     let egl_context = renderer.egl_context();
     egl_context
@@ -389,6 +398,9 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     egl_context
         .user_data()
         .insert_if_missing(|| BackdropShader(rectangle_shader));
+    egl_context
+        .user_data()
+        .insert_if_missing(|| PostprocessShader(postprocess_shader));
 
     Ok(())
 }
@@ -404,6 +416,7 @@ pub enum CursorMode {
 pub fn cursor_elements<'a, 'frame, R>(
     renderer: &mut R,
     seats: impl Iterator<Item = &'a Seat<State>>,
+    zoom_state: Option<&ZoomState>,
     theme: &Theme,
     now: Time<Monotonic>,
     output: &Output,
@@ -412,10 +425,18 @@ pub fn cursor_elements<'a, 'frame, R>(
 ) -> Vec<CosmicElement<R>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     let scale = output.current_scale().fractional_scale();
+    let (focal_point, zoom_scale) = zoom_state
+        .map(|state| {
+            (
+                state.animating_focal_point(Some(&output)).to_local(&output),
+                state.animating_level(&output),
+            )
+        })
+        .unwrap_or_else(|| ((0., 0.).into(), 1.));
     let mut elements = Vec::new();
 
     for seat in seats {
@@ -432,15 +453,23 @@ where
                     &seat,
                     location,
                     scale.into(),
+                    zoom_scale,
                     now,
                     mode != CursorMode::NotDefault,
                 )
                 .into_iter()
                 .map(|(elem, hotspot)| {
-                    CosmicElement::Cursor(RelocateRenderElement::from_element(
-                        elem,
-                        Point::from((-hotspot.x, -hotspot.y)),
-                        Relocate::Relative,
+                    CosmicElement::Cursor(RescaleRenderElement::from_element(
+                        RelocateRenderElement::from_element(
+                            elem,
+                            Point::from((-hotspot.x, -hotspot.y)),
+                            Relocate::Relative,
+                        ),
+                        focal_point
+                            .as_logical()
+                            .to_physical(output.current_scale().fractional_scale())
+                            .to_i32_round(),
+                        zoom_scale,
                     ))
                 }),
             );
@@ -469,21 +498,48 @@ where
             .lock()
             .unwrap()
             .as_ref()
-            .map(|state| state.render::<CosmicElement<R>, R>(renderer, output, theme))
+            .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output, theme))
         {
-            elements.extend(grab_elements);
+            elements.extend(grab_elements.into_iter().map(|elem| {
+                CosmicElement::MoveGrab(RescaleRenderElement::from_element(
+                    elem,
+                    focal_point
+                        .as_logical()
+                        .to_physical(output.current_scale().fractional_scale())
+                        .to_i32_round(),
+                    zoom_scale,
+                ))
+            }));
         }
 
-        if let Some(grab_elements) = seat
+        if let Some((grab_elements, should_scale)) = seat
             .user_data()
             .get::<SeatMenuGrabState>()
             .unwrap()
             .lock()
             .unwrap()
             .as_ref()
-            .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output))
+            .map(|state| {
+                (
+                    state.render::<CosmicMappedRenderElement<R>, R>(renderer, output),
+                    !state.is_in_screen_space(),
+                )
+            })
         {
-            elements.extend(grab_elements.into_iter().map(Into::into));
+            elements.extend(grab_elements.into_iter().map(|elem| {
+                CosmicElement::MoveGrab(RescaleRenderElement::from_element(
+                    elem,
+                    if should_scale {
+                        focal_point
+                            .as_logical()
+                            .to_physical(output.current_scale().fractional_scale())
+                            .to_i32_round()
+                    } else {
+                        Point::from((0, 0))
+                    },
+                    if should_scale { zoom_scale } else { 1.0 },
+                ))
+            }));
         }
     }
 
@@ -503,7 +559,7 @@ pub enum ElementFilter {
 pub fn output_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
-    shell: &Arc<RwLock<Shell>>,
+    shell: &Arc<parking_lot::RwLock<Shell>>,
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
@@ -511,20 +567,21 @@ pub fn output_elements<R>(
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let shell_guard = shell.read().unwrap();
     #[cfg(feature = "debug")]
     let mut debug_elements = {
         let output_geo = output.geometry();
+        let shell_guard = shell.read();
         let seats = shell_guard.seats.iter().cloned().collect::<Vec<_>>();
+        let debug_active = shell_guard.debug_active;
+        std::mem::drop(shell_guard);
         let scale = output.current_scale().fractional_scale();
 
         if let Some((state, timings)) = _fps {
-            let debug_active = shell_guard.debug_active;
             vec![fps_ui(
                 _gpu,
                 debug_active,
@@ -545,6 +602,7 @@ where
         }
     };
 
+    let shell_guard = shell.read();
     let Some((previous_workspace, workspace)) = shell_guard.workspaces.active(output) else {
         #[cfg(not(feature = "debug"))]
         return Ok(Vec::new());
@@ -565,12 +623,14 @@ where
     } else {
         ElementFilter::All
     };
+    let zoom_state = shell.read().zoom_state().cloned();
 
     #[allow(unused_mut)]
     let workspace_elements = workspace_elements(
         _gpu,
         renderer,
         shell,
+        zoom_state.as_ref(),
         now,
         output,
         previous_workspace,
@@ -592,39 +652,39 @@ where
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
-    shell: &Arc<RwLock<Shell>>,
+    shell: &Arc<parking_lot::RwLock<Shell>>,
+    zoom_level: Option<&ZoomState>,
     now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
-) -> Result<Vec<CosmicElement<R>>, RenderError<<R as Renderer>::Error>>
+) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
     let mut elements = Vec::new();
 
-    let theme = shell.read().unwrap().theme().clone();
-    let seats = shell
-        .read()
-        .unwrap()
-        .seats
-        .iter()
-        .cloned()
-        .collect::<Vec<_>>();
+    let shell_ref = shell.read();
+    let seats = shell_ref.seats.iter().cloned().collect::<Vec<_>>();
     if seats.is_empty() {
         return Ok(Vec::new());
     }
+    let theme = shell_ref.theme().clone();
     let scale = output.current_scale().fractional_scale();
+    // we don't want to hold a shell lock across `cursor_elements`,
+    // that is prone to deadlock with the main-thread on some grabs.
+    std::mem::drop(shell_ref);
 
     elements.extend(cursor_elements(
         renderer,
         seats.iter(),
+        zoom_level.clone(),
         &theme,
         now,
         output,
@@ -632,8 +692,7 @@ where
         element_filter == ElementFilter::ExcludeWorkspaceOverview,
     ));
 
-    let shell = shell.read().unwrap();
-
+    let shell = shell.read();
     let overview = shell.overview_mode();
     let (resize_mode, resize_indicator) = shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
@@ -680,11 +739,31 @@ where
         .size
         .as_logical()
         .to_physical_precise_round(scale);
+    let (focal_point, zoom_scale) = zoom_level
+        .map(|state| {
+            (
+                state.animating_focal_point(Some(&output)).to_local(&output),
+                state.animating_level(&output),
+            )
+        })
+        .unwrap_or_else(|| ((0., 0.).into(), 1.));
+
     let crop_to_output = |element: WorkspaceRenderElement<R>| {
-        CropRenderElement::from_element(element.into(), scale, Rectangle::from_size(output_size))
+        CropRenderElement::from_element(
+            RescaleRenderElement::from_element(
+                element.into(),
+                focal_point
+                    .as_logical()
+                    .to_physical(output.current_scale().fractional_scale())
+                    .to_i32_round(),
+                zoom_scale,
+            ),
+            scale,
+            Rectangle::from_size(output_size),
+        )
     };
 
-    render_input_order(
+    render_input_order::<()>(
         &*shell,
         output,
         previous,
@@ -692,6 +771,9 @@ where
         element_filter,
         |stage| {
             match stage {
+                Stage::ZoomUI => {
+                    elements.extend(ZoomState::render(renderer, output));
+                }
                 Stage::SessionLock(lock_surface) => {
                     elements.extend(
                         session_lock_elements(renderer, output, lock_surface)
@@ -815,7 +897,12 @@ where
                         layout
                             .render(
                                 renderer,
-                                current_focus.as_ref().and_then(|stack| stack.last()),
+                                current_focus.as_ref().and_then(|stack| {
+                                    stack.last().and_then(|t| match t {
+                                        FocusTarget::Window(w) => Some(w),
+                                        _ => None,
+                                    })
+                                }),
                                 resize_indicator.clone(),
                                 active_hint,
                                 alpha,
@@ -831,7 +918,8 @@ where
                     elements.extend(
                         match workspace.render_popups(
                             renderer,
-                            (!move_active && is_active_space).then_some(last_active_seat),
+                            last_active_seat,
+                            !move_active && is_active_space,
                             overview.clone(),
                             &theme.cosmic(),
                         ) {
@@ -859,7 +947,8 @@ where
                     elements.extend(
                         match workspace.render(
                             renderer,
-                            (!move_active && is_active_space).then_some(last_active_seat),
+                            last_active_seat,
+                            !move_active && is_active_space,
                             overview.clone(),
                             resize_indicator.clone(),
                             active_hint,
@@ -901,7 +990,7 @@ fn session_lock_elements<R>(
 ) -> Vec<WaylandSurfaceRenderElement<R>>
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: Clone + 'static,
+    R::TextureId: Clone + 'static,
 {
     if let Some(surface) = lock_surface {
         let scale = Scale::from(output.current_scale().fractional_scale());
@@ -918,36 +1007,164 @@ where
     }
 }
 
+// Used for mirroring and postprocessing
+#[derive(Debug)]
+pub struct PostprocessState {
+    pub texture: TextureRenderBuffer<GlesTexture>,
+    pub damage_tracker: OutputDamageTracker,
+    pub cursor_texture: Option<TextureRenderBuffer<GlesTexture>>,
+    pub cursor_damage_tracker: Option<OutputDamageTracker>,
+    pub output_config: PostprocessOutputConfig,
+}
+
+impl PostprocessState {
+    pub fn new_with_renderer<R: AsGlowRenderer + Offscreen<GlesTexture>>(
+        renderer: &mut R,
+        format: Fourcc,
+        output_config: PostprocessOutputConfig,
+    ) -> Result<Self, R::Error> {
+        let size = output_config.size;
+        let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
+        let opaque_regions = vec![Rectangle::from_size(buffer_size)];
+
+        let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
+        let texture_buffer = TextureRenderBuffer::from_texture(
+            renderer.glow_renderer(),
+            texture,
+            1,
+            Transform::Normal,
+            Some(opaque_regions),
+        );
+
+        // Don't use `from_output` to avoid applying output transform
+        let damage_tracker =
+            OutputDamageTracker::new(size, output_config.fractional_scale, Transform::Normal);
+
+        Ok(PostprocessState {
+            texture: texture_buffer,
+            damage_tracker,
+            cursor_texture: None,
+            cursor_damage_tracker: None,
+            output_config,
+        })
+    }
+
+    pub fn track_cursor<R: AsGlowRenderer + Offscreen<GlesTexture>>(
+        &mut self,
+        renderer: &mut R,
+        format: Fourcc,
+        size: Size<i32, Physical>,
+        scale: Scale<f64>,
+    ) -> Result<(), R::Error> {
+        let buffer_size = size.to_logical(1).to_buffer(1, Transform::Normal);
+
+        if let (Some(tex), Some(tracker)) = (
+            self.cursor_texture.as_ref(),
+            self.cursor_damage_tracker.as_ref(),
+        ) {
+            if tex.format().is_some_and(|f| f == format)
+                && tracker.mode()
+                    == &(OutputModeSource::Static {
+                        size,
+                        scale,
+                        transform: Transform::Normal,
+                    })
+            {
+                return Ok(());
+            }
+        }
+
+        let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
+
+        let texture_buffer = TextureRenderBuffer::from_texture(
+            renderer.glow_renderer(),
+            texture,
+            1,
+            Transform::Normal,
+            None,
+        );
+
+        let damage_tracker = OutputDamageTracker::new(size, scale, Transform::Normal);
+
+        self.cursor_texture = Some(texture_buffer);
+        self.cursor_damage_tracker = Some(damage_tracker);
+
+        Ok(())
+    }
+
+    pub fn remove_cursor(&mut self) {
+        self.cursor_texture.take();
+        self.cursor_damage_tracker.take();
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct PostprocessOutputConfig {
+    pub size: Size<i32, Physical>,
+    pub fractional_scale: f64,
+}
+
+impl PostprocessOutputConfig {
+    pub fn for_output_untransformed(output: &Output) -> Self {
+        Self {
+            // Apply inverse of output transform to mode size to get correct size
+            // for an untransformed render.
+            size: output.current_transform().invert().transform_size(
+                output
+                    .current_mode()
+                    .map(|mode| mode.size)
+                    .unwrap_or_default(),
+            ),
+            fractional_scale: output.current_scale().fractional_scale(),
+        }
+    }
+
+    pub fn for_output(output: &Output) -> Self {
+        Self {
+            size: output
+                .current_mode()
+                .map(|mode| mode.size)
+                .unwrap_or_default(),
+            fractional_scale: output.current_scale().fractional_scale(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ScreenFilterStorage {
+    pub filter: ScreenFilter,
+    pub state: Option<PostprocessState>,
+}
+
 #[profiling::function]
-pub fn render_output<'d, R, Target, OffTarget>(
+pub fn render_output<'d, R>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
-    target: Target,
+    target: &mut R::Framebuffer<'_>,
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
-    shell: &Arc<RwLock<Shell>>,
+    shell: &Arc<parking_lot::RwLock<Shell>>,
     now: Time<Monotonic>,
     output: &Output,
     cursor_mode: CursorMode,
-) -> Result<RenderOutputResult<'d>, RenderError<<R as Renderer>::Error>>
+    screen_filter: &'d mut ScreenFilterStorage,
+) -> Result<RenderOutputResult<'d>, RenderError<R::Error>>
 where
     R: Renderer
         + ImportAll
         + ImportMem
         + ExportMem
         + Bind<Dmabuf>
-        + Bind<Target>
-        + Offscreen<OffTarget>
-        + Blit<Target>
+        + Offscreen<GlesTexture>
+        + Blit
         + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
-    Target: Clone,
 {
-    let shell_ref = shell.read().unwrap();
+    let shell_ref = shell.read();
     let (previous_workspace, workspace) = shell_ref
         .workspaces
         .active(output)
@@ -957,6 +1174,7 @@ where
         .zip(previous_idx)
         .map(|((w, start), idx)| (w.handle, idx, start));
     let workspace = (workspace.handle, idx);
+    let zoom_state = shell_ref.zoom_state().cloned();
     std::mem::drop(shell_ref);
 
     let element_filter = if workspace_overview_is_open(output) {
@@ -965,31 +1183,159 @@ where
         ElementFilter::All
     };
 
-    let result = render_workspace(
-        gpu,
-        renderer,
-        target.clone(),
-        damage_tracker,
-        age,
-        None,
-        shell,
-        now,
-        output,
-        previous_workspace,
-        workspace,
-        cursor_mode,
-        element_filter,
-    );
+    let mut postprocess_texture = None;
+    let result = if !screen_filter.filter.is_noop() {
+        if screen_filter.state.as_ref().is_none_or(|state| {
+            state.output_config != PostprocessOutputConfig::for_output_untransformed(output)
+        }) {
+            screen_filter.state = Some(
+                PostprocessState::new_with_renderer(
+                    renderer,
+                    target.format().unwrap_or(Fourcc::Abgr8888),
+                    PostprocessOutputConfig::for_output_untransformed(output),
+                )
+                .map_err(RenderError::Rendering)?,
+            );
+        }
+
+        let state = screen_filter.state.as_mut().unwrap();
+        let mut result = Err(RenderError::OutputNoMode(OutputNoMode));
+        state
+            .texture
+            .render()
+            .draw::<_, RenderError<R::Error>>(|tex| {
+                let mut target = renderer.bind(tex).map_err(RenderError::Rendering)?;
+                result = render_workspace(
+                    gpu,
+                    renderer,
+                    &mut target,
+                    &mut state.damage_tracker,
+                    1,
+                    None,
+                    shell,
+                    zoom_state.as_ref(),
+                    now,
+                    output,
+                    previous_workspace,
+                    workspace,
+                    cursor_mode,
+                    element_filter,
+                );
+                std::mem::drop(target);
+                postprocess_texture = Some(tex.clone());
+
+                Ok(if let Ok((res, _)) = result.as_ref() {
+                    renderer.wait(&res.sync).map_err(RenderError::Rendering)?;
+                    let transform = output.current_transform();
+                    let area = tex.size().to_logical(1, transform);
+
+                    res.damage
+                        .cloned()
+                        .map(|v| {
+                            v.into_iter()
+                                .map(|r| r.to_logical(1).to_buffer(1, transform, &area))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                })
+            })?;
+
+        if result.is_ok() {
+            let texture_elem = TextureRenderElement::from_texture_render_buffer(
+                (0., 0.),
+                &state.texture,
+                Some(1.0),
+                None,
+                None,
+                Kind::Unspecified,
+            );
+
+            let postprocess_texture_shader = renderer
+                .glow_renderer_mut()
+                .egl_context()
+                .user_data()
+                .get::<PostprocessShader>()
+                .expect("OffscreenShader should be available through `init_shaders`");
+            let texture_geometry =
+                texture_elem.geometry(output.current_scale().fractional_scale().into());
+            let elements = {
+                let texture_elem = TextureShaderElement::new(
+                    texture_elem,
+                    postprocess_texture_shader.0.clone(),
+                    vec![
+                        Uniform::new(
+                            "invert",
+                            if screen_filter.filter.inverted {
+                                1.
+                            } else {
+                                0.
+                            },
+                        ),
+                        Uniform::new(
+                            "color_mode",
+                            screen_filter
+                                .filter
+                                .color_filter
+                                .map(|val| val as u8 as f32)
+                                .unwrap_or(0.),
+                        ),
+                    ],
+                );
+                constrain_render_elements(
+                    std::iter::once(texture_elem),
+                    (0, 0),
+                    Rectangle::from_size(
+                        output
+                            .geometry()
+                            .size
+                            .as_logical()
+                            .to_f64()
+                            .to_physical(output.current_scale().fractional_scale())
+                            .to_i32_round(),
+                    ),
+                    texture_geometry,
+                    ConstrainScaleBehavior::Fit,
+                    ConstrainAlign::CENTER,
+                    1.0,
+                )
+                .map(CosmicElement::Postprocess)
+                .collect::<Vec<_>>()
+            };
+
+            damage_tracker.render_output(renderer, target, age, &elements, CLEAR_COLOR)?;
+        }
+
+        result
+    } else {
+        render_workspace(
+            gpu,
+            renderer,
+            target,
+            damage_tracker,
+            age,
+            None,
+            shell,
+            zoom_state.as_ref(),
+            now,
+            output,
+            previous_workspace,
+            workspace,
+            cursor_mode,
+            element_filter,
+        )
+    };
 
     match result {
         Ok((res, mut elements)) => {
             for (session, frame) in output.take_pending_frames() {
-                if let Some((frame, damage)) = render_session(
+                if let Some((frame, damage)) = render_session::<_, _, GlesTexture>(
                     renderer,
                     &session.user_data().get::<SessionData>().unwrap(),
                     frame,
                     output.current_transform(),
-                    |buffer, renderer, dt, age, additional_damage| {
+                    |buffer, renderer, offscreen, dt, age, additional_damage| {
                         let old_len = if !additional_damage.is_empty() {
                             let area = output
                                 .current_mode()
@@ -1032,30 +1378,46 @@ where
                         }
 
                         if let (Some(ref damage), _) = &res {
-                            if let Ok(dmabuf) = get_dmabuf(buffer) {
-                                renderer
-                                    .bind(dmabuf.clone())
+                            let blit_to_buffer =
+                                |renderer: &mut R, blit_from: &mut R::Framebuffer<'_>| {
+                                    if let Ok(dmabuf) = get_dmabuf(buffer) {
+                                        let mut dmabuf_clone = dmabuf.clone();
+                                        let mut fb = renderer.bind(&mut dmabuf_clone)?;
+                                        for rect in damage.iter() {
+                                            renderer.blit(
+                                                blit_from,
+                                                &mut fb,
+                                                *rect,
+                                                *rect,
+                                                TextureFilter::Nearest,
+                                            )?;
+                                        }
+                                    } else {
+                                        let fb = offscreen
+                                            .expect("shm buffers should have offscreen target");
+                                        for rect in damage.iter() {
+                                            renderer.blit(
+                                                blit_from,
+                                                fb,
+                                                *rect,
+                                                *rect,
+                                                TextureFilter::Nearest,
+                                            )?;
+                                        }
+                                    }
+
+                                    Result::<_, R::Error>::Ok(())
+                                };
+
+                            // we would want to just assign a different framebuffer to a variable, depending on the code-path,
+                            // but then rustc tries to equate the lifetime of target with the lifetime of our temporary fb...
+                            // So instead of duplicating all the code, we use a closure..
+                            if let Some(tex) = postprocess_texture.as_mut() {
+                                let mut fb = renderer.bind(tex).map_err(RenderError::Rendering)?;
+                                blit_to_buffer(renderer, &mut fb)
                                     .map_err(RenderError::Rendering)?;
                             } else {
-                                let size = buffer_dimensions(buffer).unwrap();
-                                let format = with_buffer_contents(buffer, |_, _, data| {
-                                    shm_format_to_fourcc(data.format)
-                                })
-                                .map_err(|_| OutputNoMode)? // eh, we have to do some error
-                                .expect(
-                                    "We should be able to convert all hardcoded shm screencopy formats",
-                                );
-                                let render_buffer = renderer
-                                    .create_buffer(format, size)
-                                    .map_err(RenderError::Rendering)?;
-                                renderer
-                                    .bind(render_buffer)
-                                    .map_err(RenderError::Rendering)?;
-                            }
-                            for rect in damage.iter() {
-                                renderer
-                                    .blit_from(target.clone(), *rect, *rect, TextureFilter::Nearest)
-                                    .map_err(RenderError::Rendering)?;
+                                blit_to_buffer(renderer, target).map_err(RenderError::Rendering)?;
                             }
                         }
 
@@ -1077,32 +1439,26 @@ where
 }
 
 #[profiling::function]
-pub fn render_workspace<'d, R, Target, OffTarget>(
+pub fn render_workspace<'d, R>(
     gpu: Option<&DrmNode>,
     renderer: &mut R,
-    target: Target,
+    target: &mut R::Framebuffer<'_>,
     damage_tracker: &'d mut OutputDamageTracker,
     age: usize,
     additional_damage: Option<Vec<Rectangle<i32, Logical>>>,
-    shell: &Arc<RwLock<Shell>>,
+    shell: &Arc<parking_lot::RwLock<Shell>>,
+    zoom_level: Option<&ZoomState>,
     now: Time<Monotonic>,
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
     cursor_mode: CursorMode,
     element_filter: ElementFilter,
-) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<<R as Renderer>::Error>>
+) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R::Error>>
 where
-    R: Renderer
-        + ImportAll
-        + ImportMem
-        + ExportMem
-        + Bind<Dmabuf>
-        + Bind<Target>
-        + Offscreen<OffTarget>
-        + AsGlowRenderer,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + AsGlowRenderer,
+    R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
@@ -1111,6 +1467,7 @@ where
         gpu,
         renderer,
         shell,
+        zoom_level,
         now,
         output,
         previous,
@@ -1130,9 +1487,9 @@ where
         );
     }
 
-    renderer.bind(target).map_err(RenderError::Rendering)?;
     let res = damage_tracker.render_output(
         renderer,
+        target,
         age,
         &elements,
         CLEAR_COLOR, // TODO use a theme neutral color

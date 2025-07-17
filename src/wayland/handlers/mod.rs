@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+pub mod a11y;
 pub mod alpha_modifier;
 pub mod atspi;
 pub mod buffer;
@@ -15,7 +16,7 @@ pub mod foreign_toplevel_list;
 pub mod fractional_scale;
 pub mod idle_inhibit;
 pub mod idle_notify;
-pub mod image_source;
+pub mod image_capture_source;
 pub mod input_method;
 pub mod keyboard_shortcuts_inhibit;
 pub mod layer_shell;

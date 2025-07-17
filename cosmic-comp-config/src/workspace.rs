@@ -2,14 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
-fn default_workspace_layout() -> WorkspaceLayout {
-    WorkspaceLayout::Vertical
-}
+use crate::output::EdidProduct;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub workspace_mode: WorkspaceMode,
-    #[serde(default = "default_workspace_layout")]
+    #[serde(default)]
     pub workspace_layout: WorkspaceLayout,
 }
 
@@ -28,8 +26,22 @@ pub enum WorkspaceMode {
     Global,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WorkspaceLayout {
+    #[default]
     Vertical,
     Horizontal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputMatch {
+    pub name: String,
+    pub edid: Option<EdidProduct>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinnedWorkspace {
+    pub output: OutputMatch,
+    pub tiling_enabled: bool,
+    // TODO: name, id
 }

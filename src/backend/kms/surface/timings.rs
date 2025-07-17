@@ -1,15 +1,19 @@
 use std::{collections::VecDeque, num::NonZeroU64, time::Duration};
 
-use smithay::utils::{Clock, Monotonic, Time};
-use tracing::error;
+use smithay::{
+    backend::drm::DrmNode,
+    utils::{Clock, Monotonic, Time},
+};
+use tracing::{debug, error};
 
-const FRAME_TIME_BUFFER: Duration = Duration::from_millis(1);
-const FRAME_TIME_WINDOW: usize = 3;
+const BASE_SAFETY_MARGIN: Duration = Duration::from_millis(3);
+const SAMPLE_TIME_WINDOW: usize = 5;
 
 pub struct Timings {
     refresh_interval_ns: Option<NonZeroU64>,
     min_refresh_interval_ns: Option<NonZeroU64>,
     vrr: bool,
+    vendor: Option<u32>,
 
     pub pending_frame: Option<PendingFrame>,
     pub previous_frames: VecDeque<Frame>,
@@ -37,18 +41,23 @@ impl Frame {
         self.render_duration_elements + self.render_duration_draw
     }
 
+    fn submit_time(&self) -> Duration {
+        Time::elapsed(&self.render_start, self.presentation_submitted)
+    }
+
     fn frame_time(&self) -> Duration {
         Time::elapsed(&self.render_start, self.presentation_presented)
     }
 }
 
 impl Timings {
-    const WINDOW_SIZE: usize = 360;
+    const CLEANUP: usize = 360;
 
     pub fn new(
         refresh_interval: Option<Duration>,
         min_interval: Option<Duration>,
         vrr: bool,
+        node: DrmNode,
     ) -> Self {
         let refresh_interval_ns = if let Some(interval) = &refresh_interval {
             assert_eq!(interval.as_secs(), 0);
@@ -64,10 +73,20 @@ impl Timings {
             None
         };
 
+        let vendor = if let Ok(vendor) = std::fs::read_to_string(format!(
+            "/sys/class/drm/renderD{}/device/vendor",
+            node.minor()
+        )) {
+            u32::from_str_radix(&vendor.trim()[2..], 16).ok()
+        } else {
+            None
+        };
+
         Self {
             refresh_interval_ns,
             min_refresh_interval_ns,
             vrr,
+            vendor,
 
             pending_frame: None,
             previous_frames: VecDeque::new(),
@@ -138,15 +157,23 @@ impl Timings {
 
     pub fn presented(&mut self, value: Time<Monotonic>) {
         if let Some(frame) = self.pending_frame.take() {
-            self.previous_frames.push_back(Frame {
+            let new_frame = Frame {
                 render_start: frame.render_start,
                 render_duration_elements: frame.render_duration_elements.unwrap_or_default(),
                 render_duration_draw: frame.render_duration_draw.unwrap_or_default(),
                 presentation_submitted: frame.presentation_submitted.unwrap(),
                 presentation_presented: value,
-            });
-            while self.previous_frames.len() > Self::WINDOW_SIZE {
-                self.previous_frames.pop_front();
+            };
+            if new_frame.render_start > new_frame.presentation_submitted {
+                debug!(
+                    "frame time overflowed: {}",
+                    new_frame.frame_time().as_millis()
+                );
+            }
+            self.previous_frames.push_back(new_frame);
+
+            if let Some(overflow) = self.previous_frames.len().checked_sub(Self::CLEANUP * 2) {
+                self.previous_frames = self.previous_frames.split_off(overflow + Self::CLEANUP);
             }
         }
     }
@@ -192,14 +219,34 @@ impl Timings {
     }
 
     pub fn avg_rendertime(&self) -> Duration {
-        if self.previous_frames.is_empty() {
-            return Duration::ZERO;
-        }
-        self.previous_frames
+        let Some(sum_rendertime) = self
+            .previous_frames
             .iter()
             .map(|f| f.render_time())
-            .sum::<Duration>()
-            / (self.previous_frames.len() as u32)
+            .try_fold(Duration::ZERO, |acc, x| acc.checked_add(x))
+        else {
+            return Duration::ZERO;
+        };
+
+        sum_rendertime
+            .checked_div(self.previous_frames.len() as u32)
+            .unwrap_or(Duration::ZERO)
+    }
+
+    pub fn avg_submittime(&self, window: usize) -> Option<Duration> {
+        if self.previous_frames.len() < window || window == 0 {
+            return None;
+        }
+
+        Some(
+            self.previous_frames
+                .iter()
+                .rev()
+                .take(window)
+                .map(|f| f.submit_time())
+                .try_fold(Duration::ZERO, |acc, x| acc.checked_add(x))?
+                / (window.min(self.previous_frames.len()) as u32),
+        )
     }
 
     pub fn avg_frametime(&self, window: usize) -> Option<Duration> {
@@ -213,7 +260,7 @@ impl Timings {
                 .rev()
                 .take(window)
                 .map(|f| f.frame_time())
-                .sum::<Duration>()
+                .try_fold(Duration::ZERO, |acc, x| acc.checked_add(x))?
                 / (window.min(self.previous_frames.len()) as u32),
         )
     }
@@ -226,9 +273,12 @@ impl Timings {
             (Some(Frame { render_start, .. }), Some(end_frame)) => {
                 Time::elapsed(render_start, end_frame.render_start.clone()) + end_frame.frame_time()
             }
-            _ => Duration::ZERO,
+            _ => {
+                return 0.0;
+            }
         }
         .as_secs_f64();
+
         1.0 / (secs / self.previous_frames.len() as f64)
     }
 
@@ -278,9 +328,9 @@ impl Timings {
         }
     }
 
-    pub fn past_min_presentation_time(&self, clock: &Clock<Monotonic>) -> bool {
+    pub fn past_min_render_time(&self, clock: &Clock<Monotonic>) -> bool {
         let now: Duration = clock.now().into();
-        let Some(refresh_interval_ns) = self.min_refresh_interval_ns else {
+        let Some(min_refresh_interval_ns) = self.min_refresh_interval_ns else {
             return true;
         };
         let Some(last_presentation_time): Option<Duration> = self
@@ -291,25 +341,54 @@ impl Timings {
             return true;
         };
 
-        let refresh_interval_ns = refresh_interval_ns.get();
+        let min_refresh_interval_ns = min_refresh_interval_ns.get();
         if now <= last_presentation_time {
             return false;
         }
 
-        let next = last_presentation_time + Duration::from_nanos(refresh_interval_ns);
-        now >= next
+        const MIN_MARGIN: Duration = Duration::from_millis(3);
+        let baseline = if let Some(refresh_interval_ns) = self.refresh_interval_ns {
+            MIN_MARGIN.max(Duration::from_nanos(refresh_interval_ns.get() / 2))
+        } else {
+            MIN_MARGIN
+        };
+
+        let next_presentation_time =
+            last_presentation_time + Duration::from_nanos(min_refresh_interval_ns);
+        let deadline = next_presentation_time.saturating_sub(
+            if let Some(avg_submittime) = self.avg_submittime(SAMPLE_TIME_WINDOW) {
+                avg_submittime
+            } else {
+                baseline
+            } + BASE_SAFETY_MARGIN,
+        );
+
+        now >= deadline
     }
 
     pub fn next_render_time(&self, clock: &Clock<Monotonic>) -> Duration {
+        let Some(refresh_interval) = self.refresh_interval_ns else {
+            return Duration::ZERO; // we don't know what to expect, so render immediately.
+        };
+
+        const MIN_MARGIN: Duration = Duration::from_millis(3);
+        let baseline = MIN_MARGIN.max(Duration::from_nanos(refresh_interval.get() / 2));
+
         let estimated_presentation_time = self.next_presentation_time(clock);
         if estimated_presentation_time.is_zero() {
             return Duration::ZERO;
         }
 
-        let Some(avg_frametime) = self.avg_frametime(FRAME_TIME_WINDOW) else {
+        // HACK: Nvidia returns `page_flip`/`commit` early, so we have no information to optimize latency on submission.
+        if self.vendor == Some(0x10de) {
             return Duration::ZERO;
+        }
+
+        let Some(avg_submittime) = self.avg_submittime(SAMPLE_TIME_WINDOW) else {
+            return estimated_presentation_time.saturating_sub(baseline + BASE_SAFETY_MARGIN);
         };
 
-        estimated_presentation_time.saturating_sub(avg_frametime + FRAME_TIME_BUFFER)
+        let margin = avg_submittime + BASE_SAFETY_MARGIN;
+        estimated_presentation_time.saturating_sub(margin)
     }
 }

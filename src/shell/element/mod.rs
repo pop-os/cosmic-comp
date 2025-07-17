@@ -20,7 +20,7 @@ use smithay::{
             ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, PopupManager, WindowSurfaceType},
+    desktop::{space::SpaceElement, WindowSurfaceType},
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         Seat,
@@ -31,10 +31,7 @@ use smithay::{
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
     },
-    wayland::{
-        compositor::{with_surface_tree_downward, TraversalAction},
-        seat::WaylandFocus,
-    },
+    wayland::seat::WaylandFocus,
     xwayland::{xwm::X11Relatable, X11Surface},
 };
 use stack::CosmicStackInternal;
@@ -245,7 +242,10 @@ impl CosmicMapped {
             .cloned()
     }
 
-    pub fn set_active(&self, window: &CosmicSurface) {
+    pub fn set_active<S>(&self, window: &S)
+    where
+        CosmicSurface: PartialEq<S>,
+    {
         if let CosmicMappedInternal::Stack(stack) = &self.element {
             stack.set_active(window);
         }
@@ -259,41 +259,8 @@ impl CosmicMapped {
     }
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
-        self.windows().any(|(w, _)| {
-            let Some(toplevel) = w.wl_surface() else {
-                return false;
-            };
-
-            if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                if *toplevel == *surface {
-                    return true;
-                }
-            }
-
-            if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
-                use std::sync::atomic::Ordering;
-
-                let found = AtomicBool::new(false);
-                with_surface_tree_downward(
-                    &toplevel,
-                    surface,
-                    |_, _, search| TraversalAction::DoChildren(search),
-                    |s, _, search| {
-                        found.fetch_or(s == *search, Ordering::SeqCst);
-                    },
-                    |_, _, _| !found.load(Ordering::SeqCst),
-                );
-                if found.load(Ordering::SeqCst) {
-                    return true;
-                }
-            }
-
-            if surface_type.contains(WindowSurfaceType::POPUP) {
-                PopupManager::popups_for_surface(&toplevel).any(|(p, _)| p.wl_surface() == surface)
-            } else {
-                false
-            }
-        })
+        self.windows()
+            .any(|(w, _)| w.has_surface(surface, surface_type))
     }
 
     /// Give the pointer target under a relative offset into this element.
@@ -319,9 +286,14 @@ impl CosmicMapped {
         }
     }
 
-    pub fn handle_focus(&self, direction: FocusDirection, swap: Option<NodeDesc>) -> bool {
+    pub fn handle_focus(
+        &self,
+        seat: &Seat<State>,
+        direction: FocusDirection,
+        swap: Option<NodeDesc>,
+    ) -> bool {
         if let CosmicMappedInternal::Stack(stack) = &self.element {
-            stack.handle_focus(direction, swap)
+            stack.handle_focus(seat, direction, swap)
         } else {
             false
         }
@@ -620,7 +592,7 @@ impl CosmicMapped {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         C: From<CosmicMappedRenderElement<R>>,
     {
@@ -649,7 +621,7 @@ impl CosmicMapped {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         C: From<CosmicMappedRenderElement<R>>,
     {
@@ -680,9 +652,9 @@ impl CosmicMapped {
                             ],
                         )
                         .show(ctx, |ui| {
-                            egui::Frame::none()
+                            egui::Frame::NONE
                                 .fill(egui::Color32::BLACK)
-                                .rounding(5.0)
+                                .corner_radius(5.0)
                                 .inner_margin(10.0)
                                 .show(ui, |ui| {
                                     ui.heading(window.title());
@@ -1041,7 +1013,7 @@ impl From<CosmicStack> for CosmicMapped {
 pub enum CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
 {
     Stack(self::stack::CosmicStackRenderElement<R>),
     Window(self::window::CosmicWindowRenderElement<R>),
@@ -1076,7 +1048,7 @@ where
 impl<R> Element for CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
@@ -1259,12 +1231,12 @@ where
 impl<R> RenderElement<R> for CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: 'static,
+    R::Error: FromGlesError,
 {
     fn draw(
         &self,
-        frame: &mut R::Frame<'_>,
+        frame: &mut R::Frame<'_, '_>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -1366,12 +1338,7 @@ where
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
-                match elem.underlying_storage(glow_renderer) {
-                    Some(UnderlyingStorage::Wayland(buffer)) => {
-                        Some(UnderlyingStorage::Wayland(buffer))
-                    }
-                    _ => None,
-                }
+                elem.underlying_storage(glow_renderer)
             }
         }
     }
@@ -1380,7 +1347,7 @@ where
 impl<R> From<stack::CosmicStackRenderElement<R>> for CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: stack::CosmicStackRenderElement<R>) -> Self {
@@ -1390,7 +1357,7 @@ where
 impl<R> From<window::CosmicWindowRenderElement<R>> for CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: window::CosmicWindowRenderElement<R>) -> Self {
@@ -1401,7 +1368,7 @@ where
 impl<R> From<PixelShaderElement> for CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: PixelShaderElement) -> Self {
@@ -1412,7 +1379,7 @@ where
 impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: MemoryRenderBufferRenderElement<R>) -> Self {
@@ -1424,7 +1391,7 @@ where
 impl<R> From<TextureRenderElement<GlesTexture>> for CosmicMappedRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {

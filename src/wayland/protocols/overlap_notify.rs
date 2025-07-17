@@ -71,6 +71,7 @@ impl OverlapNotifyState {
         self.global.clone()
     }
 
+    #[profiling::function]
     pub fn refresh<D, W>(state: &mut D)
     where
         D: GlobalDispatch<ZcosmicOverlapNotifyV1, OverlapNotifyGlobalData>
@@ -116,9 +117,11 @@ impl OverlapNotifyState {
                                         .unwrap()
                                         .lock()
                                         .unwrap();
-                                    active_workspaces.iter().any(|active_workspace| {
-                                        state.in_workspace(&active_workspace)
-                                    })
+
+                                    w.is_sticky()
+                                        || active_workspaces.iter().any(|active_workspace| {
+                                            state.in_workspace(&active_workspace)
+                                        })
                                 })
                         {
                             if let Some(window_geo) = window.global_geometry() {

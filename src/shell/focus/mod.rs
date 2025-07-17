@@ -1,15 +1,15 @@
 use crate::{
-    shell::{element::CosmicMapped, Shell},
+    shell::{element::CosmicMapped, CosmicSurface, MinimizedWindow, Shell},
     state::Common,
     utils::prelude::*,
-    wayland::handlers::xdg_shell::PopupGrabData,
+    wayland::handlers::{xdg_shell::PopupGrabData, xwayland_keyboard_grab::XWaylandGrabSeatData},
 };
 use indexmap::IndexSet;
 use smithay::{
     desktop::{layer_map_for_output, PopupUngrabStrategy},
     input::{pointer::MotionEvent, Seat},
     output::Output,
-    reexports::wayland_server::Resource,
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
     utils::{IsAlive, Point, Serial, SERIAL_COUNTER},
     wayland::{
         seat::WaylandFocus,
@@ -29,18 +29,80 @@ use super::{grabs::SeatMoveGrabState, layout::floating::FloatingLayout, SeatExt}
 mod order;
 pub mod target;
 
-pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<CosmicMapped>>);
-pub struct FocusStackMut<'a>(pub(super) &'a mut IndexSet<CosmicMapped>);
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum FocusTarget {
+    Window(CosmicMapped),
+    Fullscreen(CosmicSurface),
+}
+
+impl PartialEq<CosmicMapped> for FocusTarget {
+    fn eq(&self, other: &CosmicMapped) -> bool {
+        matches!(self, FocusTarget::Window(mapped) if mapped == other)
+    }
+}
+
+impl PartialEq<CosmicSurface> for FocusTarget {
+    fn eq(&self, other: &CosmicSurface) -> bool {
+        matches!(self, FocusTarget::Fullscreen(surface) if surface == other)
+    }
+}
+
+impl From<CosmicMapped> for FocusTarget {
+    fn from(value: CosmicMapped) -> Self {
+        Self::Window(value)
+    }
+}
+
+impl From<CosmicSurface> for FocusTarget {
+    fn from(value: CosmicSurface) -> Self {
+        Self::Fullscreen(value)
+    }
+}
+
+impl Into<KeyboardFocusTarget> for FocusTarget {
+    fn into(self) -> KeyboardFocusTarget {
+        match self {
+            FocusTarget::Window(mapped) => KeyboardFocusTarget::Element(mapped),
+            FocusTarget::Fullscreen(surface) => KeyboardFocusTarget::Fullscreen(surface),
+        }
+    }
+}
+
+impl FocusTarget {
+    pub fn alive(&self) -> bool {
+        match self {
+            FocusTarget::Window(mapped) => mapped.alive(),
+            FocusTarget::Fullscreen(surface) => surface.alive(),
+        }
+    }
+
+    fn is_minimized(&self) -> bool {
+        match self {
+            FocusTarget::Window(mapped) => mapped.is_minimized(),
+            FocusTarget::Fullscreen(surface) => surface.is_minimized(),
+        }
+    }
+
+    pub fn wl_surface(&self) -> Option<WlSurface> {
+        match self {
+            FocusTarget::Window(mapped) => mapped.active_window().wl_surface().map(Cow::into_owned),
+            FocusTarget::Fullscreen(surface) => surface.wl_surface().map(Cow::into_owned),
+        }
+    }
+}
+
+pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<FocusTarget>>);
+pub struct FocusStackMut<'a>(pub(super) &'a mut IndexSet<FocusTarget>);
 
 impl<'a> FocusStack<'a> {
     /// returns the last unminimized window in the focus stack that is still alive
-    pub fn last(&self) -> Option<&CosmicMapped> {
+    pub fn last(&self) -> Option<&FocusTarget> {
         self.0
             .as_ref()
             .and_then(|set| set.iter().rev().find(|w| w.alive() && !w.is_minimized()))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &'_ CosmicMapped> {
+    pub fn iter(&self) -> impl Iterator<Item = &'_ FocusTarget> {
         self.0
             .iter()
             .flat_map(|set| set.iter().rev().filter(|w| w.alive() && !w.is_minimized()))
@@ -48,21 +110,25 @@ impl<'a> FocusStack<'a> {
 }
 
 impl<'a> FocusStackMut<'a> {
-    pub fn append(&mut self, window: &CosmicMapped) {
+    pub fn append(&mut self, target: impl Into<FocusTarget>) {
+        let target = target.into();
         self.0.retain(|w| w.alive());
-        self.0.shift_remove(window);
-        self.0.insert(window.clone());
+        self.0.shift_remove(&target);
+        self.0.insert(target);
     }
 
-    pub fn remove(&mut self, window: &CosmicMapped) {
-        self.0.retain(|w| w != window);
+    pub fn remove<T>(&mut self, target: &T)
+    where
+        FocusTarget: PartialEq<T>,
+    {
+        self.0.retain(|w| w != target);
     }
 
-    pub fn last(&self) -> Option<&CosmicMapped> {
+    pub fn last(&self) -> Option<&FocusTarget> {
         self.0.iter().rev().find(|w| w.alive() && !w.is_minimized())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &'_ CosmicMapped> {
+    pub fn iter(&self) -> impl Iterator<Item = &'_ FocusTarget> {
         self.0
             .iter()
             .rev()
@@ -99,6 +165,7 @@ impl Shell {
     /// Set the keyboard focus to the given target
     /// Note: `update_cursor` is used to determine whether to update the pointer location if cursor_follows_focus is enabled
     /// if the focus change was due to a pointer event, this should be set to false
+    #[profiling::function]
     pub fn set_focus(
         state: &mut State,
         target: Option<&KeyboardFocusTarget>,
@@ -106,55 +173,47 @@ impl Shell {
         serial: Option<Serial>,
         update_cursor: bool,
     ) {
-        let element = match target {
-            Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
-            Some(KeyboardFocusTarget::Fullscreen(window)) => state
-                .common
-                .shell
-                .read()
-                .unwrap()
-                .element_for_surface(window)
-                .cloned(),
+        let focus_target = match target {
+            Some(KeyboardFocusTarget::Element(mapped)) => Some(FocusTarget::Window(mapped.clone())),
+            Some(KeyboardFocusTarget::Fullscreen(surface)) => {
+                Some(FocusTarget::Fullscreen(surface.clone()))
+            }
             _ => None,
         };
 
-        if let Some(mapped) = element {
-            if mapped.is_minimized() {
-                return;
-            }
-
-            state
-                .common
-                .shell
-                .write()
-                .unwrap()
-                .append_focus_stack(&mapped, seat);
+        if let Some(target) = focus_target {
+            state.common.shell.write().append_focus_stack(target, seat);
         }
 
         update_focus_state(seat, target, state, serial, update_cursor);
 
-        state.common.shell.write().unwrap().update_active();
+        state.common.shell.write().update_active();
     }
 
-    pub fn append_focus_stack(&mut self, mapped: &CosmicMapped, seat: &Seat<State>) {
-        if mapped.is_minimized() {
+    pub fn append_focus_stack(&mut self, target: impl Into<FocusTarget>, seat: &Seat<State>) {
+        let target = target.into();
+        if target.is_minimized() {
             return;
         }
 
         // update FocusStack and notify layouts about new focus (if any window)
-        let workspace = self.space_for_mut(&mapped);
+        let workspace = target
+            .wl_surface()
+            .and_then(|surface| self.workspace_for_surface(&surface));
         let workspace = if workspace.is_none() {
             //should this be the active output or the focused output?
             self.active_space_mut(&seat.focused_or_active_output())
                 .unwrap()
         } else {
-            workspace.unwrap()
+            self.workspaces
+                .space_for_handle_mut(&workspace.unwrap().0)
+                .unwrap()
         };
 
         let mut focus_stack = workspace.focus_stack.get_mut(seat);
-        if Some(mapped) != focus_stack.last() {
-            trace!(?mapped, "Focusing window.");
-            focus_stack.append(&mapped);
+        if Some(&target) != focus_stack.last() {
+            trace!(?target, "Focusing window.");
+            focus_stack.append(target);
             // also remove popup grabs, if we are switching focus
             if let Some(mut popup_grab) = seat
                 .user_data()
@@ -176,7 +235,7 @@ impl Shell {
             .map(|seat| {
                 if matches!(
                     seat.get_keyboard().unwrap().current_focus(),
-                    Some(KeyboardFocusTarget::Group(_))
+                    Some(KeyboardFocusTarget::Group(_)) | Some(KeyboardFocusTarget::LockSurface(_))
                 ) {
                     return None;
                 }
@@ -184,7 +243,10 @@ impl Shell {
                 let output = seat.focused_or_active_output();
                 let space = self.active_space(&output).unwrap();
                 let stack = space.focus_stack.get(seat);
-                stack.last().cloned()
+                stack.last().and_then(|target| match target {
+                    FocusTarget::Window(window) => Some(window.clone()),
+                    FocusTarget::Fullscreen(_) => None,
+                })
             })
             .flatten()
             .collect::<Vec<_>>();
@@ -198,12 +260,33 @@ impl Shell {
                 window.set_activated(focused_windows.contains(&window));
                 window.configure();
             }
-            for m in set.minimized_windows.iter() {
-                m.window.set_activated(false);
-                m.window.configure();
+            for window in set
+                .minimized_windows
+                .iter()
+                .flat_map(MinimizedWindow::mapped)
+            {
+                window.set_activated(false);
+                window.configure();
             }
 
             let workspace = &mut set.workspaces[set.active];
+            if let Some(fullscreen) = workspace.get_fullscreen() {
+                if self.seats.iter().any(|seat| {
+                    if let Some(KeyboardFocusTarget::Fullscreen(s)) =
+                        seat.get_keyboard().unwrap().current_focus()
+                    {
+                        &s == fullscreen
+                    } else {
+                        false
+                    }
+                }) {
+                    fullscreen.set_activated(true);
+                    fullscreen.send_configure();
+                } else {
+                    fullscreen.set_activated(false);
+                    fullscreen.send_configure();
+                }
+            }
             for focused in focused_windows.iter() {
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
@@ -212,8 +295,15 @@ impl Shell {
                 window.configure();
             }
             for m in workspace.minimized_windows.iter() {
-                m.window.set_activated(false);
-                m.window.configure();
+                if let Some(window) = m.mapped() {
+                    window.set_activated(false);
+                    window.configure();
+                } else {
+                    for surface in m.windows() {
+                        surface.set_activated(false);
+                        surface.send_configure();
+                    }
+                }
             }
 
             for (i, workspace) in set.workspaces.iter().enumerate() {
@@ -230,6 +320,7 @@ impl Shell {
 }
 
 /// Internal, used to ensure that ActiveFocus, KeyboardFocusTarget, and FocusedOutput are all in sync
+#[profiling::function]
 fn update_focus_state(
     seat: &Seat<State>,
     target: Option<&KeyboardFocusTarget>,
@@ -242,7 +333,7 @@ fn update_focus_state(
         if should_update_cursor && state.common.config.cosmic_conf.cursor_follows_focus {
             if target.is_some() {
                 //need to borrow mutably for surface under
-                let shell = state.common.shell.read().unwrap();
+                let shell = state.common.shell.read();
                 // get the top left corner of the target element
                 let geometry = shell.focused_geometry(target.unwrap());
                 if let Some(geometry) = geometry {
@@ -274,12 +365,12 @@ fn update_focus_state(
             }
         }
 
+        let serial = serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial());
+        state
+            .common
+            .xwayland_notify_focus_change(target.cloned(), serial);
         ActiveFocus::set(seat, target.cloned());
-        keyboard.set_focus(
-            state,
-            target.cloned(),
-            serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial()),
-        );
+        keyboard.set_focus(state, target.cloned(), serial);
         std::mem::drop(keyboard);
 
         //update the focused output or set it to the active output
@@ -292,7 +383,6 @@ fn update_focus_state(
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .get_output_for_focus(seat)
                     .as_ref(),
             )
@@ -334,19 +424,19 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
 }
 
 impl Common {
+    #[profiling::function]
     pub fn refresh_focus(state: &mut State) {
         let seats = state
             .common
             .shell
             .read()
-            .unwrap()
             .seats
             .iter()
             .cloned()
             .collect::<Vec<_>>();
         for seat in &seats {
             {
-                let shell = state.common.shell.read().unwrap();
+                let shell = state.common.shell.read();
                 let focused_output = seat.focused_output();
                 let active_output = seat.active_output();
 
@@ -365,7 +455,7 @@ impl Common {
             update_pointer_focus(state, &seat);
 
             let output = seat.focused_or_active_output();
-            let mut shell = state.common.shell.write().unwrap();
+            let mut shell = state.common.shell.write();
             let last_known_focus = ActiveFocus::get(&seat);
 
             if let Some(target) = last_known_focus {
@@ -454,7 +544,7 @@ impl Common {
             }
         }
 
-        state.common.shell.write().unwrap().update_active()
+        state.common.shell.write().update_active()
     }
 }
 
@@ -467,6 +557,18 @@ fn focus_target_is_valid(
     // If a session lock is active, only lock surfaces can be focused
     if shell.session_lock.is_some() {
         return matches!(target, KeyboardFocusTarget::LockSurface(_));
+    }
+
+    let xwayland_grab = seat
+        .user_data()
+        .get_or_insert(XWaylandGrabSeatData::default)
+        .grab
+        .lock()
+        .unwrap();
+    if let Some((surface, grab)) = &*xwayland_grab {
+        if grab.grab().is_alive() {
+            return target == KeyboardFocusTarget::XWaylandGrab(surface.clone());
+        }
     }
 
     // If an exclusive layer shell surface exists (on any output), only exclusive
@@ -508,13 +610,11 @@ fn focus_target_is_valid(
             let workspace = shell.active_space(&output).unwrap();
             let focus_stack = workspace.focus_stack.get(&seat);
             let is_in_focus_stack = focus_stack.last().map(|m| m == &mapped).unwrap_or(false);
-            let has_fullscreen = workspace.get_fullscreen().is_some();
-
             if is_sticky && !is_in_focus_stack {
-                shell.append_focus_stack(&mapped, seat);
+                shell.append_focus_stack(mapped, seat);
             }
 
-            (is_sticky || is_in_focus_stack) && !has_fullscreen
+            is_sticky || is_in_focus_stack
         }
         KeyboardFocusTarget::LayerSurface(layer) => {
             layer_map_for_output(&output).layers().any(|l| l == &layer)
@@ -528,16 +628,11 @@ fn focus_target_is_valid(
             .has_node(&node),
         KeyboardFocusTarget::Fullscreen(window) => {
             let workspace = shell.active_space(&output).unwrap();
-            let focus_stack = workspace.focus_stack.get(&seat);
-
-            focus_stack
-                .last()
-                .map(|m| m.has_active_window(&window))
-                .unwrap_or(false)
-                && workspace.get_fullscreen().is_some()
+            workspace.get_fullscreen().is_some_and(|w| w == &window)
         }
         KeyboardFocusTarget::Popup(_) => true,
         KeyboardFocusTarget::LockSurface(_) => false,
+        KeyboardFocusTarget::XWaylandGrab(_) => false,
     }
 }
 
@@ -546,12 +641,21 @@ fn update_focus_target(
     seat: &Seat<State>,
     output: &Output,
 ) -> Option<KeyboardFocusTarget> {
+    let mut xwayland_grab = seat
+        .user_data()
+        .get_or_insert(XWaylandGrabSeatData::default)
+        .grab
+        .lock()
+        .unwrap();
+    xwayland_grab.take_if(|(_, g)| !g.grab().is_alive());
     if let Some(session_lock) = &shell.session_lock {
         session_lock
             .surfaces
             .get(output)
             .cloned()
             .map(KeyboardFocusTarget::from)
+    } else if let Some((surface, _)) = &*xwayland_grab {
+        Some(KeyboardFocusTarget::XWaylandGrab(surface.clone()))
     } else if let Some(layer) = exclusive_layer_surface_layer(shell) {
         layer_map_for_output(output)
             .layers()
@@ -562,8 +666,6 @@ fn update_focus_target(
             })
             .cloned()
             .map(KeyboardFocusTarget::from)
-    } else if let Some(surface) = shell.active_space(&output).unwrap().get_fullscreen() {
-        Some(KeyboardFocusTarget::Fullscreen(surface.clone()))
     } else {
         shell
             .active_space(&output)
@@ -571,9 +673,23 @@ fn update_focus_target(
             .focus_stack
             .get(&seat)
             .last()
-            .or_else(|| shell.active_space(&output).unwrap().mapped().next())
             .cloned()
-            .map(KeyboardFocusTarget::from)
+            .map(Into::<KeyboardFocusTarget>::into)
+            .or_else(|| {
+                let workspace = shell.active_space(&output).unwrap();
+
+                workspace
+                    .mapped()
+                    .next()
+                    .cloned()
+                    .map(KeyboardFocusTarget::Element)
+                    .or_else(|| {
+                        workspace
+                            .get_fullscreen()
+                            .cloned()
+                            .map(KeyboardFocusTarget::Fullscreen)
+                    })
+            })
     }
 }
 
@@ -582,7 +698,7 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
         let output = seat.active_output();
         let position = pointer.current_location().as_global();
 
-        let mut shell = state.common.shell.write().unwrap();
+        let mut shell = state.common.shell.write();
         let under = State::surface_under(position, &output, &mut shell)
             .map(|(target, pos)| (target, pos.as_logical()));
         drop(shell);

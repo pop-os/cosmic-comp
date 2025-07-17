@@ -45,6 +45,7 @@
 	(appid: "system76-driver", titles: [".*"]),
 	(appid: "tilda", titles: [".*"]),
 	(appid: "zoom", titles: [".*"]),
+	(appid: "Tor Browser", titles: [".*"]),
 	(appid: "^.*?action=join.*$", titles: [".*"]),
 
 ]

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod input;
+pub mod output;
 pub mod workspace;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -13,7 +14,7 @@ pub struct KeyboardConfig {
     pub numlock_state: NumlockState,
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NumlockState {
     BootOn,
     #[default]
@@ -25,6 +26,7 @@ pub enum NumlockState {
 #[version = 1]
 pub struct CosmicCompConfig {
     pub workspaces: workspace::WorkspaceConfig,
+    pub pinned_workspaces: Vec<workspace::PinnedWorkspace>,
     pub input_default: input::InputConfig,
     pub input_touchpad: input::InputConfig,
     pub input_devices: HashMap<String, input::InputConfig>,
@@ -45,17 +47,21 @@ pub struct CosmicCompConfig {
     /// The delay in milliseconds before focus follows mouse (if enabled)
     pub focus_follows_cursor_delay: u64,
     /// Let X11 applications scale themselves
-    pub descale_xwayland: bool,
+    pub descale_xwayland: XwaylandDescaling,
+    /// Let X11 applications snoop on certain key-presses to allow for global shortcuts
+    pub xwayland_eavesdropping: XwaylandEavesdropping,
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
     /// How far the pointer can travel before it's considered as moved
     pub pointer_moved_epsilon: u32,
+    pub accessibility_zoom: ZoomConfig,
 }
 
 impl Default for CosmicCompConfig {
     fn default() -> Self {
         Self {
             workspaces: Default::default(),
+            pinned_workspaces: Vec::new(),
             input_default: Default::default(),
             // By default, enable tap-to-click and disable-while-typing.
             input_touchpad: input::InputConfig {
@@ -79,9 +85,11 @@ impl Default for CosmicCompConfig {
             focus_follows_cursor: false,
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
-            descale_xwayland: false,
+            descale_xwayland: XwaylandDescaling::Fractional,
+            xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
             pointer_moved_epsilon: 10,
+            accessibility_zoom: ZoomConfig::default(),
         }
     }
 }
@@ -126,4 +134,58 @@ fn default_repeat_rate() -> u32 {
 
 fn default_repeat_delay() -> u32 {
     600
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ZoomConfig {
+    pub start_on_login: bool,
+    pub show_overlay: bool,
+    pub increment: u32,
+    pub view_moves: ZoomMovement,
+    pub enable_mouse_zoom_shortcuts: bool,
+}
+
+impl Default for ZoomConfig {
+    fn default() -> Self {
+        ZoomConfig {
+            start_on_login: false,
+            show_overlay: true,
+            increment: 50,
+            view_moves: ZoomMovement::Continuously,
+            enable_mouse_zoom_shortcuts: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum ZoomMovement {
+    OnEdge,
+    Centered,
+    Continuously,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub struct XwaylandEavesdropping {
+    pub keyboard: EavesdroppingKeyboardMode,
+    pub pointer: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub enum EavesdroppingKeyboardMode {
+    #[default]
+    None,
+    Modifiers,
+    Combinations,
+    All,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum XwaylandDescaling {
+    #[serde(rename = "true")]
+    Enabled,
+    #[serde(rename = "false")]
+    Disabled,
+    #[default]
+    Fractional,
 }

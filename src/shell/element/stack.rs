@@ -96,13 +96,13 @@ pub struct CosmicStackInternal {
     active: Arc<AtomicUsize>,
     activated: Arc<AtomicBool>,
     group_focused: Arc<AtomicBool>,
+    previous_index: Arc<Mutex<Option<(Serial, usize)>>>,
     scroll_to_focus: Arc<AtomicBool>,
     previous_keyboard: Arc<AtomicUsize>,
     pointer_entered: Arc<AtomicU8>,
     reenter: Arc<AtomicBool>,
     potential_drag: Arc<Mutex<Option<usize>>>,
     override_alive: Arc<AtomicBool>,
-    last_seat: Arc<Mutex<Option<(Seat<State>, Serial)>>>,
     geometry: Arc<Mutex<Option<Rectangle<i32, Global>>>>,
     mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
 }
@@ -149,13 +149,13 @@ impl CosmicStack {
                 active: Arc::new(AtomicUsize::new(0)),
                 activated: Arc::new(AtomicBool::new(false)),
                 group_focused: Arc::new(AtomicBool::new(false)),
+                previous_index: Arc::new(Mutex::new(None)),
                 scroll_to_focus: Arc::new(AtomicBool::new(false)),
                 previous_keyboard: Arc::new(AtomicUsize::new(0)),
                 pointer_entered: Arc::new(AtomicU8::new(0)),
                 reenter: Arc::new(AtomicBool::new(false)),
                 potential_drag: Arc::new(Mutex::new(None)),
                 override_alive: Arc::new(AtomicBool::new(true)),
-                last_seat: Arc::new(Mutex::new(None)),
                 geometry: Arc::new(Mutex::new(None)),
                 mask: Arc::new(Mutex::new(None)),
             },
@@ -165,11 +165,22 @@ impl CosmicStack {
         ))
     }
 
-    pub fn add_window(&self, window: impl Into<CosmicSurface>, idx: Option<usize>) {
+    pub fn add_window(
+        &self,
+        window: impl Into<CosmicSurface>,
+        idx: Option<usize>,
+        moved_into: Option<&Seat<State>>,
+    ) {
         let window = window.into();
         window.try_force_undecorated(true);
         window.set_tiled(true);
         self.0.with_program(|p| {
+            let last_mod_serial = moved_into.and_then(|seat| seat.last_modifier_change());
+            let mut prev_idx = p.previous_index.lock().unwrap();
+            if !prev_idx.is_some_and(|(serial, _)| Some(serial) == last_mod_serial) {
+                *prev_idx = last_mod_serial.map(|s| (s, p.active.load(Ordering::SeqCst)));
+            }
+
             if let Some(mut geo) = p.geometry.lock().unwrap().clone() {
                 geo.loc.y += TAB_HEIGHT;
                 geo.size.h -= TAB_HEIGHT;
@@ -257,78 +268,119 @@ impl CosmicStack {
         self.0.with_program(|p| p.windows.lock().unwrap().len())
     }
 
-    pub fn handle_focus(&self, direction: FocusDirection, swap: Option<NodeDesc>) -> bool {
-        let result = self.0.with_program(|p| match direction {
-            FocusDirection::Left => {
-                if !p.group_focused.load(Ordering::SeqCst) {
-                    if let Ok(old) =
-                        p.active
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                val.checked_sub(1)
-                            })
-                    {
-                        p.previous_keyboard.store(old, Ordering::SeqCst);
-                        p.scroll_to_focus.store(true, Ordering::SeqCst);
-                        true
+    pub fn handle_focus(
+        &self,
+        seat: &Seat<State>,
+        direction: FocusDirection,
+        swap: Option<NodeDesc>,
+    ) -> bool {
+        let (result, update) = self.0.with_program(|p| {
+            let last_mod_serial = seat.last_modifier_change();
+            let mut prev_idx = p.previous_index.lock().unwrap();
+            if !prev_idx.is_some_and(|(serial, _)| Some(serial) == last_mod_serial) {
+                *prev_idx = last_mod_serial.map(|s| (s, p.active.load(Ordering::SeqCst)));
+            }
+
+            match direction {
+                FocusDirection::Left => {
+                    if !p.group_focused.load(Ordering::SeqCst) {
+                        if let Ok(old) =
+                            p.active
+                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                    val.checked_sub(1)
+                                })
+                        {
+                            p.previous_keyboard.store(old, Ordering::SeqCst);
+                            p.scroll_to_focus.store(true, Ordering::SeqCst);
+                            (true, true)
+                        } else {
+                            let new = prev_idx.unwrap().1;
+                            let old = p.active.swap(new, Ordering::SeqCst);
+                            if old != new {
+                                p.previous_keyboard.store(old, Ordering::SeqCst);
+                                p.scroll_to_focus.store(true, Ordering::SeqCst);
+                                (false, true)
+                            } else {
+                                (false, false)
+                            }
+                        }
                     } else {
-                        false
+                        (false, false)
                     }
-                } else {
-                    false
                 }
-            }
-            FocusDirection::Right => {
-                if !p.group_focused.load(Ordering::SeqCst) {
-                    let max = p.windows.lock().unwrap().len();
-                    if let Ok(old) =
-                        p.active
-                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                if val < max - 1 {
-                                    Some(val + 1)
-                                } else {
-                                    None
-                                }
-                            })
-                    {
-                        p.previous_keyboard.store(old, Ordering::SeqCst);
-                        p.scroll_to_focus.store(true, Ordering::SeqCst);
-                        true
+                FocusDirection::Right => {
+                    if !p.group_focused.load(Ordering::SeqCst) {
+                        let max = p.windows.lock().unwrap().len();
+                        if let Ok(old) =
+                            p.active
+                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                    if val < max - 1 {
+                                        Some(val + 1)
+                                    } else {
+                                        None
+                                    }
+                                })
+                        {
+                            p.previous_keyboard.store(old, Ordering::SeqCst);
+                            p.scroll_to_focus.store(true, Ordering::SeqCst);
+                            (true, true)
+                        } else {
+                            let new = prev_idx.unwrap().1;
+                            let old = p.active.swap(new, Ordering::SeqCst);
+                            if old != new {
+                                p.previous_keyboard.store(old, Ordering::SeqCst);
+                                p.scroll_to_focus.store(true, Ordering::SeqCst);
+                                (false, true)
+                            } else {
+                                (false, false)
+                            }
+                        }
                     } else {
-                        false
+                        (false, false)
                     }
-                } else {
-                    false
                 }
-            }
-            FocusDirection::Out if swap.is_none() => {
-                if !p.group_focused.swap(true, Ordering::SeqCst) {
-                    p.windows.lock().unwrap().iter().for_each(|w| {
-                        w.set_activated(false);
-                        w.send_configure();
-                    });
-                    true
-                } else {
-                    false
+                FocusDirection::Out if swap.is_none() => {
+                    if !p.group_focused.swap(true, Ordering::SeqCst) {
+                        p.windows.lock().unwrap().iter().for_each(|w| {
+                            w.set_activated(false);
+                            w.send_configure();
+                        });
+                        (true, true)
+                    } else {
+                        (false, false)
+                    }
                 }
-            }
-            FocusDirection::In if swap.is_none() => {
-                if !p.group_focused.swap(false, Ordering::SeqCst) {
-                    p.windows.lock().unwrap().iter().for_each(|w| {
-                        w.set_activated(true);
-                        w.send_configure();
-                    });
-                    true
-                } else {
-                    false
+                FocusDirection::In if swap.is_none() => {
+                    if !p.group_focused.swap(false, Ordering::SeqCst) {
+                        p.windows.lock().unwrap().iter().for_each(|w| {
+                            w.set_activated(true);
+                            w.send_configure();
+                        });
+                        (true, true)
+                    } else {
+                        (false, false)
+                    }
                 }
+                FocusDirection::Up | FocusDirection::Down => {
+                    if !p.group_focused.load(Ordering::SeqCst) {
+                        let new = prev_idx.unwrap().1;
+                        let old = p.active.swap(new, Ordering::SeqCst);
+                        if old != new {
+                            p.previous_keyboard.store(old, Ordering::SeqCst);
+                            p.scroll_to_focus.store(true, Ordering::SeqCst);
+                        }
+                        (false, true)
+                    } else {
+                        (false, false)
+                    }
+                }
+                _ => (false, false),
             }
-            _ => false,
         });
 
-        if result {
+        if update {
             self.0
                 .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
-            self.0.force_update();
         }
 
         result
@@ -337,6 +389,8 @@ impl CosmicStack {
     pub fn handle_move(&self, direction: Direction) -> MoveResult {
         let loop_handle = self.0.loop_handle();
         let result = self.0.with_program(|p| {
+            let prev_idx = p.previous_index.lock().unwrap();
+
             if p.group_focused.load(Ordering::SeqCst) {
                 return MoveResult::Default;
             }
@@ -361,7 +415,13 @@ impl CosmicStack {
                     return MoveResult::Default;
                 }
                 let window = windows.remove(active);
-                if active == windows.len() {
+                if let Some(prev_idx) = prev_idx
+                    .map(|(_, idx)| idx)
+                    .filter(|idx| *idx < windows.len())
+                {
+                    p.active.store(prev_idx, Ordering::SeqCst);
+                    p.scroll_to_focus.store(true, Ordering::SeqCst);
+                } else if active == windows.len() {
                     p.active.store(active - 1, Ordering::SeqCst);
                     p.scroll_to_focus.store(true, Ordering::SeqCst);
                 }
@@ -375,7 +435,6 @@ impl CosmicStack {
         if !matches!(result, MoveResult::Default) {
             self.0
                 .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
-            self.0.force_update();
         }
 
         result
@@ -396,7 +455,10 @@ impl CosmicStack {
             .with_program(|p| p.group_focused.load(Ordering::SeqCst))
     }
 
-    pub fn set_active(&self, window: &CosmicSurface) {
+    pub fn set_active<S>(&self, window: &S)
+    where
+        CosmicSurface: PartialEq<S>,
+    {
         self.0.with_program(|p| {
             if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
                 let old = p.active.swap(val, Ordering::SeqCst);
@@ -435,7 +497,7 @@ impl CosmicStack {
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
                         && point_i32.x - geo.loc.x < geo.size.w + RESIZE_BORDER)
-                    || (point_i32.y - geo.loc.y >= geo.size.h
+                    || (point_i32.y - geo.loc.y >= geo.size.h + TAB_HEIGHT
                         && point_i32.y - geo.loc.y < geo.size.h + TAB_HEIGHT + RESIZE_BORDER)
                 {
                     stack_ui = Some((
@@ -557,7 +619,7 @@ impl CosmicStack {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         C: From<CosmicStackRenderElement<R>>,
     {
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
@@ -584,7 +646,7 @@ impl CosmicStack {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
-        <R as Renderer>::TextureId: Send + Clone + 'static,
+        R::TextureId: Send + Clone + 'static,
         C: From<CosmicStackRenderElement<R>>,
     {
         let offset = self
@@ -636,7 +698,7 @@ impl CosmicStack {
                 surface.send_configure();
                 if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
                     let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                        let res = state.common.shell.write().unwrap().move_request(
+                        let res = state.common.shell.write().move_request(
                             &surface,
                             &seat,
                             serial,
@@ -644,7 +706,6 @@ impl CosmicStack {
                             true,
                             &state.common.config,
                             &state.common.event_loop_handle,
-                            &state.common.xdg_activation_state,
                             false,
                         );
                         if let Some((grab, focus)) = res {
@@ -768,17 +829,18 @@ impl Program for CosmicStackInternal {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<State>, Serial)>,
     ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     let active = self.active.load(Ordering::SeqCst);
                     if let Some(surface) = self.windows.lock().unwrap()[active]
                         .wl_surface()
                         .map(Cow::into_owned)
                     {
                         loop_handle.insert_idle(move |state| {
-                            let res = state.common.shell.write().unwrap().move_request(
+                            let res = state.common.shell.write().move_request(
                                 &surface,
                                 &seat,
                                 serial,
@@ -786,7 +848,6 @@ impl Program for CosmicStackInternal {
                                 false,
                                 &state.common.config,
                                 &state.common.event_loop_handle,
-                                &state.common.xdg_activation_state,
                                 false,
                             );
                             if let Some((grab, focus)) = res {
@@ -809,12 +870,8 @@ impl Program for CosmicStackInternal {
                 *self.potential_drag.lock().unwrap() = None;
                 if let Some(surface) = self.windows.lock().unwrap().get(idx).cloned() {
                     loop_handle.insert_idle(move |state| {
-                        if let Some(mapped) = state
-                            .common
-                            .shell
-                            .read()
-                            .unwrap()
-                            .element_for_surface(&surface)
+                        if let Some(mapped) =
+                            state.common.shell.read().element_for_surface(&surface)
                         {
                             mapped.stack_ref().unwrap().set_active(&surface);
                         }
@@ -831,14 +888,14 @@ impl Program for CosmicStackInternal {
                 self.scroll_to_focus.store(false, Ordering::SeqCst);
             }
             Message::Menu => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     let active = self.active.load(Ordering::SeqCst);
                     if let Some(surface) = self.windows.lock().unwrap()[active]
                         .wl_surface()
                         .map(Cow::into_owned)
                     {
                         loop_handle.insert_idle(move |state| {
-                            let shell = state.common.shell.read().unwrap();
+                            let shell = state.common.shell.read();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                                 let position = if let Some((output, set)) =
                                     shell.workspaces.sets.iter().find(|(_, set)| {
@@ -887,13 +944,13 @@ impl Program for CosmicStackInternal {
                 }
             }
             Message::TabMenu(idx) => {
-                if let Some((seat, serial)) = self.last_seat.lock().unwrap().clone() {
+                if let Some((seat, serial)) = last_seat.cloned() {
                     if let Some(surface) = self.windows.lock().unwrap()[idx]
                         .wl_surface()
                         .map(Cow::into_owned)
                     {
                         loop_handle.insert_idle(move |state| {
-                            let shell = state.common.shell.read().unwrap();
+                            let shell = state.common.shell.read();
                             if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                                 if let Some(workspace) = shell.space_for(&mapped) {
                                     let Some(elem_geo) = workspace.element_geometry(&mapped) else {
@@ -1150,7 +1207,6 @@ impl SpaceElement for CosmicStack {
         })
     }
     fn refresh(&self) {
-        SpaceElement::refresh(&self.0);
         self.0.with_program(|p| {
             let mut windows = p.windows.lock().unwrap();
 
@@ -1187,6 +1243,7 @@ impl SpaceElement for CosmicStack {
                 SpaceElement::refresh(w)
             });
         });
+        SpaceElement::refresh(&self.0);
     }
 }
 
@@ -1281,8 +1338,7 @@ impl PointerTarget<State> for CosmicStack {
                 .lock()
                 .unwrap();
             cursor_state.set_shape(next.cursor_shape());
-            let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
-            *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
+            seat.set_cursor_image_status(CursorImageStatus::default_named());
         });
 
         event.location -= self.0.with_program(|p| {
@@ -1311,8 +1367,7 @@ impl PointerTarget<State> for CosmicStack {
                 .lock()
                 .unwrap();
             cursor_state.set_shape(next.cursor_shape());
-            let cursor_status = seat.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
-            *cursor_status.lock().unwrap() = CursorImageStatus::default_named();
+            seat.set_cursor_image_status(CursorImageStatus::default_named());
         });
 
         let active_window_geo = self.0.with_program(|p| {
@@ -1340,12 +1395,7 @@ impl PointerTarget<State> for CosmicStack {
 
     fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
         match self.0.with_program(|p| p.current_focus()) {
-            Some(Focus::Header) => {
-                self.0.with_program(|p| {
-                    *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
-                });
-                PointerTarget::button(&self.0, seat, data, event)
-            }
+            Some(Focus::Header) => PointerTarget::button(&self.0, seat, data, event),
             Some(x) => {
                 let serial = event.serial;
                 let seat = seat.clone();
@@ -1356,7 +1406,7 @@ impl PointerTarget<State> for CosmicStack {
                     return;
                 };
                 self.0.loop_handle().insert_idle(move |state| {
-                    let res = state.common.shell.write().unwrap().resize_request(
+                    let res = state.common.shell.write().resize_request(
                         &surface,
                         &seat,
                         serial,
@@ -1430,7 +1480,7 @@ impl PointerTarget<State> for CosmicStack {
                 surface.send_configure();
                 if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
                     let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                        let res = state.common.shell.write().unwrap().move_request(
+                        let res = state.common.shell.write().move_request(
                             &surface,
                             &seat,
                             serial,
@@ -1438,7 +1488,6 @@ impl PointerTarget<State> for CosmicStack {
                             true,
                             &state.common.config,
                             &state.common.event_loop_handle,
-                            &state.common.xdg_activation_state,
                             false,
                         );
                         if let Some((grab, focus)) = res {
@@ -1525,7 +1574,6 @@ impl TouchTarget<State> for CosmicStack {
     fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
         let mut event = event.clone();
         let active_window_geo = self.0.with_program(|p| {
-            *p.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         });
         event.location -= active_window_geo.loc.to_f64();

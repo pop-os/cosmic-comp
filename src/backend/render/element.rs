@@ -1,14 +1,16 @@
 use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
 
+#[cfg(feature = "debug")]
+use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
 use smithay::{
     backend::renderer::{
         element::{
+            memory::MemoryRenderBufferRenderElement,
             surface::WaylandSurfaceRenderElement,
-            texture::TextureRenderElement,
             utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
             Element, Id, Kind, RenderElement, UnderlyingStorage,
         },
-        gles::{GlesError, GlesTexture},
+        gles::{element::TextureShaderElement, GlesError},
         glow::{GlowFrame, GlowRenderer},
         utils::{CommitCounter, DamageSet, OpaqueRegions},
         ImportAll, ImportMem, Renderer,
@@ -21,19 +23,20 @@ use super::{cursor::CursorRenderElement, GlMultiRenderer};
 pub enum CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    Workspace(RelocateRenderElement<CropRenderElement<WorkspaceRenderElement<R>>>),
-    Cursor(RelocateRenderElement<CursorRenderElement<R>>),
-    Dnd(WaylandSurfaceRenderElement<R>),
-    MoveGrab(CosmicMappedRenderElement<R>),
-    AdditionalDamage(DamageElement),
-    Mirror(
-        CropRenderElement<
-            RelocateRenderElement<RescaleRenderElement<TextureRenderElement<GlesTexture>>>,
-        >,
+    Workspace(
+        RelocateRenderElement<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>,
     ),
+    Cursor(RescaleRenderElement<RelocateRenderElement<CursorRenderElement<R>>>),
+    Dnd(WaylandSurfaceRenderElement<R>),
+    MoveGrab(RescaleRenderElement<CosmicMappedRenderElement<R>>),
+    AdditionalDamage(DamageElement),
+    Postprocess(
+        CropRenderElement<RelocateRenderElement<RescaleRenderElement<TextureShaderElement>>>,
+    ),
+    Zoom(MemoryRenderBufferRenderElement<R>),
     #[cfg(feature = "debug")]
     Egui(TextureRenderElement<GlesTexture>),
 }
@@ -41,7 +44,7 @@ where
 impl<R> Element for CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn id(&self) -> &Id {
@@ -51,7 +54,8 @@ where
             CosmicElement::Dnd(elem) => elem.id(),
             CosmicElement::MoveGrab(elem) => elem.id(),
             CosmicElement::AdditionalDamage(elem) => elem.id(),
-            CosmicElement::Mirror(elem) => elem.id(),
+            CosmicElement::Postprocess(elem) => elem.id(),
+            CosmicElement::Zoom(elem) => elem.id(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.id(),
         }
@@ -64,7 +68,8 @@ where
             CosmicElement::Dnd(elem) => elem.current_commit(),
             CosmicElement::MoveGrab(elem) => elem.current_commit(),
             CosmicElement::AdditionalDamage(elem) => elem.current_commit(),
-            CosmicElement::Mirror(elem) => elem.current_commit(),
+            CosmicElement::Postprocess(elem) => elem.current_commit(),
+            CosmicElement::Zoom(elem) => elem.current_commit(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.current_commit(),
         }
@@ -77,7 +82,8 @@ where
             CosmicElement::Dnd(elem) => elem.src(),
             CosmicElement::MoveGrab(elem) => elem.src(),
             CosmicElement::AdditionalDamage(elem) => elem.src(),
-            CosmicElement::Mirror(elem) => elem.src(),
+            CosmicElement::Postprocess(elem) => elem.src(),
+            CosmicElement::Zoom(elem) => elem.src(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.src(),
         }
@@ -90,7 +96,8 @@ where
             CosmicElement::Dnd(elem) => elem.geometry(scale),
             CosmicElement::MoveGrab(elem) => elem.geometry(scale),
             CosmicElement::AdditionalDamage(elem) => elem.geometry(scale),
-            CosmicElement::Mirror(elem) => elem.geometry(scale),
+            CosmicElement::Postprocess(elem) => elem.geometry(scale),
+            CosmicElement::Zoom(elem) => elem.geometry(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.geometry(scale),
         }
@@ -103,7 +110,8 @@ where
             CosmicElement::Dnd(elem) => elem.location(scale),
             CosmicElement::MoveGrab(elem) => elem.location(scale),
             CosmicElement::AdditionalDamage(elem) => elem.location(scale),
-            CosmicElement::Mirror(elem) => elem.location(scale),
+            CosmicElement::Postprocess(elem) => elem.location(scale),
+            CosmicElement::Zoom(elem) => elem.location(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.location(scale),
         }
@@ -116,7 +124,8 @@ where
             CosmicElement::Dnd(elem) => elem.transform(),
             CosmicElement::MoveGrab(elem) => elem.transform(),
             CosmicElement::AdditionalDamage(elem) => elem.transform(),
-            CosmicElement::Mirror(elem) => elem.transform(),
+            CosmicElement::Postprocess(elem) => elem.transform(),
+            CosmicElement::Zoom(elem) => elem.transform(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.transform(),
         }
@@ -133,7 +142,8 @@ where
             CosmicElement::Dnd(elem) => elem.damage_since(scale, commit),
             CosmicElement::MoveGrab(elem) => elem.damage_since(scale, commit),
             CosmicElement::AdditionalDamage(elem) => elem.damage_since(scale, commit),
-            CosmicElement::Mirror(elem) => elem.damage_since(scale, commit),
+            CosmicElement::Postprocess(elem) => elem.damage_since(scale, commit),
+            CosmicElement::Zoom(elem) => elem.damage_since(scale, commit),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.damage_since(scale, commit),
         }
@@ -146,7 +156,8 @@ where
             CosmicElement::Dnd(elem) => elem.opaque_regions(scale),
             CosmicElement::MoveGrab(elem) => elem.opaque_regions(scale),
             CosmicElement::AdditionalDamage(elem) => elem.opaque_regions(scale),
-            CosmicElement::Mirror(elem) => elem.opaque_regions(scale),
+            CosmicElement::Postprocess(elem) => elem.opaque_regions(scale),
+            CosmicElement::Zoom(elem) => elem.opaque_regions(scale),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.opaque_regions(scale),
         }
@@ -159,7 +170,8 @@ where
             CosmicElement::Dnd(elem) => elem.alpha(),
             CosmicElement::MoveGrab(elem) => elem.alpha(),
             CosmicElement::AdditionalDamage(elem) => elem.alpha(),
-            CosmicElement::Mirror(elem) => elem.alpha(),
+            CosmicElement::Postprocess(elem) => elem.alpha(),
+            CosmicElement::Zoom(elem) => elem.alpha(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.alpha(),
         }
@@ -172,7 +184,8 @@ where
             CosmicElement::Dnd(elem) => elem.kind(),
             CosmicElement::MoveGrab(elem) => elem.kind(),
             CosmicElement::AdditionalDamage(elem) => elem.kind(),
-            CosmicElement::Mirror(elem) => elem.kind(),
+            CosmicElement::Postprocess(elem) => elem.kind(),
+            CosmicElement::Zoom(elem) => elem.kind(),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => elem.kind(),
         }
@@ -182,13 +195,13 @@ where
 impl<R> RenderElement<R> for CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
-    <R as Renderer>::TextureId: 'static,
-    <R as Renderer>::Error: FromGlesError,
+    R::TextureId: 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn draw(
         &self,
-        frame: &mut R::Frame<'_>,
+        frame: &mut R::Frame<'_, '_>,
         src: Rectangle<f64, BufferCoords>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -202,36 +215,31 @@ where
             CosmicElement::AdditionalDamage(elem) => {
                 RenderElement::<R>::draw(elem, frame, src, dst, damage, opaque_regions)
             }
-            CosmicElement::Mirror(elem) => {
-                let elem = {
-                    let glow_frame = R::glow_frame_mut(frame);
-                    RenderElement::<GlowRenderer>::draw(
-                        elem,
-                        glow_frame,
-                        src,
-                        dst,
-                        damage,
-                        opaque_regions,
-                    )
-                    .map_err(FromGlesError::from_gles_error)
-                };
-                elem
+            CosmicElement::Postprocess(elem) => {
+                let glow_frame = R::glow_frame_mut(frame);
+                RenderElement::<GlowRenderer>::draw(
+                    elem,
+                    glow_frame,
+                    src,
+                    dst,
+                    damage,
+                    opaque_regions,
+                )
+                .map_err(FromGlesError::from_gles_error)
             }
+            CosmicElement::Zoom(elem) => elem.draw(frame, src, dst, damage, opaque_regions),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
-                let elem = {
-                    let glow_frame = R::glow_frame_mut(frame);
-                    RenderElement::<GlowRenderer>::draw(
-                        elem,
-                        glow_frame,
-                        src,
-                        dst,
-                        damage,
-                        opaque_regions,
-                    )
-                    .map_err(FromGlesError::from_gles_error)
-                };
-                elem
+                let glow_frame = R::glow_frame_mut(frame);
+                RenderElement::<GlowRenderer>::draw(
+                    elem,
+                    glow_frame,
+                    src,
+                    dst,
+                    damage,
+                    opaque_regions,
+                )
+                .map_err(FromGlesError::from_gles_error)
             }
         }
     }
@@ -243,36 +251,28 @@ where
             CosmicElement::Dnd(elem) => elem.underlying_storage(renderer),
             CosmicElement::MoveGrab(elem) => elem.underlying_storage(renderer),
             CosmicElement::AdditionalDamage(elem) => elem.underlying_storage(renderer),
-            CosmicElement::Mirror(elem) => {
+            CosmicElement::Postprocess(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
-                match elem.underlying_storage(glow_renderer) {
-                    Some(UnderlyingStorage::Wayland(buffer)) => {
-                        Some(UnderlyingStorage::Wayland(buffer))
-                    }
-                    _ => None,
-                }
+                elem.underlying_storage(glow_renderer)
             }
+            CosmicElement::Zoom(elem) => elem.underlying_storage(renderer),
             #[cfg(feature = "debug")]
             CosmicElement::Egui(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
-                match elem.underlying_storage(glow_renderer) {
-                    Some(UnderlyingStorage::Wayland(buffer)) => {
-                        Some(UnderlyingStorage::Wayland(buffer))
-                    }
-                    _ => None,
-                }
+                elem.underlying_storage(glow_renderer)
             }
         }
     }
 }
 
-impl<R> From<CropRenderElement<WorkspaceRenderElement<R>>> for CosmicElement<R>
+impl<R> From<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>
+    for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: CropRenderElement<WorkspaceRenderElement<R>>) -> Self {
+    fn from(elem: CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>) -> Self {
         Self::Workspace(RelocateRenderElement::from_element(
             elem,
             (0, 0),
@@ -281,21 +281,10 @@ where
     }
 }
 
-impl<R> From<CosmicMappedRenderElement<R>> for CosmicElement<R>
-where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
-    CosmicMappedRenderElement<R>: RenderElement<R>,
-{
-    fn from(elem: CosmicMappedRenderElement<R>) -> Self {
-        Self::MoveGrab(elem)
-    }
-}
-
 impl<R> From<DamageElement> for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: DamageElement) -> Self {
@@ -303,11 +292,22 @@ where
     }
 }
 
+impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicElement<R>
+where
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
+        Self::Zoom(value)
+    }
+}
+
 #[cfg(feature = "debug")]
 impl<R> From<TextureRenderElement<GlesTexture>> for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    <R as Renderer>::TextureId: 'static,
+    R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
@@ -321,8 +321,12 @@ where
 {
     fn glow_renderer(&self) -> &GlowRenderer;
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer;
-    fn glow_frame<'a, 'frame>(frame: &'a Self::Frame<'frame>) -> &'a GlowFrame<'frame>;
-    fn glow_frame_mut<'a, 'frame>(frame: &'a mut Self::Frame<'frame>) -> &'a mut GlowFrame<'frame>;
+    fn glow_frame<'a, 'frame, 'buffer>(
+        frame: &'a Self::Frame<'frame, 'buffer>,
+    ) -> &'a GlowFrame<'frame, 'buffer>;
+    fn glow_frame_mut<'a, 'frame, 'buffer>(
+        frame: &'a mut Self::Frame<'frame, 'buffer>,
+    ) -> &'a mut GlowFrame<'frame, 'buffer>;
 }
 
 impl AsGlowRenderer for GlowRenderer {
@@ -332,10 +336,14 @@ impl AsGlowRenderer for GlowRenderer {
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
         self
     }
-    fn glow_frame<'a, 'frame>(frame: &'a Self::Frame<'frame>) -> &'a GlowFrame<'frame> {
+    fn glow_frame<'a, 'frame, 'buffer>(
+        frame: &'a Self::Frame<'frame, 'buffer>,
+    ) -> &'a GlowFrame<'frame, 'buffer> {
         frame
     }
-    fn glow_frame_mut<'a, 'frame>(frame: &'a mut Self::Frame<'frame>) -> &'a mut GlowFrame<'frame> {
+    fn glow_frame_mut<'a, 'frame, 'buffer>(
+        frame: &'a mut Self::Frame<'frame, 'buffer>,
+    ) -> &'a mut GlowFrame<'frame, 'buffer> {
         frame
     }
 }
@@ -347,10 +355,14 @@ impl<'a> AsGlowRenderer for GlMultiRenderer<'a> {
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer {
         self.as_mut()
     }
-    fn glow_frame<'b, 'frame>(frame: &'b Self::Frame<'frame>) -> &'b GlowFrame<'frame> {
+    fn glow_frame<'b, 'frame, 'buffer>(
+        frame: &'b Self::Frame<'frame, 'buffer>,
+    ) -> &'b GlowFrame<'frame, 'buffer> {
         frame.as_ref()
     }
-    fn glow_frame_mut<'b, 'frame>(frame: &'b mut Self::Frame<'frame>) -> &'b mut GlowFrame<'frame> {
+    fn glow_frame_mut<'b, 'frame, 'buffer>(
+        frame: &'b mut Self::Frame<'frame, 'buffer>,
+    ) -> &'b mut GlowFrame<'frame, 'buffer> {
         frame.as_mut()
     }
 }
@@ -398,12 +410,12 @@ impl Element for DamageElement {
 impl<R: Renderer> RenderElement<R> for DamageElement {
     fn draw(
         &self,
-        _frame: &mut <R as Renderer>::Frame<'_>,
+        _frame: &mut R::Frame<'_, '_>,
         _src: Rectangle<f64, BufferCoords>,
         _dst: Rectangle<i32, Physical>,
         _damage: &[Rectangle<i32, Physical>],
         _opaque_regions: &[Rectangle<i32, Physical>],
-    ) -> Result<(), <R as Renderer>::Error> {
+    ) -> Result<(), R::Error> {
         Ok(())
     }
 }

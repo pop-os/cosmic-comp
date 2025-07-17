@@ -4,10 +4,13 @@ use std::{collections::HashSet, sync::Mutex};
 
 use smithay::{
     output::Output,
-    reexports::wayland_server::{
-        backend::{ClientId, GlobalId},
-        protocol::{wl_output::WlOutput, wl_surface::WlSurface},
-        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
+    reexports::{
+        wayland_protocols::ext::foreign_toplevel_list::v1::server::ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
+        wayland_server::{
+            backend::{ClientId, GlobalId},
+            protocol::{wl_output::WlOutput, wl_surface::WlSurface},
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
+        },
     },
     utils::{user_data::UserDataMap, IsAlive, Logical, Rectangle},
     wayland::foreign_toplevel_list::{
@@ -309,7 +312,7 @@ where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + Clone + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelInfoV1, _>(
-            2,
+            3,
             ToplevelInfoGlobalData {
                 filter: Box::new(client_filter.clone()),
             },
@@ -590,8 +593,8 @@ where
         .iter()
         .filter(|w| !handle_state.workspaces.contains(w))
     {
-        for handle in workspace_state.raw_workspace_handles(&new_workspace, &instance.id()) {
-            instance.workspace_enter(&handle);
+        for handle in workspace_state.raw_ext_workspace_handles(&new_workspace, &instance.id()) {
+            instance.ext_workspace_enter(&handle);
             changed = true;
         }
     }
@@ -600,8 +603,8 @@ where
         .iter()
         .filter(|w| !state.workspaces.contains(w))
     {
-        for handle in workspace_state.raw_workspace_handles(&old_workspace, &instance.id()) {
-            instance.workspace_leave(&handle);
+        for handle in workspace_state.raw_ext_workspace_handles(&old_workspace, &instance.id()) {
+            instance.ext_workspace_leave(&handle);
             changed = true;
         }
     }
@@ -623,6 +626,26 @@ pub fn window_from_handle<W: Window + 'static>(handle: ZcosmicToplevelHandleV1) 
     handle
         .data::<ToplevelHandleState<W>>()
         .and_then(|state| state.lock().unwrap().window.clone())
+}
+
+pub fn window_from_ext_handle<'a, W: Window + 'static, D>(
+    state: &'a D,
+    foreign_toplevel: &ExtForeignToplevelHandleV1,
+) -> Option<&'a W>
+where
+    D: ToplevelInfoHandler<Window = W>,
+{
+    let handle = ForeignToplevelHandle::from_resource(foreign_toplevel)?;
+    state.toplevel_info_state().toplevels.iter().find(|w| {
+        w.user_data().get::<ToplevelState>().and_then(|inner| {
+            inner
+                .lock()
+                .unwrap()
+                .foreign_handle
+                .as_ref()
+                .map(|handle| handle.identifier())
+        }) == Some(handle.identifier())
+    })
 }
 
 macro_rules! delegate_toplevel_info {

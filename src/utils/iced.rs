@@ -3,12 +3,11 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     sync::{mpsc::Receiver, Arc, Mutex},
-    time::{Duration, Instant},
 };
 
 use cosmic::{
     iced::{
-        advanced::widget::Tree,
+        advanced::{graphics::text::font_system, widget::Tree},
         event::Event,
         futures::{FutureExt, StreamExt},
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
@@ -107,8 +106,9 @@ pub trait Program {
         &mut self,
         message: Self::Message,
         loop_handle: &LoopHandle<'static, crate::state::State>,
+        last_seat: Option<&(Seat<crate::state::State>, Serial)>,
     ) -> Task<Self::Message> {
-        let _ = (message, loop_handle);
+        let _ = (message, loop_handle, last_seat);
         Task::none()
     }
     fn view(&self) -> cosmic::Element<'_, Self::Message>;
@@ -128,29 +128,37 @@ pub trait Program {
     }
 }
 
-struct ProgramWrapper<P: Program>(P, LoopHandle<'static, crate::state::State>);
+struct ProgramWrapper<P: Program> {
+    program: P,
+    evlh: LoopHandle<'static, crate::state::State>,
+    last_seat: Arc<Mutex<Option<(Seat<crate::state::State>, Serial)>>>,
+}
+
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
     type Renderer = cosmic::Renderer;
     type Theme = cosmic::Theme;
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
-        self.0.update(message, &self.1)
+        let last_seat = self.last_seat.lock().unwrap();
+        self.program.update(message, &self.evlh, last_seat.as_ref())
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        self.0.view()
+        self.program.view()
     }
 }
 
 pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     // draw buffer
+    additional_scale: f64,
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
-    pending_update: Option<Instant>,
+    pending_realloc: bool,
 
     // state
     size: Size<i32, Logical>,
+    last_seat: Arc<Mutex<Option<(Seat<crate::state::State>, Serial)>>>,
     cursor_pos: Option<Point<f64, Logical>>,
     touch_map: HashMap<Finger, IcedPoint>,
 
@@ -185,17 +193,23 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
         let mut debug = Debug::new();
         let state = State::new(
             ID.clone(),
-            ProgramWrapper(self.state.program().0.clone(), handle.clone()),
+            ProgramWrapper {
+                program: self.state.program().program.clone(),
+                evlh: handle.clone(),
+                last_seat: self.last_seat.clone(),
+            },
             IcedSize::new(self.size.w as f32, self.size.h as f32),
             &mut renderer,
             &mut debug,
         );
 
         IcedElementInternal {
+            additional_scale: self.additional_scale,
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
-            pending_update: self.pending_update.clone(),
+            pending_realloc: self.pending_realloc.clone(),
             size: self.size.clone(),
+            last_seat: self.last_seat.clone(),
             cursor_pos: self.cursor_pos.clone(),
             touch_map: self.touch_map.clone(),
             theme: self.theme.clone(),
@@ -213,10 +227,17 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
 impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IcedElementInternal")
+            .field("additional_scale", &self.additional_scale)
+            .field(
+                "outputs",
+                &self.outputs.iter().map(|o| o.name()).collect::<Vec<_>>(),
+            )
             .field("buffers", &"...")
             .field("size", &self.size)
-            .field("pending_update", &self.pending_update)
+            .field("pending_realloc", &self.pending_realloc)
+            .field("last_seat", &self.last_seat)
             .field("cursor_pos", &self.cursor_pos)
+            .field("touch_map", &self.touch_map)
             .field("theme", &"...")
             .field("renderer", &"...")
             .field("state", &"...")
@@ -243,12 +264,17 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         theme: cosmic::Theme,
     ) -> IcedElement<P> {
         let size = size.into();
+        let last_seat = Arc::new(Mutex::new(None));
         let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
         let mut debug = Debug::new();
 
         let state = State::new(
             ID.clone(),
-            ProgramWrapper(program, handle.clone()),
+            ProgramWrapper {
+                program,
+                evlh: handle.clone(),
+                last_seat: last_seat.clone(),
+            },
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
             &mut debug,
@@ -263,11 +289,13 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             .ok();
 
         let mut internal = IcedElementInternal {
+            additional_scale: 1.0,
             outputs: HashSet::new(),
             buffers: HashMap::new(),
-            pending_update: None,
+            pending_realloc: false,
             size,
             cursor_pos: None,
+            last_seat,
             touch_map: HashMap::new(),
             theme,
             renderer,
@@ -278,19 +306,19 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             executor_token,
             rx,
         };
-        let _ = internal.update(true);
+        internal.update(true);
 
         IcedElement(Arc::new(Mutex::new(internal)))
     }
 
     pub fn with_program<R>(&self, func: impl FnOnce(&P) -> R) -> R {
         let internal = self.0.lock().unwrap();
-        func(&internal.state.program().0)
+        func(&internal.state.program().program)
     }
 
     pub fn minimum_size(&self) -> Size<i32, Logical> {
         let internal = self.0.lock().unwrap();
-        let element = internal.state.program().0.view();
+        let element = internal.state.program().program.view();
         let node = element
             .as_widget()
             .layout(
@@ -317,20 +345,21 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         }
 
         internal_ref.size = size;
-        for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
-            let buffer_size = internal_ref
-                .size
-                .to_f64()
-                .to_buffer(**scale, Transform::Normal)
-                .to_i32_round();
-            *buffer =
-                MemoryRenderBuffer::new(Fourcc::Argb8888, buffer_size, 1, Transform::Normal, None);
-            *old_primitives = None;
-        }
+        internal_ref.pending_realloc = true;
+        internal_ref.update(true);
+    }
 
-        if internal_ref.pending_update.is_none() {
-            internal_ref.pending_update = Some(Instant::now());
+    pub fn set_additional_scale(&self, scale: f64) {
+        {
+            let mut internal = self.0.lock().unwrap();
+            let internal_ref = &mut *internal;
+            if internal_ref.additional_scale == scale {
+                return;
+            }
+
+            internal_ref.additional_scale = scale;
         }
+        self.refresh();
     }
 
     pub fn force_update(&self) {
@@ -347,7 +376,19 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         for (_buffer, ref mut old_primitives) in internal.buffers.values_mut() {
             *old_primitives = None;
         }
-        internal.update(true);
+    }
+
+    pub fn current_size(&self) -> Size<i32, Logical> {
+        let internal = self.0.lock().unwrap();
+        internal
+            .size
+            .to_f64()
+            .upscale(internal.additional_scale)
+            .to_i32_round()
+    }
+
+    pub fn queue_message(&self, msg: P::Message) {
+        self.0.lock().unwrap().state.queue_message(msg);
     }
 }
 
@@ -363,14 +404,13 @@ impl<P: Program + Send + 'static + Clone> IcedElement<P> {
 
 impl<P: Program + Send + 'static> IcedElementInternal<P> {
     #[profiling::function]
-    fn update(&mut self, mut force: bool) -> Vec<Task<<P as Program>::Message>> {
+    fn update(&mut self, force: bool) {
         while let Ok(Some(message)) = self.rx.try_recv() {
             self.state.queue_message(message);
-            force = true;
         }
 
-        if !force {
-            return Vec::new();
+        if self.state.is_queue_empty() && !force {
+            return;
         }
 
         let cursor = self
@@ -378,6 +418,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             .map(|p| IcedPoint::new(p.x as f32, p.y as f32))
             .map(Cursor::Available)
             .unwrap_or(Cursor::Unavailable);
+
         let actions = self
             .state
             .update(
@@ -404,14 +445,13 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
                 }));
             }
         }
-        Vec::new()
     }
 }
 
 impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedElement<P> {
     fn enter(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &MotionEvent,
     ) {
@@ -419,28 +459,32 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorEntered));
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         // TODO: Update iced widgets to handle touch using event position, not cursor_pos
-        internal.cursor_pos = Some(event.location);
-        let _ = internal.update(true);
+        internal.cursor_pos = Some(event_location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(false);
     }
 
     fn motion(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &MotionEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
-        internal.cursor_pos = Some(event.location);
-        let _ = internal.update(true);
+        internal.cursor_pos = Some(event_location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(false);
     }
 
     fn relative_motion(
@@ -453,7 +497,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
 
     fn button(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &ButtonEvent,
     ) {
@@ -468,7 +512,8 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
             ButtonState::Pressed => MouseEvent::ButtonPressed(button),
             ButtonState::Released => MouseEvent::ButtonReleased(button),
         }));
-        let _ = internal.update(true);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(false);
     }
 
     fn axis(
@@ -493,7 +538,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
                     }
                 },
             }));
-        let _ = internal.update(true);
+        internal.update(false);
     }
 
     fn frame(&self, _seat: &Seat<crate::state::State>, _data: &mut crate::state::State) {}
@@ -509,7 +554,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));
-        let _ = internal.update(true);
+        internal.update(false);
     }
 
     fn gesture_swipe_begin(
@@ -573,55 +618,60 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
 impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedElement<P> {
     fn down(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &DownEvent,
-        _seq: Serial,
+        seq: Serial,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
         internal
             .state
             .queue_event(Event::Touch(TouchEvent::FingerPressed { id, position }));
         internal.touch_map.insert(id, position);
-        internal.cursor_pos = Some(event.location);
-        let _ = internal.update(true);
+        internal.cursor_pos = Some(event_location);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
+        let _ = internal.update(false);
     }
 
     fn up(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &UpEvent,
-        _seq: Serial,
+        seq: Serial,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
         if let Some(position) = internal.touch_map.remove(&id) {
+            *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
             internal
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
-            let _ = internal.update(true);
+            let _ = internal.update(false);
         }
     }
 
     fn motion(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         event: &TouchMotionEvent,
-        _seq: Serial,
+        seq: Serial,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
-        let position = IcedPoint::new(event.location.x as f32, event.location.y as f32);
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
         internal
             .state
             .queue_event(Event::Touch(TouchEvent::FingerMoved { id, position }));
         internal.touch_map.insert(id, position);
-        internal.cursor_pos = Some(event.location);
-        let _ = internal.update(true);
+        internal.cursor_pos = Some(event_location);
+        let _ = internal.update(false);
     }
 
     fn frame(
@@ -644,7 +694,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLost { id, position }));
         }
-        let _ = internal.update(true);
+        let _ = internal.update(false);
     }
 
     fn shape(
@@ -722,7 +772,7 @@ impl<P: Program + Send + 'static> KeyboardTarget<crate::state::State> for IcedEl
         internal
             .state
             .queue_event(Event::Keyboard(KeyboardEvent::ModifiersChanged(mods)));
-        let _ = internal.update(true);
+        let _ = internal.update(false);
     }
 }
 
@@ -734,7 +784,14 @@ impl<P: Program + Send + 'static> IsAlive for IcedElement<P> {
 
 impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     fn bbox(&self) -> Rectangle<i32, Logical> {
-        Rectangle::from_size(self.0.lock().unwrap().size)
+        let internal = self.0.lock().unwrap();
+        Rectangle::from_size(
+            internal
+                .size
+                .to_f64()
+                .upscale(internal.additional_scale)
+                .to_i32_round(),
+        )
     }
 
     fn is_in_input_region(&self, _point: &Point<f64, Logical>) -> bool {
@@ -748,12 +805,12 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         } else {
             WindowEvent::Unfocused
         }));
-        let _ = internal.update(true); // TODO
+        let _ = internal.update(false);
     }
 
     fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
         let mut internal = self.0.lock().unwrap();
-        let scale = output.current_scale().fractional_scale();
+        let scale = output.current_scale().fractional_scale() * internal.additional_scale;
 
         let internal_size = internal.size;
         internal.buffers.entry(OrderedFloat(scale)).or_insert({
@@ -769,6 +826,8 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         });
 
         internal.outputs.insert(output.clone());
+        std::mem::drop(internal);
+        self.refresh();
     }
 
     fn output_leave(&self, output: &Output) {
@@ -787,15 +846,16 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         // makes partial borrows easier
         let internal_ref = &mut *internal;
         internal_ref.buffers.retain(|scale, _| {
-            internal_ref
-                .outputs
-                .iter()
-                .any(|o| o.current_scale().fractional_scale() == **scale)
+            internal_ref.outputs.iter().any(|o| {
+                o.current_scale().fractional_scale() * internal_ref.additional_scale == **scale
+            })
         });
         for scale in internal_ref
             .outputs
             .iter()
-            .map(|o| OrderedFloat(o.current_scale().fractional_scale()))
+            .map(|o| {
+                OrderedFloat(o.current_scale().fractional_scale() * internal_ref.additional_scale)
+            })
             .filter(|scale| !internal_ref.buffers.contains_key(scale))
             .collect::<Vec<_>>()
             .into_iter()
@@ -819,7 +879,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
                 ),
             );
         }
-        internal.update(true);
+        internal.update(false);
     }
 }
 
@@ -827,7 +887,7 @@ impl<P, R> AsRenderElements<R> for IcedElement<P>
 where
     P: Program + Send + 'static,
     R: Renderer + ImportMem,
-    <R as Renderer>::TextureId: Send + Clone + 'static,
+    R::TextureId: Send + Clone + 'static,
 {
     type RenderElement = MemoryRenderBufferRenderElement<R>;
 
@@ -835,24 +895,25 @@ where
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        mut scale: Scale<f64>,
         alpha: f32,
     ) -> Vec<C> {
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier
         let internal_ref = &mut *internal;
-        let force = if matches!(
-            internal_ref.pending_update,
-            Some(instant) if Instant::now().duration_since(instant) > Duration::from_millis(25)
-        ) {
-            true
-        } else {
-            false
-        };
-        if force {
-            internal_ref.pending_update = None;
+        if std::mem::replace(&mut internal_ref.pending_realloc, false) {
+            for (scale, (buffer, old_primitives)) in internal_ref.buffers.iter_mut() {
+                let buffer_size = internal_ref
+                    .size
+                    .to_f64()
+                    .to_buffer(**scale, Transform::Normal)
+                    .to_i32_round();
+                buffer.render().resize(buffer_size);
+                *old_primitives = None;
+            }
         }
-        let _ = internal_ref.update(force);
+
+        scale = scale * internal_ref.additional_scale;
         if let Some((buffer, ref mut old_layers)) =
             internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
         {
@@ -872,7 +933,7 @@ where
                         tiny_skia::PixmapMut::from_bytes(buf, size.w as u32, size.h as u32)
                             .expect("Failed to create pixel map");
 
-                    let background_color = state_ref.program().0.background_color(theme);
+                    let background_color = state_ref.program().program.background_color(theme);
                     let bounds = IcedSize::new(size.w as u32, size.h as u32);
                     let viewport = Viewport::with_physical_size(bounds, scale.x);
                     let scale_x = scale.x as f32;
@@ -934,16 +995,24 @@ where
                             )
                         })
                         .collect::<Vec<_>>();
-                    state_ref
-                        .program()
-                        .0
-                        .foreground(&mut pixels, &damage, scale.x as f32, theme);
+                    state_ref.program().program.foreground(
+                        &mut pixels,
+                        &damage,
+                        scale.x as f32,
+                        theme,
+                    );
 
                     Result::<_, ()>::Ok(damage)
                 });
+
+                // trim the shape cache
+                {
+                    let mut font_system = font_system().write().unwrap();
+                    font_system.raw().shape_run_cache.trim(1024);
+                }
             }
 
-            if let Ok(buffer) = MemoryRenderBufferRenderElement::from_buffer(
+            match MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location.to_f64(),
                 &buffer,
@@ -953,10 +1022,19 @@ where
                         .to_logical(1., Transform::Normal)
                         .to_i32_round(),
                 )),
-                Some(internal_ref.size),
+                Some(
+                    internal_ref
+                        .size
+                        .to_f64()
+                        .upscale(internal_ref.additional_scale)
+                        .to_i32_round(),
+                ),
                 Kind::Unspecified,
             ) {
-                return vec![C::from(buffer)];
+                Ok(buffer) => {
+                    return vec![C::from(buffer)];
+                }
+                Err(err) => tracing::warn!("What? {:?}", err),
             }
         }
         Vec::new()

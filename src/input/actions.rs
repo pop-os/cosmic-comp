@@ -3,8 +3,9 @@
 use crate::{
     config::{Action, PrivateAction},
     shell::{
-        focus::target::KeyboardFocusTarget, layout::tiling::SwapWindowGrab, FocusResult,
-        InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
+        focus::{target::KeyboardFocusTarget, FocusTarget},
+        layout::tiling::SwapWindowGrab,
+        FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
     },
     utils::prelude::*,
     wayland::{
@@ -19,13 +20,20 @@ use smithay::{
     input::{pointer::MotionEvent, Seat},
     utils::{Point, Serial},
 };
-use tracing::error;
 #[cfg(not(feature = "debug"))]
 use tracing::info;
+use tracing::{error, warn};
 
 use std::{os::unix::process::CommandExt, thread};
 
 use super::gestures;
+
+fn propagate_by_default(action: &shortcuts::Action) -> bool {
+    match action {
+        shortcuts::Action::Focus(_) | shortcuts::Action::Move(_) => true,
+        _ => false,
+    }
+}
 
 impl State {
     pub fn handle_action(
@@ -36,11 +44,10 @@ impl State {
         time: u32,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
-        propagate: bool,
     ) {
         // TODO: Detect if started from login manager or tty, and only allow
         // `Terminate` if it will return to login manager.
-        if self.common.shell.read().unwrap().session_lock.is_some()
+        if self.common.shell.read().session_lock.is_some()
             && !matches!(
                 action,
                 Action::Shortcut(shortcuts::Action::Terminate)
@@ -51,12 +58,15 @@ impl State {
         }
 
         match action {
-            Action::Shortcut(action) => self
-                .handle_shortcut_action(action, seat, serial, time, pattern, direction, propagate),
-
+            Action::Shortcut(action) => {
+                let propagate = propagate_by_default(&action);
+                self.handle_shortcut_action(
+                    action, seat, serial, time, pattern, direction, propagate,
+                )
+            }
             Action::Private(PrivateAction::Escape) => {
                 {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     shell.set_overview_mode(None, self.common.event_loop_handle.clone());
                     shell.set_resize_mode(
                         None,
@@ -79,13 +89,11 @@ impl State {
                     self.common
                         .shell
                         .write()
-                        .unwrap()
                         .resize(seat, direction, edge.into());
                 } else {
                     self.common
                         .shell
                         .write()
-                        .unwrap()
                         .finish_resize(direction, edge.into());
                 }
             }
@@ -98,7 +106,7 @@ impl State {
         match action {
             SwipeAction::NextWorkspace => {
                 let _ = to_next_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut *self.common.shell.write(),
                     &seat,
                     true,
                     &mut self.common.workspace_state.update(),
@@ -106,7 +114,7 @@ impl State {
             }
             SwipeAction::PrevWorkspace => {
                 let _ = to_previous_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut *self.common.shell.write(),
                     &seat,
                     true,
                     &mut self.common.workspace_state.update(),
@@ -115,6 +123,7 @@ impl State {
         }
     }
 
+    #[profiling::function]
     pub fn handle_shortcut_action(
         &mut self,
         action: shortcuts::Action,
@@ -134,7 +143,7 @@ impl State {
 
             #[cfg(feature = "debug")]
             Action::Debug => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 shell.debug_active = !shell.debug_active;
                 for mapped in shell.workspaces.spaces().flat_map(|w| w.mapped()) {
                     mapped.set_debug(shell.debug_active);
@@ -148,11 +157,7 @@ impl State {
 
             Action::Close => {
                 if let Some(focus_target) = seat.get_keyboard().unwrap().current_focus() {
-                    self.common
-                        .shell
-                        .read()
-                        .unwrap()
-                        .close_focused(&focus_target);
+                    self.common.shell.read().close_focused(&focus_target);
                 }
             }
 
@@ -162,7 +167,7 @@ impl State {
                     0 => 9,
                     x => x - 1,
                 };
-                let _ = self.common.shell.write().unwrap().activate(
+                let _ = self.common.shell.write().activate(
                     &current_output,
                     workspace as usize,
                     WorkspaceDelta::new_shortcut(),
@@ -172,7 +177,7 @@ impl State {
 
             Action::LastWorkspace => {
                 let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.workspaces.len(&current_output).saturating_sub(1);
                 let _ = shell.activate(
                     &current_output,
@@ -183,16 +188,40 @@ impl State {
             }
 
             Action::NextWorkspace => {
+                if let Some(direction) = pattern.inferred_direction() {
+                    if ((direction == Direction::Left || direction == Direction::Right)
+                        && self.common.config.cosmic_conf.workspaces.workspace_layout
+                            == WorkspaceLayout::Vertical)
+                        || ((direction == Direction::Up || direction == Direction::Down)
+                            && self.common.config.cosmic_conf.workspaces.workspace_layout
+                                == WorkspaceLayout::Horizontal)
+                    {
+                        return;
+                    }
+                }
+
                 let next = to_next_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut *self.common.shell.write(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
                 );
-                if next.is_err() && propagate {
-                    if let Some(inferred) = pattern.inferred_direction() {
+                if next.is_err() {
+                    if propagate {
+                        if let Some(inferred) = pattern.inferred_direction() {
+                            self.handle_shortcut_action(
+                                Action::SwitchOutput(inferred),
+                                seat,
+                                serial,
+                                time,
+                                pattern,
+                                direction,
+                                true,
+                            )
+                        };
+                    } else {
                         self.handle_shortcut_action(
-                            Action::SwitchOutput(inferred),
+                            Action::Workspace(1),
                             seat,
                             serial,
                             time,
@@ -200,21 +229,45 @@ impl State {
                             direction,
                             false,
                         )
-                    };
+                    }
                 }
             }
 
             Action::PreviousWorkspace => {
+                if let Some(direction) = pattern.inferred_direction() {
+                    if ((direction == Direction::Left || direction == Direction::Right)
+                        && self.common.config.cosmic_conf.workspaces.workspace_layout
+                            == WorkspaceLayout::Vertical)
+                        || ((direction == Direction::Up || direction == Direction::Down)
+                            && self.common.config.cosmic_conf.workspaces.workspace_layout
+                                == WorkspaceLayout::Horizontal)
+                    {
+                        return;
+                    }
+                }
+
                 let previous = to_previous_workspace(
-                    &mut *self.common.shell.write().unwrap(),
+                    &mut *self.common.shell.write(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
                 );
-                if previous.is_err() && propagate {
-                    if let Some(inferred) = pattern.inferred_direction() {
+                if previous.is_err() {
+                    if propagate {
+                        if let Some(inferred) = pattern.inferred_direction() {
+                            self.handle_shortcut_action(
+                                Action::SwitchOutput(inferred),
+                                seat,
+                                serial,
+                                time,
+                                pattern,
+                                direction,
+                                true,
+                            )
+                        };
+                    } else {
                         self.handle_shortcut_action(
-                            Action::SwitchOutput(inferred),
+                            Action::LastWorkspace,
                             seat,
                             serial,
                             time,
@@ -222,7 +275,7 @@ impl State {
                             direction,
                             false,
                         )
-                    };
+                    }
                 }
             }
 
@@ -236,13 +289,13 @@ impl State {
                     Action::MoveToWorkspace(x) | Action::SendToWorkspace(x) => x - 1,
                     _ => unreachable!(),
                 };
-                let res = self.common.shell.write().unwrap().move_current_window(
+                let res = self.common.shell.write().move_current(
                     seat,
-                    &focused_output,
                     (&focused_output, Some(workspace as usize)),
                     follow,
                     None,
                     &mut self.common.workspace_state.update(),
+                    &self.common.event_loop_handle,
                 );
                 if let Ok(Some((target, _point))) = res {
                     Shell::set_focus(
@@ -259,15 +312,15 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.workspaces.len(&focused_output).saturating_sub(1);
-                let res = shell.move_current_window(
+                let res = shell.move_current(
                     seat,
-                    &focused_output,
                     (&focused_output, Some(workspace)),
                     matches!(x, Action::MoveToLastWorkspace),
                     None,
                     &mut self.common.workspace_state.update(),
+                    &self.common.event_loop_handle,
                 );
                 // If the active workspace changed, the cursor_follows_focus should probably be checked
                 if let Ok(Some((target, _point))) = res {
@@ -283,24 +336,39 @@ impl State {
             }
 
             x @ Action::MoveToNextWorkspace | x @ Action::SendToNextWorkspace => {
+                if let Some(direction) = pattern.inferred_direction() {
+                    if ((direction == Direction::Left || direction == Direction::Right)
+                        && self.common.config.cosmic_conf.workspaces.workspace_layout
+                            == WorkspaceLayout::Vertical)
+                        || ((direction == Direction::Up || direction == Direction::Down)
+                            && self.common.config.cosmic_conf.workspaces.workspace_layout
+                                == WorkspaceLayout::Horizontal)
+                    {
+                        return;
+                    }
+                }
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
+
                 let res = {
-                    let mut shell = self.common.shell.write().unwrap();
-                    let workspace = shell
+                    let mut shell = self.common.shell.write();
+                    shell
                         .workspaces
                         .active_num(&focused_output)
                         .1
-                        .saturating_add(1);
-                    shell.move_current_window(
-                        seat,
-                        &focused_output,
-                        (&focused_output, Some(workspace)),
-                        matches!(x, Action::MoveToNextWorkspace),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    )
+                        .checked_add(1)
+                        .ok_or(InvalidWorkspaceIndex)
+                        .and_then(|workspace| {
+                            shell.move_current(
+                                seat,
+                                (&focused_output, Some(workspace)),
+                                matches!(x, Action::MoveToNextWorkspace),
+                                direction,
+                                &mut self.common.workspace_state.update(),
+                                &self.common.event_loop_handle,
+                            )
+                        })
                 };
 
                 match res {
@@ -314,6 +382,7 @@ impl State {
                             matches!(x, Action::MoveToNextWorkspace),
                         );
                     }
+                    Ok(None) => {}
                     Err(_) if propagate => {
                         if let Some(inferred) = pattern.inferred_direction() {
                             self.handle_shortcut_action(
@@ -327,34 +396,63 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
-                                false,
+                                true,
                             )
                         }
                     }
-                    _ => {}
+                    Err(_) => {
+                        // cycle through
+                        self.handle_shortcut_action(
+                            if matches!(x, Action::MoveToNextWorkspace) {
+                                Action::MoveToWorkspace(1)
+                            } else {
+                                Action::SendToWorkspace(1)
+                            },
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            direction,
+                            false,
+                        )
+                    }
                 }
             }
 
             x @ Action::MoveToPreviousWorkspace | x @ Action::SendToPreviousWorkspace => {
+                if let Some(direction) = pattern.inferred_direction() {
+                    if ((direction == Direction::Left || direction == Direction::Right)
+                        && self.common.config.cosmic_conf.workspaces.workspace_layout
+                            == WorkspaceLayout::Vertical)
+                        || ((direction == Direction::Up || direction == Direction::Down)
+                            && self.common.config.cosmic_conf.workspaces.workspace_layout
+                                == WorkspaceLayout::Horizontal)
+                    {
+                        return;
+                    }
+                }
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
+
                 let res = {
-                    let mut shell = self.common.shell.write().unwrap();
-                    let workspace = shell
+                    let mut shell = self.common.shell.write();
+                    shell
                         .workspaces
                         .active_num(&focused_output)
                         .1
-                        .saturating_sub(1);
-                    // TODO: Possibly move to prev output, if idx < 0
-                    shell.move_current_window(
-                        seat,
-                        &focused_output,
-                        (&focused_output, Some(workspace)),
-                        matches!(x, Action::MoveToPreviousWorkspace),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    )
+                        .checked_sub(1)
+                        .ok_or(InvalidWorkspaceIndex)
+                        .and_then(|workspace| {
+                            shell.move_current(
+                                seat,
+                                (&focused_output, Some(workspace)),
+                                matches!(x, Action::MoveToPreviousWorkspace),
+                                direction,
+                                &mut self.common.workspace_state.update(),
+                                &self.common.event_loop_handle,
+                            )
+                        })
                 };
 
                 match res {
@@ -367,6 +465,7 @@ impl State {
                             matches!(x, Action::MoveToPreviousWorkspace),
                         );
                     }
+                    Ok(None) => {}
                     Err(_) if propagate => {
                         if let Some(inferred) = pattern.inferred_direction() {
                             self.handle_shortcut_action(
@@ -380,141 +479,82 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
-                                false,
+                                true,
                             )
                         }
                     }
-                    _ => {}
-                }
-            }
-
-            Action::SwitchOutput(direction) => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-
-                let next_output = shell.next_output(&current_output, direction).cloned();
-
-                if let Some(next_output) = next_output {
-                    let idx = shell.workspaces.active_num(&next_output).1;
-                    let res = shell.activate(
-                        &next_output,
-                        idx,
-                        WorkspaceDelta::new_shortcut(),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    seat.set_active_output(&next_output);
-
-                    if let Ok(Some(new_pos)) = res {
-                        let new_target = shell
-                            .workspaces
-                            .active(&next_output)
-                            .unwrap()
-                            .1
-                            .focus_stack
-                            .get(&seat)
-                            .last()
-                            .cloned()
-                            .map(KeyboardFocusTarget::from);
-                        std::mem::drop(shell);
-
-                        let move_cursor = if let Some(under) = new_target {
-                            let update_cursor = self.common.config.cosmic_conf.focus_follows_cursor;
-                            Shell::set_focus(self, Some(&under), seat, None, update_cursor);
-                            !update_cursor
-                        } else {
-                            true
-                        };
-
-                        if let Some(ptr) = seat.get_pointer() {
-                            if move_cursor {
-                                ptr.motion(
-                                    self,
-                                    None,
-                                    &MotionEvent {
-                                        location: new_pos.to_f64().as_logical(),
-                                        serial,
-                                        time,
-                                    },
-                                );
-                            }
-                            ptr.frame(self);
-                        }
-                    }
-                } else if propagate {
-                    std::mem::drop(shell);
-
-                    let action = match (
-                        direction,
-                        self.common.config.cosmic_conf.workspaces.workspace_layout,
-                    ) {
-                        (Direction::Left, WorkspaceLayout::Horizontal)
-                        | (Direction::Up, WorkspaceLayout::Vertical) => {
-                            Some(Action::PreviousWorkspace)
-                        }
-                        (Direction::Right, WorkspaceLayout::Horizontal)
-                        | (Direction::Down, WorkspaceLayout::Vertical) => {
-                            Some(Action::NextWorkspace)
-                        }
-                        _ => None,
-                    };
-
-                    if let Some(action) = action {
+                    Err(_) => {
+                        // cycle through
                         self.handle_shortcut_action(
-                            action,
+                            if matches!(x, Action::MoveToPreviousWorkspace) {
+                                Action::MoveToLastWorkspace
+                            } else {
+                                Action::SendToLastWorkspace
+                            },
                             seat,
                             serial,
                             time,
                             pattern,
-                            Some(direction),
+                            direction,
                             false,
                         )
                     }
                 }
             }
 
-            Action::NextOutput => {
+            Action::SwitchOutput(direction) => {
                 let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
 
-                let next_output = shell
-                    .outputs()
-                    .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
+                let next_output = shell.next_output(&current_output, direction).cloned();
+
                 if let Some(next_output) = next_output {
-                    let idx = shell.workspaces.active_num(&next_output).1;
-                    let res = shell.activate(
-                        &next_output,
-                        idx,
-                        WorkspaceDelta::new_shortcut(),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    seat.set_active_output(&next_output);
+                    let res = {
+                        let mut workspace_guard = self.common.workspace_state.update();
+                        if propagate {
+                            if let Some((serial, prev_output, prev_idx)) =
+                                shell.previous_workspace_idx.take()
+                            {
+                                if seat.last_modifier_change().is_some_and(|s| s == serial)
+                                    && prev_output == current_output
+                                {
+                                    let _ = shell.activate(
+                                        &current_output,
+                                        prev_idx,
+                                        WorkspaceDelta::new_shortcut(),
+                                        &mut workspace_guard,
+                                    );
+                                }
+                            }
+                        }
 
-                    if let Ok(Some(new_pos)) = res {
-                        let new_target = shell
-                            .workspaces
-                            .active(&next_output)
-                            .unwrap()
-                            .1
+                        let idx = shell.workspaces.active_num(&next_output).1;
+                        let res = shell.activate(
+                            &next_output,
+                            idx,
+                            WorkspaceDelta::new_shortcut(),
+                            &mut workspace_guard,
+                        );
+                        seat.set_active_output(&next_output);
+                        res
+                    };
+
+                    if let Ok(new_pos) = res {
+                        let workspace = shell.workspaces.active(&next_output).unwrap().1;
+                        let new_target = workspace
                             .focus_stack
                             .get(&seat)
                             .last()
                             .cloned()
-                            .map(KeyboardFocusTarget::from);
+                            .map(Into::<KeyboardFocusTarget>::into);
                         std::mem::drop(shell);
 
-                        let move_cursor = if let Some(under) = new_target {
-                            let update_cursor = self.common.config.cosmic_conf.focus_follows_cursor;
-                            Shell::set_focus(self, Some(&under), seat, None, update_cursor);
-                            !update_cursor
-                        } else {
-                            true
-                        };
+                        let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
+                        Shell::set_focus(self, new_target.as_ref(), seat, None, update_cursor);
 
                         if let Some(ptr) = seat.get_pointer() {
-                            if move_cursor {
+                            // Update cursor position if `set_focus` didn't already
+                            if !update_cursor {
                                 ptr.motion(
                                     self,
                                     None,
@@ -531,64 +571,14 @@ impl State {
                 }
             }
 
+            #[allow(deprecated)]
+            Action::NextOutput => {
+                warn!("Skipping deprecated shortcut NextOutput");
+            }
+
+            #[allow(deprecated)]
             Action::PreviousOutput => {
-                let current_output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
-
-                let prev_output = shell
-                    .outputs()
-                    .rev()
-                    .skip_while(|o| *o != &current_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(prev_output) = prev_output {
-                    let idx = shell.workspaces.active_num(&prev_output).1;
-                    let res = shell.activate(
-                        &prev_output,
-                        idx,
-                        WorkspaceDelta::new_shortcut(),
-                        &mut self.common.workspace_state.update(),
-                    );
-                    seat.set_active_output(&prev_output);
-
-                    if let Ok(Some(new_pos)) = res {
-                        let new_target = shell
-                            .workspaces
-                            .active(&prev_output)
-                            .unwrap()
-                            .1
-                            .focus_stack
-                            .get(&seat)
-                            .last()
-                            .cloned()
-                            .map(KeyboardFocusTarget::from);
-                        std::mem::drop(shell);
-
-                        let move_cursor = if let Some(under) = new_target {
-                            let update_cursor = self.common.config.cosmic_conf.focus_follows_cursor;
-                            Shell::set_focus(self, Some(&under), seat, None, update_cursor);
-                            !update_cursor
-                        } else {
-                            true
-                        };
-
-                        if let Some(ptr) = seat.get_pointer() {
-                            if move_cursor {
-                                ptr.motion(
-                                    self,
-                                    None,
-                                    &MotionEvent {
-                                        location: new_pos.to_f64().as_logical(),
-                                        serial,
-                                        time,
-                                    },
-                                );
-                            }
-                            ptr.frame(self);
-                        }
-                    }
-                }
+                warn!("Skipping deprecated shortcut PreviousOutput");
             }
 
             action @ Action::MoveToOutput(_) | action @ Action::SendToOutput(_) => {
@@ -602,18 +592,38 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let next_output = shell.next_output(&focused_output, direction).cloned();
 
                 if let Some(next_output) = next_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &focused_output,
-                        (&next_output, None),
-                        is_move_action,
-                        Some(direction),
-                        &mut self.common.workspace_state.update(),
-                    );
+                    let res = {
+                        let mut workspace_guard = self.common.workspace_state.update();
+                        let res = shell.move_current(
+                            seat,
+                            (&next_output, None),
+                            is_move_action,
+                            Some(direction),
+                            &mut workspace_guard,
+                            &self.common.event_loop_handle,
+                        );
+
+                        if is_move_action && propagate {
+                            if let Some((_, prev_output, prev_idx)) =
+                                shell.previous_workspace_idx.take()
+                            {
+                                if prev_output == focused_output {
+                                    let _ = shell.activate(
+                                        &focused_output,
+                                        prev_idx,
+                                        WorkspaceDelta::new_shortcut(),
+                                        &mut workspace_guard,
+                                    );
+                                }
+                            }
+                        }
+                        res
+                    };
+
                     if let Ok(Some((target, new_pos))) = res {
                         std::mem::drop(shell);
                         Shell::set_focus(self, Some(&target), seat, None, is_move_action);
@@ -630,176 +640,23 @@ impl State {
                             ptr.frame(self);
                         }
                     }
-                } else if propagate {
-                    std::mem::drop(shell);
-                    match (
-                        direction,
-                        self.common.config.cosmic_conf.workspaces.workspace_layout,
-                    ) {
-                        (Direction::Left, WorkspaceLayout::Horizontal)
-                        | (Direction::Up, WorkspaceLayout::Vertical) => self
-                            .handle_shortcut_action(
-                                Action::MoveToPreviousWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                false,
-                            ),
-                        (Direction::Right, WorkspaceLayout::Horizontal)
-                        | (Direction::Down, WorkspaceLayout::Vertical) => self
-                            .handle_shortcut_action(
-                                Action::MoveToNextWorkspace,
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                Some(direction),
-                                false,
-                            ),
-
-                        _ => {}
-                    }
                 }
             }
 
-            x @ Action::MoveToNextOutput | x @ Action::SendToNextOutput => {
-                let Some(focused_output) = seat.focused_output() else {
-                    return;
-                };
-                let mut shell = self.common.shell.write().unwrap();
-
-                let next_output = shell
-                    .outputs()
-                    .skip_while(|o| *o != &focused_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(next_output) = next_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &focused_output,
-                        (&next_output, None),
-                        matches!(x, Action::MoveToNextOutput),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    );
-                    if let Ok(Some((target, new_pos))) = res {
-                        std::mem::drop(shell);
-                        Shell::set_focus(
-                            self,
-                            Some(&target),
-                            seat,
-                            None,
-                            matches!(x, Action::MoveToNextOutput),
-                        );
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64().as_logical(),
-                                    serial,
-                                    time,
-                                },
-                            );
-                            ptr.frame(self);
-                        }
-                    }
-                }
+            #[allow(deprecated)]
+            Action::MoveToNextOutput | Action::SendToNextOutput => {
+                warn!("Ignoring deprecated action Move/SendToNextOutput");
             }
 
-            x @ Action::MoveToPreviousOutput | x @ Action::SendToPreviousOutput => {
-                let Some(focused_output) = seat.focused_output() else {
-                    return;
-                };
-                let mut shell = self.common.shell.write().unwrap();
-
-                let prev_output = shell
-                    .outputs()
-                    .rev()
-                    .skip_while(|o| *o != &focused_output)
-                    .skip(1)
-                    .next()
-                    .cloned();
-                if let Some(prev_output) = prev_output {
-                    let res = shell.move_current_window(
-                        seat,
-                        &focused_output,
-                        (&prev_output, None),
-                        matches!(x, Action::MoveToPreviousOutput),
-                        direction,
-                        &mut self.common.workspace_state.update(),
-                    );
-                    if let Ok(Some((target, new_pos))) = res {
-                        std::mem::drop(shell);
-                        Shell::set_focus(
-                            self,
-                            Some(&target),
-                            seat,
-                            None,
-                            matches!(x, Action::MoveToPreviousOutput),
-                        );
-                        if let Some(ptr) = seat.get_pointer() {
-                            ptr.motion(
-                                self,
-                                None,
-                                &MotionEvent {
-                                    location: new_pos.to_f64().as_logical(),
-                                    serial,
-                                    time,
-                                },
-                            );
-                            ptr.frame(self);
-                        }
-                    }
-                }
-            }
-
-            Action::MigrateWorkspaceToNextOutput => {
-                let active_output = seat.active_output();
-                let (active, next_output) = {
-                    let shell = self.common.shell.read().unwrap();
-                    let output = shell
-                        .outputs()
-                        .skip_while(|o| *o != &active_output)
-                        .skip(1)
-                        .next()
-                        .cloned();
-
-                    (shell.active_space(&active_output).unwrap().handle, output)
-                };
-                if let Some(next_output) = next_output {
-                    self.common
-                        .migrate_workspace(&active_output, &next_output, &active);
-                }
-            }
-
-            Action::MigrateWorkspaceToPreviousOutput => {
-                let active_output = seat.active_output();
-                let (active, prev_output) = {
-                    let shell = self.common.shell.read().unwrap();
-                    let output = shell
-                        .outputs()
-                        .rev()
-                        .skip_while(|o| *o != &active_output)
-                        .skip(1)
-                        .next()
-                        .cloned();
-
-                    (shell.active_space(&active_output).unwrap().handle, output)
-                };
-                if let Some(prev_output) = prev_output {
-                    self.common
-                        .migrate_workspace(&active_output, &prev_output, &active);
-                }
+            #[allow(deprecated)]
+            Action::MoveToPreviousOutput | Action::SendToPreviousOutput => {
+                warn!("Ignoring deprecated action Move/SendToPreviousOutput");
             }
 
             Action::MigrateWorkspaceToOutput(direction) => {
                 let active_output = seat.active_output();
                 let (active, next_output) = {
-                    let shell = self.common.shell.read().unwrap();
+                    let shell = self.common.shell.read();
 
                     (
                         shell.active_space(&active_output).unwrap().handle,
@@ -808,13 +665,56 @@ impl State {
                 };
 
                 if let Some(next_output) = next_output {
-                    self.common
-                        .migrate_workspace(&active_output, &next_output, &active);
+                    let mut shell = self.common.shell.write();
+                    let mut workspace_state = self.common.workspace_state.update();
+                    shell.workspaces.migrate_workspace(
+                        &active_output,
+                        &next_output,
+                        &active,
+                        &mut workspace_state,
+                    );
+                    // Activate workspace on new set, and set that output as active
+                    if let Some(new_idx) = shell
+                        .workspaces
+                        .sets
+                        .get(&next_output)
+                        .and_then(|set| set.workspaces.iter().position(|w| w.handle == active))
+                    {
+                        let res = shell.activate(
+                            &next_output,
+                            new_idx,
+                            WorkspaceDelta::new_shortcut(),
+                            &mut workspace_state,
+                        );
+                        drop(workspace_state);
+                        drop(shell);
+                        if res.is_ok() {
+                            self.handle_shortcut_action(
+                                Action::SwitchOutput(direction),
+                                seat,
+                                serial,
+                                time,
+                                pattern,
+                                Some(direction),
+                                true,
+                            )
+                        }
+                    }
                 }
             }
 
+            #[allow(deprecated)]
+            Action::MigrateWorkspaceToNextOutput => {
+                warn!("Ignoring deprecated action MigrateWorkspaceToNextOutput");
+            }
+
+            #[allow(deprecated)]
+            Action::MigrateWorkspaceToPreviousOutput => {
+                warn!("Ignoring deprecated action MigrateWorkspaceToPreviousOutput");
+            }
+
             Action::Focus(focus) => {
-                let result = self.common.shell.read().unwrap().next_focus(focus, seat);
+                let result = self.common.shell.read().next_focus(focus, seat);
 
                 match result {
                     FocusResult::None => {
@@ -827,8 +727,41 @@ impl State {
                         };
 
                         if let Some(direction) = dir {
+                            if let Some(last_mod_serial) = seat.last_modifier_change() {
+                                let mut shell = self.common.shell.write();
+                                if !shell
+                                    .previous_workspace_idx
+                                    .as_ref()
+                                    .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
+                                {
+                                    let current_output = seat.active_output();
+                                    let workspace_idx =
+                                        shell.workspaces.active_num(&current_output).1;
+                                    shell.previous_workspace_idx = Some((
+                                        last_mod_serial,
+                                        current_output.downgrade(),
+                                        workspace_idx,
+                                    ));
+                                }
+                            }
+
+                            let action = match (
+                                direction,
+                                self.common.config.cosmic_conf.workspaces.workspace_layout,
+                            ) {
+                                (Direction::Left, WorkspaceLayout::Horizontal)
+                                | (Direction::Up, WorkspaceLayout::Vertical) => {
+                                    Action::PreviousWorkspace
+                                }
+                                (Direction::Right, WorkspaceLayout::Horizontal)
+                                | (Direction::Down, WorkspaceLayout::Vertical) => {
+                                    Action::NextWorkspace
+                                }
+                                _ => Action::SwitchOutput(direction),
+                            };
+
                             self.handle_shortcut_action(
-                                Action::SwitchOutput(direction),
+                                action,
                                 seat,
                                 serial,
                                 time,
@@ -850,27 +783,62 @@ impl State {
                     .common
                     .shell
                     .write()
-                    .unwrap()
                     .move_current_element(direction, seat);
                 match res {
-                    MoveResult::MoveFurther(_move_further) => self.handle_shortcut_action(
-                        Action::MoveToOutput(direction),
-                        seat,
-                        serial,
-                        time,
-                        pattern,
-                        Some(direction),
-                        true,
-                    ),
+                    MoveResult::MoveFurther(_move_further) => {
+                        if let Some(last_mod_serial) = seat.last_modifier_change() {
+                            let mut shell = self.common.shell.write();
+                            if !shell
+                                .previous_workspace_idx
+                                .as_ref()
+                                .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
+                            {
+                                let current_output = seat.active_output();
+                                let workspace_idx = shell.workspaces.active_num(&current_output).1;
+                                shell.previous_workspace_idx = Some((
+                                    last_mod_serial,
+                                    current_output.downgrade(),
+                                    workspace_idx,
+                                ));
+                            }
+                        }
+
+                        let action = match (
+                            direction,
+                            self.common.config.cosmic_conf.workspaces.workspace_layout,
+                        ) {
+                            (Direction::Left, WorkspaceLayout::Horizontal)
+                            | (Direction::Up, WorkspaceLayout::Vertical) => {
+                                Action::MoveToPreviousWorkspace
+                            }
+                            (Direction::Right, WorkspaceLayout::Horizontal)
+                            | (Direction::Down, WorkspaceLayout::Vertical) => {
+                                Action::MoveToNextWorkspace
+                            }
+                            _ => Action::MoveToOutput(direction),
+                        };
+
+                        self.handle_shortcut_action(
+                            action,
+                            seat,
+                            serial,
+                            time,
+                            pattern,
+                            Some(direction),
+                            true,
+                        )
+                    }
                     MoveResult::ShiftFocus(shift) => {
                         Shell::set_focus(self, Some(&shift), seat, None, true);
                     }
                     _ => {
                         let current_output = seat.active_output();
-                        let mut shell = self.common.shell.write().unwrap();
+                        let mut shell = self.common.shell.write();
                         let workspace = shell.active_space(&current_output).unwrap();
-                        if let Some(focused_window) = workspace.focus_stack.get(seat).last() {
-                            if workspace.is_tiled(focused_window) {
+                        if let Some(FocusTarget::Window(focused_window)) =
+                            workspace.focus_stack.get(seat).last()
+                        {
+                            if workspace.is_tiled(&focused_window.active_window()) {
                                 shell.set_overview_mode(
                                     Some(Trigger::KeyboardMove(pattern.modifiers)),
                                     self.common.event_loop_handle.clone(),
@@ -885,20 +853,17 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
 
                 let workspace = shell.active_space_mut(&focused_output).unwrap();
-                if workspace.get_fullscreen().is_some() {
-                    return; // TODO, is this what we want? Maybe disengage fullscreen instead?
-                }
-
                 let keyboard_handle = seat.get_keyboard().unwrap();
+
                 if let Some(focus) = keyboard_handle.current_focus() {
                     if let Some(descriptor) = workspace.node_desc(focus) {
                         let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
                         drop(shell);
                         keyboard_handle.set_grab(self, grab, serial);
-                        let mut shell = self.common.shell.write().unwrap();
+                        let mut shell = self.common.shell.write();
                         shell.set_overview_mode(
                             Some(Trigger::KeyboardSwap(pattern, descriptor)),
                             self.common.event_loop_handle.clone(),
@@ -911,12 +876,11 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&focused_output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last().cloned();
-                if let Some(window) = focused_window {
-                    shell.minimize_request(&window);
+                if let Some(surface) = focus_stack.last().and_then(FocusTarget::wl_surface) {
+                    shell.minimize_request(&surface);
                 }
             }
 
@@ -924,16 +888,48 @@ impl State {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space(&focused_output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
                 let focused_window = focus_stack.last().cloned();
-                if let Some(window) = focused_window {
-                    shell.maximize_toggle(&window, seat);
+                if let Some(FocusTarget::Window(window)) = focused_window {
+                    shell.maximize_toggle(&window, seat, &self.common.event_loop_handle);
                 }
             }
 
-            Action::Resizing(direction) => self.common.shell.write().unwrap().set_resize_mode(
+            Action::Fullscreen => {
+                let Some(focused_output) = seat.focused_output() else {
+                    return;
+                };
+                let mut shell = self.common.shell.write();
+                let workspace = shell.active_space(&focused_output).unwrap();
+                let focus_stack = workspace.focus_stack.get(seat);
+                let focused_window = focus_stack.last().cloned();
+                match focused_window {
+                    Some(FocusTarget::Window(window)) => {
+                        let output = workspace.output.clone();
+                        if let Some(target) = shell.fullscreen_request(
+                            &window.active_window(),
+                            output,
+                            &self.common.event_loop_handle,
+                        ) {
+                            std::mem::drop(shell);
+                            Shell::set_focus(self, Some(&target), seat, Some(serial), true);
+                        }
+                    }
+                    Some(FocusTarget::Fullscreen(surface)) => {
+                        if let Some(target) =
+                            shell.unfullscreen_request(&surface, &self.common.event_loop_handle)
+                        {
+                            std::mem::drop(shell);
+                            Shell::set_focus(self, Some(&target), seat, Some(serial), true);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            Action::Resizing(direction) => self.common.shell.write().set_resize_mode(
                 Some((pattern, direction)),
                 &self.common.config,
                 self.common.event_loop_handle.clone(),
@@ -942,14 +938,14 @@ impl State {
             // rather than the output that has keyboard focus
             Action::ToggleOrientation => {
                 let output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.tiling_layer.update_orientation(None, &seat);
             }
 
             Action::Orientation(orientation) => {
                 let output = seat.active_output();
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace
                     .tiling_layer
@@ -961,8 +957,7 @@ impl State {
                     .common
                     .shell
                     .write()
-                    .unwrap()
-                    .toggle_stacking_focused(seat);
+                    .toggle_stacking_focused(seat, &self.common.event_loop_handle);
                 if let Some(new_focus) = res {
                     Shell::set_focus(self, Some(&new_focus), seat, Some(serial), false);
                 }
@@ -977,7 +972,7 @@ impl State {
                     self.common.config.cosmic_conf.autotile = autotile;
 
                     {
-                        let mut shell = self.common.shell.write().unwrap();
+                        let mut shell = self.common.shell.write();
                         let shell_ref = &mut *shell;
                         shell_ref.workspaces.update_autotile(
                             self.common.config.cosmic_conf.autotile,
@@ -993,7 +988,7 @@ impl State {
                     });
                 } else {
                     let output = seat.active_output();
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     let workspace = shell.workspaces.active_mut(&output).unwrap();
                     let mut guard = self.common.workspace_state.update();
                     workspace.toggle_tiling(seat, &mut guard);
@@ -1004,17 +999,13 @@ impl State {
                 let Some(output) = seat.focused_output() else {
                     return;
                 };
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.toggle_floating_window_focused(seat);
             }
 
             Action::ToggleSticky => {
-                self.common
-                    .shell
-                    .write()
-                    .unwrap()
-                    .toggle_sticky_current(seat);
+                self.common.shell.write().toggle_sticky_current(seat);
             }
 
             // Gets the configured command for a given system action.
@@ -1026,20 +1017,33 @@ impl State {
 
             Action::Spawn(command) => self.spawn_command(command),
 
+            x @ Action::ZoomIn | x @ Action::ZoomOut => {
+                let change = {
+                    let increment =
+                        self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
+                    match x {
+                        Action::ZoomIn => increment,
+                        Action::ZoomOut => -increment,
+                        _ => unreachable!(),
+                    }
+                };
+
+                self.update_zoom(seat, change, true);
+            }
+
             // Do nothing
             Action::Disable => (),
         }
     }
 
-    fn spawn_command(&mut self, command: String) {
-        let mut shell = self.common.shell.write().unwrap();
+    pub fn spawn_command(&mut self, command: String) {
+        let mut shell = self.common.shell.write();
 
         let (token, data) = self.common.xdg_activation_state.create_external_token(None);
         let (token, data) = (token.clone(), data.clone());
 
         let output = shell.seats.last_active().active_output();
         let workspace = shell.active_space_mut(&output).unwrap();
-        workspace.pending_tokens.insert(token.clone());
         let handle = workspace.handle;
         std::mem::drop(shell);
         data.user_data
@@ -1073,6 +1077,31 @@ impl State {
             }
         });
     }
+
+    pub fn update_zoom(&mut self, seat: &Seat<State>, change: f64, animate: bool) {
+        let output = seat.active_output();
+        let mut shell = self.common.shell.write();
+        let (zoom_seat, current_level) = shell
+            .zoom_state()
+            .map(|state| (state.current_seat(), state.current_level(&output)))
+            .unwrap_or_else(|| (seat.clone(), 1.0));
+
+        if current_level == 1. && change <= 0. {
+            return;
+        }
+
+        if zoom_seat == *seat {
+            let new_level = (current_level + change).max(1.0);
+            shell.trigger_zoom(
+                &seat,
+                Some(&output),
+                new_level,
+                &self.common.config.cosmic_conf.accessibility_zoom,
+                animate,
+                &self.common.event_loop_handle,
+            );
+        }
+    }
 }
 
 fn to_next_workspace(
@@ -1080,13 +1109,14 @@ fn to_next_workspace(
     seat: &Seat<State>,
     gesture: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let workspace = shell
         .workspaces
         .active_num(&current_output)
         .1
-        .saturating_add(1);
+        .checked_add(1)
+        .ok_or(InvalidWorkspaceIndex)?;
 
     shell.activate(
         &current_output,
@@ -1105,13 +1135,14 @@ fn to_previous_workspace(
     seat: &Seat<State>,
     gesture: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-) -> Result<Option<Point<i32, Global>>, InvalidWorkspaceIndex> {
+) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let workspace = shell
         .workspaces
         .active_num(&current_output)
         .1
-        .saturating_sub(1);
+        .checked_sub(1)
+        .ok_or(InvalidWorkspaceIndex)?;
 
     shell.activate(
         &current_output,

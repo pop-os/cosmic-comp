@@ -21,12 +21,13 @@ use crate::{
             floating::ResizeGrabMarker,
             tiling::{NodeDesc, SwapWindowGrab, TilingLayout},
         },
-        SeatExt, Trigger,
+        zoom::ZoomState,
+        LastModifierChange, SeatExt, Trigger,
     },
-    utils::{prelude::*, quirks::workspace_overview_is_open},
+    utils::{float::NextDown, prelude::*, quirks::workspace_overview_is_open},
     wayland::{
         handlers::screencopy::SessionHolder,
-        protocols::screencopy::{BufferConstraints, CursorSession},
+        protocols::screencopy::{BufferConstraints, CursorSessionRef},
     },
 };
 use calloop::{
@@ -161,6 +162,7 @@ impl ModifiersShortcutQueue {
 }
 
 impl State {
+    #[profiling::function]
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
     where
         <B as InputBackend>::Device: 'static,
@@ -170,7 +172,7 @@ impl State {
         use smithay::backend::input::Event;
         match event {
             InputEvent::DeviceAdded { device } => {
-                let shell = self.common.shell.read().unwrap();
+                let shell = self.common.shell.read();
                 let seat = shell.seats.last_active();
                 let led_state = seat.get_keyboard().unwrap().led_state();
                 seat.devices().add_device(&device, led_state);
@@ -182,7 +184,7 @@ impl State {
                 }
             }
             InputEvent::DeviceRemoved { device } => {
-                for seat in &mut self.common.shell.read().unwrap().seats.iter() {
+                for seat in &mut self.common.shell.read().seats.iter() {
                     let devices = seat.devices();
                     if devices.has_device(&device) {
                         devices.remove_device(&device);
@@ -205,7 +207,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -219,6 +220,7 @@ impl State {
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time_msec(&event);
                     let keyboard = seat.get_keyboard().unwrap();
+                    let previous_modifiers = keyboard.modifier_state();
                     if let Some((action, pattern)) = keyboard
                         .input(
                             self,
@@ -227,9 +229,50 @@ impl State {
                             serial,
                             time,
                             |data, modifiers, handle| {
-                                Self::filter_keyboard_input(
+                                if previous_modifiers != *modifiers {
+                                    *seat
+                                        .user_data()
+                                        .get::<LastModifierChange>()
+                                        .unwrap()
+                                        .0
+                                        .lock()
+                                        .unwrap() = Some(serial);
+                                }
+
+                                let current_focus = seat.get_keyboard().unwrap().current_focus();
+                                let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
+                                    f.wl_surface()
+                                        .and_then(|surface| {
+                                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                                                .map(|inhibitor| inhibitor.is_active())
+                                        })
+                                        .unwrap_or(false)
+                                        || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
+                                });
+                                let sym = handle.modified_sym();
+
+                                let result = Self::filter_keyboard_input(
                                     data, &event, &seat, modifiers, handle, serial,
-                                )
+                                );
+
+                                if (matches!(result, FilterResult::Forward)
+                                    && !seat.get_keyboard().unwrap().is_grabbed()
+                                    && !shortcuts_inhibited
+                                    && !matches!(
+                                        current_focus,
+                                        Some(KeyboardFocusTarget::LockSurface(_))
+                                    ))
+                                // we don't want to accidentally leave any keys pressed
+                                // and do more filtering in `xwayland_notify_key_event`
+                                // for released keys
+                                    || state == KeyState::Released
+                                {
+                                    data.common.xwayland_notify_key_event(
+                                        sym, keycode, state, serial, time,
+                                    );
+                                }
+
+                                result
                             },
                         )
                         .flatten()
@@ -240,7 +283,7 @@ impl State {
                                 FilterResult::<()>::Forward
                             });
                         }
-                        self.handle_action(action, &seat, serial, time, pattern, None, true)
+                        self.handle_action(action, &seat, serial, time, pattern, None)
                     }
 
                     // If we want to track numlock state so it can be reused on the next boot...
@@ -264,7 +307,7 @@ impl State {
             InputEvent::PointerMotion { event, .. } => {
                 use smithay::backend::input::PointerMotionEvent;
 
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let current_output = seat.active_output();
@@ -348,10 +391,15 @@ impl State {
                         }
                         //If the pointer isn't grabbed, we should check if the focused element should be updated
                     } else if self.common.config.cosmic_conf.focus_follows_cursor {
-                        let shell = self.common.shell.read().unwrap();
-                        let old_keyboard_target =
-                            State::element_under(original_position, &current_output, &*shell);
-                        let new_keyboard_target = State::element_under(position, &output, &*shell);
+                        let shell = self.common.shell.read();
+                        let old_keyboard_target = State::element_under(
+                            original_position,
+                            &current_output,
+                            &*shell,
+                            &seat,
+                        );
+                        let new_keyboard_target =
+                            State::element_under(position, &output, &*shell, &seat);
 
                         if old_keyboard_target != new_keyboard_target
                             && new_keyboard_target.is_some()
@@ -517,8 +565,13 @@ impl State {
                         });
                     }
 
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     shell.update_pointer_position(position.to_local(&output), &output);
+                    shell.update_focal_point(
+                        &seat,
+                        original_position,
+                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                    );
 
                     if output != current_output {
                         for session in cursor_sessions_for_output(&*shell, &current_output) {
@@ -558,7 +611,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -573,12 +625,9 @@ impl State {
                         )
                         .as_global();
                     let serial = SERIAL_COUNTER.next_serial();
-                    let under = State::surface_under(
-                        position,
-                        &output,
-                        &mut *self.common.shell.write().unwrap(),
-                    )
-                    .map(|(target, pos)| (target, pos.as_logical()));
+                    let under =
+                        State::surface_under(position, &output, &mut *self.common.shell.write())
+                            .map(|(target, pos)| (target, pos.as_logical()));
 
                     let ptr = seat.get_pointer().unwrap();
                     ptr.motion(
@@ -592,7 +641,7 @@ impl State {
                     );
                     ptr.frame(self);
 
-                    let shell = self.common.shell.read().unwrap();
+                    let shell = self.common.shell.read();
                     for session in cursor_sessions_for_output(&*shell, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
                             position.as_logical().to_buffer(
@@ -627,7 +676,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned()
@@ -637,17 +685,19 @@ impl State {
                 self.common.idle_notifier_state.notify_activity(&seat);
 
                 let current_focus = seat.get_keyboard().unwrap().current_focus();
-                let shortcuts_inhibited = current_focus.is_some_and(|f| {
+                let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
                     f.wl_surface()
                         .and_then(|surface| {
                             seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
                                 .map(|inhibitor| inhibitor.is_active())
                         })
                         .unwrap_or(false)
+                        || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
                 });
 
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
+
                 let mut pass_event = !seat.supressed_buttons().remove(button);
                 if event.state() == ButtonState::Pressed {
                     // change the keyboard focus unless the pointer is grabbed
@@ -660,8 +710,8 @@ impl State {
                         let global_position =
                             seat.get_pointer().unwrap().current_location().as_global();
                         let under = {
-                            let shell = self.common.shell.read().unwrap();
-                            State::element_under(global_position, &output, &shell)
+                            let shell = self.common.shell.read();
+                            State::element_under(global_position, &output, &shell, &seat)
                         };
                         if let Some(target) = under {
                             if let Some(surface) = target.toplevel().map(Cow::into_owned) {
@@ -752,8 +802,7 @@ impl State {
                                                 supress_button();
                                                 self.common.event_loop_handle.insert_idle(
                                                     move |state| {
-                                                        let mut shell =
-                                                            state.common.shell.write().unwrap();
+                                                        let mut shell = state.common.shell.write();
                                                         let res = shell.move_request(
                                                             &surface,
                                                             &seat_clone,
@@ -762,7 +811,6 @@ impl State {
                                                             false,
                                                             &state.common.config,
                                                             &state.common.event_loop_handle,
-                                                            &state.common.xdg_activation_state,
                                                             false,
                                                         );
 
@@ -918,7 +966,7 @@ impl State {
                         }
                     }
                 } else {
-                    let mut shell = self.common.shell.write().unwrap();
+                    let mut shell = self.common.shell.write();
                     if let Some(Trigger::Pointer(action_button)) =
                         shell.overview_mode().0.active_trigger()
                     {
@@ -928,6 +976,18 @@ impl State {
                     }
                     std::mem::drop(shell);
                 };
+
+                if pass_event
+                    && !matches!(current_focus, Some(KeyboardFocusTarget::LockSurface(_)))
+                    && !shortcuts_inhibited
+                {
+                    self.common.xwayland_notify_pointer_button_event(
+                        button,
+                        event.state(),
+                        serial,
+                        event.time_msec(),
+                    );
+                }
 
                 let ptr = seat.get_pointer().unwrap();
                 if pass_event {
@@ -962,44 +1022,68 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
-                    if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
-                        if horizontal_amount != 0.0 {
-                            frame =
-                                frame.value(Axis::Horizontal, scroll_factor * horizontal_amount);
-                            if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
-                                frame = frame.v120(
-                                    Axis::Horizontal,
-                                    (discrete * scroll_factor).round() as i32,
-                                );
+                    if seat.get_keyboard().unwrap().modifier_state().logo
+                        && self
+                            .common
+                            .config
+                            .cosmic_conf
+                            .accessibility_zoom
+                            .enable_mouse_zoom_shortcuts
+                    {
+                        seat.modifiers_shortcut_queue().clear();
+                        if let Some(mut percentage) = event
+                            .amount_v120(Axis::Vertical)
+                            .map(|val| val / 120.)
+                            .or_else(|| event.amount(Axis::Vertical))
+                            .map(|val| val * scroll_factor)
+                        {
+                            if event.source() == AxisSource::Wheel {
+                                percentage *= 5.;
                             }
-                        } else if event.source() == AxisSource::Finger {
-                            frame = frame.stop(Axis::Horizontal);
+
+                            let change = -(percentage as f64 / 100.);
+                            self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
                         }
-                    }
-                    if let Some(vertical_amount) = event.amount(Axis::Vertical) {
-                        if vertical_amount != 0.0 {
-                            frame = frame.value(Axis::Vertical, scroll_factor * vertical_amount);
-                            if let Some(discrete) = event.amount_v120(Axis::Vertical) {
-                                frame = frame.v120(
-                                    Axis::Vertical,
-                                    (discrete * scroll_factor).round() as i32,
-                                );
+                    } else {
+                        let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
+                        if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
+                            if horizontal_amount != 0.0 {
+                                frame = frame
+                                    .value(Axis::Horizontal, scroll_factor * horizontal_amount);
+                                if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
+                                    frame = frame.v120(
+                                        Axis::Horizontal,
+                                        (discrete * scroll_factor).round() as i32,
+                                    );
+                                }
+                            } else if event.source() == AxisSource::Finger {
+                                frame = frame.stop(Axis::Horizontal);
                             }
-                        } else if event.source() == AxisSource::Finger {
-                            frame = frame.stop(Axis::Vertical);
                         }
+                        if let Some(vertical_amount) = event.amount(Axis::Vertical) {
+                            if vertical_amount != 0.0 {
+                                frame =
+                                    frame.value(Axis::Vertical, scroll_factor * vertical_amount);
+                                if let Some(discrete) = event.amount_v120(Axis::Vertical) {
+                                    frame = frame.v120(
+                                        Axis::Vertical,
+                                        (discrete * scroll_factor).round() as i32,
+                                    );
+                                }
+                            } else if event.source() == AxisSource::Finger {
+                                frame = frame.stop(Axis::Vertical);
+                            }
+                        }
+                        let ptr = seat.get_pointer().unwrap();
+                        ptr.axis(self, frame);
+                        ptr.frame(self);
                     }
-                    let ptr = seat.get_pointer().unwrap();
-                    ptr.axis(self, frame);
-                    ptr.frame(self);
                 }
             }
 
@@ -1008,7 +1092,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1035,7 +1118,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1108,7 +1190,7 @@ impl State {
 
                         match gesture_state.action {
                             Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
-                                self.common.shell.write().unwrap().update_workspace_delta(
+                                self.common.shell.write().update_workspace_delta(
                                     &seat.active_output(),
                                     gesture_state.delta,
                                 )
@@ -1136,7 +1218,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1154,7 +1235,7 @@ impl State {
                                     } else {
                                         velocity / seat.active_output().geometry().size.h as f64
                                     };
-                                let _ = self.common.shell.write().unwrap().end_workspace_swipe(
+                                let _ = self.common.shell.write().end_workspace_swipe(
                                     &seat.active_output(),
                                     norm_velocity,
                                     &mut self.common.workspace_state.update(),
@@ -1182,7 +1263,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1205,7 +1285,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1228,7 +1307,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1251,7 +1329,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1274,7 +1351,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1294,7 +1370,7 @@ impl State {
             }
 
             InputEvent::TouchDown { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1304,7 +1380,8 @@ impl State {
                         return;
                     };
 
-                    let position = transform_output_mapped_position(&output, &event);
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1325,7 +1402,7 @@ impl State {
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1335,7 +1412,8 @@ impl State {
                         return;
                     };
 
-                    let position = transform_output_mapped_position(&output, &event);
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1354,7 +1432,7 @@ impl State {
                 }
             }
             InputEvent::TouchUp { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(Trigger::Touch(slot)) = shell.overview_mode().0.active_trigger() {
                     if *slot == event.slot() {
                         shell.set_overview_mode(None, self.common.event_loop_handle.clone());
@@ -1382,7 +1460,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1397,7 +1474,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1409,7 +1485,7 @@ impl State {
             }
 
             InputEvent::TabletToolAxis { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1419,7 +1495,8 @@ impl State {
                         return;
                     };
 
-                    let position = transform_output_mapped_position(&output, &event);
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1473,7 +1550,7 @@ impl State {
                 }
             }
             InputEvent::TabletToolProximity { event, .. } => {
-                let mut shell = self.common.shell.write().unwrap();
+                let mut shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1483,7 +1560,8 @@ impl State {
                         return;
                     };
 
-                    let position = transform_output_mapped_position(&output, &event);
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &mut *shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
@@ -1531,7 +1609,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1554,7 +1631,6 @@ impl State {
                     .common
                     .shell
                     .read()
-                    .unwrap()
                     .seats
                     .for_device(&event.device())
                     .cloned();
@@ -1576,6 +1652,7 @@ impl State {
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
+    #[profiling::function]
     pub fn filter_keyboard_input<B: InputBackend, E: KeyboardKeyEvent<B>>(
         &mut self,
         event: &E,
@@ -1584,7 +1661,7 @@ impl State {
         handle: KeysymHandle<'_>,
         serial: Serial,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
 
         let keyboard = seat.get_keyboard().unwrap();
         let pointer = seat.get_pointer().unwrap();
@@ -1606,6 +1683,7 @@ impl State {
                         .map(|inhibitor| inhibitor.is_active())
                 })
                 .unwrap_or(false)
+                || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
         });
 
         self.common.atspi_ei.input(
@@ -1741,7 +1819,6 @@ impl State {
                                     time.overflowing_add(duration as u32).0,
                                     key_pattern_clone.clone(),
                                     None,
-                                    true,
                                 );
                                 calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
                             },
@@ -1946,7 +2023,7 @@ impl State {
                                 for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
                                     old_workspace.tiling_layer.element_for_node(node_id)
                                 }) {
-                                    stack.append(elem);
+                                    stack.append(elem.clone());
                                 }
                             }
                             {
@@ -1954,7 +2031,7 @@ impl State {
                                 for elem in new_descriptor.focus_stack.iter().flat_map(|node_id| {
                                     new_workspace.tiling_layer.element_for_node(node_id)
                                 }) {
-                                    stack.append(elem);
+                                    stack.append(elem.clone());
                                 }
                             }
                             if let Some(focus) = TilingLayout::swap_trees(
@@ -2006,7 +2083,7 @@ impl State {
                                 for elem in old_descriptor.focus_stack.iter().flat_map(|node_id| {
                                     old_workspace.tiling_layer.element_for_node(node_id)
                                 }) {
-                                    stack.append(elem);
+                                    stack.append(elem.clone());
                                 }
                             }
                             if let Some(focus) = TilingLayout::move_tree(
@@ -2031,10 +2108,12 @@ impl State {
         }
     }
 
+    #[profiling::function]
     pub fn element_under(
         global_pos: Point<f64, Global>,
         output: &Output,
         shell: &Shell,
+        seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
         let (previous_workspace, workspace) = shell.workspaces.active(output)?;
         let (previous_idx, idx) = shell.workspaces.active_num(output);
@@ -2056,6 +2135,7 @@ impl State {
             element_filter,
             |stage| {
                 match stage {
+                    Stage::ZoomUI => {}
                     Stage::SessionLock(lock_surface) => {
                         return ControlFlow::Break(Ok(lock_surface
                             .cloned()
@@ -2083,19 +2163,21 @@ impl State {
                         }
                     }
                     Stage::LayerSurface { layer, location } => {
-                        if layer.can_receive_keyboard_focus() {
-                            if under_from_surface_tree(
-                                layer.wl_surface(),
-                                global_pos.as_logical(),
-                                location.as_logical(),
-                                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
-                            )
-                            .is_some()
-                            {
-                                return ControlFlow::Break(Ok(Some(
-                                    KeyboardFocusTarget::LayerSurface(layer),
-                                )));
-                            }
+                        if under_from_surface_tree(
+                            layer.wl_surface(),
+                            global_pos.as_logical(),
+                            location.as_logical(),
+                            WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                        )
+                        .is_some()
+                        {
+                            return ControlFlow::Break(Ok(if layer.can_receive_keyboard_focus() {
+                                Some(KeyboardFocusTarget::LayerSurface(layer))
+                            } else {
+                                // Don't change keyboard focus if in input region of layer shell
+                                // surface, but surface doesn't have keyboard interactivity.
+                                None
+                            }));
                         }
                     }
                     Stage::OverrideRedirect { .. } => {
@@ -2126,7 +2208,7 @@ impl State {
                                 geometry.contains(global_pos.to_local(output).to_i32_round())
                             })
                         {
-                            if let Some(element) = workspace.popup_element_under(location) {
+                            if let Some(element) = workspace.popup_element_under(location, seat) {
                                 return ControlFlow::Break(Ok(Some(element)));
                             }
                         }
@@ -2141,7 +2223,8 @@ impl State {
                                 geometry.contains(global_pos.to_local(output).to_i32_round())
                             })
                         {
-                            if let Some(element) = workspace.toplevel_element_under(location) {
+                            if let Some(element) = workspace.toplevel_element_under(location, seat)
+                            {
                                 return ControlFlow::Break(Ok(Some(element)));
                             }
                         }
@@ -2154,6 +2237,7 @@ impl State {
         .flatten()
     }
 
+    #[profiling::function]
     pub fn surface_under(
         global_pos: Point<f64, Global>,
         output: &Output,
@@ -2175,6 +2259,7 @@ impl State {
         let relative_pos = global_pos.to_local(output);
         let output_geo = output.geometry();
         let overview = shell.overview_mode().0;
+        let seat = shell.seats.last_active();
 
         render_input_order(
             shell,
@@ -2184,15 +2269,34 @@ impl State {
             element_filter,
             |stage| {
                 match stage {
+                    Stage::ZoomUI => {
+                        if let Some(zoom_state) = shell.zoom_state() {
+                            if let Some((target, loc)) =
+                                zoom_state.surface_under(output, global_pos)
+                            {
+                                return ControlFlow::Break(Ok(Some((target, loc))));
+                            }
+                        }
+                    }
                     Stage::SessionLock(lock_surface) => {
-                        return ControlFlow::Break(Ok(lock_surface.map(|surface| {
-                            (
-                                PointerFocusTarget::WlSurface {
-                                    surface: surface.wl_surface().clone(),
-                                    toplevel: None,
-                                },
-                                output_geo.loc.to_f64(),
-                            )
+                        return ControlFlow::Break(Ok(lock_surface.and_then(|surface| {
+                            let location = output_geo.loc;
+                            if let Some((surface, surface_loc)) = under_from_surface_tree(
+                                surface.wl_surface(),
+                                global_pos.as_logical(),
+                                location.as_logical(),
+                                WindowSurfaceType::ALL,
+                            ) {
+                                Some((
+                                    PointerFocusTarget::WlSurface {
+                                        surface,
+                                        toplevel: None,
+                                    },
+                                    surface_loc.as_global().to_f64(),
+                                ))
+                            } else {
+                                None
+                            }
                         })));
                     }
                     Stage::LayerPopup {
@@ -2268,7 +2372,7 @@ impl State {
                     Stage::WorkspacePopups { workspace, offset } => {
                         let global_pos = global_pos + offset.to_f64().as_global();
                         if let Some(under) =
-                            workspace.popup_surface_under(global_pos, overview.clone())
+                            workspace.popup_surface_under(global_pos, overview.clone(), seat)
                         {
                             return ControlFlow::Break(Ok(Some(under)));
                         }
@@ -2276,7 +2380,7 @@ impl State {
                     Stage::Workspace { workspace, offset } => {
                         let global_pos = global_pos + offset.to_f64().as_global();
                         if let Some(under) =
-                            workspace.toplevel_surface_under(global_pos, overview.clone())
+                            workspace.toplevel_surface_under(global_pos, overview.clone(), seat)
                         {
                             return ControlFlow::Break(Ok(Some(under)));
                         }
@@ -2294,7 +2398,7 @@ impl State {
 fn cursor_sessions_for_output<'a>(
     shell: &'a Shell,
     output: &'a Output,
-) -> impl Iterator<Item = CursorSession> + 'a {
+) -> impl Iterator<Item = CursorSessionRef> + 'a {
     shell
         .active_space(&output)
         .into_iter()
@@ -2313,13 +2417,19 @@ fn cursor_sessions_for_output<'a>(
         })
 }
 
-fn transform_output_mapped_position<'a, B, E>(output: &Output, event: &E) -> Point<f64, Global>
+fn transform_output_mapped_position<'a, B, E>(
+    output: &Output,
+    event: &E,
+    zoom_state: Option<&ZoomState>,
+) -> Point<f64, Global>
 where
     B: InputBackend,
     E: AbsolutePositionEvent<B>,
     B::Device: 'static,
 {
-    let geometry = output.geometry();
+    let geometry = zoom_state
+        .and_then(|_| output.zoomed_geometry())
+        .unwrap_or_else(|| output.geometry());
     let transform = output.current_transform();
     let size = transform
         .invert()
@@ -2345,33 +2455,4 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
         None
     };
     map_to_output.or_else(|| shell.builtin_output())
-}
-
-// FIXME: When f64::next_down reaches stable rust, use that instead
-trait NextDown {
-    fn next_lower(self) -> Self;
-}
-
-impl NextDown for f64 {
-    fn next_lower(self) -> Self {
-        // We must use strictly integer arithmetic to prevent denormals from
-        // flushing to zero after an arithmetic operation on some platforms.
-        const NEG_TINY_BITS: u64 = 0x8000_0000_0000_0001; // Smallest (in magnitude) negative f64.
-        const CLEAR_SIGN_MASK: u64 = 0x7fff_ffff_ffff_ffff;
-
-        let bits = self.to_bits();
-        if self.is_nan() || bits == Self::NEG_INFINITY.to_bits() {
-            return self;
-        }
-
-        let abs = bits & CLEAR_SIGN_MASK;
-        let next_bits = if abs == 0 {
-            NEG_TINY_BITS
-        } else if bits == abs {
-            bits - 1
-        } else {
-            bits + 1
-        };
-        Self::from_bits(next_bits)
-    }
 }

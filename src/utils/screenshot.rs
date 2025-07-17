@@ -29,8 +29,8 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
     ) -> anyhow::Result<()>
     where
         R: Renderer + ImportAll + Offscreen<GlesRenderbuffer> + ExportMem,
-        <R as Renderer>::TextureId: Clone + 'static,
-        <R as Renderer>::Error: Send + Sync + 'static,
+        R::TextureId: Clone + 'static,
+        R::Error: Send + Sync + 'static,
     {
         let bbox = bbox_from_surface_tree(&window.wl_surface().unwrap(), (0, 0));
         let elements = AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
@@ -43,22 +43,25 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
 
         // TODO: 10-bit
         let format = Fourcc::Abgr8888;
-        let render_buffer = Offscreen::<GlesRenderbuffer>::create_buffer(
+        let mut render_buffer = Offscreen::<GlesRenderbuffer>::create_buffer(
             renderer,
             format,
             bbox.size.to_buffer(1, Transform::Normal),
         )?;
-        renderer.bind(render_buffer)?;
+        let mut fb = renderer.bind(&mut render_buffer)?;
         let mut output_damage_tracker =
             OutputDamageTracker::new(bbox.size.to_physical(1), 1.0, Transform::Normal);
         output_damage_tracker
-            .render_output(renderer, 0, &elements, [0.0, 0.0, 0.0, 0.0])
+            .render_output(renderer, &mut fb, 0, &elements, [0.0, 0.0, 0.0, 0.0])
             .map_err(|err| match err {
                 smithay::backend::renderer::damage::Error::Rendering(err) => err,
                 smithay::backend::renderer::damage::Error::OutputNoMode(_) => unreachable!(),
             })?;
-        let mapping =
-            renderer.copy_framebuffer(bbox.to_buffer(1, Transform::Normal, &bbox.size), format)?;
+        let mapping = renderer.copy_framebuffer(
+            &mut fb,
+            bbox.to_buffer(1, Transform::Normal, &bbox.size),
+            format,
+        )?;
         let gl_data = renderer.map_texture(&mapping)?;
 
         if let Ok(Some(path)) = xdg_user::pictures() {
@@ -101,7 +104,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             .backend
             .offscreen_renderer(|kms| {
                 advertised_node_for_surface(&wl_surface, &state.common.display_handle)
-                    .or(kms.primary_node)
+                    .or(*kms.primary_node.read().unwrap())
             })
             .with_context(|| "Failed to get renderer for screenshot")
             .and_then(|renderer| match renderer {

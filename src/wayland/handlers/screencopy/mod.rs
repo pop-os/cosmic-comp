@@ -25,10 +25,11 @@ use crate::{
         OutputExt, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt, SeatExt,
     },
     wayland::protocols::{
-        image_source::ImageSourceData,
+        image_capture_source::ImageCaptureSourceData,
         screencopy::{
-            delegate_screencopy, BufferConstraints, CursorSession, DmabufConstraints, Frame,
-            ScreencopyHandler, ScreencopyState, Session,
+            delegate_screencopy, BufferConstraints, CursorSession, CursorSessionRef,
+            DmabufConstraints, Frame, FrameRef, ScreencopyHandler, ScreencopyState, Session,
+            SessionRef,
         },
     },
 };
@@ -44,28 +45,30 @@ impl ScreencopyHandler for State {
         &mut self.common.screencopy_state
     }
 
-    fn capture_source(&mut self, source: &ImageSourceData) -> Option<BufferConstraints> {
+    fn capture_source(&mut self, source: &ImageCaptureSourceData) -> Option<BufferConstraints> {
         match source {
-            ImageSourceData::Output(weak) => weak
+            ImageCaptureSourceData::Output(weak) => weak
                 .upgrade()
                 .and_then(|output| constraints_for_output(&output, &mut self.backend)),
-            ImageSourceData::Workspace(handle) => {
-                let shell = self.common.shell.read().unwrap();
+            ImageCaptureSourceData::Workspace(handle) => {
+                let shell = self.common.shell.read();
                 let output = shell.workspaces.space_for_handle(&handle)?.output();
                 constraints_for_output(output, &mut self.backend)
             }
-            ImageSourceData::Toplevel(window) => {
+            ImageCaptureSourceData::Toplevel(window) => {
                 constraints_for_toplevel(window, &mut self.backend)
             }
             _ => None,
         }
     }
-    fn capture_cursor_source(&mut self, _source: &ImageSourceData) -> Option<BufferConstraints> {
+    fn capture_cursor_source(
+        &mut self,
+        _source: &ImageCaptureSourceData,
+    ) -> Option<BufferConstraints> {
         let size = if let Some((geometry, _)) = self
             .common
             .shell
             .read()
-            .unwrap()
             .seats
             .last_active()
             .cursor_geometry((0.0, 0.0), self.common.clock.now())
@@ -84,7 +87,7 @@ impl ScreencopyHandler for State {
 
     fn new_session(&mut self, session: Session) {
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     session.stop();
                     return;
@@ -98,8 +101,8 @@ impl ScreencopyHandler for State {
 
                 output.add_session(session);
             }
-            ImageSourceData::Workspace(handle) => {
-                let mut shell = self.common.shell.write().unwrap();
+            ImageCaptureSourceData::Workspace(handle) => {
+                let mut shell = self.common.shell.write();
                 let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
                     session.stop();
                     return;
@@ -112,7 +115,7 @@ impl ScreencopyHandler for State {
                 });
                 workspace.add_session(session);
             }
-            ImageSourceData::Toplevel(mut toplevel) => {
+            ImageCaptureSourceData::Toplevel(mut toplevel) => {
                 let size = toplevel.geometry().size.to_physical(1);
                 session.user_data().insert_if_missing_threadsafe(|| {
                     Mutex::new(SessionUserData::new(OutputDamageTracker::new(
@@ -123,19 +126,12 @@ impl ScreencopyHandler for State {
                 });
                 toplevel.add_session(session);
             }
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
     fn new_cursor_session(&mut self, session: CursorSession) {
         let (pointer_loc, pointer_size, hotspot) = {
-            let seat = self
-                .common
-                .shell
-                .read()
-                .unwrap()
-                .seats
-                .last_active()
-                .clone();
+            let seat = self.common.shell.read().seats.last_active().clone();
 
             let pointer = seat.get_pointer().unwrap();
             let pointer_loc = pointer.current_location().to_i32_round().as_global();
@@ -160,9 +156,8 @@ impl ScreencopyHandler for State {
         });
 
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
-                    session.stop();
                     return;
                 };
 
@@ -190,10 +185,9 @@ impl ScreencopyHandler for State {
 
                 output.add_cursor_session(session);
             }
-            ImageSourceData::Workspace(handle) => {
-                let mut shell = self.common.shell.write().unwrap();
+            ImageCaptureSourceData::Workspace(handle) => {
+                let mut shell = self.common.shell.write();
                 let Some(workspace) = shell.workspaces.space_for_handle_mut(&handle) else {
-                    session.stop();
                     return;
                 };
 
@@ -222,8 +216,8 @@ impl ScreencopyHandler for State {
 
                 workspace.add_cursor_session(session);
             }
-            ImageSourceData::Toplevel(mut toplevel) => {
-                let shell = self.common.shell.read().unwrap();
+            ImageCaptureSourceData::Toplevel(mut toplevel) => {
+                let shell = self.common.shell.read();
                 if let Some(element) = shell.element_for_surface(&toplevel) {
                     if element.has_active_window(&toplevel) {
                         if let Some(workspace) = shell.space_for(element) {
@@ -245,100 +239,92 @@ impl ScreencopyHandler for State {
 
                 toplevel.add_cursor_session(session);
             }
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 
-    fn frame(&mut self, session: Session, frame: Frame) {
+    fn frame(&mut self, session: SessionRef, frame: Frame) {
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
-                    session.stop(); // will fail the frame as well
                     return;
                 };
 
                 output.add_frame(session, frame);
                 self.backend.schedule_render(&output);
             }
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 render_workspace_to_buffer(self, session, frame, handle)
             }
-            ImageSourceData::Toplevel(toplevel) => {
+            ImageCaptureSourceData::Toplevel(toplevel) => {
                 render_window_to_buffer(self, session, frame, &toplevel)
             }
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 
-    fn cursor_frame(&mut self, session: CursorSession, frame: Frame) {
+    fn cursor_frame(&mut self, session: CursorSessionRef, frame: Frame) {
         if !session.has_cursor() {
             frame.success(Transform::Normal, Vec::new(), self.common.clock.now());
             return;
         }
 
-        let seat = self
-            .common
-            .shell
-            .read()
-            .unwrap()
-            .seats
-            .last_active()
-            .clone();
+        let seat = self.common.shell.read().seats.last_active().clone();
         render_cursor_to_buffer(self, &session, frame, &seat);
     }
 
-    fn frame_aborted(&mut self, frame: Frame) {
-        let shell = self.common.shell.read().unwrap();
+    fn frame_aborted(&mut self, frame: FrameRef) {
+        let shell = self.common.shell.read();
         for mut output in shell.outputs().cloned() {
-            output.remove_frame(&frame)
+            output.remove_frame(&frame);
         }
     }
 
-    fn session_destroyed(&mut self, session: Session) {
+    fn session_destroyed(&mut self, session: SessionRef) {
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
-                    output.remove_session(session);
+                    output.remove_session(&session);
                 }
             }
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 if let Some(workspace) = self
                     .common
                     .shell
                     .write()
-                    .unwrap()
                     .workspaces
                     .space_for_handle_mut(&handle)
                 {
-                    workspace.remove_session(session)
+                    workspace.remove_session(&session)
                 }
             }
-            ImageSourceData::Toplevel(mut toplevel) => toplevel.remove_session(session),
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Toplevel(mut toplevel) => toplevel.remove_session(&session),
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 
-    fn cursor_session_destroyed(&mut self, session: CursorSession) {
+    fn cursor_session_destroyed(&mut self, session: CursorSessionRef) {
         match session.source() {
-            ImageSourceData::Output(weak) => {
+            ImageCaptureSourceData::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
-                    output.remove_cursor_session(session);
+                    output.remove_cursor_session(&session);
                 }
             }
-            ImageSourceData::Workspace(handle) => {
+            ImageCaptureSourceData::Workspace(handle) => {
                 if let Some(workspace) = self
                     .common
                     .shell
                     .write()
-                    .unwrap()
                     .workspaces
                     .space_for_handle_mut(&handle)
                 {
-                    workspace.remove_cursor_session(session)
+                    workspace.remove_cursor_session(&session)
                 }
             }
-            ImageSourceData::Toplevel(mut toplevel) => toplevel.remove_cursor_session(session),
-            ImageSourceData::Destroyed => unreachable!(),
+            ImageCaptureSourceData::Toplevel(mut toplevel) => {
+                toplevel.remove_cursor_session(&session)
+            }
+            ImageCaptureSourceData::Destroyed => unreachable!(),
         }
     }
 }
@@ -352,7 +338,10 @@ fn constraints_for_output(output: &Output, backend: &mut BackendData) -> Option<
     };
 
     let mut renderer = backend
-        .offscreen_renderer(|kms| kms.target_node_for_output(&output).or(kms.primary_node))
+        .offscreen_renderer(|kms| {
+            kms.target_node_for_output(&output)
+                .or(*kms.primary_node.read().unwrap())
+        })
         .unwrap();
     Some(constraints_for_renderer(mode, renderer.as_mut()))
 }
@@ -373,7 +362,7 @@ fn constraints_for_toplevel(
             })
             .flatten();
 
-            dma_node.or(kms.primary_node)
+            dma_node.or(*kms.primary_node.read().unwrap())
         })
         .unwrap();
 

@@ -18,7 +18,8 @@ use smithay::{
         ImportAll, Renderer,
     },
     desktop::{
-        space::SpaceElement, utils::OutputPresentationFeedback, PopupManager, Window, WindowSurface,
+        space::SpaceElement, utils::OutputPresentationFeedback, PopupManager, Window,
+        WindowSurface, WindowSurfaceType,
     },
     input::{
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
@@ -33,13 +34,14 @@ use smithay::{
                 shell::server::xdg_toplevel::State as ToplevelState,
             },
         },
+        wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::Mode as KdeMode,
         wayland_server::protocol::wl_surface::WlSurface,
     },
     utils::{
         user_data::UserDataMap, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
     },
     wayland::{
-        compositor::{with_states, SurfaceData},
+        compositor::{with_states, with_surface_tree_downward, SurfaceData, TraversalAction},
         seat::WaylandFocus,
         shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData},
     },
@@ -50,10 +52,10 @@ use tracing::trace;
 use crate::{
     state::{State, SurfaceDmabufFeedback},
     utils::prelude::*,
-    wayland::handlers::decoration::PreferredDecorationMode,
+    wayland::handlers::decoration::{KdeDecorationData, PreferredDecorationMode},
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct CosmicSurface(pub Window);
 
 impl From<ToplevelSurface> for CosmicSurface {
@@ -77,6 +79,13 @@ impl From<X11Surface> for CosmicSurface {
 impl PartialEq<WlSurface> for CosmicSurface {
     fn eq(&self, other: &WlSurface) -> bool {
         self.wl_surface().map_or(false, |s| &*s == other)
+    }
+}
+
+impl PartialEq<ToplevelSurface> for CosmicSurface {
+    fn eq(&self, other: &ToplevelSurface) -> bool {
+        self.wl_surface()
+            .map_or(false, |s| &*s == other.wl_surface())
     }
 }
 
@@ -109,7 +118,7 @@ impl CosmicSurface {
                     .clone()
                     .unwrap_or_default()
             }),
-            WindowSurface::X11(surface) => surface.title(),
+            WindowSurface::X11(surface) => surface.title().replace('\0', ""),
         }
     }
 
@@ -126,7 +135,7 @@ impl CosmicSurface {
                     .clone()
                     .unwrap_or_default()
             }),
-            WindowSurface::X11(surface) => surface.class(),
+            WindowSurface::X11(surface) => surface.class().replace('\0', ""),
         }
     }
 
@@ -216,20 +225,27 @@ impl CosmicSurface {
     pub fn is_decorated(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
-                if pending {
+                let kde_state = with_states(toplevel.wl_surface(), |states| {
+                    states
+                        .data_map
+                        .get::<KdeDecorationData>()
+                        .and_then(|data| data.lock().unwrap().mode.map(|m| m != KdeMode::Server))
+                });
+
+                let xdg_state = if pending {
                     toplevel.with_pending_state(|pending| {
                         pending
                             .decoration_mode
                             .map(|mode| mode == DecorationMode::ClientSide)
-                            .unwrap_or(true)
                     })
                 } else {
                     toplevel
                         .current_state()
                         .decoration_mode
                         .map(|mode| mode == DecorationMode::ClientSide)
-                        .unwrap_or(true)
-                }
+                };
+
+                kde_state.or(xdg_state).unwrap_or(true)
             }
             WindowSurface::X11(surface) => surface.is_decorated(),
         }
@@ -247,11 +263,25 @@ impl CosmicSurface {
                     toplevel.with_pending_state(|pending| {
                         pending.decoration_mode = Some(DecorationMode::ServerSide);
                     });
+                    with_states(toplevel.wl_surface(), |data| {
+                        if let Some(kde_data) = data.data_map.get::<KdeDecorationData>() {
+                            for obj in kde_data.lock().unwrap().objs.iter() {
+                                obj.mode(KdeMode::Server);
+                            }
+                        }
+                    })
                 } else {
                     let previous_mode = PreferredDecorationMode::mode(&self.0);
                     toplevel.with_pending_state(|pending| {
                         pending.decoration_mode = previous_mode;
                     });
+                    with_states(toplevel.wl_surface(), |data| {
+                        if let Some(kde_data) = data.data_map.get::<KdeDecorationData>() {
+                            for obj in kde_data.lock().unwrap().objs.iter() {
+                                obj.mode(KdeMode::Server);
+                            }
+                        }
+                    })
                 }
             }
             WindowSurface::X11(_surface) => {}
@@ -580,6 +610,42 @@ impl CosmicSurface {
         }
     }
 
+    pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
+        let Some(toplevel) = self.wl_surface() else {
+            return false;
+        };
+
+        if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+            if *toplevel == *surface {
+                return true;
+            }
+        }
+
+        if surface_type.contains(WindowSurfaceType::SUBSURFACE) {
+            use std::sync::atomic::Ordering;
+
+            let found = AtomicBool::new(false);
+            with_surface_tree_downward(
+                &toplevel,
+                surface,
+                |_, _, search| TraversalAction::DoChildren(search),
+                |s, _, search| {
+                    found.fetch_or(s == *search, Ordering::SeqCst);
+                },
+                |_, _, _| !found.load(Ordering::SeqCst),
+            );
+            if found.load(Ordering::SeqCst) {
+                return true;
+            }
+        }
+
+        if surface_type.contains(WindowSurfaceType::POPUP) {
+            PopupManager::popups_for_surface(&toplevel).any(|(p, _)| p.wl_surface() == surface)
+        } else {
+            false
+        }
+    }
+
     pub fn on_commit(&self) {
         self.0.on_commit();
     }
@@ -660,7 +726,7 @@ impl CosmicSurface {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll,
-        <R as Renderer>::TextureId: Clone + 'static,
+        R::TextureId: Clone + 'static,
         C: From<WaylandSurfaceRenderElement<R>>,
     {
         match self.0.underlying_surface() {
@@ -695,7 +761,7 @@ impl CosmicSurface {
     ) -> Vec<C>
     where
         R: Renderer + ImportAll,
-        <R as Renderer>::TextureId: Clone + 'static,
+        R::TextureId: Clone + 'static,
         C: From<WaylandSurfaceRenderElement<R>>,
     {
         match self.0.underlying_surface() {
@@ -848,7 +914,7 @@ impl X11Relatable for CosmicSurface {
 impl<R> AsRenderElements<R> for CosmicSurface
 where
     R: Renderer + ImportAll,
-    <R as Renderer>::TextureId: Clone + 'static,
+    R::TextureId: Clone + 'static,
 {
     type RenderElement = WaylandSurfaceRenderElement<R>;
 

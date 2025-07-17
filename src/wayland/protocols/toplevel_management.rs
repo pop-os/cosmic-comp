@@ -12,14 +12,14 @@ use smithay::{
 };
 
 pub use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1 as ManagementCapabilities;
-use cosmic_protocols::{
-    toplevel_management::v1::server::zcosmic_toplevel_manager_v1::{
-        self, ZcosmicToplevelManagerV1,
-    },
-    workspace::v1::server::zcosmic_workspace_handle_v1::ZcosmicWorkspaceHandleV1,
+use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_v1::{
+    self, ZcosmicToplevelManagerV1,
 };
 
-use super::toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState, Window};
+use super::{
+    toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState, Window},
+    workspace::WorkspaceHandle,
+};
 
 #[derive(Debug)]
 pub struct ToplevelManagementState {
@@ -68,7 +68,7 @@ where
         &mut self,
         dh: &DisplayHandle,
         window: &<Self as ToplevelInfoHandler>::Window,
-        workspace: ZcosmicWorkspaceHandleV1,
+        workspace: WorkspaceHandle,
         output: Output,
     ) {
     }
@@ -116,7 +116,7 @@ impl ToplevelManagementState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelManagerV1, _>(
-            3,
+            4,
             ToplevelManagerGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -249,14 +249,19 @@ where
                     }
                 }
             }
-            zcosmic_toplevel_manager_v1::Request::MoveToWorkspace {
+            zcosmic_toplevel_manager_v1::Request::MoveToWorkspace { .. } => {}
+            zcosmic_toplevel_manager_v1::Request::MoveToExtWorkspace {
                 toplevel,
                 workspace,
                 output,
             } => {
                 let window = window_from_handle(toplevel).unwrap();
-                if let Some(output) = Output::from_resource(&output) {
-                    state.move_to_workspace(dh, &window, workspace, output);
+                if let Some(workspace_handle) =
+                    state.workspace_state().get_ext_workspace_handle(&workspace)
+                {
+                    if let Some(output) = Output::from_resource(&output) {
+                        state.move_to_workspace(dh, &window, workspace_handle, output);
+                    }
                 }
             }
             _ => unreachable!(),

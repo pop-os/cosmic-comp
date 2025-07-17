@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render,
-    config::OutputConfig,
+    config::{OutputConfig, ScreenFilter},
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
@@ -20,7 +20,6 @@ use smithay::{
         input::{Event, InputEvent},
         renderer::{
             damage::{OutputDamageTracker, RenderOutputResult},
-            gles::GlesRenderbuffer,
             glow::GlowRenderer,
             Bind, ImportDma,
         },
@@ -41,7 +40,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
 
-use super::render::init_shaders;
+use super::render::{init_shaders, ScreenFilterStorage};
 
 #[derive(Debug)]
 enum Allocator {
@@ -146,6 +145,7 @@ impl X11State {
             render: ping.clone(),
             dirty: false,
             pending: true,
+            screen_filter_state: ScreenFilterStorage::default(),
         });
 
         // schedule first render
@@ -187,6 +187,13 @@ impl X11State {
             Ok(vec![surface.output.clone()])
         }
     }
+
+    pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
+        for surface in &mut self.surfaces {
+            surface.screen_filter_state.filter = screen_filter.clone();
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -198,24 +205,29 @@ pub struct Surface {
     render: ping::Ping,
     dirty: bool,
     pending: bool,
+    screen_filter_state: ScreenFilterStorage,
 }
 
 impl Surface {
     pub fn render_output(&mut self, renderer: &mut GlowRenderer, state: &mut Common) -> Result<()> {
-        let (buffer, age) = self
+        let (mut buffer, age) = self
             .surface
             .buffer()
             .with_context(|| "Failed to allocate buffer")?;
-        match render::render_output::<_, _, GlesRenderbuffer>(
+        let mut fb = renderer
+            .bind(&mut buffer)
+            .with_context(|| "Failed to bind dmabuf")?;
+        match render::render_output(
             None,
             renderer,
-            buffer.clone(),
+            &mut fb,
             &mut self.damage_tracker,
             age as usize,
             &state.shell,
             state.clock.now(),
             &self.output,
             render::CursorMode::NotDefault,
+            &mut self.screen_filter_state,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 self.surface
@@ -228,7 +240,6 @@ impl Surface {
                     let mut output_presentation_feedback = state
                         .shell
                         .read()
-                        .unwrap()
                         .take_presentation_feedback(&self.output, &states);
                     output_presentation_feedback.presented(
                         state.clock.now(),
@@ -508,7 +519,7 @@ impl State {
                         .unwrap();
 
                     let device = event.device();
-                    for seat in self.common.shell.read().unwrap().seats.iter() {
+                    for seat in self.common.shell.read().seats.iter() {
                         let devices = seat.user_data().get::<Devices>().unwrap();
                         if devices.has_device(&device) {
                             seat.set_active_output(&output);
@@ -522,7 +533,7 @@ impl State {
 
         self.process_input_event(event);
         // TODO actually figure out the output
-        for output in self.common.shell.read().unwrap().outputs() {
+        for output in self.common.shell.read().outputs() {
             self.backend.x11().schedule_render(output);
         }
     }

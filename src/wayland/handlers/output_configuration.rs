@@ -6,6 +6,7 @@ use tracing::{error, warn};
 use crate::{
     config::{OutputConfig, OutputState},
     state::State,
+    utils::prelude::OutputExt,
     wayland::protocols::output_configuration::{
         delegate_output_configuration, ModeConfiguration, OutputConfiguration,
         OutputConfigurationHandler, OutputConfigurationState,
@@ -24,6 +25,17 @@ impl OutputConfigurationHandler for State {
     }
     fn apply_configuration(&mut self, conf: Vec<(Output, OutputConfiguration)>) -> bool {
         self.output_configuration(false, conf)
+    }
+
+    fn request_xwayland_primary(&mut self, primary_output: Option<Output>) {
+        for output in self.common.output_configuration_state.outputs() {
+            output.config_mut().xwayland_primary =
+                primary_output.as_ref().is_some_and(|o| *o == output);
+        }
+        self.common.update_xwayland_primary_output();
+        self.common
+            .config
+            .write_outputs(self.common.output_configuration_state.outputs());
     }
 }
 
@@ -136,6 +148,7 @@ impl State {
         let res = self.backend.apply_config_for_outputs(
             test_only,
             &self.common.event_loop_handle,
+            self.common.config.dynamic_conf.screen_filter(),
             self.common.shell.clone(),
             &mut self.common.workspace_state.update(),
             &self.common.xdg_activation_state,
@@ -158,6 +171,7 @@ impl State {
                 if let Err(err) = self.backend.apply_config_for_outputs(
                     false,
                     &self.common.event_loop_handle,
+                    self.common.config.dynamic_conf.screen_filter(),
                     self.common.shell.clone(),
                     &mut self.common.workspace_state.update(),
                     &self.common.xdg_activation_state,

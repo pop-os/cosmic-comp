@@ -3,9 +3,7 @@
 use crate::state::State;
 use anyhow::{anyhow, Context, Result};
 use cosmic_comp_config::NumlockState;
-use smithay::backend::input::{self as smithay_input};
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
-use smithay::utils::SERIAL_COUNTER;
 use tracing::{info, warn};
 
 pub mod render;
@@ -49,7 +47,6 @@ pub fn init_backend_auto(
             .common
             .shell
             .read()
-            .unwrap()
             .outputs()
             .next()
             .with_context(|| "Backend initialized without output")
@@ -70,9 +67,25 @@ pub fn init_backend_auto(
             .common
             .shell
             .write()
-            .unwrap()
             .seats
-            .add_seat(initial_seat);
+            .add_seat(initial_seat.clone());
+
+        if state
+            .common
+            .config
+            .cosmic_conf
+            .accessibility_zoom
+            .start_on_login
+        {
+            state.common.shell.write().trigger_zoom(
+                &initial_seat,
+                None,
+                1.0 + (state.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.),
+                &state.common.config.cosmic_conf.accessibility_zoom,
+                true,
+                &state.common.event_loop_handle,
+            );
+        }
 
         let desired_numlock = state
             .common
@@ -102,7 +115,7 @@ pub fn init_backend_auto(
                     .common
                     .startup_done
                     .store(true, std::sync::atomic::Ordering::SeqCst);
-                for output in state.common.shell.read().unwrap().outputs() {
+                for output in state.common.shell.read().outputs() {
                     state.backend.schedule_render(&output);
                 }
             }

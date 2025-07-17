@@ -18,7 +18,7 @@ use smithay::{
     },
     output::Output,
     reexports::{input::Device as InputDevice, wayland_server::DisplayHandle},
-    utils::{Buffer, IsAlive, Monotonic, Point, Rectangle, Time, Transform},
+    utils::{Buffer, IsAlive, Monotonic, Point, Rectangle, Serial, Time, Transform},
     wayland::compositor::with_states,
 };
 use tracing::warn;
@@ -172,6 +172,9 @@ struct ActiveOutput(pub Mutex<Output>);
 /// The output which currently has keyboard focus
 struct FocusedOutput(pub Mutex<Option<Output>>);
 
+#[derive(Default)]
+pub struct LastModifierChange(pub Mutex<Option<Serial>>);
+
 pub fn create_seat(
     dh: &DisplayHandle,
     seat_state: &mut SeatState<State>,
@@ -186,6 +189,7 @@ pub fn create_seat(
     userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(SupressedButtons::default);
     userdata.insert_if_missing(ModifiersShortcutQueue::default);
+    userdata.insert_if_missing(LastModifierChange::default);
     userdata.insert_if_missing_threadsafe(SeatMoveGrabState::default);
     userdata.insert_if_missing_threadsafe(SeatMenuGrabState::default);
     userdata.insert_if_missing_threadsafe(CursorState::default);
@@ -241,12 +245,15 @@ pub trait SeatExt {
     fn supressed_keys(&self) -> &SupressedKeys;
     fn supressed_buttons(&self) -> &SupressedButtons;
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue;
+    fn last_modifier_change(&self) -> Option<Serial>;
 
     fn cursor_geometry(
         &self,
         loc: impl Into<Point<f64, Buffer>>,
         time: Time<Monotonic>,
     ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)>;
+    fn cursor_image_status(&self) -> CursorImageStatus;
+    fn set_cursor_image_status(&self, status: CursorImageStatus);
 }
 
 impl SeatExt for Seat<State> {
@@ -315,6 +322,16 @@ impl SeatExt for Seat<State> {
         self.user_data().get::<ModifiersShortcutQueue>().unwrap()
     }
 
+    fn last_modifier_change(&self) -> Option<Serial> {
+        *self
+            .user_data()
+            .get::<LastModifierChange>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap()
+    }
+
     fn cursor_geometry(
         &self,
         loc: impl Into<Point<f64, Buffer>>,
@@ -322,21 +339,7 @@ impl SeatExt for Seat<State> {
     ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)> {
         let location = loc.into().to_i32_round();
 
-        let cursor_status = self
-            .user_data()
-            .get::<Mutex<CursorImageStatus>>()
-            .map(|lock| {
-                let mut cursor_status = lock.lock().unwrap();
-                if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-                    if !surface.alive() {
-                        *cursor_status = CursorImageStatus::default_named();
-                    }
-                }
-                cursor_status.clone()
-            })
-            .unwrap_or(CursorImageStatus::default_named());
-
-        match cursor_status {
+        match self.cursor_image_status() {
             CursorImageStatus::Surface(surface) => {
                 let hotspot = with_states(&surface, |states| {
                     states
@@ -371,5 +374,22 @@ impl SeatExt for Seat<State> {
             }
             CursorImageStatus::Hidden => None,
         }
+    }
+
+    fn cursor_image_status(&self) -> CursorImageStatus {
+        let lock = self.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+        // Reset the cursor if the surface is no longer alive
+        let mut cursor_status = lock.lock().unwrap();
+        if let CursorImageStatus::Surface(ref surface) = *cursor_status {
+            if !surface.alive() {
+                *cursor_status = CursorImageStatus::default_named();
+            }
+        }
+        cursor_status.clone()
+    }
+
+    fn set_cursor_image_status(&self, status: CursorImageStatus) {
+        let cursor_status = self.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+        *cursor_status.lock().unwrap() = status;
     }
 }

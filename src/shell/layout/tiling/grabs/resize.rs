@@ -227,7 +227,7 @@ impl ResizeForkGrab {
         self.last_loc = location.as_global();
 
         if let Some(output) = self.output.upgrade() {
-            let mut shell = data.common.shell.write().unwrap();
+            let mut shell = data.common.shell.write();
             let Some(workspace) = shell.active_space_mut(&output) else {
                 return false;
             };

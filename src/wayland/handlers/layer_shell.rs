@@ -26,7 +26,7 @@ impl WlrLayerShellHandler for State {
         _layer: Layer,
         namespace: String,
     ) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
         let output = wl_output
             .as_ref()
@@ -40,7 +40,7 @@ impl WlrLayerShellHandler for State {
     }
 
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
-        self.common.shell.read().unwrap().unconstrain_popup(&popup);
+        self.common.shell.read().unconstrain_popup(&popup);
 
         if popup.send_configure().is_ok() {
             self.common
@@ -51,7 +51,7 @@ impl WlrLayerShellHandler for State {
     }
 
     fn layer_destroyed(&mut self, surface: WlrLayerSurface) {
-        let mut shell = self.common.shell.write().unwrap();
+        let mut shell = self.common.shell.write();
         let maybe_output = shell
             .outputs()
             .find(|o| {

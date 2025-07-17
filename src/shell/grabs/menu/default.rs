@@ -1,5 +1,8 @@
 use cosmic_settings_config::shortcuts::Action;
-use smithay::{input::pointer::MotionEvent, utils::SERIAL_COUNTER, wayland::seat::WaylandFocus};
+use smithay::{
+    input::pointer::MotionEvent, reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::SERIAL_COUNTER, wayland::seat::WaylandFocus,
+};
 
 use crate::{
     config::Config,
@@ -11,12 +14,13 @@ use crate::{
     },
     state::State,
     utils::{prelude::SeatExt, screenshot::screenshot_window},
+    wayland::protocols::workspace::WorkspaceHandle,
 };
 
 use super::{Item, ResizeEdge};
 
 fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
-    let mut shell = state.common.shell.write().unwrap();
+    let mut shell = state.common.shell.write();
     let seat = shell.seats.last_active().clone();
     if let Some(new_focus) = shell.toggle_stacking(&seat, mapped) {
         std::mem::drop(shell);
@@ -24,69 +28,136 @@ fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
     }
 }
 
-fn move_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
-    let mut shell = state.common.shell.write().unwrap();
-    let seat = shell.seats.last_active().clone();
-    let (current_handle, output) = {
-        let Some(ws) = shell.space_for(mapped) else {
-            return;
-        };
-        (ws.handle, ws.output.clone())
-    };
-    let maybe_handle = shell
+fn prev_workspace(
+    shell: &Shell,
+    surface: &WlSurface,
+) -> Option<(WorkspaceHandle, WorkspaceHandle)> {
+    let (current_handle, output) = shell.workspace_for_surface(surface)?;
+    shell
         .workspaces
         .spaces_for_output(&output)
         .enumerate()
         .find_map(|(i, space)| (space.handle == current_handle).then_some(i))
         .and_then(|i| i.checked_sub(1))
-        .and_then(|i| shell.workspaces.get(i, &output).map(|s| s.handle));
-    if let Some(prev_handle) = maybe_handle {
-        let res = shell.move_window(
-            Some(&seat),
-            mapped,
-            &current_handle,
-            &prev_handle,
-            true,
-            None,
-            &mut state.common.workspace_state.update(),
-        );
-        if let Some((target, _)) = res {
-            std::mem::drop(shell);
-            Shell::set_focus(state, Some(&target), &seat, None, true);
-        }
-    }
+        .and_then(|i| shell.workspaces.get(i, &output))
+        .map(|space| (current_handle, space.handle))
 }
 
-fn move_next_workspace(state: &mut State, mapped: &CosmicMapped) {
-    let mut shell = state.common.shell.write().unwrap();
-    let seat = shell.seats.last_active().clone();
-    let (current_handle, output) = {
-        let Some(ws) = shell.space_for(mapped) else {
-            return;
-        };
-        (ws.handle, ws.output.clone())
-    };
-    let maybe_handle = shell
+fn next_workspace(
+    shell: &Shell,
+    surface: &WlSurface,
+) -> Option<(WorkspaceHandle, WorkspaceHandle)> {
+    let (current_handle, output) = shell.workspace_for_surface(surface)?;
+    shell
         .workspaces
         .spaces_for_output(&output)
         .skip_while(|space| space.handle != current_handle)
         .skip(1)
         .next()
-        .map(|space| space.handle);
-    if let Some(next_handle) = maybe_handle {
-        let res = shell.move_window(
-            Some(&seat),
-            mapped,
-            &current_handle,
-            &next_handle,
-            true,
-            None,
-            &mut state.common.workspace_state.update(),
-        );
-        if let Some((target, _point)) = res {
-            std::mem::drop(shell);
-            Shell::set_focus(state, Some(&target), &seat, None, true)
-        }
+        .map(|space| (current_handle, space.handle))
+}
+
+fn move_fullscreen_prev_workspace(state: &mut State, surface: &CosmicSurface) {
+    let mut shell = state.common.shell.write();
+    let Some(wl_surface) = surface.wl_surface() else {
+        return;
+    };
+    let Some((from, to)) = prev_workspace(&shell, &*wl_surface) else {
+        return;
+    };
+
+    let seat = shell.seats.last_active().clone();
+    let res = shell.move_window(
+        Some(&seat),
+        surface,
+        &from,
+        &to,
+        true,
+        None,
+        &mut state.common.workspace_state.update(),
+        &state.common.event_loop_handle,
+    );
+    if let Some((target, _)) = res {
+        std::mem::drop(shell);
+        Shell::set_focus(state, Some(&target), &seat, None, true);
+    }
+}
+
+fn move_fullscreen_next_workspace(state: &mut State, surface: &CosmicSurface) {
+    let mut shell = state.common.shell.write();
+    let Some(wl_surface) = surface.wl_surface() else {
+        return;
+    };
+    let Some((from, to)) = next_workspace(&shell, &*wl_surface) else {
+        return;
+    };
+
+    let seat = shell.seats.last_active().clone();
+    let res = shell.move_window(
+        Some(&seat),
+        surface,
+        &from,
+        &to,
+        true,
+        None,
+        &mut state.common.workspace_state.update(),
+        &state.common.event_loop_handle,
+    );
+    if let Some((target, _)) = res {
+        std::mem::drop(shell);
+        Shell::set_focus(state, Some(&target), &seat, None, true);
+    }
+}
+
+fn move_element_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
+    let mut shell = state.common.shell.write();
+    let window = mapped.active_window();
+    let Some(wl_surface) = window.wl_surface() else {
+        return;
+    };
+    let Some((from, to)) = prev_workspace(&shell, &*wl_surface) else {
+        return;
+    };
+
+    let seat = shell.seats.last_active().clone();
+    let res = shell.move_element(
+        Some(&seat),
+        mapped,
+        &from,
+        &to,
+        true,
+        None,
+        &mut state.common.workspace_state.update(),
+    );
+    if let Some((target, _)) = res {
+        std::mem::drop(shell);
+        Shell::set_focus(state, Some(&target), &seat, None, true);
+    }
+}
+
+fn move_element_next_workspace(state: &mut State, mapped: &CosmicMapped) {
+    let mut shell = state.common.shell.write();
+    let window = mapped.active_window();
+    let Some(wl_surface) = window.wl_surface() else {
+        return;
+    };
+    let Some((from, to)) = next_workspace(&shell, &*wl_surface) else {
+        return;
+    };
+
+    let seat = shell.seats.last_active().clone();
+    let res = shell.move_element(
+        Some(&seat),
+        mapped,
+        &from,
+        &to,
+        true,
+        None,
+        &mut state.common.workspace_state.update(),
+    );
+    if let Some((target, _point)) = res {
+        std::mem::drop(shell);
+        Shell::set_focus(state, Some(&target), &seat, None, true)
     }
 }
 
@@ -114,7 +185,7 @@ pub fn tab_items(
                 )
                 .into();
 
-                let mut shell = state.common.shell.write().unwrap();
+                let mut shell = state.common.shell.write();
                 let seat = shell.seats.last_active().clone();
                 let output = seat.active_output();
                 let workspace = shell.workspaces.active_mut(&output).unwrap();
@@ -162,6 +233,7 @@ pub fn window_items(
 ) -> impl Iterator<Item = Item> {
     let minimize_clone = window.clone();
     let maximize_clone = window.clone();
+    let fullscreen_clone = window.clone();
     let tile_clone = window.clone();
     let move_prev_clone = window.clone();
     let move_next_clone = window.clone();
@@ -202,8 +274,7 @@ pub fn window_items(
                         .common
                         .shell
                         .write()
-                        .unwrap()
-                        .minimize_request(&mapped);
+                        .minimize_request(&mapped.active_window());
                 });
             })
             .shortcut(config.shortcut_for_action(&Action::Minimize)),
@@ -212,19 +283,39 @@ pub fn window_items(
             Item::new(fl!("window-menu-maximize"), move |handle| {
                 let mapped = maximize_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
-                    shell.maximize_toggle(&mapped, &seat);
+                    shell.maximize_toggle(&mapped, &seat, &state.common.event_loop_handle);
                 });
             })
             .shortcut(config.shortcut_for_action(&Action::Maximize))
             .toggled(window.is_maximized(false)),
         ),
+        Some(
+            Item::new(fl!("window-menu-fullscreen"), move |handle| {
+                let mapped = fullscreen_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    let mut shell = state.common.shell.write();
+                    let seat = shell.seats.last_active().clone();
+                    let output = seat.active_output();
+                    if let Some(target) = shell.fullscreen_request(
+                        &mapped.active_window(),
+                        output,
+                        &state.common.event_loop_handle,
+                    ) {
+                        std::mem::drop(shell);
+                        Shell::set_focus(state, Some(&target), &seat, None, false);
+                    }
+                });
+            })
+            .shortcut(config.shortcut_for_action(&Action::Fullscreen))
+            .toggled(false),
+        ),
         (tiling_enabled && !is_sticky).then_some(
             Item::new(fl!("window-menu-tiled"), move |handle| {
                 let tile_clone = tile_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     if let Some(ws) = shell.space_for_mut(&tile_clone) {
                         ws.toggle_floating_window(&seat, &tile_clone);
@@ -246,7 +337,7 @@ pub fn window_items(
             let move_clone = move_clone.clone();
             let _ = handle.insert_idle(move |state| {
                 if let Some(surface) = move_clone.wl_surface() {
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     let res = shell.move_request(
                         &surface,
@@ -256,7 +347,6 @@ pub fn window_items(
                         false,
                         &state.common.config,
                         &state.common.event_loop_handle,
-                        &state.common.xdg_activation_state,
                         false,
                     );
 
@@ -286,7 +376,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-top"), move |handle| {
                     let resize_clone = resize_top_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
                             &resize_clone,
@@ -321,7 +411,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-left"), move |handle| {
                     let resize_clone = resize_left_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
                             &resize_clone,
@@ -356,7 +446,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-right"), move |handle| {
                     let resize_clone = resize_right_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
                             &resize_clone,
@@ -391,7 +481,7 @@ pub fn window_items(
                 Item::new(fl!("window-menu-resize-edge-bottom"), move |handle| {
                     let resize_clone = resize_bottom_clone.clone();
                     let _ = handle.insert_idle(move |state| {
-                        let mut shell = state.common.shell.write().unwrap();
+                        let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
                             &resize_clone,
@@ -428,7 +518,8 @@ pub fn window_items(
         Some(
             Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
                 let mapped = move_prev_clone.clone();
-                let _ = handle.insert_idle(move |state| move_prev_workspace(state, &mapped));
+                let _ =
+                    handle.insert_idle(move |state| move_element_prev_workspace(state, &mapped));
             })
             .shortcut(config.shortcut_for_action(&Action::MoveToPreviousWorkspace))
             .disabled(is_sticky),
@@ -436,7 +527,8 @@ pub fn window_items(
         Some(
             Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
                 let mapped = move_next_clone.clone();
-                let _ = handle.insert_idle(move |state| move_next_workspace(state, &mapped));
+                let _ =
+                    handle.insert_idle(move |state| move_element_next_workspace(state, &mapped));
             })
             .shortcut(config.shortcut_for_action(&Action::MoveToNextWorkspace))
             .disabled(is_sticky),
@@ -446,7 +538,7 @@ pub fn window_items(
             Item::new(fl!("window-menu-sticky"), move |handle| {
                 let mapped = sticky_clone.clone();
                 let _ = handle.insert_idle(move |state| {
-                    let mut shell = state.common.shell.write().unwrap();
+                    let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     shell.toggle_sticky(&seat, &mapped);
                 });
@@ -468,6 +560,114 @@ pub fn window_items(
                 .shortcut(config.shortcut_for_action(&Action::Close)),
             )
         },
+    ]
+    .into_iter()
+    .flatten()
+}
+
+pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterator<Item = Item> {
+    let minimize_clone = window.clone();
+    let fullscreen_clone = window.clone();
+    let move_prev_clone = window.clone();
+    let move_next_clone = window.clone();
+    let move_clone = window.clone();
+    let screenshot_clone = window.clone();
+    let close_clone = window.clone();
+
+    vec![
+        Some(
+            Item::new(fl!("window-menu-minimize"), move |handle| {
+                let window = minimize_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    state.common.shell.write().minimize_request(&window);
+                });
+            })
+            .shortcut(config.shortcut_for_action(&Action::Minimize)),
+        ),
+        Some(
+            Item::new(fl!("window-menu-fullscreen"), move |handle| {
+                let window = fullscreen_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    let mut shell = state.common.shell.write();
+                    if let Some(target) =
+                        shell.unfullscreen_request(&window, &state.common.event_loop_handle)
+                    {
+                        let seat = shell.seats.last_active().clone();
+                        std::mem::drop(shell);
+                        Shell::set_focus(state, Some(&target), &seat, None, true);
+                    }
+                });
+            })
+            .shortcut(config.shortcut_for_action(&Action::Fullscreen))
+            .toggled(true),
+        ),
+        Some(Item::Separator),
+        // TODO: Where to save?
+        Some(Item::new(fl!("window-menu-screenshot"), move |handle| {
+            let window = screenshot_clone.clone();
+            let _ = handle.insert_idle(move |state| screenshot_window(state, &window));
+        })),
+        Some(Item::Separator),
+        Some(Item::new(fl!("window-menu-move"), move |handle| {
+            let move_clone = move_clone.clone();
+            let _ = handle.insert_idle(move |state| {
+                if let Some(surface) = move_clone.wl_surface() {
+                    let mut shell = state.common.shell.write();
+                    let seat = shell.seats.last_active().clone();
+                    let res = shell.move_request(
+                        &surface,
+                        &seat,
+                        None,
+                        ReleaseMode::Click,
+                        false,
+                        &state.common.config,
+                        &state.common.event_loop_handle,
+                        false,
+                    );
+
+                    std::mem::drop(shell);
+                    if let Some((grab, focus)) = res {
+                        if grab.is_touch_grab() {
+                            seat.get_touch().unwrap().set_grab(
+                                state,
+                                grab,
+                                SERIAL_COUNTER.next_serial(),
+                            )
+                        } else {
+                            seat.get_pointer().unwrap().set_grab(
+                                state,
+                                grab,
+                                SERIAL_COUNTER.next_serial(),
+                                focus,
+                            );
+                        }
+                    }
+                }
+            });
+        })),
+        Some(
+            Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
+                let window = move_prev_clone.clone();
+                let _ =
+                    handle.insert_idle(move |state| move_fullscreen_prev_workspace(state, &window));
+            })
+            .shortcut(config.shortcut_for_action(&Action::MoveToPreviousWorkspace)),
+        ),
+        Some(
+            Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
+                let window = move_next_clone.clone();
+                let _ =
+                    handle.insert_idle(move |state| move_fullscreen_next_workspace(state, &window));
+            })
+            .shortcut(config.shortcut_for_action(&Action::MoveToNextWorkspace)),
+        ),
+        Some(Item::Separator),
+        Some(
+            Item::new(fl!("window-menu-close"), move |_handle| {
+                close_clone.close();
+            })
+            .shortcut(config.shortcut_for_action(&Action::Close)),
+        ),
     ]
     .into_iter()
     .flatten()
