@@ -762,7 +762,6 @@ impl<'a> KmsGuard<'a> {
                 .context("Failed to enable devices")?;
         }
 
-        let mut all_outputs = Vec::new();
         for device in self.drm_devices.values_mut() {
             let now = clock.now();
             let output_map = device
@@ -771,28 +770,6 @@ impl<'a> KmsGuard<'a> {
                 .filter(|(_, s)| s.is_active())
                 .map(|(crtc, surface)| (*crtc, surface.output.clone()))
                 .collect::<HashMap<_, _>>();
-
-            // configure primary scanout allowance
-            if !device.surfaces.is_empty() {
-                let mut renderer = self
-                    .api
-                    .single_renderer(&device.render_node)
-                    .with_context(|| "Failed to create renderer")?;
-
-                device
-                    .allow_primary_scanout_any(
-                        device
-                            .surfaces
-                            .values()
-                            .filter(|s| s.output.is_enabled() && s.output.mirroring().is_none())
-                            .count()
-                            <= 1,
-                        &mut renderer,
-                        clock,
-                        &shell,
-                    )
-                    .context("Failed to switch primary-plane scanout flags")?;
-            }
 
             // reconfigure existing
             for (crtc, surface) in device.surfaces.iter_mut() {
@@ -972,25 +949,26 @@ impl<'a> KmsGuard<'a> {
                 }
             }
 
-            all_outputs.extend(
-                device
-                    .outputs
-                    .iter()
-                    .filter(|(conn, _)| {
-                        !device
-                            .leased_connectors
-                            .iter()
-                            .any(|(leased_conn, _)| *conn == leased_conn)
-                    })
-                    .map(|(_, output)| output.clone())
-                    .collect::<Vec<_>>(),
-            );
-
+            // configure primary scanout allowance
             if !device.surfaces.is_empty() {
                 let mut renderer = self
                     .api
                     .single_renderer(&device.render_node)
                     .with_context(|| "Failed to create renderer")?;
+
+                device
+                    .allow_primary_scanout_any(
+                        device
+                            .surfaces
+                            .values()
+                            .filter(|s| s.output.is_enabled() && s.output.mirroring().is_none())
+                            .count()
+                            <= 1,
+                        &mut renderer,
+                        clock,
+                        &shell,
+                    )
+                    .context("Failed to switch primary-plane scanout flags")?;
 
                 let mut elements = DrmOutputRenderElements::default();
                 for (crtc, output) in output_map.iter() {
@@ -1018,6 +996,7 @@ impl<'a> KmsGuard<'a> {
         }
 
         // we need to handle mirroring, after all outputs have been enabled
+        let all_outputs = self.all_outputs();
         for device in self.drm_devices.values_mut() {
             for surface in device.surfaces.values_mut() {
                 let mirrored_output =
