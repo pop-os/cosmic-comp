@@ -751,7 +751,7 @@ impl State {
                                         serial: Serial,
                                     ) -> Option<(MenuGrab, smithay::input::pointer::Focus)>
                                     {
-                                        let shell = state.common.shell.write().unwrap();
+                                        let shell = state.common.shell.write();
                                         if let Some(mapped) =
                                             shell.element_for_surface(&surface).cloned()
                                         {
@@ -835,7 +835,7 @@ impl State {
                                                     let seat_clone2 = seat_clone.clone();
                                                     let seat_clone3 = seat_clone.clone();
 
-                                                    let mut shell = state.common.shell.write().unwrap();
+                                                    let mut shell = state.common.shell.write();
                                                     let res = shell
                                                         .distance_switch_request(
                                                             &surface_clone,
@@ -847,8 +847,7 @@ impl State {
                                                                     let mut shell = state
                                                                         .common
                                                                         .shell
-                                                                        .write()
-                                                                        .unwrap();
+                                                                        .write();
 
                                                                     let Some(target_elem) =
                                                                         shell.element_for_surface(&surface)

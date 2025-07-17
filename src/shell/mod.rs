@@ -1,6 +1,6 @@
 use calloop::LoopHandle;
 use focus::target::WindowGroup;
-use grabs::{DistanceSwitchGrab, SeatMoveGrabState, MenuAlignment};
+use grabs::{DistanceSwitchGrab, MenuAlignment, SeatMoveGrabState};
 use indexmap::IndexMap;
 use layout::TilingExceptions;
 use std::{
@@ -3283,7 +3283,7 @@ impl Shell {
     ) -> Option<(MenuGrab, Focus)> {
         let serial = serial.into();
         let Some(GrabStartData::Pointer(start_data)) =
-            check_grab_preconditions(&seat, surface, serial, client_initiated)
+            check_grab_preconditions(&seat, serial, client_initiated.then_some(surface))
         else {
             return None; // TODO: an application can send a menu request for a touch event
         };
@@ -3404,7 +3404,8 @@ impl Shell {
     ) -> Option<(DistanceSwitchGrab<Moved, Unmoved>, Focus)> {
         let serial = serial.into();
 
-        let start_data = check_grab_preconditions(&seat, surface, serial, client_initiated)?;
+        let start_data =
+            check_grab_preconditions(&seat, serial, client_initiated.then_some(surface))?;
 
         Some((
             DistanceSwitchGrab {
