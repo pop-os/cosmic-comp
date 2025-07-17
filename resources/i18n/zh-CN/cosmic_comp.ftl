@@ -9,6 +9,7 @@ stack-windows = 堆叠窗口
 unknown-keybinding = <未设置>
 window-menu-minimize = 最小化
 window-menu-maximize = 最大化
+window-menu-fullscreen = 全屏
 window-menu-tiled = 浮动窗口
 window-menu-screenshot = 截图
 window-menu-move = 移动
