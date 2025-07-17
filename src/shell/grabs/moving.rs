@@ -383,37 +383,6 @@ impl MoveGrab {
             let mut window_geo = self.window.geometry();
             window_geo.loc += location.to_i32_round() + grab_state.window_offset;
 
-            if matches!(self.previous, ManagedLayer::Floating | ManagedLayer::Sticky) {
-                let loc = (grab_state.window_offset.to_f64() + grab_state.location).as_local();
-                let size = window_geo.size.to_f64().as_local();
-                let output_geom = self
-                    .cursor_output
-                    .geometry()
-                    .to_f64()
-                    .to_local(&self.cursor_output);
-                let output_loc = output_geom.loc;
-                let output_size = output_geom.size;
-
-                grab_state.location.x = if (loc.x - output_loc.x).abs() < self.edge_snap_threshold {
-                    output_loc.x - grab_state.window_offset.x as f64
-                } else if ((loc.x + size.w) - (output_loc.x + output_size.w)).abs()
-                    < self.edge_snap_threshold
-                {
-                    output_loc.x + output_size.w - grab_state.window_offset.x as f64 - size.w
-                } else {
-                    grab_state.location.x
-                };
-                grab_state.location.y = if (loc.y - output_loc.y).abs() < self.edge_snap_threshold {
-                    output_loc.y - grab_state.window_offset.y as f64
-                } else if ((loc.y + size.h) - (output_loc.y + output_size.h)).abs()
-                    < self.edge_snap_threshold
-                {
-                    output_loc.y + output_size.h - grab_state.window_offset.y as f64 - size.h
-                } else {
-                    grab_state.location.y
-                };
-            }
-
             for output in shell.outputs() {
                 if let Some(overlap) = output.geometry().as_logical().intersection(window_geo) {
                     if self.window_outputs.insert(output.clone()) {
@@ -423,6 +392,39 @@ impl MoveGrab {
                         {
                             indicator.output_enter(output, overlap);
                         }
+                    }
+
+                    if matches!(self.previous, ManagedLayer::Floating | ManagedLayer::Sticky) {
+                        let loc = (grab_state.window_offset.to_f64() + grab_state.location);
+                        let size = window_geo.size.to_f64();
+                        let output_geom = output.geometry().to_f64().as_logical();
+                        let output_loc = output_geom.loc;
+                        let output_size = output_geom.size;
+
+                        grab_state.location.x =
+                            if (loc.x - output_loc.x).abs() < self.edge_snap_threshold {
+                                output_loc.x - grab_state.window_offset.x as f64
+                            } else if ((loc.x + size.w) - (output_loc.x + output_size.w)).abs()
+                                < self.edge_snap_threshold
+                            {
+                                output_loc.x + output_size.w
+                                    - grab_state.window_offset.x as f64
+                                    - size.w
+                            } else {
+                                grab_state.location.x
+                            };
+                        grab_state.location.y =
+                            if (loc.y - output_loc.y).abs() < self.edge_snap_threshold {
+                                output_loc.y - grab_state.window_offset.y as f64
+                            } else if ((loc.y + size.h) - (output_loc.y + output_size.h)).abs()
+                                < self.edge_snap_threshold
+                            {
+                                output_loc.y + output_size.h
+                                    - grab_state.window_offset.y as f64
+                                    - size.h
+                            } else {
+                                grab_state.location.y
+                            };
                     }
                 } else if self.window_outputs.remove(&output) {
                     self.window.output_leave(output);
