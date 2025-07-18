@@ -505,6 +505,7 @@ impl Config {
                 found_outputs.push((output.clone(), enabled));
             }
 
+            let mut backend = backend.lock();
             if let Err(err) = backend.apply_config_for_outputs(
                 false,
                 loop_handle,
@@ -580,7 +581,7 @@ impl Config {
                 w += output.geometry().size.w as u32;
             }
 
-            if let Err(err) = backend.apply_config_for_outputs(
+            if let Err(err) = backend.lock().apply_config_for_outputs(
                 false,
                 loop_handle,
                 self.dynamic_conf.screen_filter(),

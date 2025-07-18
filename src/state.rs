@@ -2,7 +2,7 @@
 
 use crate::{
     backend::{
-        kms::KmsState,
+        kms::{KmsGuard, KmsState},
         render::{GlMultiError, RendererRef},
         winit::WinitState,
         x11::X11State,
@@ -261,6 +261,12 @@ pub enum BackendData {
     Unset,
 }
 
+pub enum LockedBackend<'a> {
+    X11(&'a mut X11State),
+    Winit(&'a mut WinitState),
+    Kms(KmsGuard<'a>),
+}
+
 #[derive(Debug, Clone)]
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
@@ -300,93 +306,6 @@ impl BackendData {
             BackendData::Winit(ref mut winit_state) => winit_state,
             _ => unreachable!("Called winit in non winit backend"),
         }
-    }
-
-    pub fn apply_config_for_outputs(
-        &mut self,
-        test_only: bool,
-        loop_handle: &LoopHandle<'static, State>,
-        screen_filter: &ScreenFilter,
-        shell: Arc<parking_lot::RwLock<Shell>>,
-        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-        xdg_activation_state: &XdgActivationState,
-        startup_done: Arc<AtomicBool>,
-        clock: &Clock<Monotonic>,
-    ) -> Result<(), anyhow::Error> {
-        let result = match self {
-            BackendData::Kms(ref mut state) => state.apply_config_for_outputs(
-                test_only,
-                loop_handle,
-                screen_filter,
-                shell.clone(),
-                startup_done,
-                clock,
-            ),
-            BackendData::Winit(ref mut state) => state.apply_config_for_outputs(test_only),
-            BackendData::X11(ref mut state) => state.apply_config_for_outputs(test_only),
-            _ => unreachable!("No backend set when applying output config"),
-        }?;
-
-        let mut shell = shell.write();
-        for output in result {
-            // apply to Output
-            let final_config = output
-                .user_data()
-                .get::<RefCell<OutputConfig>>()
-                .unwrap()
-                .borrow();
-
-            let mode = Some(final_config.output_mode()).filter(|m| match output.current_mode() {
-                None => true,
-                Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
-            });
-            let transform =
-                Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
-            let scale = Some(final_config.scale)
-                .filter(|x| *x != output.current_scale().fractional_scale());
-            let location = Some(Point::from((
-                final_config.position.0 as i32,
-                final_config.position.1 as i32,
-            )))
-            .filter(|x| *x != output.current_location());
-            output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
-
-            output.set_adaptive_sync(final_config.vrr);
-            output.set_mirroring(match &final_config.enabled {
-                OutputState::Mirroring(conn) => shell
-                    .outputs()
-                    .find(|output| &output.name() == conn)
-                    .cloned(),
-                _ => None,
-            });
-
-            match final_config.enabled {
-                OutputState::Enabled => shell.workspaces.add_output(&output, workspace_state),
-                _ => {
-                    let shell = &mut *shell;
-                    shell.workspaces.remove_output(
-                        &output,
-                        shell.seats.iter(),
-                        workspace_state,
-                        xdg_activation_state,
-                    )
-                }
-            }
-
-            layer_map_for_output(&output).arrange();
-
-            self.schedule_render(&output);
-        }
-
-        // Update layout for changes in resolution, scale, orientation
-        shell.workspaces.recalculate();
-
-        loop_handle.insert_idle(move |state| {
-            state.common.update_xwayland_scale();
-            state.common.update_xwayland_primary_output();
-        });
-
-        Ok(())
     }
 
     pub fn schedule_render(&mut self, output: &Output) {
@@ -462,6 +381,134 @@ impl BackendData {
             BackendData::X11(ref mut state) => state.update_screen_filter(screen_filter),
             _ => unreachable!("No backend set when setting screen filters"),
         }
+    }
+
+    pub fn lock(&mut self) -> LockedBackend<'_> {
+        match self {
+            BackendData::Kms(ref mut state) => LockedBackend::Kms(state.lock_devices()),
+            BackendData::X11(ref mut state) => LockedBackend::X11(state),
+            BackendData::Winit(ref mut state) => LockedBackend::Winit(state),
+            _ => unreachable!("Tried to lock unset backend"),
+        }
+    }
+}
+
+impl<'a> LockedBackend<'a> {
+    fn all_outputs(&self) -> Vec<Output> {
+        match self {
+            LockedBackend::Kms(state) => state.all_outputs(),
+            LockedBackend::X11(state) => state.all_outputs(),
+            LockedBackend::Winit(state) => state.all_outputs(),
+        }
+    }
+
+    pub fn apply_config_for_outputs(
+        &mut self,
+        test_only: bool,
+        loop_handle: &LoopHandle<'static, State>,
+        screen_filter: &ScreenFilter,
+        shell: Arc<parking_lot::RwLock<Shell>>,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        xdg_activation_state: &XdgActivationState,
+        startup_done: Arc<AtomicBool>,
+        clock: &Clock<Monotonic>,
+    ) -> Result<(), anyhow::Error> {
+        let all_outputs = self.all_outputs();
+
+        // update outputs, so that `OutputModeSource`s are correct
+        for output in &all_outputs {
+            // apply to Output
+            let final_config = output
+                .user_data()
+                .get::<RefCell<OutputConfig>>()
+                .unwrap()
+                .borrow();
+
+            let mode = Some(final_config.output_mode()).filter(|m| match output.current_mode() {
+                None => true,
+                Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
+            });
+            let transform =
+                Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
+            let scale = Some(final_config.scale)
+                .filter(|x| *x != output.current_scale().fractional_scale());
+            let location = Some(Point::from((
+                final_config.position.0 as i32,
+                final_config.position.1 as i32,
+            )))
+            .filter(|x| *x != output.current_location());
+            output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
+
+            output.set_adaptive_sync(final_config.vrr);
+        }
+
+        match self {
+            LockedBackend::Kms(state) => state.apply_config_for_outputs(
+                test_only,
+                loop_handle,
+                screen_filter,
+                shell.clone(),
+                startup_done,
+                clock,
+            ),
+            LockedBackend::Winit(state) => state.apply_config_for_outputs(test_only),
+            LockedBackend::X11(state) => state.apply_config_for_outputs(test_only),
+        }?;
+
+        let mut shell_ref = shell.write();
+        for output in &all_outputs {
+            // apply the rest; add / remove outputs
+            let final_config = output
+                .user_data()
+                .get::<RefCell<OutputConfig>>()
+                .unwrap()
+                .borrow();
+
+            output.set_mirroring(match &final_config.enabled {
+                OutputState::Mirroring(conn) => shell_ref
+                    .outputs()
+                    .find(|output| &output.name() == conn)
+                    .cloned(),
+                _ => None,
+            });
+
+            match final_config.enabled {
+                OutputState::Enabled => shell_ref.workspaces.add_output(&output, workspace_state),
+                _ => {
+                    let shell = &mut *shell_ref;
+                    shell.workspaces.remove_output(
+                        &output,
+                        shell.seats.iter(),
+                        workspace_state,
+                        xdg_activation_state,
+                    )
+                }
+            }
+
+            layer_map_for_output(&output).arrange();
+        }
+
+        // Update layout for changes in resolution, scale, orientation
+        shell_ref.workspaces.recalculate();
+        let active_outputs = shell_ref.outputs().cloned().collect::<Vec<_>>();
+        std::mem::drop(shell_ref);
+
+        for output in active_outputs {
+            match self {
+                LockedBackend::Winit(_) => {} // We cannot do this on the winit backend.
+                // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
+                // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
+                LockedBackend::X11(ref mut state) => state.schedule_render(&output),
+                LockedBackend::Kms(ref mut state) => state.schedule_render(&output),
+            }
+        }
+
+        loop_handle.insert_idle(move |state| {
+            state.common.update_xwayland_scale();
+            state.common.update_xwayland_primary_output();
+        });
+
+        Ok(())
     }
 }
 

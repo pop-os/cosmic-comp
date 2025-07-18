@@ -145,7 +145,8 @@ impl State {
             }
         }
 
-        let res = self.backend.apply_config_for_outputs(
+        let mut backend = self.backend.lock();
+        let res = backend.apply_config_for_outputs(
             test_only,
             &self.common.event_loop_handle,
             self.common.config.dynamic_conf.screen_filter(),
@@ -168,7 +169,7 @@ impl State {
                 }
             }
             if !test_only {
-                if let Err(err) = self.backend.apply_config_for_outputs(
+                if let Err(err) = backend.apply_config_for_outputs(
                     false,
                     &self.common.event_loop_handle,
                     self.common.config.dynamic_conf.screen_filter(),
