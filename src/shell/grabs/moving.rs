@@ -384,13 +384,9 @@ impl MoveGrab {
             window_geo.loc += location.to_i32_round() + grab_state.window_offset;
 
             if matches!(self.previous, ManagedLayer::Floating | ManagedLayer::Sticky) {
-                let loc = (grab_state.window_offset.to_f64() + grab_state.location).as_local();
-                let size = window_geo.size.to_f64().as_local();
-                let output_geom = self
-                    .cursor_output
-                    .geometry()
-                    .to_f64()
-                    .to_local(&self.cursor_output);
+                let loc = grab_state.window_offset.to_f64() + grab_state.location;
+                let size = window_geo.size.to_f64();
+                let output_geom = self.cursor_output.geometry().to_f64().as_logical();
                 let output_loc = output_geom.loc;
                 let output_size = output_geom.size;
 
