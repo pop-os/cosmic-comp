@@ -2,11 +2,13 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     hash::{Hash, Hasher},
-    sync::{mpsc::Receiver, Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex, mpsc::Receiver},
 };
 
 use cosmic::{
+    Theme,
     iced::{
+        Limits, Point as IcedPoint, Size as IcedSize, Task,
         advanced::{graphics::text::font_system, widget::Tree},
         event::Event,
         futures::{FutureExt, StreamExt},
@@ -14,37 +16,35 @@ use cosmic::{
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
         touch::{Event as TouchEvent, Finger},
         window::Event as WindowEvent,
-        Limits, Point as IcedPoint, Size as IcedSize, Task,
     },
-    iced_core::{clipboard::Null as NullClipboard, id::Id, renderer::Style, Color, Length, Pixels},
+    iced_core::{Color, Length, Pixels, clipboard::Null as NullClipboard, id::Id, renderer::Style},
     iced_runtime::{
+        Action, Debug,
         program::{Program as IcedProgram, State},
         task::into_stream,
-        Action, Debug,
     },
-    Theme,
 };
 use iced_tiny_skia::{
-    graphics::{damage, Viewport},
     Layer,
+    graphics::{Viewport, damage},
 };
 
-use once_cell::sync::Lazy;
 use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
         allocator::Fourcc,
         input::{ButtonState, KeyState},
         renderer::{
-            element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                AsRenderElements, Kind,
-            },
             ImportMem, Renderer,
+            element::{
+                AsRenderElements, Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+            },
         },
     },
     desktop::space::{RenderZindex, SpaceElement},
     input::{
+        Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -56,18 +56,17 @@ use smithay::{
             DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
             UpEvent,
         },
-        Seat,
     },
     output::Output,
     reexports::calloop::RegistrationToken,
-    reexports::calloop::{self, futures::Scheduler, LoopHandle},
+    reexports::calloop::{self, LoopHandle, futures::Scheduler},
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
         Transform,
     },
 };
 
-static ID: Lazy<Id> = Lazy::new(|| Id::new("Program"));
+static ID: LazyLock<Id> = LazyLock::new(|| Id::new("Program"));
 
 pub struct IcedElement<P: Program + Send + 'static>(pub(crate) Arc<Mutex<IcedElementInternal<P>>>);
 
@@ -373,7 +372,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn force_redraw(&self) {
         let mut internal = self.0.lock().unwrap();
-        for (_buffer, ref mut old_primitives) in internal.buffers.values_mut() {
+        for (_buffer, old_primitives) in internal.buffers.values_mut() {
             *old_primitives = None;
         }
     }
@@ -914,9 +913,7 @@ where
         }
 
         scale = scale * internal_ref.additional_scale;
-        if let Some((buffer, ref mut old_layers)) =
-            internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
-        {
+        if let Some((buffer, old_layers)) = internal_ref.buffers.get_mut(&OrderedFloat(scale.x)) {
             let size: Size<i32, BufferCoords> = internal_ref
                 .size
                 .to_f64()
