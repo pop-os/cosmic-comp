@@ -744,7 +744,7 @@ impl TilingLayout {
                     }
                 };
 
-                for (ref mut parent_id, _) in children.iter_mut() {
+                for (parent_id, _) in children.iter_mut() {
                     *parent_id = id.clone();
                 }
                 if let Data::Mapped { mapped, .. } = other_tree.get_mut(&id).unwrap().data_mut() {

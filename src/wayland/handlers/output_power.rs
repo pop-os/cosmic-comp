@@ -26,7 +26,7 @@ pub fn set_all_surfaces_dpms_on(state: &mut State) {
 }
 
 fn kms_surfaces(state: &mut State) -> impl Iterator<Item = &mut Surface> {
-    if let BackendData::Kms(ref mut kms_state) = &mut state.backend {
+    if let BackendData::Kms(kms_state) = &mut state.backend {
         Some(
             kms_state
                 .drm_devices

@@ -667,8 +667,7 @@ impl CosmicMapped {
                                         WindowSurface::Wayland(_) => "Protocol: Wayland",
                                         WindowSurface::X11(_) => "Protocol: X11",
                                     });
-                                    if let WindowSurface::X11(ref surf) =
-                                        window.0.underlying_surface()
+                                    if let WindowSurface::X11(surf) = window.0.underlying_surface()
                                     {
                                         let geo = surf.geometry();
                                         ui.label(format!(

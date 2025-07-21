@@ -3267,22 +3267,29 @@ impl Shell {
             let is_stacked = mapped.is_stack();
 
             if target_stack || !is_stacked {
-                Box::new(window_items(
-                    &mapped,
-                    is_tiled,
-                    is_stacked,
-                    is_sticky,
-                    tiling_enabled,
-                    edge,
-                    config,
-                )) as Box<dyn Iterator<Item = Item>>
+                Box::new(
+                    window_items(
+                        &mapped,
+                        is_tiled,
+                        is_stacked,
+                        is_sticky,
+                        tiling_enabled,
+                        edge,
+                        config,
+                    )
+                    .collect::<Vec<Item>>()
+                    .into_iter(),
+                ) as Box<dyn Iterator<Item = Item>>
             } else {
                 let (tab, _) = mapped
                     .windows()
                     .find(|(s, _)| s.wl_surface().as_deref() == Some(surface))
                     .unwrap();
-                Box::new(tab_items(&mapped, &tab, is_tiled, config))
-                    as Box<dyn Iterator<Item = Item>>
+                Box::new(
+                    tab_items(&mapped, &tab, is_tiled, config)
+                        .collect::<Vec<Item>>()
+                        .into_iter(),
+                ) as Box<dyn Iterator<Item = Item>>
             }
         };
 
@@ -3292,7 +3299,7 @@ impl Shell {
                     .mapped()
                     .find_map(|m| {
                         m.windows()
-                            .find(|(ref w, _)| w == surface)
+                            .find(|(w, _)| w == surface)
                             .map(|(_, loc)| (m, loc))
                     })
                     .map(|(mapped, relative_loc)| (set, mapped, relative_loc))
