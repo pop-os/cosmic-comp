@@ -352,10 +352,16 @@ impl CosmicStack {
                 }
                 FocusDirection::In if swap.is_none() => {
                     if !p.group_focused.swap(false, Ordering::SeqCst) {
-                        p.windows.lock().unwrap().iter().for_each(|w| {
-                            w.set_activated(true);
-                            w.send_configure();
-                        });
+                        p.windows
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .enumerate()
+                            .for_each(|(i, w)| {
+                                w.set_activated(p.active.load(Ordering::SeqCst) == i);
+                                w.send_configure();
+                            });
+
                         (true, true)
                     } else {
                         (false, false)
@@ -1162,7 +1168,11 @@ impl SpaceElement for CosmicStack {
                     .lock()
                     .unwrap()
                     .iter()
-                    .for_each(|w| SpaceElement::set_activate(w, activated))
+                    .enumerate()
+                    .for_each(|(i, w)| {
+                        w.set_activated(activated && p.active.load(Ordering::SeqCst) == i);
+                        w.send_configure();
+                    });
             }
             p.activated.swap(activated, Ordering::SeqCst) != activated
         });
