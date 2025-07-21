@@ -1,10 +1,15 @@
+a11y-zoom-move-continuously = Лупа двигается за курсором
+a11y-zoom-move-onedge = Лупа двигается когда курсор достигает края
+a11y-zoom-move-centered = Лупа двигается с курсором в центре
+a11y-zoom-settings = Параметры лупы...
 grow-window = Увеличить
 shrink-window = Уменьшить
 swap-windows = Сменить окна
 stack-windows = Стопка
 unknown-keybinding = <не задано>
 window-menu-minimize = Свернуть
-window-menu-maximize = На весь экран
+window-menu-maximize = Развернуть
+window-menu-fullscreen = Во весь экран
 window-menu-tiled = Плавающее окно
 window-menu-screenshot = Сделать снимок окна
 window-menu-move = Переместить
