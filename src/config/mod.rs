@@ -10,13 +10,13 @@ use crate::{
 };
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
 use cosmic_settings_config::window_rules::ApplicationException;
-use cosmic_settings_config::{Shortcuts, shortcuts, window_rules};
+use cosmic_settings_config::{shortcuts, window_rules, Shortcuts};
 use serde::{Deserialize, Serialize};
 use smithay::utils::{Clock, Monotonic};
 use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
     backend::input::{self as smithay_input, KeyState},
-    input::keyboard::{Keysym, ModifiersState, keysyms as KeySyms},
+    input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
     output::{Mode, Output},
     reexports::{
         calloop::LoopHandle,
@@ -25,7 +25,7 @@ pub use smithay::{
             TapButtonMap,
         },
     },
-    utils::{Logical, Physical, Point, SERIAL_COUNTER, Size, Transform},
+    utils::{Logical, Physical, Point, Size, Transform, SERIAL_COUNTER},
 };
 use std::{
     cell::RefCell,
@@ -33,7 +33,7 @@ use std::{
     fs::OpenOptions,
     io::Write,
     path::PathBuf,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{atomic::AtomicBool, Arc},
 };
 use tracing::{error, warn};
 
@@ -45,8 +45,8 @@ pub use self::types::*;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::output::EdidProduct;
 use cosmic_comp_config::{
-    CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
-    XwaylandEavesdropping, ZoomConfig, input::InputConfig, workspace::WorkspaceConfig,
+    input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
+    XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
 };
 
 #[derive(Debug)]
