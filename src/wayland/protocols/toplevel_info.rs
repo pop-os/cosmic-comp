@@ -209,7 +209,10 @@ where
                         .push((obj.downgrade(), instance));
                 } else {
                     let _ = data_init.init(cosmic_toplevel, ToplevelHandleStateInner::empty());
-                    error!(?foreign_toplevel, "Toplevel for foreign-toplevel-list not registered for cosmic-toplevel-info.");
+                    error!(
+                        ?foreign_toplevel,
+                        "Toplevel for foreign-toplevel-list not registered for cosmic-toplevel-info."
+                    );
                 }
             }
             zcosmic_toplevel_info_v1::Request::Stop => {
