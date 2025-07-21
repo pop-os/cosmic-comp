@@ -72,10 +72,7 @@ impl State {
 
             if offset_x > 0 || offset_y > 0 {
                 for (output, conf) in conf.iter_mut() {
-                    if let OutputConfiguration::Enabled {
-                        ref mut position, ..
-                    } = conf
-                    {
+                    if let OutputConfiguration::Enabled { position, .. } = conf {
                         let current_config = output
                             .user_data()
                             .get::<RefCell<OutputConfig>>()

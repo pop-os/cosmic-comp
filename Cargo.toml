@@ -1,6 +1,6 @@
 [package]
 authors = ["Victoria Brekenfeld"]
-edition = "2021"
+edition = "2024"
 license = "GPL-3.0-only"
 name = "cosmic-comp"
 version = "0.1.0"
@@ -25,7 +25,7 @@ cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "
     "server",
 ] }
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
-cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", branch = "greeter", features = [
+cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
     "greeter",
 ] }
 cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = [

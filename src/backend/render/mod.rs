@@ -1379,7 +1379,7 @@ where
                             elements.truncate(old_len);
                         }
 
-                        if let (Some(ref damage), _) = &res {
+                        if let (Some(damage), _) = &res {
                             let blit_to_buffer =
                                 |renderer: &mut R, blit_from: &mut R::Framebuffer<'_>| {
                                     if let Ok(dmabuf) = get_dmabuf(buffer) {

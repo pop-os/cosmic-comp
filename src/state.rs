@@ -391,9 +391,9 @@ impl BackendData {
 
     pub fn lock(&mut self) -> LockedBackend<'_> {
         match self {
-            BackendData::Kms(ref mut state) => LockedBackend::Kms(state.lock_devices()),
-            BackendData::X11(ref mut state) => LockedBackend::X11(state),
-            BackendData::Winit(ref mut state) => LockedBackend::Winit(state),
+            BackendData::Kms(state) => LockedBackend::Kms(state.lock_devices()),
+            BackendData::X11(state) => LockedBackend::X11(state),
+            BackendData::Winit(state) => LockedBackend::Winit(state),
             _ => unreachable!("Tried to lock unset backend"),
         }
     }
@@ -535,8 +535,8 @@ impl<'a> LockedBackend<'a> {
                 LockedBackend::Winit(_) => {} // We cannot do this on the winit backend.
                 // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
                 // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
-                LockedBackend::X11(ref mut state) => state.schedule_render(&output),
-                LockedBackend::Kms(ref mut state) => state.schedule_render(&output),
+                LockedBackend::X11(state) => state.schedule_render(&output),
+                LockedBackend::Kms(state) => state.schedule_render(&output),
             }
         }
 
