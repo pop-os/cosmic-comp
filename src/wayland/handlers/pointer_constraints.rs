@@ -7,7 +7,7 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point},
     wayland::{
-        pointer_constraints::{with_pointer_constraint, PointerConstraintsHandler},
+        pointer_constraints::{PointerConstraintsHandler, with_pointer_constraint},
         seat::WaylandFocus,
     },
 };

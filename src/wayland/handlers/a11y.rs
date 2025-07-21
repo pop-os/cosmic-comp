@@ -3,7 +3,7 @@ use tracing::warn;
 use crate::{
     config::ColorFilter,
     state::State,
-    wayland::protocols::a11y::{delegate_a11y, A11yHandler, A11yState},
+    wayland::protocols::a11y::{A11yHandler, A11yState, delegate_a11y},
 };
 
 impl A11yHandler for State {

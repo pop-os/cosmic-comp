@@ -1,18 +1,18 @@
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, format::get_transparent, Buffer, Fourcc},
+        allocator::{Buffer, Fourcc, dmabuf::Dmabuf, format::get_transparent},
         renderer::{
+            Bind, Blit, BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
             buffer_dimensions, buffer_type,
             damage::{Error as DTError, OutputDamageTracker, RenderOutputResult},
             element::{
+                AsRenderElements, RenderElement,
                 surface::WaylandSurfaceRenderElement,
                 utils::{Relocate, RelocateRenderElement},
-                AsRenderElements, RenderElement,
             },
             gles::{GlesError, GlesRenderbuffer},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, Blit, BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
     desktop::space::SpaceElement,
@@ -34,16 +34,16 @@ use tracing::warn;
 
 use crate::{
     backend::render::{
-        cursor,
+        CursorMode, ElementFilter, RendererRef, cursor,
         element::{AsGlowRenderer, CosmicElement, DamageElement, FromGlesError},
-        render_workspace, CursorMode, ElementFilter, RendererRef,
+        render_workspace,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{Common, KmsNodes, State},
     utils::prelude::SeatExt,
     wayland::{
         handlers::screencopy::{
-            constraints_for_output, constraints_for_toplevel, SessionData, SessionUserData,
+            SessionData, SessionUserData, constraints_for_output, constraints_for_toplevel,
         },
         protocols::{
             screencopy::{BufferConstraints, CursorSessionRef, FailureReason, Frame, SessionRef},
@@ -518,11 +518,7 @@ pub fn render_window_to_buffer(
         let location = if let Some(mapped) = shell.element_for_surface(window) {
             mapped.cursor_position(&seat).and_then(|mut p| {
                 p -= mapped.active_window_offset().to_f64();
-                if p.x < 0. || p.y < 0. {
-                    None
-                } else {
-                    Some(p)
-                }
+                if p.x < 0. || p.y < 0. { None } else { Some(p) }
             })
         } else {
             None

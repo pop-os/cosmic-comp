@@ -5,13 +5,13 @@ use calloop::Interest;
 use smithay::{
     backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
     delegate_compositor,
-    desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
-    utils::{Logical, Size, SERIAL_COUNTER},
+    desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
+    reexports::wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
+    utils::{Logical, SERIAL_COUNTER, Size},
     wayland::{
         compositor::{
-            add_blocker, add_pre_commit_hook, with_states, BufferAssignment, CompositorClientState,
-            CompositorHandler, CompositorState, SurfaceAttributes,
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            SurfaceAttributes, add_blocker, add_pre_commit_hook, with_states,
         },
         dmabuf::get_dmabuf,
         drm_syncobj::DrmSyncobjCachedState,
@@ -49,7 +49,7 @@ fn toplevel_ensure_initial_configure(
 }
 
 fn xdg_popup_ensure_initial_configure(popup: &PopupKind) {
-    if let PopupKind::Xdg(ref popup) = popup {
+    if let PopupKind::Xdg(popup) = popup {
         let initial_configure_sent = with_states(popup.wl_surface(), |states| {
             states
                 .data_map

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::reexports::{
-    calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction},
+    calloop::{Interest, LoopHandle, Mode, PostAction, generic::Generic},
     rustix,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use sendfd::RecvWithFd;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -54,7 +54,7 @@ unsafe fn set_cloexec(fd: RawFd) -> rustix::io::Result<()> {
     if fd == -1 {
         return Err(rustix::io::Errno::BADF);
     }
-    let fd = BorrowedFd::borrow_raw(fd);
+    let fd = unsafe { BorrowedFd::borrow_raw(fd) };
     let flags = rustix::io::fcntl_getfd(fd)?;
     rustix::io::fcntl_setfd(fd, flags | rustix::io::FdFlags::CLOEXEC)
 }

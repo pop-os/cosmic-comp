@@ -13,6 +13,7 @@ use id_tree::{NodeId, Tree};
 use smithay::{
     backend::input::ButtonState,
     input::{
+        Seat,
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -24,7 +25,6 @@ use smithay::{
             DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
             OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
         },
-        Seat,
     },
     output::WeakOutput,
     utils::{IsAlive, Logical, Point, Serial},

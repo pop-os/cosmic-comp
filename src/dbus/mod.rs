@@ -2,7 +2,7 @@ use crate::state::{BackendData, Common, State};
 use anyhow::{Context, Result};
 use calloop::{InsertError, LoopHandle, RegistrationToken};
 use std::collections::HashMap;
-use zbus::blocking::{fdo::DBusProxy, Connection};
+use zbus::blocking::{Connection, fdo::DBusProxy};
 
 mod power;
 

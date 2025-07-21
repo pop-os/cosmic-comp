@@ -3,7 +3,7 @@
 // update a Arc<Mutex<Theme>> in the state on change of the theme and mark all interfaces for a redraw.
 
 use calloop::LoopHandle;
-use cosmic::cosmic_theme::{palette, Theme, ThemeMode};
+use cosmic::cosmic_theme::{Theme, ThemeMode, palette};
 
 use crate::state::State;
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
+    backend::render::{CLEAR_COLOR, CursorMode, GlMultiRenderer, output_elements},
     config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState, ScreenFilter},
     shell::Shell,
     utils::{env::dev_list_var, prelude::*},
@@ -13,27 +13,27 @@ use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
+            Format, Fourcc,
             format::FormatSet,
             gbm::{GbmAllocator, GbmDevice},
-            Format, Fourcc,
         },
         drm::{
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
             compositor::{FrameError, FrameFlags},
             exporter::gbm::GbmFramebufferExporter,
             output::DrmOutputManager,
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
         },
-        egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
+        egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
         session::Session,
     },
     desktop::utils::OutputPresentationFeedback,
     output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
-        drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+        drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
         gbm::BufferObjectFlags as GbmBufferFlags,
         rustix::fs::OFlags,
-        wayland_server::{protocol::wl_buffer::WlBuffer, DisplayHandle, Weak},
+        wayland_server::{DisplayHandle, Weak, protocol::wl_buffer::WlBuffer},
     },
     utils::{
         Buffer as BufferCoords, Clock, DevPath, DeviceFd, Monotonic, Point, Rectangle, Transform,
@@ -47,7 +47,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     path::Path,
-    sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool, mpsc::Receiver},
     time::Duration,
 };
 

@@ -14,24 +14,24 @@ use render::gles::GbmGlowBackend;
 use smithay::{
     backend::{
         allocator::{
+            Buffer,
             dmabuf::Dmabuf,
             gbm::{GbmAllocator, GbmBufferFlags},
-            Buffer,
         },
-        drm::{output::DrmOutputRenderElements, DrmDeviceFd, DrmNode, NodeType},
-        egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
+        drm::{DrmDeviceFd, DrmNode, NodeType, output::DrmOutputRenderElements},
+        egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{glow::GlowRenderer, multigpu::GpuManager},
-        session::{libseat::LibSeatSession, Event as SessionEvent, Session},
-        udev::{primary_gpu, UdevBackend, UdevEvent},
+        session::{Event as SessionEvent, Session, libseat::LibSeatSession},
+        udev::{UdevBackend, UdevEvent, primary_gpu},
     },
     output::Output,
     reexports::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
         drm::{
-            control::{connector::Interface, crtc, Device as _},
             Device as _,
+            control::{Device as _, connector::Interface, crtc},
         },
         input::{self, Libinput},
         wayland_server::{Client, DisplayHandle},
@@ -39,7 +39,7 @@ use smithay::{
     utils::{Clock, DevPath, Monotonic, Size},
     wayland::{
         dmabuf::DmabufGlobal,
-        drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState},
+        drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd},
         relative_pointer::RelativePointerManagerState,
     },
 };
@@ -50,7 +50,7 @@ use std::{
     borrow::BorrowMut,
     collections::{HashMap, HashSet},
     path::Path,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool},
 };
 
 mod device;
@@ -63,7 +63,7 @@ pub(crate) use surface::Surface;
 use device::*;
 pub use surface::Timings;
 
-use super::render::{init_shaders, output_elements, CursorMode, CLEAR_COLOR};
+use super::render::{CLEAR_COLOR, CursorMode, init_shaders, output_elements};
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -161,7 +161,7 @@ fn init_libinput(
     let libinput_backend = LibinputInputBackend::new(libinput_context.clone());
 
     evlh.insert_source(libinput_backend, move |mut event, _, state| {
-        if let InputEvent::DeviceAdded { ref mut device } = &mut event {
+        if let InputEvent::DeviceAdded { device } = &mut event {
             state.common.config.read_device(device);
             state
                 .backend

@@ -3,12 +3,12 @@ use crate::shell::layout::tiling::RestoreTilingState;
 use crate::wayland::handlers::xdg_activation::ActivationContext;
 use crate::{
     backend::render::{
-        element::{AsGlowRenderer, FromGlesError},
         BackdropShader,
+        element::{AsGlowRenderer, FromGlesError},
     },
     shell::{
+        ANIMATION_DURATION, OverviewMode,
         layout::{floating::FloatingLayout, tiling::TilingLayout},
-        OverviewMode, ANIMATION_DURATION,
     },
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
@@ -30,16 +30,16 @@ use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::output::WeakOutput;
 use smithay::{
     backend::renderer::{
+        ImportAll, ImportMem, Renderer,
         element::{
-            surface::WaylandSurfaceRenderElement, texture::TextureRenderElement,
-            utils::RescaleRenderElement, Element, Id, RenderElement,
+            Element, Id, RenderElement, surface::WaylandSurfaceRenderElement,
+            texture::TextureRenderElement, utils::RescaleRenderElement,
         },
         gles::GlesTexture,
         glow::GlowRenderer,
         utils::{DamageSet, OpaqueRegions},
-        ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
+    desktop::{WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
     output::Output,
     reexports::wayland_server::Client,
@@ -54,18 +54,18 @@ use std::{
 use wayland_backend::server::ClientId;
 
 use super::{
+    CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
     element::{
-        resize_indicator::ResizeIndicator, stack::CosmicStackRenderElement,
-        swap_indicator::SwapIndicator, window::CosmicWindowRenderElement, CosmicMapped,
-        MaximizedState,
+        CosmicMapped, MaximizedState, resize_indicator::ResizeIndicator,
+        stack::CosmicStackRenderElement, swap_indicator::SwapIndicator,
+        window::CosmicWindowRenderElement,
     },
     focus::{
-        target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
         FocusStack, FocusStackMut,
+        target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
     },
     grabs::ResizeEdge,
     layout::tiling::{Data, NodeDesc},
-    CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
 };
 
 const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);

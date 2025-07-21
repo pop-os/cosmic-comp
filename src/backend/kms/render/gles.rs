@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::backend::{
+    SwapBuffersError,
     allocator::{
+        Allocator,
         dmabuf::{AnyError, Dmabuf, DmabufAllocator},
         gbm::GbmAllocator,
-        Allocator,
     },
     drm::{CreateDrmNodeError, DrmNode},
     renderer::{
+        RendererSuper,
         gles::GlesError,
         glow::GlowRenderer,
         multigpu::{ApiDevice, Error as MultiError, GraphicsApi},
-        RendererSuper,
     },
-    SwapBuffersError,
 };
 use std::cell::Cell;
 use std::{

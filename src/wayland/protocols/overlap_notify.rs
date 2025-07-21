@@ -13,7 +13,7 @@ use cosmic_protocols::{
     },
 };
 use smithay::{
-    desktop::{layer_map_for_output, LayerSurface},
+    desktop::{LayerSurface, layer_map_for_output},
     output::Output,
     reexports::{
         wayland_protocols::ext::foreign_toplevel_list::v1::server::ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,

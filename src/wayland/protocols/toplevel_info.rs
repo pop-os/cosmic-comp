@@ -7,12 +7,12 @@ use smithay::{
     reexports::{
         wayland_protocols::ext::foreign_toplevel_list::v1::server::ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
         wayland_server::{
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
             backend::{ClientId, GlobalId},
             protocol::{wl_output::WlOutput, wl_surface::WlSurface},
-            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
         },
     },
-    utils::{user_data::UserDataMap, IsAlive, Logical, Rectangle},
+    utils::{IsAlive, Logical, Rectangle, user_data::UserDataMap},
     wayland::foreign_toplevel_list::{
         ForeignToplevelHandle, ForeignToplevelListHandler, ForeignToplevelListState,
     },
@@ -209,7 +209,10 @@ where
                         .push((obj.downgrade(), instance));
                 } else {
                     let _ = data_init.init(cosmic_toplevel, ToplevelHandleStateInner::empty());
-                    error!(?foreign_toplevel, "Toplevel for foreign-toplevel-list not registered for cosmic-toplevel-info.");
+                    error!(
+                        ?foreign_toplevel,
+                        "Toplevel for foreign-toplevel-list not registered for cosmic-toplevel-info."
+                    );
                 }
             }
             zcosmic_toplevel_info_v1::Request::Stop => {

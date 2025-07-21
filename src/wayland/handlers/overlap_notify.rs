@@ -1,5 +1,5 @@
 use smithay::{
-    desktop::{layer_map_for_output, LayerSurface, WindowSurfaceType},
+    desktop::{LayerSurface, WindowSurfaceType, layer_map_for_output},
     output::Output,
     reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
 };
@@ -7,7 +7,7 @@ use smithay::{
 use crate::{
     state::State,
     wayland::protocols::overlap_notify::{
-        delegate_overlap_notify, OverlapNotifyHandler, OverlapNotifyState,
+        OverlapNotifyHandler, OverlapNotifyState, delegate_overlap_notify,
     },
 };
 

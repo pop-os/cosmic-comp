@@ -2,11 +2,11 @@
 
 use crate::{
     state::{BackendData, State},
-    wayland::protocols::drm::{delegate_wl_drm, DrmHandler, ImportError},
+    wayland::protocols::drm::{DrmHandler, ImportError, delegate_wl_drm},
 };
 use smithay::{
     backend::{allocator::dmabuf::Dmabuf, drm::DrmNode},
-    reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource},
+    reexports::wayland_server::{Resource, protocol::wl_buffer::WlBuffer},
     wayland::dmabuf::DmabufGlobal,
 };
 use tracing::warn;

@@ -1,30 +1,31 @@
 use std::{
     fmt,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
 use calloop::LoopHandle;
 use cosmic::{
+    Apply as _, Task,
     iced::{Alignment, Background},
-    iced_core::{alignment::Horizontal, Border, Length, Rectangle as IcedRectangle},
-    iced_widget::{self, text::Style as TextStyle, Column, Row},
+    iced_core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
+    iced_widget::{self, Column, Row, text::Style as TextStyle},
     theme,
     widget::{button, divider, horizontal_space, icon::from_name, text},
-    Apply as _, Task,
 };
 use smithay::{
     backend::{
         input::{ButtonState, TouchSlot},
         renderer::{
-            element::{memory::MemoryRenderBufferRenderElement, AsRenderElements},
             ImportMem, Renderer,
+            element::{AsRenderElements, memory::MemoryRenderBufferRenderElement},
         },
     },
     desktop::space::SpaceElement,
     input::{
+        Seat,
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -36,14 +37,13 @@ use smithay::{
             DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
             TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
         },
-        Seat,
     },
     output::Output,
     utils::{Logical, Point, Rectangle, Serial, Size},
 };
 
 use crate::{
-    shell::{focus::target::PointerFocusTarget, SeatExt},
+    shell::{SeatExt, focus::target::PointerFocusTarget},
     state::State,
     utils::{
         iced::{IcedElement, Program},
