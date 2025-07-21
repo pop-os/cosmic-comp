@@ -35,7 +35,6 @@ use i18n_embed::{
     fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,
 };
-use once_cell::sync::Lazy;
 use rust_embed::RustEmbed;
 use smithay::{
     backend::{
@@ -121,7 +120,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     process::Child,
-    sync::{atomic::AtomicBool, Arc, Once},
+    sync::{atomic::AtomicBool, Arc, LazyLock, Once},
     time::{Duration, Instant},
 };
 
@@ -129,7 +128,8 @@ use std::{
 #[folder = "resources/i18n"]
 struct Localizations;
 
-pub static LANG_LOADER: Lazy<FluentLanguageLoader> = Lazy::new(|| fluent_language_loader!());
+pub static LANG_LOADER: LazyLock<FluentLanguageLoader> =
+    LazyLock::new(|| fluent_language_loader!());
 
 #[macro_export]
 macro_rules! fl {
@@ -295,21 +295,21 @@ impl Default for SurfaceFrameThrottlingState {
 impl BackendData {
     pub fn kms(&mut self) -> &mut KmsState {
         match self {
-            BackendData::Kms(ref mut kms_state) => kms_state,
+            BackendData::Kms(kms_state) => kms_state,
             _ => unreachable!("Called kms in non kms backend"),
         }
     }
 
     pub fn x11(&mut self) -> &mut X11State {
         match self {
-            BackendData::X11(ref mut x11_state) => x11_state,
+            BackendData::X11(x11_state) => x11_state,
             _ => unreachable!("Called x11 in non x11 backend"),
         }
     }
 
     pub fn winit(&mut self) -> &mut WinitState {
         match self {
-            BackendData::Winit(ref mut winit_state) => winit_state,
+            BackendData::Winit(winit_state) => winit_state,
             _ => unreachable!("Called winit in non winit backend"),
         }
     }
@@ -319,8 +319,8 @@ impl BackendData {
             BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
-            BackendData::X11(ref mut state) => state.schedule_render(output),
-            BackendData::Kms(ref mut state) => state.schedule_render(output),
+            BackendData::X11(state) => state.schedule_render(output),
+            BackendData::Kms(state) => state.schedule_render(output),
             _ => unreachable!("No backend was initialized"),
         }
     }
@@ -332,15 +332,15 @@ impl BackendData {
         dmabuf: Dmabuf,
     ) -> Result<Option<DrmNode>, anyhow::Error> {
         match self {
-            BackendData::Kms(ref mut state) => {
+            BackendData::Kms(state) => {
                 return state
                     .dmabuf_imported(client, global, dmabuf)
-                    .map(|node| Some(node))
+                    .map(|node| Some(node));
             }
-            BackendData::Winit(ref mut state) => {
+            BackendData::Winit(state) => {
                 state.backend.renderer().import_dmabuf(&dmabuf, None)?;
             }
-            BackendData::X11(ref mut state) => {
+            BackendData::X11(state) => {
                 state.renderer.import_dmabuf(&dmabuf, None)?;
             }
             _ => unreachable!("No backend set when importing dmabuf"),
@@ -382,9 +382,9 @@ impl BackendData {
 
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> anyhow::Result<()> {
         match self {
-            BackendData::Kms(ref mut state) => state.update_screen_filter(screen_filter),
-            BackendData::Winit(ref mut state) => state.update_screen_filter(screen_filter),
-            BackendData::X11(ref mut state) => state.update_screen_filter(screen_filter),
+            BackendData::Kms(state) => state.update_screen_filter(screen_filter),
+            BackendData::Winit(state) => state.update_screen_filter(screen_filter),
+            BackendData::X11(state) => state.update_screen_filter(screen_filter),
             _ => unreachable!("No backend set when setting screen filters"),
         }
     }
