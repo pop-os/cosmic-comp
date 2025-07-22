@@ -671,10 +671,11 @@ impl SurfaceThreadState {
             Duration::from_secs_f64(1_000. / drm_helpers::calculate_refresh_rate(mode) as f64);
         self.timings.set_refresh_interval(Some(interval));
 
+        const SAFETY_MARGIN: u32 = 2; // Magic two frames margin taken from kwin to not trigger low-framerate-compensation
         let min_min_refresh_interval = Duration::from_secs_f64(1. / 30.); // 30Hz
         self.timings.set_min_refresh_interval(Some(
             min_hz
-                .map(|min| Duration::from_secs_f64(1. / min as f64))
+                .map(|min| Duration::from_secs_f64(1. / (min + SAFETY_MARGIN) as f64))
                 .unwrap_or(min_min_refresh_interval) // alternatively use 30Hz
                 .max(min_min_refresh_interval),
         ));
