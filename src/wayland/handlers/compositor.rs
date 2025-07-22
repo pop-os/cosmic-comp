@@ -7,11 +7,12 @@ use smithay::{
     delegate_compositor,
     desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
-    utils::{Logical, Size, SERIAL_COUNTER},
+    utils::{Clock, Logical, Monotonic, Size, Time, SERIAL_COUNTER},
     wayland::{
         compositor::{
-            add_blocker, add_pre_commit_hook, with_states, BufferAssignment, CompositorClientState,
-            CompositorHandler, CompositorState, SurfaceAttributes,
+            add_blocker, add_post_commit_hook, add_pre_commit_hook, with_states,
+            with_surface_tree_downward, BufferAssignment, CompositorClientState, CompositorHandler,
+            CompositorState, SurfaceAttributes, SurfaceData, TraversalAction,
         },
         dmabuf::get_dmabuf,
         drm_syncobj::DrmSyncobjCachedState,
@@ -25,7 +26,7 @@ use smithay::{
     },
     xwayland::XWaylandClientData,
 };
-use std::sync::Mutex;
+use std::{collections::VecDeque, sync::Mutex, time::Duration};
 
 fn toplevel_ensure_initial_configure(
     toplevel: &ToplevelSurface,
@@ -90,6 +91,61 @@ pub fn client_compositor_state(client: &Client) -> &CompositorClientState {
         return &state.compositor_client_state;
     }
     panic!("Unknown client data type")
+}
+
+#[derive(Debug)]
+struct FrametimeData {
+    last_commit: Option<Time<Monotonic>>,
+    last_diffs: VecDeque<Duration>,
+    estimation: Duration,
+}
+
+impl Default for FrametimeData {
+    fn default() -> Self {
+        FrametimeData {
+            last_commit: None,
+            last_diffs: VecDeque::with_capacity(100),
+            estimation: Duration::MAX,
+        }
+    }
+}
+
+pub fn frame_time_estimation(clock: &Clock<Monotonic>, states: &SurfaceData) -> Option<Duration> {
+    let data = states
+        .data_map
+        .get::<Mutex<FrametimeData>>()?
+        .lock()
+        .unwrap();
+    if let Some(ref last) = data.last_commit {
+        // if the time since the last commit is already higher than our estimation,
+        // there is no reason to not use that as a better "guess"
+        let diff = Time::elapsed(&last, clock.now());
+        Some(diff.max(data.estimation))
+    } else {
+        Some(data.estimation)
+    }
+}
+
+pub fn recursive_frame_time_estimation(
+    clock: &Clock<Monotonic>,
+    surface: &WlSurface,
+) -> Option<Duration> {
+    let mut overall_estimate = None;
+    with_surface_tree_downward(
+        surface,
+        (),
+        |_, _, _| TraversalAction::DoChildren(()),
+        |_, data, _| {
+            let surface_estimate = frame_time_estimation(clock, data);
+            overall_estimate = match (overall_estimate, surface_estimate) {
+                (x, None) => x,
+                (None, Some(estimate)) => Some(estimate),
+                (Some(a), Some(b)) => Some(a.min(b)),
+            };
+        },
+        |_, _, _| true,
+    );
+    overall_estimate
 }
 
 impl CompositorHandler for State {
@@ -160,6 +216,30 @@ impl CompositorHandler for State {
                     }
                 }
             }
+        });
+
+        add_post_commit_hook::<Self, _>(surface, |state, _dh, surface| {
+            let now = state.common.clock.now();
+            with_states(surface, |states| {
+                let mut data = states
+                    .data_map
+                    .get_or_insert_threadsafe::<Mutex<FrametimeData>, _>(Default::default)
+                    .lock()
+                    .unwrap();
+                if let Some(ref last) = data.last_commit {
+                    let diff = Time::elapsed(last, now);
+                    data.last_diffs.push_back(diff);
+                    if data.last_diffs.len() > 100 {
+                        data.last_diffs.pop_front();
+                    }
+                    data.estimation = data
+                        .last_diffs
+                        .iter()
+                        .fold(Duration::ZERO, |acc, new| acc.saturating_add(*new))
+                        / (data.last_diffs.len() as u32);
+                }
+                data.last_commit = Some(now);
+            });
         });
     }
 
