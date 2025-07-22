@@ -618,6 +618,7 @@ impl CosmicMapped {
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
         scale: smithay::utils::Scale<f64>,
         alpha: f32,
+        scanout_override: Option<bool>,
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
@@ -803,11 +804,19 @@ impl CosmicMapped {
         #[cfg_attr(not(feature = "debug"), allow(unused_mut))]
         elements.extend(match &self.element {
             CosmicMappedInternal::Stack(s) => s.render_elements::<R, CosmicMappedRenderElement<R>>(
-                renderer, location, scale, alpha,
+                renderer,
+                location,
+                scale,
+                alpha,
+                scanout_override,
             ),
             CosmicMappedInternal::Window(w) => w
                 .render_elements::<R, CosmicMappedRenderElement<R>>(
-                    renderer, location, scale, alpha,
+                    renderer,
+                    location,
+                    scale,
+                    alpha,
+                    scanout_override,
                 ),
             _ => unreachable!(),
         });
