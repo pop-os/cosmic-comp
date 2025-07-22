@@ -187,6 +187,7 @@ impl MoveGrabState {
                     .to_physical_precise_round(output_scale),
                 output_scale,
                 alpha,
+                Some(false),
             );
         let p_elements = self
             .window

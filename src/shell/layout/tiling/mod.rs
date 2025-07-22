@@ -4983,6 +4983,7 @@ where
                 geo.loc.as_logical().to_physical_precise_round(output_scale) - elem_geometry.loc,
                 Scale::from(output_scale),
                 alpha,
+                None,
             );
 
             elements.extend(window_elements.into_iter().flat_map(|element| {
@@ -5470,6 +5471,7 @@ where
                         - elem_geometry.loc,
                     Scale::from(output_scale),
                     alpha,
+                    None,
                 );
 
                 if swap_desc
