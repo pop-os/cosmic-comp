@@ -649,6 +649,7 @@ impl CosmicStack {
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
+        scanout_override: Option<bool>,
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
@@ -675,7 +676,11 @@ impl CosmicStack {
             let active = p.active.load(Ordering::SeqCst);
 
             windows[active].render_elements::<R, CosmicStackRenderElement<R>>(
-                renderer, window_loc, scale, alpha,
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_override,
             )
         }));
 

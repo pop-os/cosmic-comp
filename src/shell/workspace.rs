@@ -1556,6 +1556,7 @@ impl Workspace {
                     render_loc,
                     output_scale.into(),
                     alpha,
+                    Some(true),
                 )
                 .into_iter()
                 .map(|elem| RescaleRenderElement::from_element(elem, render_loc, scale))
