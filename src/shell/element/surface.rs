@@ -12,7 +12,7 @@ use smithay::{
         element::{
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             utils::select_dmabuf_feedback,
-            AsRenderElements, RenderElementStates,
+            AsRenderElements, Kind, RenderElementStates,
         },
         ImportAll, Renderer,
     },
@@ -27,7 +27,7 @@ use smithay::{
     output::Output,
     reexports::{
         wayland_protocols::{
-            wp::presentation_time::server::wp_presentation_feedback::Kind,
+            wp::presentation_time::server::wp_presentation_feedback::Kind as PresentationKind,
             xdg::{
                 decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
                 shell::server::xdg_toplevel::State as ToplevelState,
@@ -699,7 +699,7 @@ impl CosmicSurface {
         presentation_feedback_flags: F2,
     ) where
         F1: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
-        F2: FnMut(&WlSurface, &SurfaceData) -> Kind + Copy,
+        F2: FnMut(&WlSurface, &SurfaceData) -> PresentationKind + Copy,
     {
         self.0.take_presentation_feedback(
             output_feedback,
@@ -760,6 +760,7 @@ impl CosmicSurface {
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
+        scanout_override: Option<bool>,
     ) -> Vec<C>
     where
         R: Renderer + ImportAll,
@@ -776,7 +777,16 @@ impl CosmicSurface {
                     location,
                     scale,
                     alpha,
-                    FRAME_TIME_FILTER,
+                    scanout_override
+                        .map(|val| {
+                            if val {
+                                Kind::ScanoutCandidate
+                            } else {
+                                Kind::Unspecified
+                            }
+                            .into()
+                        })
+                        .unwrap_or(FRAME_TIME_FILTER),
                 )
             }
             WindowSurface::X11(surface) => {
@@ -790,7 +800,16 @@ impl CosmicSurface {
                     location,
                     scale,
                     alpha,
-                    FRAME_TIME_FILTER,
+                    scanout_override
+                        .map(|val| {
+                            if val {
+                                Kind::ScanoutCandidate
+                            } else {
+                                Kind::Unspecified
+                            }
+                            .into()
+                        })
+                        .unwrap_or(FRAME_TIME_FILTER),
                 )
             }
         }
