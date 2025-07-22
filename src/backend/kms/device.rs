@@ -289,7 +289,7 @@ impl State {
                 gbm.clone(),
                 GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
             ),
-            GbmFramebufferExporter::new(gbm.clone(), drm_node.into()),
+            GbmFramebufferExporter::new(gbm.clone(), render_node.into()),
             Some(gbm.clone()),
             [
                 Fourcc::Abgr2101010,
