@@ -972,8 +972,9 @@ impl SurfaceThreadState {
         let mut additional_frame_flags = FrameFlags::empty();
         let mut remove_frame_flags = FrameFlags::empty();
 
-        let (has_active_fullscreen, fullscreen_drives_refresh_rate) = {
+        let (has_active_fullscreen, fullscreen_drives_refresh_rate, animations_going) = {
             let shell = self.shell.read();
+            let animations_going = shell.animations_going();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
             if let Some((_, workspace)) = shell.workspaces.active(output) {
                 if let Some(fullscreen_surface) = workspace.get_fullscreen() {
@@ -984,17 +985,18 @@ impl SurfaceThreadState {
                             recursive_frame_time_estimation(&self.clock, &*surface)
                                 .is_some_and(|dur| dur <= _30_FPS)
                         }),
+                        animations_going,
                     )
                 } else {
-                    (false, false)
+                    (false, false, animations_going)
                 }
             } else {
-                (false, false)
+                (false, false, animations_going)
             }
         };
 
-        if has_active_fullscreen {
-            // skip overlay plane assign if we have a fullscreen surface to save on tests
+        if has_active_fullscreen || animations_going {
+            // skip overlay plane assign if we have a fullscreen surface or dynamic contents to save on tests
             remove_frame_flags |= FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
         }
 
