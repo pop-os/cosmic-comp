@@ -26,6 +26,7 @@ use crate::{
     utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::{
         handlers::{
+            compositor::FRAME_TIME_FILTER,
             data_device::get_dnd_icon,
             screencopy::{render_session, FrameHolder, SessionData},
         },
@@ -48,7 +49,7 @@ use smithay::{
                     constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior,
                     CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
                 },
-                AsRenderElements, Element, Id, Kind, RenderElement,
+                Element, Id, Kind, RenderElement,
             },
             gles::{
                 element::{PixelShaderElement, TextureShaderElement},
@@ -796,7 +797,7 @@ where
                                 .to_physical_precise_round(scale),
                             Scale::from(scale),
                             1.0,
-                            Kind::Unspecified,
+                            FRAME_TIME_FILTER,
                         )
                         .into_iter()
                         .flat_map(crop_to_output)
@@ -814,7 +815,7 @@ where
                                 .to_physical_precise_round(scale),
                             Scale::from(scale),
                             1.0,
-                            Kind::Unspecified,
+                            FRAME_TIME_FILTER,
                         )
                         .into_iter()
                         .flat_map(crop_to_output)
@@ -822,21 +823,22 @@ where
                     );
                 }
                 Stage::OverrideRedirect { surface, location } => {
-                    elements.extend(
-                        AsRenderElements::<R>::render_elements::<WorkspaceRenderElement<R>>(
-                            surface,
+                    elements.extend(surface.wl_surface().into_iter().flat_map(|surface| {
+                        render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
                             renderer,
+                            &surface,
                             location
                                 .to_local(output)
                                 .as_logical()
                                 .to_physical_precise_round(scale),
                             Scale::from(scale),
                             1.0,
+                            FRAME_TIME_FILTER,
                         )
                         .into_iter()
                         .flat_map(crop_to_output)
-                        .map(Into::into),
-                    );
+                        .map(Into::into)
+                    }));
                 }
                 Stage::StickyPopups(layout) => {
                     let alpha = match &overview.0 {
@@ -1000,7 +1002,7 @@ where
             (0, 0),
             scale,
             1.0,
-            Kind::Unspecified,
+            FRAME_TIME_FILTER,
         )
     } else {
         Vec::new()

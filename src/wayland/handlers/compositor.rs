@@ -3,7 +3,10 @@
 use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
 use calloop::Interest;
 use smithay::{
-    backend::renderer::utils::{on_commit_buffer_handler, with_renderer_surface_state},
+    backend::renderer::{
+        element::{surface::KindEvaluation, Kind},
+        utils::{on_commit_buffer_handler, with_renderer_surface_state},
+    },
     delegate_compositor,
     desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
@@ -147,6 +150,21 @@ pub fn recursive_frame_time_estimation(
     );
     overall_estimate
 }
+
+pub const FRAME_TIME_FILTER: KindEvaluation = KindEvaluation::Dynamic({
+    fn frame_time_filter_fn(states: &SurfaceData) -> Kind {
+        let clock = Clock::<Monotonic>::new();
+        const _20_FPS: Duration = Duration::from_nanos(1_000_000_000 / 20);
+
+        if frame_time_estimation(&clock, states).is_some_and(|dur| dur <= _20_FPS) {
+            Kind::ScanoutCandidate
+        } else {
+            Kind::Unspecified
+        }
+    }
+
+    frame_time_filter_fn
+});
 
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
