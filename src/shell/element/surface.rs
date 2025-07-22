@@ -10,7 +10,6 @@ use std::{
 use smithay::{
     backend::renderer::{
         element::{
-            self,
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             utils::select_dmabuf_feedback,
             AsRenderElements, RenderElementStates,
@@ -52,7 +51,10 @@ use tracing::trace;
 use crate::{
     state::{State, SurfaceDmabufFeedback},
     utils::prelude::*,
-    wayland::handlers::decoration::{KdeDecorationData, PreferredDecorationMode},
+    wayland::handlers::{
+        compositor::FRAME_TIME_FILTER,
+        decoration::{KdeDecorationData, PreferredDecorationMode},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
@@ -743,7 +745,7 @@ impl CosmicSurface {
                             location + offset,
                             scale,
                             alpha,
-                            element::Kind::Unspecified,
+                            FRAME_TIME_FILTER,
                         )
                     })
                     .collect()
@@ -774,11 +776,22 @@ impl CosmicSurface {
                     location,
                     scale,
                     alpha,
-                    element::Kind::Unspecified,
+                    FRAME_TIME_FILTER,
                 )
             }
             WindowSurface::X11(surface) => {
-                surface.render_elements(renderer, location, scale, alpha)
+                let Some(surface) = surface.wl_surface() else {
+                    return Vec::new();
+                };
+
+                render_elements_from_surface_tree(
+                    renderer,
+                    &surface,
+                    location,
+                    scale,
+                    alpha,
+                    FRAME_TIME_FILTER,
+                )
             }
         }
     }
