@@ -27,9 +27,8 @@ use crate::{
     wayland::protocols::{
         image_capture_source::ImageCaptureSourceData,
         screencopy::{
-            delegate_screencopy, BufferConstraints, CursorSession, CursorSessionRef,
-            DmabufConstraints, Frame, FrameRef, ScreencopyHandler, ScreencopyState, Session,
-            SessionRef,
+            BufferConstraints, CursorSession, CursorSessionRef, DmabufConstraints, Frame, FrameRef,
+            ScreencopyHandler, ScreencopyState, Session, SessionRef, delegate_screencopy,
         },
     },
 };

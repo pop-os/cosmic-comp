@@ -4,7 +4,7 @@ use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex};
 
 use crate::{
     backend::render::cursor::CursorState,
-    config::{xkb_config_to_wl, Config},
+    config::{Config, xkb_config_to_wl},
     input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
 };
@@ -12,9 +12,9 @@ use smithay::{
     backend::input::{Device, DeviceCapability},
     desktop::utils::bbox_from_surface_tree,
     input::{
+        Seat, SeatState,
         keyboard::{LedState, XkbConfig},
         pointer::{CursorImageAttributes, CursorImageStatus},
-        Seat, SeatState,
     },
     output::Output,
     reexports::{input::Device as InputDevice, wayland_server::DisplayHandle},

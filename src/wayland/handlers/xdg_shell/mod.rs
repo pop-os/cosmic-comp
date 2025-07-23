@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow},
+    shell::{CosmicSurface, PendingWindow, focus::target::KeyboardFocusTarget, grabs::ReleaseMode},
     utils::prelude::*,
 };
 use smithay::{
     delegate_xdg_shell,
     desktop::{
-        find_popup_root_surface, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-        PopupUngrabStrategy,
+        PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
+        find_popup_root_surface,
     },
-    input::{pointer::Focus, Seat},
+    input::{Seat, pointer::Focus},
     output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,

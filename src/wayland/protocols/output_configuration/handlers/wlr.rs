@@ -12,8 +12,8 @@ use smithay::{
             zwlr_output_mode_v1::{self, ZwlrOutputModeV1},
         },
         wayland_server::{
-            backend::ClientId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New,
-            Resource,
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+            backend::ClientId,
         },
     },
     utils::{Point, Size},

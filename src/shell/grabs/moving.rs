@@ -2,16 +2,16 @@
 
 use crate::{
     backend::render::{
-        cursor::CursorState, element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage,
+        BackdropShader, IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
     },
     shell::{
+        CosmicMapped, CosmicSurface, Direction, ManagedLayer,
         element::{
-            stack_hover::{stack_hover, StackHover},
             CosmicMappedRenderElement,
+            stack_hover::{StackHover, stack_hover},
         },
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         layout::floating::TiledCorners,
-        CosmicMapped, CosmicSurface, Direction, ManagedLayer,
     },
     utils::prelude::*,
     wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
@@ -23,12 +23,13 @@ use smithay::{
     backend::{
         input::ButtonState,
         renderer::{
-            element::{utils::RescaleRenderElement, AsRenderElements, RenderElement},
             ImportAll, ImportMem, Renderer,
+            element::{AsRenderElements, RenderElement, utils::RescaleRenderElement},
         },
     },
-    desktop::{layer_map_for_output, space::SpaceElement, WindowSurfaceType},
+    desktop::{WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::{
+        Seat,
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -37,14 +38,13 @@ use smithay::{
             RelativeMotionEvent,
         },
         touch::{self, GrabStartData as TouchGrabStartData, TouchGrab, TouchInnerHandle},
-        Seat,
     },
     output::Output,
-    utils::{IsAlive, Logical, Point, Rectangle, Scale, Serial, SERIAL_COUNTER},
+    utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Scale, Serial},
 };
 use std::{
     collections::HashSet,
-    sync::{atomic::Ordering, Mutex},
+    sync::{Mutex, atomic::Ordering},
     time::Instant,
 };
 

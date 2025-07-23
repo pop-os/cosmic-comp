@@ -5,7 +5,7 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::{
         compositor::{get_parent, with_states},
-        fractional_scale::{with_fractional_scale, FractionalScaleHandler},
+        fractional_scale::{FractionalScaleHandler, with_fractional_scale},
     },
 };
 

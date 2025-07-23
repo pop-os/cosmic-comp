@@ -4,7 +4,7 @@ use crate::{shell::SessionLock, state::State, utils::prelude::*};
 use smithay::{
     delegate_session_lock,
     output::Output,
-    reexports::wayland_server::{protocol::wl_output::WlOutput, Resource},
+    reexports::wayland_server::{Resource, protocol::wl_output::WlOutput},
     utils::Size,
     wayland::session_lock::{
         LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,

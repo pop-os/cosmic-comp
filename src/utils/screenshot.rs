@@ -3,10 +3,10 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            damage::OutputDamageTracker,
-            element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
-            gles::GlesRenderbuffer,
             ExportMem, ImportAll, Offscreen, Renderer,
+            damage::OutputDamageTracker,
+            element::{AsRenderElements, surface::WaylandSurfaceRenderElement},
+            gles::GlesRenderbuffer,
         },
     },
     desktop::utils::bbox_from_surface_tree,
@@ -18,7 +18,7 @@ use tracing::warn;
 use crate::{
     backend::render::RendererRef,
     shell::element::CosmicSurface,
-    state::{advertised_node_for_surface, State},
+    state::{State, advertised_node_for_surface},
 };
 
 pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {

@@ -16,8 +16,8 @@ use crate::{
 use std::{
     cell::{Ref, RefCell, RefMut},
     sync::{
-        atomic::{AtomicU8, Ordering},
         Mutex,
+        atomic::{AtomicU8, Ordering},
     },
 };
 

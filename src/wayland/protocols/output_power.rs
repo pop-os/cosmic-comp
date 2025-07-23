@@ -8,8 +8,8 @@ use smithay::{
             zwlr_output_power_v1::{self, ZwlrOutputPowerV1},
         },
         wayland_server::{
-            backend::GlobalId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New,
-            Resource,
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+            backend::GlobalId,
         },
     },
 };

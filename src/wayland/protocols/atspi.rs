@@ -5,7 +5,7 @@ use cosmic_protocols::atspi::v1::server::cosmic_atspi_manager_v1;
 use smithay::{
     backend::input::Keycode,
     reexports::wayland_server::{
-        backend::GlobalId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New,
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, backend::GlobalId,
     },
 };
 use std::os::unix::{io::AsFd, net::UnixStream};

@@ -2,18 +2,18 @@ use cosmic_settings_config::shortcuts;
 use smithay::{
     backend::input::{KeyState, Keycode},
     input::{
+        Seat, SeatHandler,
         keyboard::{
             GrabStartData as KeyboardGrabStartData, KeyboardGrab, KeyboardInnerHandle,
             ModifiersState,
         },
-        Seat, SeatHandler,
     },
     utils::Serial,
 };
 
 use crate::{
     config::key_bindings::cosmic_modifiers_from_smithay,
-    shell::{layout::tiling::NodeDesc, Trigger},
+    shell::{Trigger, layout::tiling::NodeDesc},
     state::State,
 };
 

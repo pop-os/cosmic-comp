@@ -8,8 +8,8 @@ use crate::{
         x11::X11State,
     },
     config::{Config, OutputConfig, OutputState, ScreenFilter},
-    input::{gestures::GestureState, PointerFocusState},
-    shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
+    input::{PointerFocusState, gestures::GestureState},
+    shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
     wayland::{
         handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
@@ -32,42 +32,40 @@ use crate::{
 use anyhow::Context;
 use calloop::RegistrationToken;
 use i18n_embed::{
-    fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,
+    fluent::{FluentLanguageLoader, fluent_language_loader},
 };
-use once_cell::sync::Lazy;
 use rust_embed::RustEmbed;
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, Fourcc},
+        allocator::{Fourcc, dmabuf::Dmabuf},
         drm::DrmNode,
         renderer::{
-            element::{
-                default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
-                RenderElementState, RenderElementStates,
-            },
             ImportDma,
+            element::{
+                RenderElementState, RenderElementStates, default_primary_scanout_output_compare,
+                utils::select_dmabuf_feedback,
+            },
         },
     },
     desktop::{
-        layer_map_for_output,
+        PopupManager, layer_map_for_output,
         utils::{
             send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
             surface_primary_scanout_output, update_surface_primary_scanout_output,
             with_surfaces_surface_tree,
         },
-        PopupManager,
     },
-    input::{pointer::CursorImageStatus, SeatState},
+    input::{SeatState, pointer::CursorImageStatus},
     output::{Output, Scale, WeakOutput},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities,
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode,
         wayland_server::{
+            Client, DisplayHandle, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::{wl_shm, wl_surface::WlSurface},
-            Client, DisplayHandle, Resource,
         },
     },
     utils::{Clock, Monotonic, Point},
@@ -76,7 +74,7 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
-        fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
+        fractional_scale::{FractionalScaleManagerState, with_fractional_scale},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
         input_method::InputMethodManagerState,
@@ -95,7 +93,7 @@ use smithay::{
         shell::{
             kde::decoration::KdeDecorationState,
             wlr_layer::WlrLayerShellState,
-            xdg::{decoration::XdgDecorationState, XdgShellState},
+            xdg::{XdgShellState, decoration::XdgDecorationState},
         },
         shm::ShmState,
         single_pixel_buffer::SinglePixelBufferState,
@@ -118,7 +116,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     process::Child,
-    sync::{atomic::AtomicBool, Arc, Once},
+    sync::{Arc, LazyLock, Once, atomic::AtomicBool},
     time::{Duration, Instant},
 };
 
@@ -126,7 +124,8 @@ use std::{
 #[folder = "resources/i18n"]
 struct Localizations;
 
-pub static LANG_LOADER: Lazy<FluentLanguageLoader> = Lazy::new(|| fluent_language_loader!());
+pub static LANG_LOADER: LazyLock<FluentLanguageLoader> =
+    LazyLock::new(|| fluent_language_loader!());
 
 #[macro_export]
 macro_rules! fl {
@@ -283,21 +282,21 @@ impl Default for SurfaceFrameThrottlingState {
 impl BackendData {
     pub fn kms(&mut self) -> &mut KmsState {
         match self {
-            BackendData::Kms(ref mut kms_state) => kms_state,
+            BackendData::Kms(kms_state) => kms_state,
             _ => unreachable!("Called kms in non kms backend"),
         }
     }
 
     pub fn x11(&mut self) -> &mut X11State {
         match self {
-            BackendData::X11(ref mut x11_state) => x11_state,
+            BackendData::X11(x11_state) => x11_state,
             _ => unreachable!("Called x11 in non x11 backend"),
         }
     }
 
     pub fn winit(&mut self) -> &mut WinitState {
         match self {
-            BackendData::Winit(ref mut winit_state) => winit_state,
+            BackendData::Winit(winit_state) => winit_state,
             _ => unreachable!("Called winit in non winit backend"),
         }
     }
@@ -314,7 +313,7 @@ impl BackendData {
         clock: &Clock<Monotonic>,
     ) -> Result<(), anyhow::Error> {
         let result = match self {
-            BackendData::Kms(ref mut state) => state.apply_config_for_outputs(
+            BackendData::Kms(state) => state.apply_config_for_outputs(
                 test_only,
                 loop_handle,
                 screen_filter,
@@ -322,8 +321,8 @@ impl BackendData {
                 startup_done,
                 clock,
             ),
-            BackendData::Winit(ref mut state) => state.apply_config_for_outputs(test_only),
-            BackendData::X11(ref mut state) => state.apply_config_for_outputs(test_only),
+            BackendData::Winit(state) => state.apply_config_for_outputs(test_only),
+            BackendData::X11(state) => state.apply_config_for_outputs(test_only),
             _ => unreachable!("No backend set when applying output config"),
         }?;
 
@@ -394,8 +393,8 @@ impl BackendData {
             BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
-            BackendData::X11(ref mut state) => state.schedule_render(output),
-            BackendData::Kms(ref mut state) => state.schedule_render(output),
+            BackendData::X11(state) => state.schedule_render(output),
+            BackendData::Kms(state) => state.schedule_render(output),
             _ => unreachable!("No backend was initialized"),
         }
     }
@@ -407,15 +406,15 @@ impl BackendData {
         dmabuf: Dmabuf,
     ) -> Result<Option<DrmNode>, anyhow::Error> {
         match self {
-            BackendData::Kms(ref mut state) => {
+            BackendData::Kms(state) => {
                 return state
                     .dmabuf_imported(client, global, dmabuf)
-                    .map(|node| Some(node))
+                    .map(|node| Some(node));
             }
-            BackendData::Winit(ref mut state) => {
+            BackendData::Winit(state) => {
                 state.backend.renderer().import_dmabuf(&dmabuf, None)?;
             }
-            BackendData::X11(ref mut state) => {
+            BackendData::X11(state) => {
                 state.renderer.import_dmabuf(&dmabuf, None)?;
             }
             _ => unreachable!("No backend set when importing dmabuf"),
@@ -457,9 +456,9 @@ impl BackendData {
 
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> anyhow::Result<()> {
         match self {
-            BackendData::Kms(ref mut state) => state.update_screen_filter(screen_filter),
-            BackendData::Winit(ref mut state) => state.update_screen_filter(screen_filter),
-            BackendData::X11(ref mut state) => state.update_screen_filter(screen_filter),
+            BackendData::Kms(state) => state.update_screen_filter(screen_filter),
+            BackendData::Winit(state) => state.update_screen_filter(screen_filter),
+            BackendData::X11(state) => state.update_screen_filter(screen_filter),
             _ => unreachable!("No backend set when setting screen filters"),
         }
     }

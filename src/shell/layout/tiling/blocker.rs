@@ -1,6 +1,6 @@
 use crate::shell::element::CosmicSurface;
 use smithay::{
-    reexports::wayland_server::{backend::ClientId, Client, Resource},
+    reexports::wayland_server::{Client, Resource, backend::ClientId},
     utils::{IsAlive, Serial},
     wayland::{
         compositor::{Blocker, BlockerState},

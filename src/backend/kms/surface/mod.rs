@@ -2,16 +2,17 @@
 
 use crate::{
     backend::render::{
+        CLEAR_COLOR, CursorMode, GlMultiError, GlMultiRenderer, PostprocessOutputConfig,
+        PostprocessShader, PostprocessState,
         element::{CosmicElement, DamageElement},
-        init_shaders, output_elements, CursorMode, GlMultiError, GlMultiRenderer,
-        PostprocessOutputConfig, PostprocessShader, PostprocessState, CLEAR_COLOR,
+        init_shaders, output_elements,
     },
     config::{AdaptiveSync, ScreenFilter},
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
+        handlers::screencopy::{FrameHolder, SessionData, submit_buffer},
         protocols::screencopy::{
             FailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
         },
@@ -23,11 +24,12 @@ use calloop::channel::Channel;
 use smithay::{
     backend::{
         allocator::{
+            Fourcc,
             format::FormatSet,
             gbm::{GbmAllocator, GbmBuffer},
-            Fourcc,
         },
         drm::{
+            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
             compositor::{
                 BlitFrameResultError, FrameError, FrameFlags, PrimaryPlaneElement,
                 RenderFrameResult,
@@ -35,38 +37,36 @@ use smithay::{
             exporter::gbm::GbmFramebufferExporter,
             gbm::GbmFramebuffer,
             output::DrmOutput,
-            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
         },
         egl::EGLContext,
         renderer::{
-            buffer_dimensions, buffer_type,
+            Bind, Blit, BufferType, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
+            TextureFilter, buffer_dimensions, buffer_type,
             damage::Error as RenderError,
             element::{
+                Element, Kind, RenderElementStates,
                 texture::TextureRenderElement,
                 utils::{
-                    constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior, Relocate,
-                    RelocateRenderElement,
+                    ConstrainAlign, ConstrainScaleBehavior, Relocate, RelocateRenderElement,
+                    constrain_render_elements,
                 },
-                Element, Kind, RenderElementStates,
             },
             gles::{
-                element::TextureShaderElement, GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform,
+                GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform, element::TextureShaderElement,
             },
             glow::GlowRenderer,
             multigpu::{ApiDevice, Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, Blit, BufferType, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
-            TextureFilter,
         },
     },
     desktop::utils::OutputPresentationFeedback,
     output::{Output, OutputNoMode},
     reexports::{
         calloop::{
-            channel::{channel, Event, Sender},
-            timer::{TimeoutAction, Timer},
             EventLoop, LoopHandle, RegistrationToken,
+            channel::{Event, Sender, channel},
+            timer::{TimeoutAction, Timer},
         },
         drm::control::{connector, crtc},
         wayland_protocols::wp::{
@@ -77,7 +77,7 @@ use smithay::{
     },
     utils::{Buffer as BufferCoords, Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
-        dmabuf::{get_dmabuf, DmabufFeedbackBuilder},
+        dmabuf::{DmabufFeedbackBuilder, get_dmabuf},
         presentation::Refresh,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -87,12 +87,12 @@ use tracing::{error, trace, warn};
 
 use std::{
     borrow::{Borrow, BorrowMut},
-    collections::{hash_map, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map},
     mem,
     sync::{
+        Arc, RwLock,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender},
-        Arc, RwLock,
     },
     time::Duration,
 };

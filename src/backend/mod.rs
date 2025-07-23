@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::State;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::NumlockState;
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
 use tracing::{info, warn};

@@ -1,9 +1,9 @@
 use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
-    backend::render::cursor::{load_cursor_env, load_cursor_theme, Cursor},
+    backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
     shell::{
-        focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow, Shell,
+        CosmicSurface, PendingWindow, Shell, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
     },
     state::State,
     utils::prelude::*,
@@ -16,23 +16,24 @@ use smithay::{
         drm::DrmNode,
         input::{ButtonState, KeyState, Keycode},
         renderer::{
+            Bind, Frame, Offscreen, Renderer,
             element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
                 Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             },
             pixman::{PixmanError, PixmanRenderer},
             utils::draw_render_elements,
-            Bind, Frame, Offscreen, Renderer,
         },
     },
     desktop::space::SpaceElement,
     input::{keyboard::ModifiersState, pointer::CursorIcon},
     reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
     utils::{
-        Buffer as BufferCoords, Logical, Point, Rectangle, Serial, Size, Transform, SERIAL_COUNTER,
+        Buffer as BufferCoords, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform,
     },
     wayland::{
         selection::{
+            SelectionTarget,
             data_device::{
                 clear_data_device_selection, current_data_device_selection_userdata,
                 request_data_device_client_selection, set_data_device_selection,
@@ -41,13 +42,12 @@ use smithay::{
                 clear_primary_selection, current_primary_selection_userdata,
                 request_primary_client_selection, set_primary_selection,
             },
-            SelectionTarget,
         },
         xdg_activation::XdgActivationToken,
     },
     xwayland::{
-        xwm::{Reorder, XwmId},
         X11Surface, X11Wm, XWayland, XWaylandClientData, XWaylandEvent, XwmHandler,
+        xwm::{Reorder, XwmId},
     },
 };
 use tracing::{error, trace, warn};

@@ -3,21 +3,21 @@
 use crate::{
     config::{Action, PrivateAction},
     shell::{
-        focus::{target::KeyboardFocusTarget, FocusTarget},
-        layout::tiling::SwapWindowGrab,
         FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
+        focus::{FocusTarget, target::KeyboardFocusTarget},
+        layout::tiling::SwapWindowGrab,
     },
     utils::prelude::*,
     wayland::{
         handlers::xdg_activation::ActivationContext, protocols::workspace::WorkspaceUpdateGuard,
     },
 };
-use cosmic_comp_config::{workspace::WorkspaceLayout, TileBehavior};
+use cosmic_comp_config::{TileBehavior, workspace::WorkspaceLayout};
 use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
-    input::{pointer::MotionEvent, Seat},
+    input::{Seat, pointer::MotionEvent},
     utils::{Point, Serial},
 };
 #[cfg(not(feature = "debug"))]

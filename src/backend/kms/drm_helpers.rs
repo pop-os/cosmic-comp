@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use libdisplay_info::{edid::DisplayDescriptorTag, info::Info};
 use smithay::{
     reexports::drm::control::{
+        AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType, ResourceHandle,
         atomic::AtomicModeReq,
         connector::{self, State as ConnectorState},
         crtc,
         dumbbuffer::DumbBuffer,
-        property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
-        ResourceHandle,
+        property,
     },
     utils::Transform,
 };

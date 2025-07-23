@@ -11,8 +11,8 @@ use smithay::{
             ext_workspace_manager_v1::{self, ExtWorkspaceManagerV1},
         },
         wayland_server::{
-            backend::ClientId, protocol::wl_output::WlOutput, Client, DataInit, Dispatch,
-            DisplayHandle, GlobalDispatch, New, Resource, Weak,
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
+            backend::ClientId, protocol::wl_output::WlOutput,
         },
     },
 };

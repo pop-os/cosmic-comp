@@ -3,8 +3,8 @@
 use crate::{shell::Shell, utils::prelude::*};
 use smithay::{
     desktop::{
-        get_popup_toplevel_coords, layer_map_for_output, space::SpaceElement, LayerSurface,
-        PopupKind, PopupManager, WindowSurfaceType,
+        LayerSurface, PopupKind, PopupManager, WindowSurfaceType, get_popup_toplevel_coords,
+        layer_map_for_output, space::SpaceElement,
     },
     output::Output,
     reexports::{
@@ -15,7 +15,7 @@ use smithay::{
     wayland::{
         compositor::{get_role, with_states},
         seat::WaylandFocus,
-        shell::xdg::{PopupSurface, ToplevelSurface, XdgPopupSurfaceData, XDG_POPUP_ROLE},
+        shell::xdg::{PopupSurface, ToplevelSurface, XDG_POPUP_ROLE, XdgPopupSurfaceData},
     },
 };
 use tracing::warn;

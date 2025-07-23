@@ -8,9 +8,9 @@ use crate::{
     config::Config,
     fl,
     shell::{
+        CosmicSurface, PointGlobalExt, Shell,
         element::{CosmicMapped, CosmicWindow},
         grabs::ReleaseMode,
-        CosmicSurface, PointGlobalExt, Shell,
     },
     state::State,
     utils::{prelude::SeatExt, screenshot::screenshot_window},

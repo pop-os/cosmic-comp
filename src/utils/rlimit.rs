@@ -1,4 +1,4 @@
-use rustix::process::{getrlimit, setrlimit, Resource, Rlimit};
+use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static OLD_LIMIT: AtomicU64 = AtomicU64::new(0);
