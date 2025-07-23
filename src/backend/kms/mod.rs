@@ -8,7 +8,7 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
-use calloop::LoopSignal;
+use calloop::{error, LoopSignal};
 use render::gles::GbmGlowBackend;
 use smithay::{
     backend::{
@@ -53,6 +53,7 @@ use std::{
 
 mod device;
 mod drm_helpers;
+mod gamma;
 pub mod render;
 mod socket;
 mod surface;
@@ -900,6 +901,26 @@ impl KmsState {
                 {
                     warn!(?err, "Failed to restore modifiers");
                 }
+
+                if let Some(temperature) = screen_filter.night_light_temperature {
+                    for (crtc, output) in output_map.iter() {
+                        if let Err(err) = gamma::apply_gamma_for_temperature(
+                            device.drm.device(),
+                            *crtc,
+                            temperature,
+                        ) {
+                            warn!(?err, "[apply_config_for_outputs] Failed to apply gamma for night light temperature");
+                        } else {
+                            info!(
+                                "[apply_config_for_outputs] Applied gamma for night light temperature {} on {}",
+                                temperature,
+                                output.name()
+                            );
+                        }
+                    }
+                } else {
+                    warn!("No night light temperature set, cannot apply gamma");
+                }
             }
         }
 
@@ -934,6 +955,24 @@ impl KmsState {
         for device in self.drm_devices.values_mut() {
             for surface in device.surfaces.values_mut() {
                 surface.set_screen_filter(screen_filter.clone());
+
+                if let Some(temperature) = screen_filter.night_light_temperature {
+                    if let Err(err) = gamma::apply_gamma_for_temperature(
+                        device.drm.device(),
+                        surface.crtc,
+                        temperature,
+                    ) {
+                        warn!(?err, "[update_screen_filter] Failed to apply gamma for night light temperature");
+                    } else {
+                        info!(
+                            "[update_screen_filter] Applied gamma for night light temperature {} on {}",
+                            temperature,
+                            surface.output.name()
+                        );
+                    }
+                } else {
+                    warn!("No night light temperature set, cannot apply gamma");
+                }
             }
         }
 

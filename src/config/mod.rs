@@ -186,11 +186,13 @@ pub struct ScreenFilter {
     pub inverted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_filter: Option<ColorFilter>,
+
+    pub night_light_temperature: Option<u32>, // in Kelvin
 }
 
 impl ScreenFilter {
     pub fn is_noop(&self) -> bool {
-        self.inverted == false && self.color_filter.is_none()
+        self.inverted == false && self.color_filter.is_none() && self.night_light_temperature.is_none()
     }
 }
 
@@ -459,6 +461,7 @@ impl Config {
         ScreenFilter {
             inverted: false,
             color_filter: None,
+            night_light_temperature: Some(2700)
         }
     }
 
