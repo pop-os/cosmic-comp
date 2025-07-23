@@ -16,6 +16,7 @@ impl DrmLeaseHandler for State {
             .drm_devices
             .get_mut(&node)
             .unwrap()
+            .inner
             .leasing_global
             .as_mut()
             .unwrap()
@@ -32,7 +33,7 @@ impl DrmLeaseHandler for State {
             .get_mut(&node)
             .ok_or(LeaseRejected::default())?
             .lock();
-        let mut renderer = match kms.api.single_renderer(&backend.render_node) {
+        let mut renderer = match kms.api.single_renderer(&backend.inner.render_node) {
             Ok(renderer) => renderer,
             Err(err) => {
                 tracing::warn!(
@@ -55,6 +56,7 @@ impl DrmLeaseHandler for State {
         let mut builder = DrmLeaseBuilder::new(backend.drm.device());
         for conn in request.connectors {
             if let Some((_, crtc)) = backend
+                .inner
                 .leased_connectors
                 .iter()
                 .find(|(handle, _)| *handle == conn)
@@ -101,7 +103,7 @@ impl DrmLeaseHandler for State {
 
     fn new_active_lease(&mut self, node: DrmNode, lease: DrmLease) {
         if let Some(backend) = self.backend.kms().drm_devices.get_mut(&node) {
-            backend.active_leases.push(lease);
+            backend.inner.active_leases.push(lease);
         }
         // else the backend is gone, drop the lease
     }
@@ -110,10 +112,10 @@ impl DrmLeaseHandler for State {
         let kms = self.backend.kms();
         if let Some(backend) = kms.drm_devices.get_mut(&node) {
             let mut backend = backend.lock();
-            backend.active_leases.retain(|l| l.id() != lease);
+            backend.inner.active_leases.retain(|l| l.id() != lease);
 
-            if backend.active_leases.is_empty() {
-                let mut renderer = match kms.api.single_renderer(&backend.render_node) {
+            if backend.inner.active_leases.is_empty() {
+                let mut renderer = match kms.api.single_renderer(&backend.inner.render_node) {
                     Ok(renderer) => renderer,
                     Err(err) => {
                         tracing::warn!(?err, "Failed to create renderer to enable direct scanout.");

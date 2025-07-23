@@ -38,9 +38,9 @@ impl DmabufHandler for State {
                     if let Some(device) = kms_state
                         .drm_devices
                         .values_mut()
-                        .find(|dev| dev.render_node == node)
+                        .find(|dev| dev.inner.render_node == node)
                     {
-                        device.active_buffers.insert(buffer.downgrade());
+                        device.inner.active_buffers.insert(buffer.downgrade());
                     }
                     if let Err(err) = kms_state.refresh_used_devices() {
                         warn!(?err, "Failed to init devices.");

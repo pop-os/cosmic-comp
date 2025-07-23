@@ -53,11 +53,9 @@ mod drm_helpers;
 pub mod render;
 mod socket;
 mod surface;
+use device::*;
 pub(crate) use surface::Surface;
 pub use surface::Timings;
-
-pub use device::MaybeLockedDevice;
-use device::*;
 
 use super::render::{output_elements, CursorMode, CLEAR_COLOR};
 
@@ -203,17 +201,18 @@ fn determine_primary_gpu(
     seat: String,
 ) -> Result<Option<DrmNode>> {
     if let Some(device) = dev_var("COSMIC_RENDER_DEVICE") {
-        if let Some(node) = drm_devices
-            .values()
-            .find_map(|dev| device.matches(&dev.render_node).then_some(dev.render_node))
-        {
+        if let Some(node) = drm_devices.values().find_map(|dev| {
+            device
+                .matches(&dev.inner.render_node)
+                .then_some(dev.inner.render_node)
+        }) {
             return Ok(Some(node));
         }
     }
 
     // try to find builtin display
     for dev in drm_devices.values() {
-        if dev.surfaces.values().any(|s| {
+        if dev.inner.surfaces.values().any(|s| {
             if let Some(conn_info) = dev.drm.device().get_connector(s.connector, false).ok() {
                 let i = conn_info.interface();
                 i == Interface::EmbeddedDisplayPort || i == Interface::LVDS || i == Interface::DSI
@@ -221,20 +220,23 @@ fn determine_primary_gpu(
                 false
             }
         }) {
-            return Ok(Some(dev.render_node));
+            return Ok(Some(dev.inner.render_node));
         }
     }
 
     // else try to find the boot gpu
     let boot = determine_boot_gpu(seat);
     if let Some(boot) = boot {
-        if drm_devices.values().any(|dev| dev.render_node == boot) {
+        if drm_devices
+            .values()
+            .any(|dev| dev.inner.render_node == boot)
+        {
             return Ok(Some(boot));
         }
     }
 
     // else just take the first
-    Ok(drm_devices.values().next().map(|dev| dev.render_node))
+    Ok(drm_devices.values().next().map(|dev| dev.inner.render_node))
 }
 
 /// Create `GlowRenderer` for `EGL_MESA_device_software` device, if present
@@ -316,7 +318,7 @@ impl State {
             if let Err(err) = device.drm.lock().activate(true) {
                 error!(?err, "Failed to resume drm device");
             }
-            if let Some(lease_state) = device.leasing_global.as_mut() {
+            if let Some(lease_state) = device.inner.leasing_global.as_mut() {
                 lease_state.resume::<State>();
             }
         }
@@ -367,10 +369,10 @@ impl State {
         backend.libinput.suspend();
         for device in backend.drm_devices.values_mut() {
             device.drm.pause();
-            if let Some(lease_state) = device.leasing_global.as_mut() {
+            if let Some(lease_state) = device.inner.leasing_global.as_mut() {
                 lease_state.suspend();
             }
-            for surface in device.surfaces.values_mut() {
+            for surface in device.inner.surfaces.values_mut() {
                 surface.suspend();
             }
         }
@@ -451,12 +453,16 @@ impl KmsState {
         let mut last_err = anyhow::anyhow!("Dmabuf cannot be imported on any gpu");
         for device in expected_node.into_iter().chain(other_nodes.into_iter()) {
             let mut _egl = None;
-            let egl_display = if let Some(egl_display) =
-                device.egl.as_ref().map(|internals| &internals.display)
+            let egl_display = if let Some(egl_display) = device
+                .inner
+                .egl
+                .as_ref()
+                .map(|internals| &internals.display)
             {
                 egl_display
             } else {
-                _egl = Some(init_egl(&device.gbm).context("Failed to initialize egl context")?);
+                _egl =
+                    Some(init_egl(&device.inner.gbm).context("Failed to initialize egl context")?);
                 &_egl.as_ref().unwrap().display
             };
 
@@ -466,7 +472,7 @@ impl KmsState {
             {
                 trace!(
                     "Skipping import of dmabuf on {:?}: unsupported format",
-                    device.render_node
+                    device.inner.render_node
                 );
                 continue;
             }
@@ -480,7 +486,7 @@ impl KmsState {
                             image,
                         );
                     };
-                    device.render_node
+                    device.inner.render_node
                 })
                 .map_err(Into::into);
 
@@ -490,7 +496,11 @@ impl KmsState {
                     return Ok(node);
                 }
                 Err(err) => {
-                    trace!(?err, "Failed to import dmabuf on {:?}", device.render_node);
+                    trace!(
+                        ?err,
+                        "Failed to import dmabuf on {:?}",
+                        device.inner.render_node
+                    );
                     last_err = err;
                 }
             }
@@ -503,7 +513,7 @@ impl KmsState {
         for surface in self
             .drm_devices
             .values()
-            .flat_map(|d| d.surfaces.values())
+            .flat_map(|d| d.inner.surfaces.values())
             .filter(|s| s.output == *output || s.output.mirroring().is_some_and(|o| &o == output))
         {
             surface.schedule_render();
@@ -513,14 +523,14 @@ impl KmsState {
     pub fn target_node_for_output(&self, output: &Output) -> Option<DrmNode> {
         self.drm_devices
             .values()
-            .find(|dev| dev.surfaces.values().any(|s| s.output == *output))
-            .map(|dev| &dev.render_node)
+            .find(|dev| dev.inner.surfaces.values().any(|s| s.output == *output))
+            .map(|dev| &dev.inner.render_node)
             .copied()
     }
 
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
         for device in self.drm_devices.values_mut() {
-            for surface in device.surfaces.values_mut() {
+            for surface in device.inner.surfaces.values_mut() {
                 surface.set_screen_filter(screen_filter.clone());
             }
         }
@@ -538,8 +548,11 @@ impl KmsState {
         let mut used_devices = HashSet::new();
 
         for device in self.drm_devices.values_mut() {
-            if device.update_egl(primary_node.as_ref(), self.api.as_mut())? {
-                used_devices.insert(device.render_node());
+            if device
+                .inner
+                .update_egl(primary_node.as_ref(), self.api.as_mut())?
+            {
+                used_devices.insert(device.inner.render_node);
             }
         }
 
@@ -552,14 +565,16 @@ impl KmsState {
         let all_devices = self
             .drm_devices
             .values()
-            .map(|d| d.render_node)
+            .map(|d| d.inner.render_node)
             .collect::<Vec<_>>();
         for node in all_devices {
             let (mut device, others) = self
                 .drm_devices
                 .values_mut()
-                .partition::<Vec<_>, _>(|d| d.render_node == node);
-            device[0].update_surface_nodes(&used_devices, others.iter().map(|device| &**device))?;
+                .partition::<Vec<_>, _>(|d| d.inner.render_node == node);
+            device[0]
+                .inner
+                .update_surface_nodes(&used_devices, others.iter().map(|device| &device.inner))?;
         }
 
         Ok(())
@@ -584,7 +599,7 @@ impl<'a> KmsGuard<'a> {
         for surface in self
             .drm_devices
             .values()
-            .flat_map(|d| d.surfaces.values())
+            .flat_map(|d| d.inner.surfaces.values())
             .filter(|s| s.output == *output || s.output.mirroring().is_some_and(|o| &o == output))
         {
             surface.schedule_render();
@@ -596,8 +611,11 @@ impl<'a> KmsGuard<'a> {
         let mut used_devices = HashSet::new();
 
         for device in self.drm_devices.values_mut() {
-            if device.update_egl(primary_node.as_ref(), self.api.as_mut())? {
-                used_devices.insert(device.render_node());
+            if device
+                .inner
+                .update_egl(primary_node.as_ref(), self.api.as_mut())?
+            {
+                used_devices.insert(device.inner.render_node);
             }
         }
 
@@ -610,14 +628,16 @@ impl<'a> KmsGuard<'a> {
         let all_devices = self
             .drm_devices
             .values()
-            .map(|d| d.render_node)
+            .map(|d| d.inner.render_node)
             .collect::<Vec<_>>();
         for node in all_devices {
             let (mut device, others) = self
                 .drm_devices
                 .values_mut()
-                .partition::<Vec<_>, _>(|d| d.render_node == node);
-            device[0].update_surface_nodes(&used_devices, others.iter().map(|device| &**device))?;
+                .partition::<Vec<_>, _>(|d| d.inner.render_node == node);
+            device[0]
+                .inner
+                .update_surface_nodes(&used_devices, others.iter().map(|device| &*device.inner))?;
         }
 
         Ok(())
@@ -628,10 +648,12 @@ impl<'a> KmsGuard<'a> {
             .values()
             .flat_map(|device| {
                 device
+                    .inner
                     .outputs
                     .iter()
                     .filter(|(conn, _)| {
                         !device
+                            .inner
                             .leased_connectors
                             .iter()
                             .any(|(leased_conn, _)| *conn == leased_conn)
@@ -658,10 +680,12 @@ impl<'a> KmsGuard<'a> {
             // we only want outputs exposed to wayland - not leased ones
             // but that is also not all surface, because that doesn't contain all detected, but unmapped outputs
             let outputs = device
+                .inner
                 .outputs
                 .iter()
                 .filter(|(conn, _)| {
                     !device
+                        .inner
                         .leased_connectors
                         .iter()
                         .any(|(leased_conn, _)| *conn == leased_conn)
@@ -681,6 +705,7 @@ impl<'a> KmsGuard<'a> {
                 .iter()
                 .filter(|crtc| {
                     !device
+                        .inner
                         .surfaces
                         .get(crtc)
                         .is_some_and(|surface| surface.output.is_enabled())
@@ -690,10 +715,12 @@ impl<'a> KmsGuard<'a> {
             let open_conns = outputs
                 .iter()
                 .filter(|output| {
-                    output.is_enabled() && !device.surfaces.values().any(|s| &s.output == *output)
+                    output.is_enabled()
+                        && !device.inner.surfaces.values().any(|s| &s.output == *output)
                 })
                 .flat_map(|output| {
                     device
+                        .inner
                         .outputs
                         .iter()
                         .find_map(|(conn, o)| (output == o).then_some(*conn))
@@ -731,6 +758,7 @@ impl<'a> KmsGuard<'a> {
             if !test_only {
                 for output in outputs.iter().filter(|o| !o.is_enabled()) {
                     device
+                        .inner
                         .surfaces
                         .retain(|_, surface| surface.output != *output);
                 }
@@ -740,7 +768,8 @@ impl<'a> KmsGuard<'a> {
             let mut w = shell.read().global_space().size.w as u32;
             if !test_only {
                 for (conn, crtc) in new_pairings {
-                    let (output, _) = device.connector_added(
+                    let (output, _) = device.inner.connector_added(
+                        device.drm.device_mut(),
                         self.primary_node.clone(),
                         conn,
                         Some(crtc),
@@ -765,6 +794,7 @@ impl<'a> KmsGuard<'a> {
         for device in self.drm_devices.values_mut() {
             let now = clock.now();
             let output_map = device
+                .inner
                 .surfaces
                 .iter()
                 .filter(|(_, s)| s.is_active())
@@ -772,7 +802,7 @@ impl<'a> KmsGuard<'a> {
                 .collect::<HashMap<_, _>>();
 
             // reconfigure existing
-            for (crtc, surface) in device.surfaces.iter_mut() {
+            for (crtc, surface) in device.inner.surfaces.iter_mut() {
                 let output_config = surface.output.config();
 
                 let drm = &mut device.drm;
@@ -815,13 +845,13 @@ impl<'a> KmsGuard<'a> {
 
                             let mut renderer = self
                                 .api
-                                .single_renderer(&device.render_node)
+                                .single_renderer(&device.inner.render_node)
                                 .with_context(|| "Failed to create renderer")?;
 
                             let mut elements = DrmOutputRenderElements::default();
                             for (crtc, output) in output_map.iter() {
                                 let output_elements = output_elements(
-                                    Some(&device.render_node),
+                                    Some(&device.inner.render_node),
                                     &mut renderer,
                                     &shell,
                                     now,
@@ -924,13 +954,13 @@ impl<'a> KmsGuard<'a> {
 
                         let mut renderer = self
                             .api
-                            .single_renderer(&device.render_node)
+                            .single_renderer(&device.inner.render_node)
                             .with_context(|| "Failed to create renderer")?;
 
                         let mut elements = DrmOutputRenderElements::default();
                         for (crtc, output) in output_map.iter() {
                             let output_elements = output_elements(
-                                Some(&device.render_node),
+                                Some(&device.inner.render_node),
                                 &mut renderer,
                                 &shell,
                                 now,
@@ -950,15 +980,16 @@ impl<'a> KmsGuard<'a> {
             }
 
             // configure primary scanout allowance
-            if !device.surfaces.is_empty() {
+            if !device.inner.surfaces.is_empty() {
                 let mut renderer = self
                     .api
-                    .single_renderer(&device.render_node)
+                    .single_renderer(&device.inner.render_node)
                     .with_context(|| "Failed to create renderer")?;
 
                 device
                     .allow_primary_scanout_any(
                         device
+                            .inner
                             .surfaces
                             .values()
                             .filter(|s| s.output.is_enabled() && s.output.mirroring().is_none())
@@ -973,7 +1004,7 @@ impl<'a> KmsGuard<'a> {
                 let mut elements = DrmOutputRenderElements::default();
                 for (crtc, output) in output_map.iter() {
                     let output_elements = output_elements(
-                        Some(&device.render_node),
+                        Some(&device.inner.render_node),
                         &mut renderer,
                         &shell,
                         now,
@@ -998,7 +1029,7 @@ impl<'a> KmsGuard<'a> {
         // we need to handle mirroring, after all outputs have been enabled
         let all_outputs = self.all_outputs();
         for device in self.drm_devices.values_mut() {
-            for surface in device.surfaces.values_mut() {
+            for surface in device.inner.surfaces.values_mut() {
                 let mirrored_output =
                     if let OutputState::Mirroring(conn) = &surface.output.config().enabled {
                         Some(

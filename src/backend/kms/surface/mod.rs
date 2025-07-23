@@ -296,6 +296,7 @@ impl Surface {
                         .drm_devices
                         .get_mut(&dev_node)
                         .unwrap()
+                        .inner
                         .surfaces
                         .get_mut(&crtc)
                         .unwrap();

@@ -88,60 +88,52 @@ pub type GbmDrmOutputManager = DrmOutputManager<
     DrmDeviceFd,
 >;
 
+#[derive(Debug)]
 pub struct Device {
+    pub inner: InnerDevice,
+    pub drm: GbmDrmOutputManager,
+
+    supports_atomic: bool,
+    event_token: Option<RegistrationToken>,
+    pub socket: Option<Socket>,
+}
+
+#[derive(Debug)]
+pub struct LockedDevice<'a> {
+    pub inner: &'a mut InnerDevice,
+    pub drm: LockedGbmDrmOutputManager<'a>,
+}
+
+pub struct InnerDevice {
     pub dev_node: DrmNode,
     pub render_node: DrmNode,
     pub egl: Option<EGLInternals>,
 
     pub outputs: HashMap<connector::Handle, Output>,
     pub surfaces: HashMap<crtc::Handle, Surface>,
-    pub drm: GbmDrmOutputManager,
     pub gbm: GbmDevice<DrmDeviceFd>,
-
-    supports_atomic: bool,
 
     pub leased_connectors: Vec<(connector::Handle, crtc::Handle)>,
     pub leasing_global: Option<DrmLeaseState>,
     pub active_leases: Vec<DrmLease>,
     pub active_buffers: HashSet<Weak<WlBuffer>>,
-
-    event_token: Option<RegistrationToken>,
-    pub socket: Option<Socket>,
 }
 
-impl fmt::Debug for Device {
+impl fmt::Debug for InnerDevice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Device")
-            .field("dev_node", &self.render_node)
+            .field("dev_node", &self.dev_node)
             .field("render_node", &self.render_node)
+            .field("egl", &self.egl)
             .field("outputs", &self.outputs)
             .field("surfaces", &self.surfaces)
-            .field("drm", &"..")
-            .field("egl", &self.egl)
-            .field("supports_atomic", &self.supports_atomic)
+            .field("gbm", &"..")
             .field("leased_connectors", &self.leased_connectors)
             .field("leasing_global", &self.leasing_global)
             .field("active_leases", &self.active_leases)
-            .field("event_token", &self.event_token)
-            .field("socket", &self.socket)
+            .field("active_buffers", &self.active_buffers.len())
             .finish()
     }
-}
-
-pub struct LockedDevice<'a> {
-    pub dev_node: &'a DrmNode,
-    pub render_node: &'a DrmNode,
-    pub egl: &'a mut Option<EGLInternals>,
-
-    pub outputs: &'a HashMap<connector::Handle, Output>,
-    pub surfaces: &'a mut HashMap<crtc::Handle, Surface>,
-    pub drm: LockedGbmDrmOutputManager<'a>,
-    pub gbm: &'a GbmDevice<DrmDeviceFd>,
-
-    pub leased_connectors: &'a mut Vec<(connector::Handle, crtc::Handle)>,
-    pub leasing_global: &'a mut Option<DrmLeaseState>,
-    pub active_leases: &'a mut Vec<DrmLease>,
-    pub active_buffers: &'a HashSet<Weak<WlBuffer>>,
 }
 
 pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
@@ -268,7 +260,7 @@ impl State {
                 move |event, metadata, state: &mut State| match event {
                     DrmEvent::VBlank(crtc) => {
                         if let Some(device) = state.backend.kms().drm_devices.get_mut(&drm_node) {
-                            if let Some(surface) = device.surfaces.get_mut(&crtc) {
+                            if let Some(surface) = device.inner.surfaces.get_mut(&crtc) {
                                 surface.on_vblank(metadata.take());
                             }
                         }
@@ -309,31 +301,32 @@ impl State {
         );
 
         let mut device = Device {
-            dev_node: drm_node,
-            render_node,
-            egl: None,
-
-            outputs: HashMap::new(),
-            surfaces: HashMap::new(),
             drm,
-            gbm,
+            inner: InnerDevice {
+                dev_node: drm_node,
+                render_node,
+                egl: None,
+
+                outputs: HashMap::new(),
+                surfaces: HashMap::new(),
+                gbm,
+
+                leased_connectors: Vec::new(),
+                leasing_global: DrmLeaseState::new::<State>(dh, &drm_node)
+                    .map_err(|err| {
+                        // TODO: replace with inspect_err, once stable
+                        warn!(
+                            ?err,
+                            "Failed to initialize drm lease global for: {}", drm_node
+                        );
+                        err
+                    })
+                    .ok(),
+                active_leases: Vec::new(),
+                active_buffers: HashSet::new(),
+            },
 
             supports_atomic,
-
-            leased_connectors: Vec::new(),
-            leasing_global: DrmLeaseState::new::<State>(dh, &drm_node)
-                .map_err(|err| {
-                    // TODO: replace with inspect_err, once stable
-                    warn!(
-                        ?err,
-                        "Failed to initialize drm lease global for: {}", drm_node
-                    );
-                    err
-                })
-                .ok(),
-            active_leases: Vec::new(),
-            active_buffers: HashSet::new(),
-
             event_token: Some(token),
             socket,
         };
@@ -344,7 +337,8 @@ impl State {
 
         {
             for (conn, maybe_crtc) in connectors {
-                match device.connector_added(
+                match device.inner.connector_added(
+                    device.drm.device_mut(),
                     self.backend.kms().primary_node.clone(),
                     conn,
                     maybe_crtc,
@@ -359,7 +353,7 @@ impl State {
                             w += output.geometry().size.w as u32;
                             wl_outputs.push(output.clone());
                         }
-                        device.outputs.insert(conn, output);
+                        device.inner.outputs.insert(conn, output);
                     }
                     Err(err) => {
                         warn!(?err, "Failed to initialize output, skipping");
@@ -411,26 +405,29 @@ impl State {
                 for conn in changes.removed {
                     // contains conns with updated crtcs, just drop the surface and re-create
                     if let Some(pos) = device
+                        .inner
                         .leased_connectors
                         .iter()
                         .position(|(handle, _)| *handle == conn)
                     {
-                        let _ = device.leased_connectors.remove(pos);
-                        if let Some(leasing_state) = device.leasing_global.as_mut() {
+                        let _ = device.inner.leased_connectors.remove(pos);
+                        if let Some(leasing_state) = device.inner.leasing_global.as_mut() {
                             leasing_state.withdraw_connector(conn);
                         }
                     } else if let Some(crtc) = device
+                        .inner
                         .surfaces
                         .iter()
                         .find_map(|(crtc, surface)| (surface.connector == conn).then_some(crtc))
                         .cloned()
                     {
-                        device.surfaces.remove(&crtc).unwrap();
+                        device.inner.surfaces.remove(&crtc).unwrap();
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
                         outputs_removed.push(
                             device
+                                .inner
                                 .outputs
                                 .remove(&conn)
                                 .expect("Connector without output?"),
@@ -439,7 +436,8 @@ impl State {
                 }
 
                 for (conn, maybe_crtc) in changes.added {
-                    match device.connector_added(
+                    match device.inner.connector_added(
+                        device.drm.device_mut(),
                         backend.primary_node.clone(),
                         conn,
                         maybe_crtc,
@@ -455,7 +453,7 @@ impl State {
                                 outputs_added.push(output.clone());
                             }
 
-                            device.outputs.insert(conn, output);
+                            device.inner.outputs.insert(conn, output);
                         }
                         Err(err) => {
                             warn!(?err, "Failed to initialize output, skipping");
@@ -502,15 +500,17 @@ impl State {
         let drm_node = backend
             .drm_devices
             .values()
-            .find_map(|device| (device.dev_node.dev_id() == dev).then_some(device.dev_node))
+            .find_map(|device| {
+                (device.inner.dev_node.dev_id() == dev).then_some(device.inner.dev_node)
+            })
             .with_context(|| format!("Couldn't find drm node for {}", dev))?;
 
         let mut outputs_removed = Vec::new();
         if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
-            if let Some(mut leasing_global) = device.leasing_global.take() {
+            if let Some(mut leasing_global) = device.inner.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
-            for surface in device.surfaces.values_mut() {
+            for surface in device.inner.surfaces.values_mut() {
                 outputs_removed.push(surface.output.clone());
             }
             if let Some(token) = device.event_token.take() {
@@ -523,12 +523,12 @@ impl State {
                     .destroy_global::<State>(dh, socket.dmabuf_global);
                 dh.remove_global::<State>(socket.drm_global);
             }
-            backend.api.as_mut().remove_node(&device.render_node);
+            backend.api.as_mut().remove_node(&device.inner.render_node);
             backend
                 .primary_node
                 .write()
                 .unwrap()
-                .take_if(|node| node == &device.render_node);
+                .take_if(|node| node == &device.inner.render_node);
         };
         self.common
             .output_configuration_state
@@ -570,11 +570,13 @@ impl Device {
             drm_helpers::display_configuration(self.drm.device_mut(), self.supports_atomic)?;
 
         let surfaces = self
+            .inner
             .surfaces
             .iter()
             .map(|(c, s)| (s.connector, *c))
             .chain(
-                self.leased_connectors
+                self.inner
+                    .leased_connectors
                     .iter()
                     .map(|(conn, crtc)| (*conn, *crtc)),
             )
@@ -591,6 +593,7 @@ impl Device {
             .collect::<Vec<_>>();
 
         let removed = self
+            .inner
             .outputs
             .iter()
             .filter(|(conn, _)| match config.get(conn) {
@@ -605,17 +608,8 @@ impl Device {
 
     pub fn lock(&mut self) -> LockedDevice<'_> {
         LockedDevice {
-            dev_node: &self.dev_node,
-            render_node: &self.render_node,
-            egl: &mut self.egl,
-            outputs: &self.outputs,
-            surfaces: &mut self.surfaces,
+            inner: &mut self.inner,
             drm: self.drm.lock(),
-            gbm: &self.gbm,
-            leased_connectors: &mut self.leased_connectors,
-            leasing_global: &mut self.leasing_global,
-            active_leases: &mut self.active_leases,
-            active_buffers: &mut self.active_buffers,
         }
     }
 }
@@ -629,13 +623,14 @@ impl<'a> LockedDevice<'a> {
         clock: &Clock<Monotonic>,
         shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
-        for surface in self.surfaces.values_mut() {
+        for surface in self.inner.surfaces.values_mut() {
             surface.allow_frame_flags(flag, flags);
         }
 
         if !flag {
             let now = clock.now();
             let output_map = self
+                .inner
                 .surfaces
                 .iter()
                 .filter(|(_, s)| s.is_active())
@@ -645,7 +640,7 @@ impl<'a> LockedDevice<'a> {
             for (crtc, compositor) in self.drm.compositors().iter() {
                 let elements = match output_map.get(crtc) {
                     Some(output) => output_elements(
-                        Some(&self.render_node),
+                        Some(&self.inner.render_node),
                         renderer,
                         shell,
                         now,
@@ -702,7 +697,7 @@ impl<'a> LockedDevice<'a> {
         )?;
 
         for (crtc, comp) in self.drm.compositors() {
-            let Some(surface) = self.surfaces.get_mut(crtc) else {
+            let Some(surface) = self.inner.surfaces.get_mut(crtc) else {
                 continue;
             };
             let comp = comp.lock().unwrap();
@@ -725,25 +720,16 @@ impl<'a> LockedDevice<'a> {
     }
 }
 
-pub trait MaybeLockedDevice {
-    fn dev_node(&self) -> DrmNode;
-    fn render_node(&self) -> DrmNode;
-    fn output(&self, conn: &connector::Handle) -> Option<&Output>;
-    fn drm_device_mut(&mut self) -> &mut DrmDevice;
-    fn gbm(&self) -> &GbmDevice<DrmDeviceFd>;
-    fn egl(&mut self) -> &mut Option<EGLInternals>;
-    fn insert_surface(&mut self, crtc: crtc::Handle, surface: Surface);
+impl InnerDevice {
+    pub fn in_use(&self, primary: Option<&DrmNode>) -> bool {
+        Some(&self.render_node) == primary
+            || !self.surfaces.is_empty()
+            || !self.active_buffers.is_empty()
+    }
 
-    fn in_use(&self, primary: Option<&DrmNode>) -> bool;
-    fn add_leased_connector(
+    pub fn connector_added(
         &mut self,
-        crtc: crtc::Handle,
-        conn: connector::Handle,
-        output: &Output,
-    );
-
-    fn connector_added(
-        &mut self,
+        drm: &mut DrmDevice,
         primary_node: Arc<RwLock<Option<DrmNode>>>,
         conn: connector::Handle,
         maybe_crtc: Option<crtc::Handle>,
@@ -754,27 +740,39 @@ pub trait MaybeLockedDevice {
         startup_done: Arc<AtomicBool>,
     ) -> Result<(Output, bool)> {
         let output = self
-            .output(&conn)
+            .outputs
+            .get(&conn)
             .cloned()
             .map(|output| Ok(output))
-            .unwrap_or_else(|| create_output_for_conn(self.drm_device_mut(), conn))
+            .unwrap_or_else(|| create_output_for_conn(drm, conn))
             .context("Failed to create `Output`")?;
 
-        let non_desktop =
-            match drm_helpers::get_property_val(self.drm_device_mut(), conn, "non-desktop") {
-                Ok((val_type, value)) => val_type.convert_value(value).as_boolean().unwrap(),
-                Err(err) => {
-                    warn!(
-                        ?err,
-                        "Failed to determine if connector is meant desktop usage, assuming so."
-                    );
-                    false
-                }
-            };
+        let non_desktop = match drm_helpers::get_property_val(drm, conn, "non-desktop") {
+            Ok((val_type, value)) => val_type.convert_value(value).as_boolean().unwrap(),
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "Failed to determine if connector is meant desktop usage, assuming so."
+                );
+                false
+            }
+        };
 
         if non_desktop {
             if let Some(crtc) = maybe_crtc {
-                self.add_leased_connector(crtc, conn, &output);
+                self.leased_connectors.push((conn, crtc));
+                info!(
+                    "Connector {} is non-desktop, setting up for leasing",
+                    output.name()
+                );
+                if let Some(lease_state) = self.leasing_global.as_mut() {
+                    let physical = output.physical_properties();
+                    lease_state.add_connector::<State>(
+                        conn,
+                        output.name(),
+                        format!("{} {}", physical.make, physical.model),
+                    );
+                }
             } else {
                 warn!(
                     "Connector {} is non-desktop, but we don't have a free crtc: not leasing",
@@ -788,7 +786,7 @@ pub trait MaybeLockedDevice {
                 .user_data()
                 .insert_if_missing(|| RefCell::new(OutputConfig::default()));
 
-            populate_modes(self.drm_device_mut(), &output, conn, position)
+            populate_modes(drm, &output, conn, position)
                 .with_context(|| "Failed to enumerate connector modes")?;
 
             let has_surface = if let Some(crtc) = maybe_crtc {
@@ -797,15 +795,15 @@ pub trait MaybeLockedDevice {
                     crtc,
                     conn,
                     primary_node,
-                    self.dev_node(),
-                    self.render_node(),
+                    self.dev_node,
+                    self.render_node,
                     evlh,
                     screen_filter,
                     shell,
                     startup_done,
                 ) {
                     Ok(data) => {
-                        self.insert_surface(crtc, data);
+                        self.surfaces.insert(crtc, data);
                         true
                     }
                     Err(err) => {
@@ -830,14 +828,14 @@ pub trait MaybeLockedDevice {
         }
     }
 
-    fn update_egl(
+    pub fn update_egl(
         &mut self,
         primary_node: Option<&DrmNode>,
         api: &mut GbmGlowBackend<DrmDeviceFd>,
     ) -> Result<bool> {
         if self.in_use(primary_node) {
-            if self.egl().is_none() {
-                let egl = init_egl(self.gbm()).context("Failed to create EGL context")?;
+            if self.egl.is_none() {
+                let egl = init_egl(&self.gbm).context("Failed to create EGL context")?;
                 let mut renderer = unsafe {
                     GlowRenderer::new(
                         EGLContext::new_shared_with_priority(
@@ -851,96 +849,34 @@ pub trait MaybeLockedDevice {
                 };
                 init_shaders(renderer.borrow_mut()).context("Failed to compile shaders")?;
                 api.add_node(
-                    self.render_node(),
+                    self.render_node,
                     GbmAllocator::new(
-                        self.gbm().clone(),
+                        self.gbm.clone(),
                         // SCANOUT because stride bugs
                         GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
                     ),
                     renderer,
                 );
-                *self.egl() = Some(egl);
+                self.egl = Some(egl);
             }
             Ok(true)
         } else {
-            if self.egl().is_some() {
-                let _ = self.egl().take();
-                api.remove_node(&self.render_node());
+            if self.egl.is_some() {
+                let _ = self.egl.take();
+                api.remove_node(&self.render_node);
             }
             Ok(false)
         }
     }
 
-    fn update_surface_nodes<'b>(
+    pub fn update_surface_nodes<'b>(
         &mut self,
         used_devices: &HashSet<DrmNode>,
-        others: impl Iterator<Item = &'b Self>,
+        mut others: impl Iterator<Item = &'b Self>,
     ) -> Result<()>
     where
-        Self: 'b;
-}
-
-impl MaybeLockedDevice for Device {
-    fn dev_node(&self) -> DrmNode {
-        self.dev_node
-    }
-
-    fn render_node(&self) -> DrmNode {
-        self.render_node
-    }
-
-    fn output(&self, conn: &connector::Handle) -> Option<&Output> {
-        self.outputs.get(conn)
-    }
-
-    fn drm_device_mut(&mut self) -> &mut DrmDevice {
-        self.drm.device_mut()
-    }
-
-    fn gbm(&self) -> &GbmDevice<DrmDeviceFd> {
-        &self.gbm
-    }
-
-    fn egl(&mut self) -> &mut Option<EGLInternals> {
-        &mut self.egl
-    }
-
-    fn insert_surface(&mut self, crtc: crtc::Handle, surface: Surface) {
-        self.surfaces.insert(crtc, surface);
-    }
-
-    fn in_use(&self, primary: Option<&DrmNode>) -> bool {
-        Some(&self.render_node) == primary
-            || !self.surfaces.is_empty()
-            || !self.active_buffers.is_empty()
-    }
-
-    fn add_leased_connector(
-        &mut self,
-        crtc: crtc::Handle,
-        conn: connector::Handle,
-        output: &Output,
-    ) {
-        self.leased_connectors.push((conn, crtc));
-        info!(
-            "Connector {} is non-desktop, setting up for leasing",
-            output.name()
-        );
-        if let Some(lease_state) = self.leasing_global.as_mut() {
-            let physical = output.physical_properties();
-            lease_state.add_connector::<State>(
-                conn,
-                output.name(),
-                format!("{} {}", physical.make, physical.model),
-            );
-        }
-    }
-
-    fn update_surface_nodes<'b>(
-        &mut self,
-        used_devices: &HashSet<DrmNode>,
-        mut others: impl Iterator<Item = &'b Device>,
-    ) -> Result<()> {
+        Self: 'b,
+    {
         for surface in self.surfaces.values_mut() {
             let known_nodes = surface.known_nodes().clone();
             for gone_device in known_nodes.difference(&used_devices) {
@@ -980,7 +916,59 @@ impl MaybeLockedDevice for Device {
     }
 }
 
-impl<'a> MaybeLockedDevice for LockedDevice<'a> {
+impl Device {
+    /*
+    fn dev_node(&self) -> DrmNode {
+        self.dev_node
+    }
+
+    fn render_node(&self) -> DrmNode {
+        self.render_node
+    }
+
+    fn output(&self, conn: &connector::Handle) -> Option<&Output> {
+        self.outputs.get(conn)
+    }
+
+    fn drm_device_mut(&mut self) -> &mut DrmDevice {
+        self.drm.device_mut()
+    }
+
+    fn gbm(&self) -> &GbmDevice<DrmDeviceFd> {
+        &self.gbm
+    }
+
+    fn egl(&mut self) -> &mut Option<EGLInternals> {
+        &mut self.egl
+    }
+
+    fn insert_surface(&mut self, crtc: crtc::Handle, surface: Surface) {
+    }
+
+    fn in_use(&self, primary: Option<&DrmNode>) -> bool {
+    }
+
+    fn add_leased_connector(
+        &mut self,
+        crtc: crtc::Handle,
+        conn: connector::Handle,
+        output: &Output,
+    ) {
+
+    }
+
+    fn update_surface_nodes<'b>(
+        &mut self,
+        used_devices: &HashSet<DrmNode>,
+        mut others: impl Iterator<Item = &'b Device>,
+    ) -> Result<()> {
+
+    }
+    */
+}
+
+impl<'a> LockedDevice<'a> {
+    /*
     fn dev_node(&self) -> DrmNode {
         *self.dev_node
     }
@@ -1081,6 +1069,7 @@ impl<'a> MaybeLockedDevice for LockedDevice<'a> {
 
         Ok(())
     }
+    */
 }
 
 fn create_output_for_conn(drm: &mut DrmDevice, conn: connector::Handle) -> Result<Output> {
