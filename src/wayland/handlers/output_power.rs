@@ -31,7 +31,7 @@ fn kms_surfaces(state: &mut State) -> impl Iterator<Item = &mut Surface> {
             kms_state
                 .drm_devices
                 .values_mut()
-                .flat_map(|device| device.surfaces.values_mut()),
+                .flat_map(|device| device.inner.surfaces.values_mut()),
         )
     } else {
         None

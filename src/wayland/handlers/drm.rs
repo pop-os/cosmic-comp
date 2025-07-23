@@ -29,9 +29,9 @@ impl DrmHandler<Option<DrmNode>> for State {
                 if let Some(device) = kms_state
                     .drm_devices
                     .values_mut()
-                    .find(|device| device.render_node == node)
+                    .find(|device| device.inner.render_node == node)
                 {
-                    device.active_buffers.insert(buffer.downgrade());
+                    device.inner.active_buffers.insert(buffer.downgrade());
                 }
 
                 if let Err(err) = kms_state.refresh_used_devices() {
