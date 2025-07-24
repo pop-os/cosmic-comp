@@ -67,55 +67,31 @@ pub fn apply_gamma_for_temperature(
     Ok(())
 }
 
-macro_rules! normalise {
-    ($x:expr) => {{
-        if $x < 0.0 {
-            $x = 0.;
-        } else if $x > 255.0 {
-            $x = 255.0;
-        }
-    }};
-}
-
 /// Convert color temperature to RGB multipliers using Tanner Helland algorithm
-/// Ripped from https://github.com/spacekookie/colortemp/blob/master/src/lib.rs
-/// to avoid adding a dependency on `colortemp` crate
 fn kelvin_to_rgb_multipliers(temperature: u32) -> (f32, f32, f32) {
-    let (mut red, mut green, mut blue);
-    let temp = temperature / 100;
+    let temp = (temperature as f32 / 100.0).clamp(10.0, 400.0);
 
-    /* Calculate red */
-    if temp <= 66 {
-        red = 255.;
+    let red = if temp <= 66.0 {
+        1.0
     } else {
-        red = (temp as f32) - 60.;
-        red = 329.698727446 * red.powf(-329.698727446);
-        normalise!(red);
-    }
+        (329.698727446 * (temp - 60.0).powf(-0.1332047592) / 255.0).clamp(0.0, 1.0)
+    };
 
-    /* Calculate green */
-    if temp <= 66 {
-        green = temp as f32;
-        green = 99.4708025861 * green.ln() - 161.1195681661;
-        normalise!(green);
+    let green = if temp <= 66.0 {
+        (99.4708025861 * temp.ln() - 161.1195681661) / 255.0
     } else {
-        green = temp as f32 - 60.;
-        green = 288.1221695283 * green.powf(-0.0755148492);
-        normalise!(green);
+        (288.1221695283 * (temp - 60.0).powf(-0.0755148492)) / 255.0
     }
+    .clamp(0.0, 1.0);
 
-    /* Feeling bluueeee */
-    if temp >= 66 {
-        blue = 255.;
+    let blue = if temp >= 66.0 {
+        1.0
+    } else if temp <= 19.0 {
+        0.0
     } else {
-        if temp <= 19 {
-            blue = 0.;
-        } else {
-            blue = temp as f32 - 10.;
-            blue = 138.5177312231 * blue.ln() - 305.0447927307;
-            normalise!(blue);
-        }
+        (138.5177312231 * (temp - 10.0).ln() - 305.0447927307) / 255.0
     }
+    .clamp(0.0, 1.0);
 
-    return (red, green, blue);
+    (red, green, blue)
 }
