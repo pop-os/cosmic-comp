@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::backend::kms::drm_helpers;
 use anyhow::{anyhow, Context, Result};
 use smithay::{
     backend::drm::DrmDevice,
@@ -9,8 +10,7 @@ use tracing::debug;
 
 /// Query gamma capabilities for a CRTC
 fn get_lut_size(device: &impl ControlDevice, crtc: crtc::Handle) -> Result<usize> {
-    let (value_type, raw_value) =
-        crate::backend::kms::drm_helpers::get_property_val(device, crtc, "GAMMA_LUT_SIZE")?;
+    let (value_type, raw_value) = drm_helpers::get_property_val(device, crtc, "GAMMA_LUT_SIZE")?;
 
     let size = match value_type.convert_value(raw_value) {
         property::Value::UnsignedRange(size) => size as usize,
@@ -24,6 +24,9 @@ fn get_lut_size(device: &impl ControlDevice, crtc: crtc::Handle) -> Result<usize
     }
 }
 
+// Experiemental. 1.0 was wayy too dark on my laptop.
+const BRIGHTNESS_MULTIPLIER: f32 = 2.0;
+
 /// Apply color temperature to a CRTC
 pub fn apply_gamma_for_temperature(
     device: &DrmDevice,
@@ -36,7 +39,7 @@ pub fn apply_gamma_for_temperature(
         temperature, lut_size
     );
 
-    let (r, g, b) = kelvin_to_rgb_multipliers(temperature);
+    let (r_multiplier, g_multiplier, b_multiplier) = kelvin_to_rgb_multipliers(temperature);
 
     let gamma_length =
         get_lut_size(device, crtc).context("Failed to get gamma LUT size for CRTC")?;
@@ -53,10 +56,10 @@ pub fn apply_gamma_for_temperature(
 
     // Fill the gamma ramp with the RGB multipliers
     for i in 0..gamma_length {
-        let normalized = i as f32 / (gamma_length - 1) as f32 * 2.0;
-        red_ramp[i] = (normalized * r * 65535.0).min(65535.0) as u16;
-        green_ramp[i] = (normalized * g * 65535.0).min(65535.0) as u16;
-        blue_ramp[i] = (normalized * b * 65535.0).min(65535.0) as u16;
+        let normalized = i as f32 / (gamma_length - 1) as f32 * BRIGHTNESS_MULTIPLIER;
+        red_ramp[i] = to_ramp(normalized * r_multiplier);
+        green_ramp[i] = to_ramp(normalized * g_multiplier);
+        blue_ramp[i] = to_ramp(normalized * b_multiplier);
     }
 
     // Apply the gamma ramp to the CRTC
@@ -65,6 +68,11 @@ pub fn apply_gamma_for_temperature(
         .context("Failed to set gamma for CRTC")?;
 
     Ok(())
+}
+
+fn to_ramp(multiplier: f32) -> u16 {
+    let max = u16::MAX as f32;
+    (multiplier * max).clamp(0.0, max) as u16
 }
 
 /// Convert color temperature to RGB multipliers using Tanner Helland algorithm

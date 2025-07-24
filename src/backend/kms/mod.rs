@@ -564,7 +564,6 @@ impl KmsState {
         startup_done: Arc<AtomicBool>,
         clock: &Clock<Monotonic>,
     ) -> Result<Vec<Output>, anyhow::Error> {
-        info!("Applying config for outputs");
         if !self.session.is_active() {
             return Ok(Vec::new());
         }
@@ -931,7 +930,6 @@ impl KmsState {
             }
         }
 
-        info!("Getting ready to apply gamma for outputs");
         if let Some(temperature) = screen_filter.night_light_temperature {
             for device in self.drm_devices.values_mut() {
                 if device.surfaces.is_empty() {
@@ -939,32 +937,24 @@ impl KmsState {
                 }
 
                 for (crtc, surface) in device.surfaces.iter() {
-                    if surface.output.is_enabled() {
-                        info!(
-                            "[apply_config_for_outputs] Applying gamma for night light temperature {} on {}",
-                            temperature,
-                            surface.output.name()
-                        );
+                    if !surface.output.is_enabled() {
+                        continue;
                     }
 
                     if let Err(err) =
                         gamma::apply_gamma_for_temperature(device.drm.device(), *crtc, temperature)
                     {
-                        warn!(?err, "[apply_config_for_outputs] Failed to apply gamma for night light temperature");
+                        warn!(?err, "Failed to apply gamma for night light temperature");
                     } else {
                         info!(
-                                    "[apply_config_for_outputs] Applied gamma for night light temperature {} on {}",
-                                    temperature,
-                                    surface.output.name()
-                                );
+                            "Applied gamma for night light temperature {} on {}",
+                            temperature,
+                            surface.output.name()
+                        );
                     }
                 }
             }
-        } else {
-            warn!("No night light temperature set, cannot apply gamma");
         }
-
-        info!("Successfully applied config for outputs");
 
         Ok(all_outputs)
     }
