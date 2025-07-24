@@ -192,7 +192,7 @@ pub struct ScreenFilter {
 
 impl ScreenFilter {
     pub fn is_noop(&self) -> bool {
-        self.inverted == false && self.color_filter.is_none() && self.night_light_temperature.is_none()
+        self.inverted == false && self.color_filter.is_none()
     }
 }
 
@@ -461,7 +461,7 @@ impl Config {
         ScreenFilter {
             inverted: false,
             color_filter: None,
-            night_light_temperature: Some(2700)
+            night_light_temperature: Some(3700)
         }
     }
 

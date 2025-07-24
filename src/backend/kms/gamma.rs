@@ -53,10 +53,10 @@ pub fn apply_gamma_for_temperature(
 
     // Fill the gamma ramp with the RGB multipliers
     for i in 0..gamma_length {
-        let normalized = i as f32 / (gamma_length - 1) as f32;
-        red_ramp[i] = (normalized * r * 65535.0) as u16;
-        green_ramp[i] = (normalized * g * 65535.0) as u16;
-        blue_ramp[i] = (normalized * b * 65535.0) as u16;
+        let normalized = i as f32 / (gamma_length - 1) as f32 * 2.0;
+        red_ramp[i] = (normalized * r * 65535.0).min(65535.0) as u16;
+        green_ramp[i] = (normalized * g * 65535.0).min(65535.0) as u16;
+        blue_ramp[i] = (normalized * b * 65535.0).min(65535.0) as u16;
     }
 
     // Apply the gamma ramp to the CRTC

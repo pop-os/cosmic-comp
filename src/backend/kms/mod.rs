@@ -564,6 +564,7 @@ impl KmsState {
         startup_done: Arc<AtomicBool>,
         clock: &Clock<Monotonic>,
     ) -> Result<Vec<Output>, anyhow::Error> {
+        info!("Applying config for outputs");
         if !self.session.is_active() {
             return Ok(Vec::new());
         }
@@ -729,6 +730,8 @@ impl KmsState {
                         (output_config.mode.1.unwrap() as i32 - refresh_rate as i32).abs()
                     })
                     .ok_or(anyhow::anyhow!("Unable to find matching mode"))?;
+
+                info!(">>>> test_only={}", test_only);
 
                 if !test_only {
                     if !surface.is_active() {
@@ -901,26 +904,6 @@ impl KmsState {
                 {
                     warn!(?err, "Failed to restore modifiers");
                 }
-
-                if let Some(temperature) = screen_filter.night_light_temperature {
-                    for (crtc, output) in output_map.iter() {
-                        if let Err(err) = gamma::apply_gamma_for_temperature(
-                            device.drm.device(),
-                            *crtc,
-                            temperature,
-                        ) {
-                            warn!(?err, "[apply_config_for_outputs] Failed to apply gamma for night light temperature");
-                        } else {
-                            info!(
-                                "[apply_config_for_outputs] Applied gamma for night light temperature {} on {}",
-                                temperature,
-                                output.name()
-                            );
-                        }
-                    }
-                } else {
-                    warn!("No night light temperature set, cannot apply gamma");
-                }
             }
         }
 
@@ -948,6 +931,41 @@ impl KmsState {
             }
         }
 
+        info!("Getting ready to apply gamma for outputs");
+        if let Some(temperature) = screen_filter.night_light_temperature {
+            for device in self.drm_devices.values_mut() {
+                if device.surfaces.is_empty() {
+                    continue;
+                }
+
+                for (crtc, surface) in device.surfaces.iter() {
+                    if surface.output.is_enabled() {
+                        info!(
+                            "[apply_config_for_outputs] Applying gamma for night light temperature {} on {}",
+                            temperature,
+                            surface.output.name()
+                        );
+                    }
+
+                    if let Err(err) =
+                        gamma::apply_gamma_for_temperature(device.drm.device(), *crtc, temperature)
+                    {
+                        warn!(?err, "[apply_config_for_outputs] Failed to apply gamma for night light temperature");
+                    } else {
+                        info!(
+                                    "[apply_config_for_outputs] Applied gamma for night light temperature {} on {}",
+                                    temperature,
+                                    surface.output.name()
+                                );
+                    }
+                }
+            }
+        } else {
+            warn!("No night light temperature set, cannot apply gamma");
+        }
+
+        info!("Successfully applied config for outputs");
+
         Ok(all_outputs)
     }
 
@@ -955,24 +973,6 @@ impl KmsState {
         for device in self.drm_devices.values_mut() {
             for surface in device.surfaces.values_mut() {
                 surface.set_screen_filter(screen_filter.clone());
-
-                if let Some(temperature) = screen_filter.night_light_temperature {
-                    if let Err(err) = gamma::apply_gamma_for_temperature(
-                        device.drm.device(),
-                        surface.crtc,
-                        temperature,
-                    ) {
-                        warn!(?err, "[update_screen_filter] Failed to apply gamma for night light temperature");
-                    } else {
-                        info!(
-                            "[update_screen_filter] Applied gamma for night light temperature {} on {}",
-                            temperature,
-                            surface.output.name()
-                        );
-                    }
-                } else {
-                    warn!("No night light temperature set, cannot apply gamma");
-                }
             }
         }
 
