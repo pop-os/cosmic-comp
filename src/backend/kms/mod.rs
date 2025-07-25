@@ -235,8 +235,18 @@ fn determine_primary_gpu(
         }
     }
 
-    // else just take the first
-    Ok(drm_devices.values().next().map(|dev| dev.inner.render_node))
+    // else use first available render node
+    let fallback = drm_devices.values().next().map(|dev| dev.inner.render_node);
+    if fallback.is_some() {
+        warn!(
+            "Falling back to first available DRM node: {:?}",
+            fallback.unwrap()
+        );
+    } else {
+        error!("No available DRM devices to use as primary GPU");
+    }
+
+    Ok(fallback)
 }
 
 /// Create `GlowRenderer` for `EGL_MESA_device_software` device, if present
