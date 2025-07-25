@@ -350,6 +350,7 @@ impl CosmicWindow {
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
+        scanout_override: Option<bool>,
     ) -> Vec<C>
     where
         R: Renderer + ImportAll + ImportMem,
@@ -368,7 +369,11 @@ impl CosmicWindow {
 
         elements.extend(self.0.with_program(|p| {
             p.window.render_elements::<R, CosmicWindowRenderElement<R>>(
-                renderer, window_loc, scale, alpha,
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_override,
             )
         }));
 

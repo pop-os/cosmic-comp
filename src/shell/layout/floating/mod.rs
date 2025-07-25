@@ -1465,6 +1465,7 @@ impl FloatingLayout {
                     .to_physical_precise_round(output_scale),
                 output_scale.into(),
                 alpha,
+                None,
             );
 
             if let Some(anim) = self.animations.get(elem) {
