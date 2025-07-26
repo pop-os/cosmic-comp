@@ -31,6 +31,7 @@ use smithay::{
     output::Output,
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
 };
+use tracing::debug;
 
 /// Information about the resize operation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -582,7 +583,7 @@ impl ResizeSurfaceGrab {
         if let Some(ResizeState::Resizing(resize_data)) = *resize_state {
             *resize_state = Some(ResizeState::WaitingForCommit(resize_data));
         } else {
-            panic!("invalid resize state: {:?}", resize_state);
+            debug!("unexpected resize state: {:?}", resize_state);
         }
     }
 }
