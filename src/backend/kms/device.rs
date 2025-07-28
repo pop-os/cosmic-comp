@@ -872,7 +872,7 @@ impl InnerDevice {
     pub fn update_surface_nodes<'b>(
         &mut self,
         used_devices: &HashSet<DrmNode>,
-        mut others: impl Iterator<Item = &'b Self>,
+        others: &[&'b mut Self],
     ) -> Result<()>
     where
         Self: 'b,
@@ -891,7 +891,10 @@ impl InnerDevice {
                         self.gbm.clone(),
                     )
                 } else {
-                    let device = others.find(|d| d.render_node == *new_device).unwrap();
+                    let device = others
+                        .iter()
+                        .find(|d| d.render_node == *new_device)
+                        .unwrap();
                     (
                         device.render_node,
                         device.egl.as_ref().unwrap(),
