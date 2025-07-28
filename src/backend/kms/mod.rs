@@ -571,10 +571,9 @@ impl KmsState {
             let (mut device, others) = self
                 .drm_devices
                 .values_mut()
-                .partition::<Vec<_>, _>(|d| d.inner.render_node == node);
-            device[0]
-                .inner
-                .update_surface_nodes(&used_devices, others.iter().map(|device| &device.inner))?;
+                .map(|d| &mut d.inner)
+                .partition::<Vec<_>, _>(|d| d.render_node == node);
+            device[0].update_surface_nodes(&used_devices, &others)?;
         }
 
         Ok(())
@@ -634,10 +633,9 @@ impl<'a> KmsGuard<'a> {
             let (mut device, others) = self
                 .drm_devices
                 .values_mut()
-                .partition::<Vec<_>, _>(|d| d.inner.render_node == node);
-            device[0]
-                .inner
-                .update_surface_nodes(&used_devices, others.iter().map(|device| &*device.inner))?;
+                .map(|d| &mut *d.inner)
+                .partition::<Vec<_>, _>(|d| d.render_node == node);
+            device[0].update_surface_nodes(&used_devices, &others)?;
         }
 
         Ok(())
