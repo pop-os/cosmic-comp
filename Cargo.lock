@@ -841,6 +841,7 @@ dependencies = [
  "libdisplay-info",
  "libsystemd",
  "log-panics",
+ "logind-zbus",
  "once_cell",
  "ordered-float",
  "parking_lot 0.12.3",
@@ -3058,6 +3059,16 @@ checksum = "68f9dd8546191c1850ecf67d22f5ff00a935b890d0e84713159a55495cc2ac5f"
 dependencies = [
  "backtrace",
  "log",
+]
+
+[[package]]
+name = "logind-zbus"
+version = "5.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "469c962578b549a82f3d0cc72d0f77d1123780fa7121e2b03d78b0780f6ccac6"
+dependencies = [
+ "serde",
+ "zbus",
 ]
 
 [[package]]
