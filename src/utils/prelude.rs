@@ -22,6 +22,7 @@ use std::{
 };
 
 pub trait OutputExt {
+    fn is_internal(&self) -> bool;
     fn geometry(&self) -> Rectangle<i32, Global>;
     fn zoomed_geometry(&self) -> Option<Rectangle<i32, Global>>;
 
@@ -44,6 +45,11 @@ struct VrrSupport(AtomicU8);
 struct Mirroring(Mutex<Option<WeakOutput>>);
 
 impl OutputExt for Output {
+    fn is_internal(&self) -> bool {
+        let name = self.name();
+        name.starts_with("eDP-") || name.starts_with("LVDS-") || name.starts_with("DSI-")
+    }
+
     fn geometry(&self) -> Rectangle<i32, Global> {
         Rectangle::new(self.current_location(), {
             Transform::from(self.current_transform())
