@@ -7,7 +7,7 @@ use crate::{
             cosmic_keystate_from_smithay, cosmic_modifiers_eq_smithay,
             cosmic_modifiers_from_smithay,
         },
-        Action, Config, PrivateAction,
+        Action, Config, OutputConfig, OutputState, PrivateAction,
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
@@ -41,9 +41,9 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
         GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
-        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState,
-        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-        TabletToolTipState, TouchEvent,
+        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState, Switch,
+        SwitchState, SwitchToggleEvent, TabletToolButtonEvent, TabletToolEvent,
+        TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
     },
     desktop::{utils::under_from_surface_tree, PopupKeyboardGrab, WindowSurfaceType},
     input::{
@@ -1507,7 +1507,40 @@ impl State {
                 }
             }
             InputEvent::Special(_) => {}
-            InputEvent::SwitchToggle { event: _ } => {}
+            InputEvent::SwitchToggle { event } => {
+                if event.switch() == Some(Switch::Lid) {
+                    let outputs = self.backend.lock().all_outputs();
+                    if let Some(internal) = outputs.into_iter().find(|o| o.is_internal()) {
+                        let config = internal.user_data().get::<RefCell<OutputConfig>>().unwrap();
+                        let enabled = config.borrow().enabled.clone();
+                        if enabled != OutputState::Disabled && event.state() == SwitchState::On {
+                            config.borrow_mut().enabled = OutputState::Disabled;
+                            self.common
+                                .output_configuration_state
+                                .remove_heads(std::iter::once(&internal));
+                        } else if enabled == OutputState::Disabled
+                            && event.state() == SwitchState::Off
+                        {
+                            self.common
+                                .output_configuration_state
+                                .add_heads(std::iter::once(&internal));
+                        } else {
+                            return;
+                        }
+
+                        self.common.config.read_outputs(
+                            &mut self.common.output_configuration_state,
+                            &mut self.backend,
+                            &self.common.shell,
+                            &self.common.event_loop_handle,
+                            &mut self.common.workspace_state.update(),
+                            &self.common.xdg_activation_state,
+                            self.common.startup_done.clone(),
+                            &self.common.clock,
+                        );
+                    }
+                }
+            }
         }
     }
 
