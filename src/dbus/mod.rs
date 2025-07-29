@@ -4,6 +4,8 @@ use calloop::{InsertError, LoopHandle, RegistrationToken};
 use std::collections::HashMap;
 use zbus::blocking::{fdo::DBusProxy, Connection};
 
+#[cfg(feature = "systemd")]
+pub mod logind;
 mod power;
 
 pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>> {

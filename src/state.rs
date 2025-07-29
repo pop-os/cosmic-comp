@@ -112,6 +112,9 @@ use smithay::{
 };
 use time::UtcOffset;
 
+#[cfg(feature = "systemd")]
+use std::os::fd::OwnedFd;
+
 use std::{
     cell::RefCell,
     cmp::min,
@@ -249,6 +252,9 @@ pub struct Common {
 
     pub atspi_state: AtspiState,
     pub atspi_ei: crate::wayland::handlers::atspi::AtspiEiState,
+
+    #[cfg(feature = "systemd")]
+    inhibit_lid_fd: Option<OwnedFd>,
 }
 
 #[derive(Debug)]
@@ -504,6 +510,7 @@ impl<'a> LockedBackend<'a> {
         }
 
         loop_handle.insert_idle(move |state| {
+            state.update_inhibitor_locks();
             state.common.update_xwayland_scale();
             state.common.update_xwayland_primary_output();
         });
@@ -707,6 +714,9 @@ impl State {
 
                 atspi_state,
                 atspi_ei: Default::default(),
+
+                #[cfg(feature = "systemd")]
+                inhibit_lid_fd: None,
             },
             backend: BackendData::Unset,
             ready: Once::new(),
@@ -724,6 +734,34 @@ impl State {
             privileged: !enable_wayland_security(),
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
+        }
+    }
+
+    fn update_inhibitor_locks(&mut self) {
+        #[cfg(feature = "systemd")]
+        {
+            use tracing::{debug, error};
+
+            let outputs = self.backend.lock().all_outputs();
+            let should_handle_lid = outputs.iter().any(|o| o.is_internal()) && outputs.len() >= 2;
+
+            if should_handle_lid {
+                if self.common.inhibit_lid_fd.is_none() {
+                    match crate::dbus::logind::inhibit_lid() {
+                        Ok(fd) => {
+                            debug!("Inhibiting lid switch");
+                            self.common.inhibit_lid_fd = Some(fd);
+                        }
+                        Err(err) => {
+                            error!("Failed to inhibit lid switch: {}", err);
+                        }
+                    }
+                }
+            } else {
+                if self.common.inhibit_lid_fd.take().is_some() {
+                    debug!("Removing inhibitor-lock on lid switch")
+                }
+            }
         }
     }
 }
