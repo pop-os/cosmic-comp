@@ -400,7 +400,7 @@ impl BackendData {
 }
 
 impl<'a> LockedBackend<'a> {
-    fn all_outputs(&self) -> Vec<Output> {
+    pub fn all_outputs(&self) -> Vec<Output> {
         match self {
             LockedBackend::Kms(state) => state.all_outputs(),
             LockedBackend::X11(state) => state.all_outputs(),
