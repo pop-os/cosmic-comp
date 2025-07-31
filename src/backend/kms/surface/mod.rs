@@ -309,16 +309,34 @@ impl Surface {
                                     .feedback
                                     .entry(source_node)
                                     .or_insert_with(|| {
-                                        let render_formats = kms
+                                        let render_formats = match kms
                                             .api
                                             .single_renderer(&source_node)
-                                            .unwrap()
-                                            .dmabuf_formats();
-                                        let target_formats = kms
+                                        {
+                                            Ok(renderer) => renderer.dmabuf_formats(),
+                                            Err(err) => {
+                                                tracing::error!(
+                                                    ?err,
+                                                    "Failed to create single renderer for source_node {:?}",
+                                                    source_node
+                                                );
+                                                FormatSet::default()
+                                            }
+                                        };
+                                        let target_formats = match kms
                                             .api
                                             .single_renderer(&target_node)
-                                            .unwrap()
-                                            .dmabuf_formats();
+                                        {
+                                            Ok(renderer) => renderer.dmabuf_formats(),
+                                            Err(err) => {
+                                                tracing::error!(
+                                                    ?err,
+                                                    "Failed to create single renderer for target_node {:?}",
+                                                    target_node
+                                                );
+                                                FormatSet::default()
+                                            }
+                                        };
                                         get_surface_dmabuf_feedback(
                                             source_node,
                                             target_node,
@@ -957,11 +975,33 @@ impl SurfaceThreadState {
         );
 
         let mut renderer = if render_node != self.target_node {
-            self.api
+            match self
+                .api
                 .renderer(&render_node, &self.target_node, compositor.format())
-                .unwrap()
+            {
+                Ok(renderer) => renderer,
+                Err(err) => {
+                    tracing::error!(
+                        ?err,
+                        "Failed to create renderer for render_node {:?} and target_node {:?}",
+                        render_node,
+                        self.target_node
+                    );
+                    return Ok(());
+                }
+            }
         } else {
-            self.api.single_renderer(&self.target_node).unwrap()
+            match self.api.single_renderer(&self.target_node) {
+                Ok(renderer) => renderer,
+                Err(err) => {
+                    tracing::error!(
+                        ?err,
+                        "Failed to create single renderer for target_node {:?}",
+                        self.target_node
+                    );
+                    return Ok(());
+                }
+            }
         };
 
         self.timings.start_render(&self.clock);
@@ -1201,7 +1241,13 @@ impl SurfaceThreadState {
                 })
                 .context("Failed to draw to offscreen render target")?;
 
-            renderer = self.api.single_renderer(&self.target_node).unwrap();
+            renderer = match self.api.single_renderer(&self.target_node) {
+                Ok(renderer) => renderer,
+                Err(err) => {
+                    tracing::error!(?err, "Failed to create single renderer for target_node {:?} after postprocessing", self.target_node);
+                    return Ok(());
+                }
+            };
 
             elements = postprocess_elements(
                 &mut renderer,
