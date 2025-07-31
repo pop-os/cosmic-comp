@@ -4,11 +4,12 @@ use crate::{
     shell::{focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow},
     utils::prelude::*,
 };
+use smithay::desktop::layer_map_for_output;
 use smithay::{
     delegate_xdg_shell,
     desktop::{
         find_popup_root_surface, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-        PopupUngrabStrategy,
+        PopupUngrabStrategy, WindowSurfaceType,
     },
     input::{pointer::Focus, Seat},
     output::Output,
@@ -63,7 +64,9 @@ impl XdgShellHandler for State {
             // let other shells deal with their popups
             self.common.shell.read().unconstrain_popup(&surface);
 
-            if surface.send_configure().is_ok() {
+            if let Err(err) = surface.send_configure() {
+                warn!("Unable to configure popup. {err:?}",);
+            } else {
                 self.common
                     .popups
                     .track_popup(PopupKind::from(surface))
@@ -75,52 +78,75 @@ impl XdgShellHandler for State {
     fn grab(&mut self, surface: PopupSurface, seat: WlSeat, serial: Serial) {
         let seat = Seat::from_resource(&seat).unwrap();
         let kind = PopupKind::Xdg(surface);
-        let maybe_root = find_popup_root_surface(&kind)
-            .ok()
-            .and_then(|root| self.common.shell.read().element_for_surface(&root).cloned());
+        let maybe_root = find_popup_root_surface(&kind).ok();
+        if maybe_root.is_none() {
+            tracing::warn!("No root surface found for popup grab.");
+            return;
+        }
+        let maybe_root: Option<KeyboardFocusTarget> = maybe_root.and_then(|root| {
+            let shell = self.common.shell.read();
+            shell
+                .element_for_surface(&root)
+                .map(|r| r.clone().into())
+                .or_else(|| {
+                    shell.outputs().find_map(|o| {
+                        layer_map_for_output(o)
+                            .layer_for_surface(&root, WindowSurfaceType::ALL)
+                            .cloned()
+                            .map(KeyboardFocusTarget::LayerSurface)
+                    })
+                })
+        });
 
         if let Some(root) = maybe_root {
             let target = root.into();
             let ret = self.common.popups.grab_popup(target, kind, &seat, serial);
-
-            if let Ok(mut grab) = ret {
-                if let Some(keyboard) = seat.get_keyboard() {
-                    if keyboard.is_grabbed()
-                        && !(keyboard.has_grab(serial)
-                            || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
-                    {
-                        grab.ungrab(PopupUngrabStrategy::All);
-                        return;
+            match ret {
+                Ok(mut grab) => {
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        if keyboard.is_grabbed()
+                            && !(keyboard.has_grab(serial)
+                                || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
+                        {
+                            grab.ungrab(PopupUngrabStrategy::All);
+                            return;
+                        }
+                        Shell::set_focus(
+                            self,
+                            grab.current_grab().as_ref(),
+                            &seat,
+                            Some(serial),
+                            false,
+                        );
+                        keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
                     }
-                    Shell::set_focus(
-                        self,
-                        grab.current_grab().as_ref(),
-                        &seat,
-                        Some(serial),
-                        false,
-                    );
-                    keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
-                }
 
-                if let Some(pointer) = seat.get_pointer() {
-                    if pointer.is_grabbed()
-                        && !(pointer.has_grab(serial)
-                            || pointer
-                                .has_grab(grab.previous_serial().unwrap_or_else(|| grab.serial())))
-                    {
-                        grab.ungrab(PopupUngrabStrategy::All);
-                        return;
+                    if let Some(pointer) = seat.get_pointer() {
+                        if pointer.is_grabbed()
+                            && !(pointer.has_grab(serial)
+                                || pointer.has_grab(
+                                    grab.previous_serial().unwrap_or_else(|| grab.serial()),
+                                ))
+                        {
+                            grab.ungrab(PopupUngrabStrategy::All);
+                            return;
+                        }
+                        pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
                     }
-                    pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
-                }
 
-                seat.user_data()
-                    .insert_if_missing(|| PopupGrabData::new(None));
-                seat.user_data()
-                    .get::<PopupGrabData>()
-                    .unwrap()
-                    .set(Some(grab));
+                    seat.user_data()
+                        .insert_if_missing(|| PopupGrabData::new(None));
+                    seat.user_data()
+                        .get::<PopupGrabData>()
+                        .unwrap()
+                        .set(Some(grab));
+                }
+                Err(err) => {
+                    tracing::warn!("Failed to grab popup: {:?}", err);
+                }
             }
+        } else {
+            tracing::warn!("No root for grab.");
         }
     }
 
