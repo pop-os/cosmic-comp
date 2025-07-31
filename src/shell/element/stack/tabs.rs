@@ -511,9 +511,9 @@ where
             &theme::Container::custom(|theme| widget::container::Style {
                 icon_color: None,
                 text_color: None,
-                background: Some(Background::Color(super::tab::primary_container_color(
-                    theme.cosmic(),
-                ))),
+                background: Some(Background::Color(
+                    theme.cosmic().primary_container_color().into(),
+                )),
                 border: Border {
                     radius: 0.0.into(),
                     width: 0.0,

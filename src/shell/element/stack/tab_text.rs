@@ -71,6 +71,7 @@ impl TabText {
     fn create_hash(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.text.hash(&mut hasher);
+        self.selected.hash(&mut hasher);
         hasher.finish()
     }
 
@@ -149,9 +150,14 @@ impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
 
         if state.overflowed {
             let background = if self.selected {
-                super::tab::selected_state_color(theme.cosmic())
+                theme
+                    .cosmic()
+                    .primary
+                    .component
+                    .selected_state_color()
+                    .into()
             } else {
-                super::tab::primary_container_color(theme.cosmic())
+                theme.cosmic().primary_container_color().into()
             };
             let transparent = Color {
                 a: 0.0,

@@ -1,6 +1,9 @@
 use cosmic::{
     font::Font,
-    iced::widget::{self, container::draw_background, rule::FillMode},
+    iced::{
+        widget::{self, container::draw_background, rule::FillMode},
+        Background,
+    },
     iced_core::{
         alignment, event,
         layout::{Layout, Limits, Node},
@@ -15,30 +18,6 @@ use cosmic::{
 };
 
 use super::tab_text::tab_text;
-
-/// The background color of the stack tab header.
-pub(super) fn primary_container_color(theme: &cosmic::cosmic_theme::Theme) -> Color {
-    const PRIMARY_CONTAINER_DARK: Color = Color::from_rgba(0.149, 0.149, 0.149, 1.0);
-    const PRIMARY_CONTAINER_LIGHT: Color = Color::from_rgba(0.894, 0.894, 0.894, 1.0);
-
-    if theme.is_dark {
-        PRIMARY_CONTAINER_DARK
-    } else {
-        PRIMARY_CONTAINER_LIGHT
-    }
-}
-
-/// The background color for the selected stack tab.
-pub(super) fn selected_state_color(theme: &cosmic::cosmic_theme::Theme) -> Color {
-    const SELECTED_STATE_DARK: Color = Color::from_rgba(0.195, 0.195, 0.195, 1.0);
-    const SELECTED_STATE_LIGHT: Color = Color::from_rgba(0.8344, 0.8344, 0.8344, 1.0);
-
-    if theme.is_dark {
-        SELECTED_STATE_DARK
-    } else {
-        SELECTED_STATE_LIGHT
-    }
-}
 
 #[derive(Clone, Copy)]
 pub(super) enum TabRuleTheme {
@@ -79,19 +58,6 @@ pub(super) enum TabBackgroundTheme {
     Default,
 }
 
-impl TabBackgroundTheme {
-    /// Select the background color of stack tabs based on dark theme preference.
-    fn background_color(self, theme: &theme::Theme) -> Color {
-        match self {
-            TabBackgroundTheme::ActiveActivated | TabBackgroundTheme::ActiveDeactivated => {
-                selected_state_color(theme.cosmic())
-            }
-
-            TabBackgroundTheme::Default => primary_container_color(theme.cosmic()),
-        }
-    }
-}
-
 impl From<TabBackgroundTheme> for theme::Container<'_> {
     fn from(background_theme: TabBackgroundTheme) -> Self {
         match background_theme {
@@ -99,7 +65,9 @@ impl From<TabBackgroundTheme> for theme::Container<'_> {
                 Self::custom(move |theme| widget::container::Style {
                     icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(background_theme.background_color(theme).into()),
+                    background: Some(Background::Color(
+                        theme.cosmic().primary.component.selected.into(),
+                    )),
                     border: Border {
                         radius: 0.0.into(),
                         width: 0.0,
@@ -112,7 +80,9 @@ impl From<TabBackgroundTheme> for theme::Container<'_> {
                 Self::custom(move |theme| widget::container::Style {
                     icon_color: None,
                     text_color: None,
-                    background: Some(background_theme.background_color(theme).into()),
+                    background: Some(Background::Color(
+                        theme.cosmic().primary.component.base.into(),
+                    )),
                     border: Border {
                         radius: 0.0.into(),
                         width: 0.0,
