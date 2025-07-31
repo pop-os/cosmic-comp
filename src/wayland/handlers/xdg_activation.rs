@@ -1,4 +1,5 @@
 use crate::shell::focus::target::KeyboardFocusTarget;
+use crate::shell::WorkspaceDelta;
 use crate::{shell::ActivationKey, state::ClientState, utils::prelude::*};
 use crate::{
     state::State,
@@ -12,7 +13,7 @@ use smithay::{
         XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
     },
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ActivationContext {
@@ -123,21 +124,39 @@ impl XdgActivationHandler for State {
                         shell.unminimize_request(&surface, &seat, &self.common.event_loop_handle);
                     }
 
-                    let element_workspace = shell.space_for(&element).map(|w| w.handle.clone());
-                    let current_workspace = shell.active_space_mut(&current_output).unwrap();
+                    let Some((element_output, element_workspace)) = shell
+                        .space_for(&element)
+                        .map(|w| (w.output.clone(), w.handle.clone()))
+                    else {
+                        return;
+                    };
+                    let in_current_workspace =
+                        element_workspace == shell.active_space(&current_output).unwrap().handle;
 
-                    let in_current_workspace = element_workspace
-                        .as_ref()
-                        .map(|w| *w == current_workspace.handle)
-                        .unwrap_or(false);
+                    if !in_current_workspace {
+                        let Some(idx) = shell
+                            .workspaces
+                            .idx_for_handle(&element_output, &element_workspace)
+                        else {
+                            warn!("Couldn't determine idx for elements workspace?");
+                            return;
+                        };
 
-                    if in_current_workspace {
-                        current_workspace
-                            .floating_layer
-                            .space
-                            .raise_element(&element, true);
+                        if let Err(err) = shell.activate(
+                            &element_output,
+                            idx,
+                            WorkspaceDelta::new_shortcut(),
+                            &mut self.common.workspace_state.update(),
+                        ) {
+                            warn!("Failed to activate the workspace: {err:?}");
+                        }
                     }
 
+                    let current_workspace = shell.active_space_mut(&current_output).unwrap();
+                    current_workspace
+                        .floating_layer
+                        .space
+                        .raise_element(&element, true);
                     if element.is_stack() {
                         if let Some((window, _)) = element.windows().find(|(window, _)| {
                             let mut found = false;
@@ -149,38 +168,34 @@ impl XdgActivationHandler for State {
                             found
                         }) {
                             element.set_active(&window);
+                        } else {
+                            warn!("Failed to find activated window in the stack");
+                            return;
                         }
                     }
 
-                    if in_current_workspace {
-                        if seat.get_keyboard().unwrap().current_focus()
-                            != Some(element.clone().into())
-                            && current_workspace.is_tiled(&surface)
+                    if seat.get_keyboard().unwrap().current_focus() != Some(element.clone().into())
+                        && current_workspace.is_tiled(&surface)
+                    {
+                        for mapped in current_workspace
+                            .mapped()
+                            .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into_iter()
                         {
-                            for mapped in current_workspace
-                                .mapped()
-                                .filter(|m| m.maximized_state.lock().unwrap().is_some())
-                                .cloned()
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                            {
-                                current_workspace.unmaximize_request(&mapped);
-                            }
+                            current_workspace.unmaximize_request(&mapped);
                         }
-
-                        std::mem::drop(shell);
-                        Shell::set_focus(
-                            self,
-                            Some(&KeyboardFocusTarget::Element(element.clone())),
-                            &seat,
-                            None,
-                            false,
-                        );
-                    } else if let Some(w) = element_workspace {
-                        shell.append_focus_stack(element, &seat);
-                        let mut workspace_guard = self.common.workspace_state.update();
-                        workspace_guard.add_workspace_state(&w, WState::Urgent);
                     }
+
+                    std::mem::drop(shell);
+                    Shell::set_focus(
+                        self,
+                        Some(&KeyboardFocusTarget::Element(element.clone())),
+                        &seat,
+                        None,
+                        false,
+                    );
                 } else if let Some((workspace, _)) = shell.workspace_for_surface(&surface) {
                     let current_workspace = shell.active_space(&current_output).unwrap();
                     if workspace == current_workspace.handle {
