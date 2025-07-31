@@ -42,7 +42,9 @@ impl WlrLayerShellHandler for State {
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
         self.common.shell.read().unconstrain_popup(&popup);
 
-        if popup.send_configure().is_ok() {
+        if let Err(err) = popup.send_configure() {
+            tracing::warn!("Unable to configure popup. {err:?}",);
+        } else {
             self.common
                 .popups
                 .track_popup(PopupKind::from(popup))
