@@ -6,6 +6,7 @@ use crate::{
     backend::render::cursor::CursorState,
     config::{Config, xkb_config_to_wl},
     input::{InputBackendId, ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
+    shell::focus::target::KeyboardFocusTarget,
     state::State,
 };
 use smithay::{
@@ -209,6 +210,9 @@ pub struct PointerConstraintHint(pub Mutex<Option<(WlSurface, Point<f64, Logical
 #[derive(Default)]
 pub struct LastModifierChange(pub Mutex<(HashMap<InputBackendId, Serial>, Option<Serial>)>);
 
+#[derive(Default)]
+pub struct LastAcknowlegedElement(pub Mutex<Option<KeyboardFocusTarget>>);
+
 pub fn create_seat(
     dh: &DisplayHandle,
     seat_state: &mut SeatState<State>,
@@ -224,6 +228,7 @@ pub fn create_seat(
     userdata.insert_if_missing(SupressedButtons::default);
     userdata.insert_if_missing(ModifiersShortcutQueue::default);
     userdata.insert_if_missing(LastModifierChange::default);
+    userdata.insert_if_missing(LastAcknowlegedElement::default);
     userdata.insert_if_missing_threadsafe(SeatMoveGrabState::default);
     userdata.insert_if_missing_threadsafe(SeatMenuGrabState::default);
     userdata.insert_if_missing_threadsafe(CursorState::default);

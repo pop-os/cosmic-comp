@@ -57,8 +57,14 @@ pub enum PointerFocusTarget {
         surface: X11Surface,
         toplevel: Option<CosmicSurface>,
     },
-    StackUI(CosmicStack),
-    WindowUI(CosmicWindow),
+    StackUI {
+        stack: CosmicStack,
+        is_border: bool,
+    },
+    WindowUI {
+        window: CosmicWindow,
+        is_border: bool,
+    },
     ResizeFork(ResizeForkTarget),
     ZoomUI(ZoomFocusTarget),
 }
@@ -146,8 +152,8 @@ impl PointerFocusTarget {
         match self {
             PointerFocusTarget::WlSurface { surface, .. } => surface,
             PointerFocusTarget::X11Surface { surface, .. } => surface,
-            PointerFocusTarget::StackUI(u) => u,
-            PointerFocusTarget::WindowUI(u) => u,
+            PointerFocusTarget::StackUI { stack, .. } => stack,
+            PointerFocusTarget::WindowUI { window, .. } => window,
             PointerFocusTarget::ResizeFork(f) => f,
             PointerFocusTarget::ZoomUI(e) => e,
         }
@@ -157,8 +163,8 @@ impl PointerFocusTarget {
         match self {
             PointerFocusTarget::WlSurface { surface, .. } => surface,
             PointerFocusTarget::X11Surface { surface, .. } => surface,
-            PointerFocusTarget::StackUI(u) => u,
-            PointerFocusTarget::WindowUI(u) => u,
+            PointerFocusTarget::StackUI { stack, .. } => stack,
+            PointerFocusTarget::WindowUI { window, .. } => window,
             PointerFocusTarget::ResizeFork(f) => f,
             PointerFocusTarget::ZoomUI(e) => e,
         }
@@ -211,8 +217,8 @@ impl PointerFocusTarget {
                 toplevel: Some(surface),
                 ..
             } => Some(surface.clone()),
-            PointerFocusTarget::StackUI(stack) => Some(stack.active()),
-            PointerFocusTarget::WindowUI(window) => Some(window.surface()),
+            PointerFocusTarget::StackUI { stack, .. } => Some(stack.active()),
+            PointerFocusTarget::WindowUI { window, .. } => Some(window.surface()),
             _ => None,
         }
     }
@@ -283,6 +289,27 @@ impl PointerFocusTarget {
         for session in cursor_sessions {
             session.set_cursor_pos(cursor_pos);
             session.set_cursor_hotspot(cursor_hotspot);
+        }
+    }
+
+    pub fn should_follow_focus(&self, relative_pos: Point<f64, Logical>) -> bool {
+        match self {
+            PointerFocusTarget::WlSurface { toplevel, .. } => {
+                toplevel.as_ref().is_none_or(|toplevel| match toplevel {
+                    PointerFocusToplevel::Popup(popup) => {
+                        popup.geometry().contains(relative_pos.to_i32_round())
+                    }
+                    PointerFocusToplevel::Surface(surface) => {
+                        surface.0.geometry().contains(relative_pos.to_i32_round())
+                    }
+                })
+            }
+            PointerFocusTarget::X11Surface { surface, .. } => {
+                surface.geometry().contains(relative_pos.to_i32_round())
+            }
+            PointerFocusTarget::StackUI { is_border, .. }
+            | PointerFocusTarget::WindowUI { is_border, .. } => !*is_border,
+            PointerFocusTarget::ResizeFork(_) | PointerFocusTarget::ZoomUI(_) => false,
         }
     }
 }
@@ -374,8 +401,8 @@ impl IsAlive for PointerFocusTarget {
             // XXX? does this change anything
             PointerFocusTarget::WlSurface { surface, .. } => surface.alive(),
             PointerFocusTarget::X11Surface { surface, .. } => surface.alive(),
-            PointerFocusTarget::StackUI(e) => e.alive(),
-            PointerFocusTarget::WindowUI(e) => e.alive(),
+            PointerFocusTarget::StackUI { stack, .. } => stack.alive(),
+            PointerFocusTarget::WindowUI { window, .. } => window.alive(),
             PointerFocusTarget::ResizeFork(f) => f.alive(),
             PointerFocusTarget::ZoomUI(_) => true,
         }
@@ -764,8 +791,8 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => Cow::Borrowed(surface),
             PointerFocusTarget::X11Surface { surface, .. } => Cow::Owned(surface.wl_surface()?),
             PointerFocusTarget::ResizeFork(_)
-            | PointerFocusTarget::StackUI(_)
-            | PointerFocusTarget::WindowUI(_)
+            | PointerFocusTarget::StackUI { .. }
+            | PointerFocusTarget::WindowUI { .. }
             | PointerFocusTarget::ZoomUI(_) => {
                 return None;
             }
@@ -777,11 +804,12 @@ impl WaylandFocus for PointerFocusTarget {
             PointerFocusTarget::X11Surface { surface, .. } => surface
                 .wl_surface()
                 .is_some_and(|s| s.id().same_client_as(object_id)),
-            PointerFocusTarget::StackUI(stack) => stack
+            PointerFocusTarget::StackUI { stack, .. } => stack
                 .active()
                 .wl_surface()
-                .is_some_and(|s| s.id().same_client_as(object_id)),
-            PointerFocusTarget::WindowUI(window) => window
+                .map(|s| s.id().same_client_as(object_id))
+                .unwrap_or(false),
+            PointerFocusTarget::WindowUI { window, .. } => window
                 .wl_surface()
                 .is_some_and(|s| s.id().same_client_as(object_id)),
             PointerFocusTarget::ResizeFork(_) | PointerFocusTarget::ZoomUI(_) => false,

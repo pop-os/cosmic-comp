@@ -289,7 +289,7 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
             }
             _ => format!("X11Surface {}", surface.window_id()),
         },
-        Some(StackUI(stack)) => format!(
+        Some(StackUI { stack, .. }) => format!(
             "Stack SSD {} ({})",
             match stack.active().0.underlying_surface() {
                 WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
@@ -297,7 +297,7 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
             },
             stack.active().title()
         ),
-        Some(WindowUI(window)) => format!(
+        Some(WindowUI { window, .. }) => format!(
             "Window SSD {} ({})",
             match window.surface().0.underlying_surface() {
                 WindowSurface::Wayland(t) => t.wl_surface().id().protocol_id(),
