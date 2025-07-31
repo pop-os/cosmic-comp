@@ -992,6 +992,11 @@ impl SurfaceThreadState {
         }
 
         // TODO commit timing `signal_until`
+        {
+            let shell = self.shell.read();
+            // XXX correct way to set time?
+            shell.signal_commit_timing(&self.output, self.clock.now() + estimated_presentation);
+        }
 
         let mut elements = output_elements(
             Some(&render_node),
