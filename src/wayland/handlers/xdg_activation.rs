@@ -42,23 +42,20 @@ impl XdgActivationHandler for State {
             })
             .unwrap_or(false)
         {
-            if let Some(seat) = data.serial.and_then(|(_, seat)| Seat::from_resource(&seat)) {
-                let output = seat.active_output();
-                let mut shell = self.common.shell.write();
-                let workspace = shell.active_space_mut(&output).unwrap();
-                let handle = workspace.handle;
-                data.user_data
-                    .insert_if_missing(move || ActivationContext::Workspace(handle));
-                debug!(?token, "created workspace token for privileged client");
-            } else {
-                data.user_data
-                    .insert_if_missing(|| ActivationContext::UrgentOnly);
-                debug!(
-                    ?token,
-                    "created urgent-only token for privileged client without seat"
-                );
-            }
-
+            let seat = data
+                .serial
+                .and_then(|(_, seat)| Seat::from_resource(&seat))
+                .unwrap_or_else(|| {
+                    let shell = self.common.shell.read();
+                    shell.seats.last_active().clone()
+                });
+            let output = seat.active_output();
+            let mut shell = self.common.shell.write();
+            let workspace = shell.active_space_mut(&output).unwrap();
+            let handle = workspace.handle;
+            data.user_data
+                .insert_if_missing(move || ActivationContext::Workspace(handle));
+            debug!(?token, "created workspace token for privileged client");
             return true;
         };
 
