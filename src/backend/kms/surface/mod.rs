@@ -304,32 +304,30 @@ impl Surface {
                     state
                         .common
                         .send_dmabuf_feedback(&output_clone, &states, |source_node| {
-                            Some(
-                                surface
-                                    .feedback
-                                    .entry(source_node)
-                                    .or_insert_with(|| {
-                                        let render_formats = kms
-                                            .api
-                                            .single_renderer(&source_node)
-                                            .unwrap()
-                                            .dmabuf_formats();
-                                        let target_formats = kms
-                                            .api
-                                            .single_renderer(&target_node)
-                                            .unwrap()
-                                            .dmabuf_formats();
-                                        get_surface_dmabuf_feedback(
-                                            source_node,
-                                            target_node,
-                                            render_formats,
-                                            target_formats,
-                                            surface.primary_plane_formats.clone(),
-                                            surface.overlay_plane_formats.clone(),
-                                        )
-                                    })
-                                    .clone(),
-                            )
+                            if let Some(cached_feedback) = surface.feedback.get(&source_node) {
+                                Some(cached_feedback.clone())
+                            } else {
+                                // If we have freed the node, because it didn't have any active buffers/surfaces,
+                                // we might not be able to evaluate surface feedback yet.
+                                let render_formats =
+                                    kms.api.single_renderer(&source_node).ok()?.dmabuf_formats();
+                                // In contrast we must have the target node, if we have an active surface
+                                let target_formats = kms
+                                    .api
+                                    .single_renderer(&target_node)
+                                    .unwrap()
+                                    .dmabuf_formats();
+                                let feedback = get_surface_dmabuf_feedback(
+                                    source_node,
+                                    target_node,
+                                    render_formats,
+                                    target_formats,
+                                    surface.primary_plane_formats.clone(),
+                                    surface.overlay_plane_formats.clone(),
+                                );
+                                surface.feedback.insert(source_node, feedback.clone());
+                                Some(feedback)
+                            }
                         });
                 }
                 Event::Closed => {}
