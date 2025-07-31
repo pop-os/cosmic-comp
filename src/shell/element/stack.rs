@@ -1077,18 +1077,18 @@ impl Program for CosmicStackInternal {
             .apply(iced_widget::container)
             .align_y(Alignment::Center)
             .class(theme::Container::custom(move |theme| {
+                let cosmic_theme = theme.cosmic();
+
                 let background = if group_focused {
-                    Some(Background::Color(theme.cosmic().accent_color().into()))
+                    cosmic_theme.accent_color()
                 } else {
-                    Some(Background::Color(tab::primary_container_color(
-                        theme.cosmic(),
-                    )))
+                    cosmic_theme.primary_container_color()
                 };
 
                 iced_widget::container::Style {
-                    icon_color: Some(Color::from(theme.cosmic().background.on)),
-                    text_color: Some(Color::from(theme.cosmic().background.on)),
-                    background,
+                    icon_color: Some(cosmic_theme.background.on.into()),
+                    text_color: Some(cosmic_theme.background.on.into()),
+                    background: Some(Background::Color(background.into())),
                     border: Border {
                         radius,
                         width: 0.0,
