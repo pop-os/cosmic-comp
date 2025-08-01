@@ -120,6 +120,7 @@ use std::{
     cmp::min,
     collections::HashSet,
     ffi::OsString,
+    os::unix::net::UnixStream,
     process::Child,
     sync::{atomic::AtomicBool, Arc, Once},
     time::{Duration, Instant},
@@ -148,6 +149,7 @@ pub struct ClientState {
     pub privileged: bool,
     pub evls: LoopSignal,
     pub security_context: Option<SecurityContext>,
+    pub pid: Option<u32>,
 }
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
@@ -724,7 +726,14 @@ impl State {
         }
     }
 
-    pub fn new_client_state(&self) -> ClientState {
+    pub fn new_client_state(&self, unix_stream: &UnixStream) -> ClientState {
+        let pid = match rustix::net::sockopt::get_socket_peercred(&unix_stream) {
+            Ok(cred) => Some(rustix::process::Pid::as_raw(Some(cred.pid)) as u32),
+            Err(err) => {
+                tracing::warn!(?err, "Failed to get PID for Wayland client");
+                None
+            }
+        };
         ClientState {
             compositor_client_state: CompositorClientState::default(),
             advertised_drm_node: match &self.backend {
@@ -734,6 +743,7 @@ impl State {
             privileged: !enable_wayland_security(),
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
+            pid,
         }
     }
 

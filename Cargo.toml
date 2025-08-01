@@ -59,7 +59,7 @@ xdg-user = "0.2.1"
 xkbcommon = "0.8"
 zbus = "5.7.1"
 profiling = { version = "1.0" }
-rustix = { version = "0.38.32", features = ["process"] }
+rustix = { version = "0.38.32", features = ["net", "process"] }
 smallvec = "1.13.2"
 rand = "0.9.0"
 reis = { version = "0.5", features = ["calloop"] }
@@ -121,8 +121,10 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
+# cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
+# cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
+cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "toplevel-info" }
+cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "toplevel-info" }
 
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "1d05641" }
