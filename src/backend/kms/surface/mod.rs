@@ -11,7 +11,10 @@ use crate::{
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
     wayland::{
-        handlers::screencopy::{submit_buffer, FrameHolder, SessionData},
+        handlers::{
+            compositor::recursive_frame_time_estimation,
+            screencopy::{submit_buffer, FrameHolder, SessionData},
+        },
         protocols::screencopy::{
             FailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
         },
@@ -670,10 +673,11 @@ impl SurfaceThreadState {
             Duration::from_secs_f64(1_000. / drm_helpers::calculate_refresh_rate(mode) as f64);
         self.timings.set_refresh_interval(Some(interval));
 
+        const SAFETY_MARGIN: u32 = 2; // Magic two frames margin taken from kwin to not trigger low-framerate-compensation
         let min_min_refresh_interval = Duration::from_secs_f64(1. / 30.); // 30Hz
         self.timings.set_min_refresh_interval(Some(
             min_hz
-                .map(|min| Duration::from_secs_f64(1. / min as f64))
+                .map(|min| Duration::from_secs_f64(1. / (min + SAFETY_MARGIN) as f64))
                 .unwrap_or(min_min_refresh_interval) // alternatively use 30Hz
                 .max(min_min_refresh_interval),
         ));
@@ -967,18 +971,31 @@ impl SurfaceThreadState {
         let mut additional_frame_flags = FrameFlags::empty();
         let mut remove_frame_flags = FrameFlags::empty();
 
-        let has_active_fullscreen = {
+        let (has_active_fullscreen, fullscreen_drives_refresh_rate, animations_going) = {
             let shell = self.shell.read();
+            let animations_going = shell.animations_going();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
             if let Some((_, workspace)) = shell.workspaces.active(output) {
-                workspace.get_fullscreen().is_some()
+                if let Some(fullscreen_surface) = workspace.get_fullscreen() {
+                    const _30_FPS: Duration = Duration::from_nanos(1_000_000_000 / 30);
+                    (
+                        true,
+                        fullscreen_surface.wl_surface().is_some_and(|surface| {
+                            recursive_frame_time_estimation(&self.clock, &*surface)
+                                .is_some_and(|dur| dur <= _30_FPS)
+                        }),
+                        animations_going,
+                    )
+                } else {
+                    (false, false, animations_going)
+                }
             } else {
-                false
+                (false, false, animations_going)
             }
         };
 
-        if has_active_fullscreen {
-            // skip overlay plane assign if we have a fullscreen surface to save on tests
+        if has_active_fullscreen || animations_going {
+            // skip overlay plane assign if we have a fullscreen surface or dynamic contents to save on tests
             remove_frame_flags |= FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
         }
 
@@ -1007,7 +1024,8 @@ impl SurfaceThreadState {
             anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
         })?;
 
-        if vrr && has_active_fullscreen && !self.timings.past_min_render_time(&self.clock) {
+        if vrr && fullscreen_drives_refresh_rate && !self.timings.past_min_render_time(&self.clock)
+        {
             additional_frame_flags |= FrameFlags::SKIP_CURSOR_ONLY_UPDATES;
         };
         self.timings.set_vrr(vrr);

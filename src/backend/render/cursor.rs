@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::utils::prelude::*;
+use crate::{utils::prelude::*, wayland::handlers::compositor::FRAME_TIME_FILTER};
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -182,7 +182,7 @@ where
         location.to_physical(scale).to_i32_round(),
         scale,
         1.0,
-        Kind::Unspecified,
+        FRAME_TIME_FILTER,
     )
 }
 
