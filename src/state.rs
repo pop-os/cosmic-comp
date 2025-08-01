@@ -76,6 +76,7 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
+        fifo::FifoManagerState,
         fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
@@ -236,6 +237,7 @@ pub struct Common {
     pub xdg_decoration_state: XdgDecorationState,
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
+    pub fifo_manager_state: FifoManagerState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -653,6 +655,8 @@ impl State {
         // TODO: Restrict to only specific client?
         let atspi_state = AtspiState::new::<State, _>(dh, |_| true);
 
+        let fifo_manager_state = FifoManagerState::new::<State>(dh);
+
         State {
             common: Common {
                 config,
@@ -707,6 +711,7 @@ impl State {
                 xdg_foreign_state,
                 workspace_state,
                 a11y_state,
+                fifo_manager_state,
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
