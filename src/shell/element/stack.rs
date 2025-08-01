@@ -507,14 +507,20 @@ impl CosmicStack {
                         && point_i32.y - geo.loc.y < geo.size.h + TAB_HEIGHT + RESIZE_BORDER)
                 {
                     stack_ui = Some((
-                        PointerFocusTarget::StackUI(self.clone()),
+                        PointerFocusTarget::StackUI {
+                            stack: self.clone(),
+                            is_border: true,
+                        },
                         Point::from((0., 0.)),
                     ));
                 }
 
                 if point_i32.y - geo.loc.y < TAB_HEIGHT {
                     stack_ui = Some((
-                        PointerFocusTarget::StackUI(self.clone()),
+                        PointerFocusTarget::StackUI {
+                            stack: self.clone(),
+                            is_border: false,
+                        },
                         Point::from((0., 0.)),
                     ));
                 }
