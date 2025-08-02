@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     hash::{Hash, Hasher},
-    sync::{mpsc::Receiver, Arc, Mutex},
+    sync::{mpsc::Receiver, Arc, LazyLock, Mutex},
 };
 
 use cosmic::{
@@ -29,7 +29,6 @@ use iced_tiny_skia::{
     Layer,
 };
 
-use once_cell::sync::Lazy;
 use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
@@ -67,7 +66,7 @@ use smithay::{
     },
 };
 
-static ID: Lazy<Id> = Lazy::new(|| Id::new("Program"));
+static ID: LazyLock<Id> = LazyLock::new(|| Id::new("Program"));
 
 pub struct IcedElement<P: Program + Send + 'static>(pub(crate) Arc<Mutex<IcedElementInternal<P>>>);
 
@@ -373,7 +372,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn force_redraw(&self) {
         let mut internal = self.0.lock().unwrap();
-        for (_buffer, ref mut old_primitives) in internal.buffers.values_mut() {
+        for (_buffer, old_primitives) in internal.buffers.values_mut() {
             *old_primitives = None;
         }
     }
@@ -914,9 +913,7 @@ where
         }
 
         scale = scale * internal_ref.additional_scale;
-        if let Some((buffer, ref mut old_layers)) =
-            internal_ref.buffers.get_mut(&OrderedFloat(scale.x))
-        {
+        if let Some((buffer, old_layers)) = internal_ref.buffers.get_mut(&OrderedFloat(scale.x)) {
             let size: Size<i32, BufferCoords> = internal_ref
                 .size
                 .to_f64()
