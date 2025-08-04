@@ -935,6 +935,7 @@ impl Program for CosmicStackInternal {
                                     true,
                                     &state.common.config,
                                     &state.common.event_loop_handle,
+                                    true,
                                 );
 
                                 std::mem::drop(shell);
@@ -977,6 +978,7 @@ impl Program for CosmicStackInternal {
                                         false,
                                         &state.common.config,
                                         &state.common.event_loop_handle,
+                                        true,
                                     );
 
                                     std::mem::drop(shell);
