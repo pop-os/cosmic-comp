@@ -279,7 +279,8 @@ impl FloatingLayout {
         let old_output_geometry = {
             let layers = layer_map_for_output(&old_output);
             layers.non_exclusive_zone()
-        };
+        }
+        .to_f64();
         let output_geometry = {
             let layers = layer_map_for_output(&output);
             layers.non_exclusive_zone()
@@ -302,15 +303,17 @@ impl FloatingLayout {
                     None,
                 );
             } else {
-                let geometry = self.space.element_geometry(&mapped).unwrap();
+                let geometry = self.space.element_geometry(&mapped).unwrap().to_f64();
                 let new_loc = (
-                    geometry.loc.x.saturating_sub(old_output_geometry.loc.x)
+                    ((geometry.loc.x - old_output_geometry.loc.x).max(0.)
                         / old_output_geometry.size.w
-                        * output_geometry.size.w
+                        * output_geometry.size.w as f64)
+                        .round() as i32
                         + output_geometry.loc.x,
-                    geometry.loc.y.saturating_sub(old_output_geometry.loc.y)
+                    ((geometry.loc.y - old_output_geometry.loc.y).max(0.)
                         / old_output_geometry.size.h
-                        * output_geometry.size.h
+                        * output_geometry.size.h as f64)
+                        .round() as i32
                         + output_geometry.loc.y,
                 );
                 self.map_internal(mapped, Some(Point::from(new_loc)), None, None);
