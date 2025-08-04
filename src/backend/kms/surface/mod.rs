@@ -367,6 +367,7 @@ impl Surface {
 
     pub fn remove_node(&mut self, node: DrmNode) {
         self.known_nodes.remove(&node);
+        self.feedback.remove(&node);
         let _ = self
             .thread_command
             .send(ThreadCommand::NodeRemoved { node });
