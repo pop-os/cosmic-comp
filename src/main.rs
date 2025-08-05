@@ -99,7 +99,14 @@ impl State {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() {
+    if let Err(err) = main_inner() {
+        error!("Error occured in main(): {}", err);
+        process::exit(1);
+    }
+}
+
+fn main_inner() -> Result<(), Box<dyn Error>> {
     let raw_args = RawArgs::from_args();
     let mut cursor = raw_args.cursor();
     let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
