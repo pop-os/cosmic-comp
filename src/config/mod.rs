@@ -213,7 +213,7 @@ impl Config {
                 config_changed(config, keys, state);
             })
             .expect("Failed to add cosmic-config to the event loop");
-        let xdg = xdg::BaseDirectories::new().ok();
+        let xdg = xdg::BaseDirectories::new();
 
         let cosmic_comp_config =
             CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
@@ -341,7 +341,7 @@ impl Config {
         });
 
         Config {
-            dynamic_conf: Self::load_dynamic(xdg.as_ref()),
+            dynamic_conf: Self::load_dynamic(&xdg),
             cosmic_conf: cosmic_comp_config,
             cosmic_helper: config,
             settings_context,
@@ -351,18 +351,15 @@ impl Config {
         }
     }
 
-    fn load_dynamic(xdg: Option<&xdg::BaseDirectories>) -> DynamicConfig {
-        let output_path =
-            xdg.and_then(|base| base.place_state_file("cosmic-comp/outputs.ron").ok());
+    fn load_dynamic(xdg: &xdg::BaseDirectories) -> DynamicConfig {
+        let output_path = xdg.place_state_file("cosmic-comp/outputs.ron").ok();
         let outputs = Self::load_outputs(&output_path);
-        let numlock_path =
-            xdg.and_then(|base| base.place_state_file("cosmic-comp/numlock.ron").ok());
+        let numlock_path = xdg.place_state_file("cosmic-comp/numlock.ron").ok();
         let numlock = Self::load_numlock(&numlock_path);
 
-        let filter_path = xdg.and_then(|base| {
-            base.place_state_file("cosmic-comp/a11y_screen_filter.ron")
-                .ok()
-        });
+        let filter_path = xdg
+            .place_state_file("cosmic-comp/a11y_screen_filter.ron")
+            .ok();
         let filter = Self::load_filter_state(&filter_path);
 
         DynamicConfig {
@@ -389,11 +386,15 @@ impl Config {
                                         .find(|(_, info)| &info.connector == conn)
                                     {
                                         if config_clone[j].enabled != OutputState::Enabled {
-                                            warn!("Invalid Mirroring tag, overriding with `Enabled` instead");
+                                            warn!(
+                                                "Invalid Mirroring tag, overriding with `Enabled` instead"
+                                            );
                                             conf.enabled = OutputState::Enabled;
                                         }
                                     } else {
-                                        warn!("Invalid Mirroring tag, overriding with `Enabled` instead");
+                                        warn!(
+                                            "Invalid Mirroring tag, overriding with `Enabled` instead"
+                                        );
                                         conf.enabled = OutputState::Enabled;
                                     }
                                 }
@@ -765,7 +766,7 @@ fn get_config<T: Default + serde::de::DeserializeOwned>(
 }
 
 fn update_input(state: &mut State) {
-    if let BackendData::Kms(ref mut kms_state) = &mut state.backend {
+    if let BackendData::Kms(kms_state) = &mut state.backend {
         for device in kms_state.input_devices.values_mut() {
             state.common.config.read_device(device);
         }

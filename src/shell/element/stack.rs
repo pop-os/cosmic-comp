@@ -24,7 +24,6 @@ use cosmic::{
     theme, widget as cosmic_widget, Apply, Element as CosmicElement, Theme,
 };
 use cosmic_settings_config::shortcuts;
-use once_cell::sync::Lazy;
 use shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     backend::{
@@ -64,7 +63,7 @@ use std::{
     hash::Hash,
     sync::{
         atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, LazyLock, Mutex,
     },
 };
 
@@ -77,7 +76,7 @@ use self::{
     tabs::Tabs,
 };
 
-static SCROLLABLE_ID: Lazy<Id> = Lazy::new(|| Id::new("scrollable"));
+static SCROLLABLE_ID: LazyLock<Id> = LazyLock::new(|| Id::new("scrollable"));
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CosmicStack(pub(super) IcedElement<CosmicStackInternal>);
