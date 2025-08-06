@@ -8,7 +8,11 @@ use cosmic::{
         alignment, event,
         layout::{Layout, Limits, Node},
         mouse, overlay, renderer,
-        widget::{operation::Operation, tree::Tree, Id, Widget},
+        widget::{
+            operation::Operation,
+            tree::{self, Tree},
+            Id, Widget,
+        },
         Border, Clipboard, Color, Length, Rectangle, Shell, Size,
     },
     iced_widget::scrollable::AbsoluteOffset,
@@ -53,46 +57,52 @@ impl From<TabRuleTheme> for theme::Rule {
 
 #[derive(Clone, Copy)]
 pub(super) enum TabBackgroundTheme {
+    /// Selected active stack
     ActiveActivated,
+    /// Selected inactive stack
     ActiveDeactivated,
+    /// Not selected
     Default,
 }
 
-impl From<TabBackgroundTheme> for theme::Container<'_> {
-    fn from(background_theme: TabBackgroundTheme) -> Self {
-        match background_theme {
-            TabBackgroundTheme::ActiveActivated => {
-                Self::custom(move |theme| widget::container::Style {
-                    icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(Background::Color(
-                        theme.cosmic().primary.component.selected.into(),
-                    )),
-                    border: Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                })
+impl TabBackgroundTheme {
+    pub fn into_container_theme(self, hovered: bool) -> theme::Container<'static> {
+        let (selected, active_stack) = match self {
+            Self::ActiveActivated => (true, true),
+            Self::ActiveDeactivated => (true, false),
+            Self::Default => (false, false),
+        };
+
+        theme::Container::custom(move |theme| {
+            let cosmic_theme = theme.cosmic();
+
+            let text_color = if selected && active_stack {
+                Some(Color::from(cosmic_theme.accent_text_color()))
+            } else {
+                None
+            };
+
+            widget::container::Style {
+                icon_color: text_color,
+                text_color,
+                background: Some(Background::Color(
+                    if hovered {
+                        cosmic_theme.primary.component.hover_state_color()
+                    } else if selected {
+                        cosmic_theme.primary.component.selected_state_color()
+                    } else {
+                        cosmic_theme.primary.component.base
+                    }
+                    .into(),
+                )),
+                border: Border {
+                    radius: 0.0.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
             }
-            TabBackgroundTheme::ActiveDeactivated => {
-                Self::custom(move |theme| widget::container::Style {
-                    icon_color: None,
-                    text_color: None,
-                    background: Some(Background::Color(
-                        theme.cosmic().primary.component.base.into(),
-                    )),
-                    border: Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                })
-            }
-            TabBackgroundTheme::Default => Self::Transparent,
-        }
+        })
     }
 }
 
@@ -103,6 +113,10 @@ pub trait TabMessage: Clone {
     fn scroll_back() -> Self;
     fn populate_scroll(&mut self, current_offset: AbsoluteOffset) -> Option<AbsoluteOffset>;
     fn scrolled() -> Self;
+}
+
+struct LocalState {
+    hovered: bool,
 }
 
 pub struct Tab<Message: TabMessage> {
@@ -209,7 +223,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             id: self.id,
             idx,
             active: self.active,
-            background: self.background_theme.into(),
+            background: self.background_theme,
             elements: items,
             press_message: self.press_message,
             right_click_message: self.right_click_message,
@@ -228,7 +242,7 @@ pub(super) struct TabInternal<'a, Message: TabMessage> {
     id: Id,
     idx: usize,
     active: bool,
-    background: theme::Container<'a>,
+    background: TabBackgroundTheme,
     elements: Vec<cosmic::Element<'a, Message>>,
     press_message: Option<Message>,
     right_click_message: Option<Message>,
@@ -256,6 +270,10 @@ where
 
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(LocalState { hovered: false })
     }
 
     fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
@@ -332,6 +350,9 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) -> event::Status {
+        let state = tree.state.downcast_mut::<LocalState>();
+        state.hovered = cursor.is_over(layout.bounds());
+
         let status = self
             .elements
             .iter_mut()
@@ -351,7 +372,7 @@ where
             })
             .fold(event::Status::Ignored, event::Status::merge);
 
-        if status == event::Status::Ignored && cursor.is_over(layout.bounds()) {
+        if status == event::Status::Ignored && state.hovered {
             if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
@@ -414,7 +435,10 @@ where
         viewport: &Rectangle,
     ) {
         use cosmic::widget::container::Catalog;
-        let style = theme.style(&self.background);
+        let state = tree.state.downcast_ref::<LocalState>();
+
+        let style = theme.style(&self.background.into_container_theme(state.hovered));
+        let text_color = style.text_color.unwrap_or(renderer_style.text_color);
 
         draw_background(renderer, &style, layout.bounds());
 
@@ -429,8 +453,8 @@ where
                 renderer,
                 theme,
                 &renderer::Style {
-                    icon_color: style.text_color.unwrap_or(renderer_style.text_color),
-                    text_color: style.text_color.unwrap_or(renderer_style.text_color),
+                    icon_color: text_color,
+                    text_color,
                     scale_factor: renderer_style.scale_factor,
                 },
                 layout,
