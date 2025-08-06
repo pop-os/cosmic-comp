@@ -58,6 +58,7 @@ struct TabAnimationState {
 #[derive(Debug, Clone)]
 pub struct State {
     offset_x: Offset,
+    scrolling: bool,
     scroll_animation: Option<ScrollAnimationState>,
     scroll_to: Option<usize>,
     last_state: Option<HashMap<Id, Rectangle>>,
@@ -99,6 +100,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             offset_x: Offset::Absolute(0.),
+            scrolling: false,
             scroll_animation: None,
             scroll_to: None,
             last_state: None,
@@ -342,6 +344,8 @@ where
 
     #[allow(clippy::too_many_lines)]
     fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
+        let state = tree.state.downcast_mut::<State>();
+
         let limits = limits.width(self.width).height(self.height);
 
         // calculate the smallest possible size
@@ -367,8 +371,8 @@ where
                 height: a.height.max(b.height),
             });
         let size = limits.resolve(self.width, self.height, min_size);
-
-        if min_size.width <= size.width {
+        state.scrolling = min_size.width > size.width;
+        if !state.scrolling {
             // we don't need to scroll
 
             // can we make every tab equal weight and keep the active large enough?
@@ -524,8 +528,7 @@ where
         );
         draw_background(renderer, &background_style, bounds);
 
-        let scrolling = content_bounds.width.floor() > bounds.width;
-        if scrolling {
+        if state.scrolling {
             bounds.width -= 64.;
             bounds.x += 30.;
         }
@@ -536,7 +539,7 @@ where
             ..bounds
         };
 
-        if scrolling {
+        if state.scrolling {
             // we have scroll buttons
             for ((scroll, state), layout) in self
                 .elements
@@ -562,7 +565,7 @@ where
                         / TAB_ANIMATION_DURATION.as_millis() as f32;
                     ease(EaseOutCubic, 0.0, 1.0, percentage)
                 } else {
-                    1.0
+                    1.0f32
                 };
 
                 for ((tab, wstate), layout) in self.elements[2..self.elements.len() - 3]
@@ -594,9 +597,9 @@ where
                                 height: layout.bounds().height,
                             });
                         Rectangle {
-                            x: previous.x + (next.x - previous.x) * percentage,
-                            y: previous.y + (next.y - previous.y) * percentage,
-                            width: previous.width + (next.width - previous.width) * percentage,
+                            x: percentage.mul_add(next.x - previous.x, previous.x),
+                            y: percentage.mul_add(next.y - previous.y, previous.y),
+                            width: percentage.mul_add(next.width - previous.width, previous.width),
                             height: next.height,
                         }
                     } else {
@@ -640,7 +643,7 @@ where
             viewport,
         );
 
-        if !scrolling && self.group_focused {
+        if !state.scrolling && self.group_focused {
             // HACK, overdraw our rule at the edges
             self.elements[0].as_widget().draw(
                 &tree.children[2].children[0],
@@ -662,7 +665,7 @@ where
             );
         }
 
-        if scrolling {
+        if state.scrolling {
             // we have scroll buttons
             for ((scroll, state), layout) in self.elements
                 [self.elements.len() - 2..self.elements.len()]
@@ -732,7 +735,6 @@ where
             width: a.width + b.bounds().width,
             height: b.bounds().height,
         });
-        let scrolling = content_bounds.width.floor() > bounds.width;
 
         let current_state = self.elements[2..self.elements.len() - 3]
             .iter()
@@ -781,7 +783,7 @@ where
         };
 
         if unknown_keys || changes.is_some() {
-            if !scrolling || !matches!(changes, Some(Difference::Focus)) {
+            if !state.scrolling || !matches!(changes, Some(Difference::Focus)) {
                 let start_time = Instant::now();
 
                 State::discard_expired_tab_animations(&mut state.tab_animations, start_time);
@@ -798,7 +800,7 @@ where
             *last_state = current_state;
         }
 
-        if scrolling {
+        if state.scrolling {
             bounds.x += 30.;
             bounds.width -= 64.;
         }
@@ -808,7 +810,7 @@ where
             state.scroll_to = Some(idx);
         }
         if let Some(idx) = state.scroll_to.take() {
-            if scrolling {
+            if state.scrolling {
                 let tab_bounds = layout.children().nth(idx + 2).unwrap().bounds();
                 let left_offset = tab_bounds.x - layout.bounds().x - 30.;
                 let right_offset = left_offset + tab_bounds.width + 4.;
@@ -850,7 +852,7 @@ where
         let mut internal_shell = Shell::new(&mut messages);
 
         let len = self.elements.len();
-        let result = if scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
+        let result = if state.scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
             self.elements[0..2]
                 .iter_mut()
                 .zip(&mut tree.children)
@@ -868,7 +870,7 @@ where
                     )
                 })
                 .fold(event::Status::Ignored, event::Status::merge)
-        } else if scrolling
+        } else if state.scrolling
             && cursor
                 .position()
                 .is_some_and(|pos| pos.x >= bounds.x + bounds.width)
@@ -945,9 +947,8 @@ where
             width: a.width + b.bounds().width,
             height: b.bounds().height,
         });
-        let scrolling = content_bounds.width.floor() > bounds.width;
 
-        if scrolling {
+        if state.scrolling {
             bounds.width -= 64.;
             bounds.x += 30.;
         }
@@ -958,7 +959,7 @@ where
             ..bounds
         };
 
-        if scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
+        if state.scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
             self.elements[0..2]
                 .iter()
                 .zip(&tree.children)
@@ -969,7 +970,7 @@ where
                         .mouse_interaction(state, layout, cursor, viewport, renderer)
                 })
                 .max()
-        } else if scrolling
+        } else if state.scrolling
             && cursor
                 .position()
                 .is_some_and(|pos| pos.x >= bounds.x + bounds.width)
