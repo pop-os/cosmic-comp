@@ -164,11 +164,6 @@ impl<Message: TabMessage + 'static> Tab<Message> {
         self
     }
 
-    pub(super) fn non_active(mut self) -> Self {
-        self.active = false;
-        self
-    }
-
     pub(super) fn active(mut self) -> Self {
         self.active = true;
         self
