@@ -1,8 +1,10 @@
+use std::hash::{Hash, Hasher};
+
 use cosmic::{
     font::Font,
     iced::{
         widget::{self, container::draw_background, rule::FillMode},
-        Background,
+        Background, Padding,
     },
     iced_core::{
         alignment, event,
@@ -17,9 +19,11 @@ use cosmic::{
     },
     iced_widget::scrollable::AbsoluteOffset,
     theme,
-    widget::{icon::from_name, Icon},
+    widget::icon,
     Apply,
 };
+
+use crate::shell::CosmicSurface;
 
 use super::tab_text::tab_text;
 
@@ -115,14 +119,47 @@ pub trait TabMessage: Clone {
     fn scrolled() -> Self;
 }
 
+#[derive(Debug, Clone)]
+pub struct Model {
+    pub id: Id,
+    pub app_icon: cosmic::widget::icon::Handle,
+    pub title: String,
+    pub title_hash: u64,
+}
+
+impl Model {
+    pub fn new(id: Id, appid: String, title: String) -> Self {
+        // Pre-emptively cache the hash of each title for more efficient diffing.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        title.hash(&mut hasher);
+
+        Self {
+            id,
+            app_icon: icon::from_name(appid).size(16).handle(),
+            title,
+            title_hash: hasher.finish(),
+        }
+    }
+}
+
+impl From<&CosmicSurface> for Model {
+    fn from(window: &CosmicSurface) -> Self {
+        let user_data = window.user_data();
+        user_data.insert_if_missing(Id::unique);
+        Self::new(
+            user_data.get::<Id>().unwrap().clone(),
+            window.app_id(),
+            window.title(),
+        )
+    }
+}
+
 struct LocalState {
     hovered: bool,
 }
 
-pub struct Tab<Message: TabMessage> {
-    id: Id,
-    app_icon: Icon,
-    title: String,
+pub struct Tab<'a, Message: TabMessage> {
+    model: &'a Model,
     font: Font,
     close_message: Option<Message>,
     press_message: Option<Message>,
@@ -132,12 +169,10 @@ pub struct Tab<Message: TabMessage> {
     active: bool,
 }
 
-impl<Message: TabMessage + 'static> Tab<Message> {
-    pub fn new(title: impl Into<String>, app_id: impl Into<String>, id: Id) -> Self {
+impl<'a, Message: TabMessage + 'static> Tab<'a, Message> {
+    pub fn new(model: &'a Model) -> Self {
         Tab {
-            id,
-            app_icon: from_name(app_id.into()).size(16).icon(),
-            title: title.into(),
+            model,
             font: cosmic::font::default(),
             close_message: None,
             press_message: None,
@@ -183,8 +218,8 @@ impl<Message: TabMessage + 'static> Tab<Message> {
         self
     }
 
-    pub(super) fn internal<'a>(self, idx: usize) -> TabInternal<'a, Message> {
-        let mut close_button = from_name("window-close-symbolic")
+    pub(super) fn internal(self, idx: usize) -> TabInternal<'a, Message> {
+        let mut close_button = icon::from_name("window-close-symbolic")
             .size(16)
             .prefer_svg(true)
             .icon()
@@ -197,14 +232,14 @@ impl<Message: TabMessage + 'static> Tab<Message> {
 
         let items = vec![
             widget::vertical_rule(4).class(self.rule_theme).into(),
-            self.app_icon
+            cosmic::widget::icon(self.model.app_icon.clone())
                 .clone()
                 .apply(widget::container)
                 .width(Length::Shrink)
                 .padding([2, 4, 2, 8])
                 .center_y(Length::Fill)
                 .into(),
-            tab_text(self.title, self.active)
+            tab_text(&self.model, self.active)
                 .font(self.font)
                 .font_size(14.0)
                 .height(Length::Fill)
@@ -220,7 +255,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
         ];
 
         TabInternal {
-            id: self.id,
+            id: self.model.id.clone(),
             idx,
             active: self.active,
             background: self.background_theme,
@@ -299,6 +334,7 @@ where
             .min_height(size.height)
             .width(size.width)
             .height(size.height);
+
         cosmic::iced_core::layout::flex::resolve(
             cosmic::iced_core::layout::flex::Axis::Horizontal,
             renderer,

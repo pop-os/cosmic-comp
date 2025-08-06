@@ -13,9 +13,11 @@ use cosmic::{
     },
 };
 
+use super::tab::Model;
+
 /// Text in a stack tab with an overflow gradient.
-pub fn tab_text(text: String, selected: bool) -> TabText {
-    TabText::new(text, selected)
+pub fn tab_text(model: &Model, selected: bool) -> TabText {
+    TabText::new(model, selected)
 }
 
 struct LocalState {
@@ -25,8 +27,8 @@ struct LocalState {
 }
 
 /// Text in a stack tab with an overflow gradient.
-pub struct TabText {
-    text: String,
+pub struct TabText<'a> {
+    model: &'a Model,
     font: cosmic::font::Font,
     font_size: f32,
     selected: bool,
@@ -34,15 +36,15 @@ pub struct TabText {
     width: Length,
 }
 
-impl TabText {
-    pub fn new(text: String, selected: bool) -> Self {
+impl<'a> TabText<'a> {
+    pub fn new(model: &'a Model, selected: bool) -> Self {
         TabText {
             width: Length::Shrink,
             height: Length::Shrink,
             font: cosmic::font::default(),
             font_size: 14.0,
             selected,
-            text,
+            model,
         }
     }
 
@@ -70,14 +72,14 @@ impl TabText {
 
     fn create_hash(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.text.hash(&mut hasher);
+        self.model.title_hash.hash(&mut hasher);
         self.selected.hash(&mut hasher);
         hasher.finish()
     }
 
     fn create_paragraph(&self) -> <cosmic::Renderer as TextRenderer>::Paragraph {
         <cosmic::Renderer as TextRenderer>::Paragraph::with_text(Text {
-            content: &self.text,
+            content: &self.model.title,
             size: cosmic::iced_core::Pixels(self.font_size),
             bounds: Size::INFINITY,
             font: self.font,
@@ -90,7 +92,7 @@ impl TabText {
     }
 }
 
-impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
+impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText<'a> {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<LocalState>()
     }
@@ -204,8 +206,8 @@ impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
     }
 }
 
-impl<Message: 'static> From<TabText> for cosmic::Element<'_, Message> {
-    fn from(value: TabText) -> Self {
+impl<'a, Message: 'static> From<TabText<'a>> for cosmic::Element<'a, Message> {
+    fn from(value: TabText<'a>) -> Self {
         Self::new(value)
     }
 }
