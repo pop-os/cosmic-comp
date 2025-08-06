@@ -92,6 +92,7 @@ impl fmt::Debug for CosmicStack {
 #[derive(Debug, Clone)]
 pub struct CosmicStackInternal {
     windows: Arc<Mutex<Vec<CosmicSurface>>>,
+    tab_models: Arc<[tab::Model]>,
     active: Arc<AtomicUsize>,
     activated: Arc<AtomicBool>,
     group_focused: Arc<AtomicBool>,
@@ -132,7 +133,11 @@ impl CosmicStack {
         handle: LoopHandle<'static, crate::state::State>,
         theme: cosmic::Theme,
     ) -> CosmicStack {
-        let windows = windows.map(Into::into).collect::<Vec<_>>();
+        let (tab_models, windows) = windows
+            .map(Into::into)
+            .map(|window| (tab::Model::from(&window), window))
+            .collect::<(Vec<_>, Vec<_>)>();
+
         assert!(!windows.is_empty());
 
         for window in &windows {
@@ -145,6 +150,7 @@ impl CosmicStack {
         CosmicStack(IcedElement::new(
             CosmicStackInternal {
                 windows: Arc::new(Mutex::new(windows)),
+                tab_models: Arc::from(tab_models),
                 active: Arc::new(AtomicUsize::new(0)),
                 activated: Arc::new(AtomicBool::new(false)),
                 group_focused: Arc::new(AtomicBool::new(false)),
@@ -795,6 +801,7 @@ pub enum Message {
     PotentialTabDragStart(usize),
     Activate(usize),
     Close(usize),
+    Refresh,
     ScrollForward,
     ScrollBack,
     Scrolled,
@@ -842,6 +849,15 @@ impl Program for CosmicStackInternal {
         last_seat: Option<&(Seat<State>, Serial)>,
     ) -> Task<Self::Message> {
         match message {
+            Message::Refresh => {
+                self.tab_models = self
+                    .windows
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(tab::Model::from)
+                    .collect();
+            }
             Message::DragStart => {
                 if let Some((seat, serial)) = last_seat.cloned() {
                     let active = self.active.load(Ordering::SeqCst);
@@ -1001,12 +1017,14 @@ impl Program for CosmicStackInternal {
     }
 
     fn view(&self) -> CosmicElement<'_, Self::Message> {
-        let windows = self.windows.lock().unwrap();
         if self.geometry.lock().unwrap().is_none() {
             return iced_widget::row(Vec::new()).into();
         };
+
         let active = self.active.load(Ordering::SeqCst);
+        let activated = self.activated.load(Ordering::SeqCst);
         let group_focused = self.group_focused.load(Ordering::SeqCst);
+        let maximized = self.windows.lock().unwrap()[active].is_maximized(false);
 
         let elements = vec![
             cosmic_widget::icon::from_name("window-stack-symbolic")
@@ -1033,20 +1051,14 @@ impl Program for CosmicStackInternal {
                 .into(),
             CosmicElement::new(
                 Tabs::new(
-                    windows.iter().enumerate().map(|(i, w)| {
-                        let user_data = w.user_data();
-                        user_data.insert_if_missing(Id::unique);
-                        Tab::new(
-                            w.title(),
-                            w.app_id(),
-                            user_data.get::<Id>().unwrap().clone(),
-                        )
-                        .on_press(Message::PotentialTabDragStart(i))
-                        .on_right_click(Message::TabMenu(i))
-                        .on_close(Message::Close(i))
+                    self.tab_models.iter().enumerate().map(|(i, tab)| {
+                        Tab::new(tab)
+                            .on_press(Message::PotentialTabDragStart(i))
+                            .on_right_click(Message::TabMenu(i))
+                            .on_close(Message::Close(i))
                     }),
                     active,
-                    windows[active].is_activated(false),
+                    activated,
                     group_focused,
                 )
                 .id(SCROLLABLE_ID.clone())
@@ -1068,7 +1080,7 @@ impl Program for CosmicStackInternal {
                 .into(),
         ];
 
-        let radius = if windows[active].is_maximized(false) {
+        let radius = if maximized {
             Radius::from(0.0)
         } else {
             Radius::from([8.0, 8.0, 0.0, 0.0])
@@ -1255,6 +1267,8 @@ impl SpaceElement for CosmicStack {
                 SpaceElement::refresh(w)
             });
         });
+
+        self.0.queue_message(Message::Refresh);
         SpaceElement::refresh(&self.0);
     }
 }

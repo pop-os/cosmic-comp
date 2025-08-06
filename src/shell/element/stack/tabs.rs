@@ -132,7 +132,7 @@ where
     Message: TabMessage + 'static,
 {
     pub fn new(
-        tabs: impl ExactSizeIterator<Item = Tab<Message>>,
+        tabs: impl ExactSizeIterator<Item = Tab<'a, Message>>,
         active: usize,
         activated: bool,
         group_focused: bool,
