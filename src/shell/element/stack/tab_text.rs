@@ -142,49 +142,65 @@ impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
         renderer.with_layer(bounds, |renderer| {
             renderer.fill_paragraph(
                 &state.paragraph,
-                Point::new(bounds.x, bounds.y + bounds.height / 2.0),
+                Point::new(bounds.x, bounds.height.mul_add(0.5, bounds.y)),
                 style.text_color,
                 bounds,
             );
+
+            renderer.with_layer(bounds, |renderer| {
+                if state.overflowed {
+                    let overlay = match (theme.cosmic().is_dark, self.selected) {
+                        (true, false) => Color {
+                            a: 1.0,
+                            r: 0.149,
+                            g: 0.149,
+                            b: 0.149,
+                        },
+                        (true, true) => Color {
+                            a: 1.0,
+                            r: 0.196,
+                            g: 0.196,
+                            b: 0.196,
+                        },
+                        (false, false) => Color {
+                            a: 1.0,
+                            r: 0.894,
+                            g: 0.894,
+                            b: 0.894,
+                        },
+                        (false, true) => Color {
+                            a: 1.0,
+                            r: 0.831,
+                            g: 0.831,
+                            b: 0.831,
+                        },
+                    };
+
+                    let transparent = Color { a: 0.0, ..overlay };
+
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: (bounds.x + bounds.width - 27.).max(bounds.x),
+                                width: 27.0_f32.min(bounds.width),
+                                ..bounds
+                            },
+                            border: Border {
+                                radius: 0.0.into(),
+                                width: 0.0,
+                                color: Color::TRANSPARENT,
+                            },
+                            shadow: Default::default(),
+                        },
+                        Background::Gradient(Gradient::Linear(
+                            gradient::Linear::new(Degrees(90.))
+                                .add_stop(0.0, transparent)
+                                .add_stop(1.0, overlay),
+                        )),
+                    );
+                }
+            });
         });
-
-        if state.overflowed {
-            let background = if self.selected {
-                theme
-                    .cosmic()
-                    .primary
-                    .component
-                    .selected_state_color()
-                    .into()
-            } else {
-                theme.cosmic().primary_container_color().into()
-            };
-            let transparent = Color {
-                a: 0.0,
-                ..background
-            };
-
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: (bounds.x + bounds.width - 24.).max(bounds.x),
-                        width: 24.0_f32.min(bounds.width),
-                        ..bounds
-                    },
-                    border: Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                },
-                Background::Gradient(Gradient::Linear(
-                    gradient::Linear::new(Degrees(90.))
-                        .add_stop(0.0, transparent)
-                        .add_stop(1.0, background),
-                )),
-            );
-        }
     }
 }
 
