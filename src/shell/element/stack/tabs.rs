@@ -137,14 +137,14 @@ where
         activated: bool,
         group_focused: bool,
     ) -> Self {
-        let tabs = tabs.into_iter().enumerate().map(|(i, tab)| {
+        let tabs = tabs.into_iter().enumerate().map(|(i, mut tab)| {
             let rule = if activated {
                 TabRuleTheme::ActiveActivated
             } else {
                 TabRuleTheme::ActiveDeactivated
             };
 
-            let tab = if i == active {
+            tab = if i == active {
                 tab.rule_style(rule)
                     .background_style(if activated {
                         TabBackgroundTheme::ActiveActivated
@@ -154,9 +154,9 @@ where
                     .font(cosmic::font::semibold())
                     .active()
             } else if i.checked_sub(1) == Some(active) {
-                tab.rule_style(rule).non_active()
+                tab.rule_style(rule)
             } else {
-                tab.non_active()
+                tab
             };
 
             Element::new(tab.internal(i))
