@@ -7,7 +7,7 @@ use crate::{
             cosmic_keystate_from_smithay, cosmic_modifiers_eq_smithay,
             cosmic_modifiers_from_smithay,
         },
-        Action, Config, OutputConfig, OutputState, PrivateAction,
+        Action, Config, OutputState, PrivateAction,
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
@@ -1511,26 +1511,28 @@ impl State {
                 if event.switch() == Some(Switch::Lid) {
                     let outputs = self.backend.lock().all_outputs();
                     if let Some(internal) = outputs.into_iter().find(|o| o.is_internal()) {
-                        let config = internal.user_data().get::<RefCell<OutputConfig>>().unwrap();
-                        let enabled = config.borrow().enabled.clone();
-                        if enabled != OutputState::Disabled && event.state() == SwitchState::On {
-                            config.borrow_mut().enabled = OutputState::Disabled;
+                        let mut config = internal.config_mut();
+                        if config.enabled != OutputState::Disabled
+                            && event.state() == SwitchState::On
+                        {
+                            config.enabled = OutputState::Disabled;
                             self.common
                                 .output_configuration_state
                                 .remove_heads(std::iter::once(&internal));
-                        } else if enabled == OutputState::Disabled
+                        } else if config.enabled == OutputState::Disabled
                             && event.state() == SwitchState::Off
                         {
                             // If it was previously mirrored, `read_outputs` will restore that correctly.
                             // But if we don't have a config for *some* reason or reading it fails,
                             // we don't want to write out `Disabled` accidentally.
-                            config.borrow_mut().enabled = OutputState::Enabled;
+                            config.enabled = OutputState::Enabled;
                             self.common
                                 .output_configuration_state
                                 .add_heads(std::iter::once(&internal));
                         } else {
                             return;
                         }
+                        std::mem::drop(config);
 
                         self.common.config.read_outputs(
                             &mut self.common.output_configuration_state,
