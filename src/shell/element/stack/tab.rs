@@ -201,7 +201,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
                 .clone()
                 .apply(widget::container)
                 .width(Length::Shrink)
-                .padding([2, 4])
+                .padding([2, 4, 2, 8])
                 .center_y(Length::Fill)
                 .into(),
             tab_text(self.title, self.active)
@@ -213,7 +213,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             close_button
                 .apply(widget::container)
                 .width(Length::Shrink)
-                .padding([2, 4])
+                .padding([2, 12, 2, 4])
                 .center_y(Length::Fill)
                 .align_x(alignment::Horizontal::Right)
                 .into(),
@@ -305,8 +305,8 @@ where
             &limits,
             Length::Fill,
             Length::Fill,
-            0.into(),
-            8.,
+            Padding::ZERO,
+            0.,
             cosmic::iced::Alignment::Center,
             if size.width >= CLOSE_BREAKPOINT as f32 {
                 &self.elements
