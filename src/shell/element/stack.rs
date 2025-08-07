@@ -108,6 +108,77 @@ pub struct CosmicStackInternal {
 }
 
 impl CosmicStackInternal {
+    pub fn set_previous_index(&self, moved_into: Option<&Seat<State>>) -> Option<usize> {
+        let last_mod_serial = moved_into.and_then(|seat| seat.last_modifier_change());
+        let mut prev_idx = self.previous_index.lock().unwrap();
+        if !prev_idx.is_some_and(|(serial, _)| Some(serial) == last_mod_serial) {
+            *prev_idx = last_mod_serial.map(|s| (s, self.active.load(Ordering::SeqCst)));
+        }
+        prev_idx.map(|(_, idx)| idx)
+    }
+
+    #[must_use]
+    pub fn add_window(&self, idx: Option<usize>, window: CosmicSurface) -> Message {
+        window.send_configure();
+        self.scroll_to_focus.store(true, Ordering::SeqCst);
+        let model = tab::Model::from(&window);
+        let mut windows = self.windows.lock().unwrap();
+        if let Some(idx) = idx {
+            windows.insert(idx, window);
+            let prev_active = self.active.swap(idx, Ordering::SeqCst);
+            if prev_active == idx {
+                self.reenter.store(true, Ordering::SeqCst);
+                self.previous_keyboard.store(prev_active, Ordering::SeqCst);
+            }
+
+            Message::TabInsert(idx, model)
+        } else {
+            windows.push(window);
+            self.active.store(windows.len() - 1, Ordering::SeqCst);
+            Message::TabAdd(model)
+        }
+    }
+
+    #[must_use]
+    pub fn remove_window(&self, idx: usize) -> Option<CosmicSurface> {
+        let mut windows = self.windows.lock().unwrap();
+
+        if windows.len() == 1 {
+            self.override_alive.store(false, Ordering::SeqCst);
+            let window = &windows[0];
+            window.try_force_undecorated(false);
+            window.set_tiled(false);
+            return None;
+        }
+
+        if windows.len() <= idx {
+            return None;
+        }
+
+        if idx == self.active.load(Ordering::SeqCst) {
+            self.reenter.store(true, Ordering::SeqCst);
+        }
+
+        let window = windows.remove(idx);
+        window.try_force_undecorated(false);
+        window.set_tiled(false);
+
+        _ = self
+            .active
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
+                if active == idx {
+                    self.scroll_to_focus.store(true, Ordering::SeqCst);
+                    Some(windows.len() - 1)
+                } else if idx < active {
+                    Some(active - 1)
+                } else {
+                    None
+                }
+            });
+
+        Some(window)
+    }
+
     pub fn swap_focus(&self, focus: Option<Focus>) -> Option<Focus> {
         let value = focus.map_or(0, |x| x as u8);
         unsafe { Focus::from_u8(self.pointer_entered.swap(value, Ordering::SeqCst)) }
@@ -179,90 +250,59 @@ impl CosmicStack {
         let window = window.into();
         window.try_force_undecorated(true);
         window.set_tiled(true);
-        self.0.with_program(|p| {
-            let last_mod_serial = moved_into.and_then(|seat| seat.last_modifier_change());
-            let mut prev_idx = p.previous_index.lock().unwrap();
-            if !prev_idx.is_some_and(|(serial, _)| Some(serial) == last_mod_serial) {
-                *prev_idx = last_mod_serial.map(|s| (s, p.active.load(Ordering::SeqCst)));
-            }
+        let message = self.0.with_program(|p| {
+            p.set_previous_index(moved_into);
 
             if let Some(mut geo) = p.geometry.lock().unwrap().clone() {
                 geo.loc.y += TAB_HEIGHT;
                 geo.size.h -= TAB_HEIGHT;
                 window.set_geometry(geo, TAB_HEIGHT as u32);
             }
-            window.send_configure();
-            if let Some(idx) = idx {
-                p.windows.lock().unwrap().insert(idx, window);
-                let old_idx = p.active.swap(idx, Ordering::SeqCst);
-                if old_idx == idx {
-                    p.reenter.store(true, Ordering::SeqCst);
-                    p.previous_keyboard.store(old_idx, Ordering::SeqCst);
-                }
-            } else {
-                let mut windows = p.windows.lock().unwrap();
-                windows.push(window);
-                p.active.store(windows.len() - 1, Ordering::SeqCst);
-            }
-            p.scroll_to_focus.store(true, Ordering::SeqCst);
+
+            p.add_window(idx, window)
         });
+
+        self.0.queue_message(message);
         self.0
             .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
-        self.0.force_redraw()
     }
 
     pub fn remove_window(&self, window: &CosmicSurface) {
-        self.0.with_program(|p| {
-            let mut windows = p.windows.lock().unwrap();
-            if windows.len() == 1 {
-                p.override_alive.store(false, Ordering::SeqCst);
-                let window = windows.get(0).unwrap();
-                window.try_force_undecorated(false);
-                window.set_tiled(false);
-                return;
-            }
-
-            let Some(idx) = windows.iter().position(|w| w == window) else {
-                return;
-            };
-            if idx == p.active.load(Ordering::SeqCst) {
-                p.reenter.store(true, Ordering::SeqCst);
-            }
-            let window = windows.remove(idx);
-            window.try_force_undecorated(false);
-            window.set_tiled(false);
-
-            p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+        let message = self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let idx = windows.iter().position(|w| w == window)?;
+            drop(windows);
+            p.remove_window(idx)
+                .is_some()
+                .then(|| Message::TabRemove(idx))
         });
+
+        if let Some(message) = message {
+            self.0.queue_message(message);
+        }
+
         self.0
             .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
         self.0.force_redraw()
     }
 
     pub fn remove_idx(&self, idx: usize) -> Option<CosmicSurface> {
-        let window = self.0.with_program(|p| {
-            let mut windows = p.windows.lock().unwrap();
-            if windows.len() == 1 {
-                p.override_alive.store(false, Ordering::SeqCst);
-                let window = windows.get(0).unwrap();
-                window.try_force_undecorated(false);
-                window.set_tiled(false);
-                return Some(window.clone());
+        let (message, window) = self.0.with_program(|p| match p.remove_window(idx) {
+            Some(window) => (Some(Message::TabRemove(idx)), Some(window)),
+            None => {
+                let windows = p.windows.lock().unwrap();
+                if windows.len() == 1 {
+                    (None, Some(windows[0].clone()))
+                } else {
+                    (None, None)
+                }
             }
-            if windows.len() <= idx {
-                return None;
-            }
-            if idx == p.active.load(Ordering::SeqCst) {
-                p.reenter.store(true, Ordering::SeqCst);
-            }
-            let window = windows.remove(idx);
-            window.try_force_undecorated(false);
-            window.set_tiled(false);
-
-            p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
-
-            Some(window)
         });
+
+        if let Some(message) = message {
+            self.0.queue_message(message);
+        }
+
         self.0
             .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
         self.0.force_redraw();
@@ -444,6 +484,7 @@ impl CosmicStack {
         });
 
         if !matches!(result, MoveResult::Default) {
+            self.0.queue_message(Message::Refresh);
             self.0
                 .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
         }
@@ -793,11 +834,15 @@ impl CosmicStack {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Message {
     DragStart,
     Menu,
+    TabAdd(tab::Model),
     TabMenu(usize),
+    TabInsert(usize, tab::Model),
+    TabRemove(usize),
+    TabSwap(usize, usize),
     PotentialTabDragStart(usize),
     Activate(usize),
     Close(usize),
@@ -967,6 +1012,28 @@ impl Program for CosmicStackInternal {
                         });
                     }
                 }
+            }
+            Message::TabAdd(model) => {
+                let mut tab_models = Vec::with_capacity(self.tab_models.len() + 1);
+                tab_models.extend_from_slice(&self.tab_models);
+                tab_models.push(model);
+                self.tab_models = tab_models.into()
+            }
+            Message::TabInsert(idx, model) => {
+                let mut tab_models = Vec::with_capacity(self.tab_models.len() + 1);
+                tab_models.extend_from_slice(&self.tab_models);
+                tab_models.insert(idx, model);
+                self.tab_models = tab_models.into()
+            }
+            Message::TabRemove(idx) => {
+                let mut tab_models = Vec::from(self.tab_models.as_ref());
+                _ = tab_models.remove(idx);
+                self.tab_models = tab_models.into();
+            }
+            Message::TabSwap(from, to) => {
+                let mut tab_models = Vec::from(self.tab_models.as_ref());
+                tab_models.swap(from, to);
+                self.tab_models = tab_models.into();
             }
             Message::TabMenu(idx) => {
                 if let Some((seat, serial)) = last_seat.cloned() {
