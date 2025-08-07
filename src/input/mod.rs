@@ -1521,6 +1521,10 @@ impl State {
                         } else if enabled == OutputState::Disabled
                             && event.state() == SwitchState::Off
                         {
+                            // If it was previously mirrored, `read_outputs` will restore that correctly.
+                            // But if we don't have a config for *some* reason or reading it fails,
+                            // we don't want to write out `Disabled` accidentally.
+                            config.borrow_mut().enabled = OutputState::Enabled;
                             self.common
                                 .output_configuration_state
                                 .add_heads(std::iter::once(&internal));
