@@ -763,44 +763,11 @@ impl XwmHandler for State {
         });
     }
 
-    fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
-        let mut shell = self.common.shell.write();
-        if let Some(window) = shell
-            .pending_windows
-            .iter()
-            .find(|pending| pending.surface.x11_surface() == Some(&surface))
-            .map(|pending| pending.surface.clone())
-        {
-            if !shell
-                .pending_activations
-                .contains_key(&crate::shell::ActivationKey::X11(surface.window_id()))
-            {
-                if let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id()) {
-                    if let Some(context) = self
-                        .common
-                        .xdg_activation_state
-                        .data_for_token(&XdgActivationToken::from(startup_id))
-                        .and_then(|data| data.user_data.get::<ActivationContext>())
-                    {
-                        shell.pending_activations.insert(
-                            crate::shell::ActivationKey::X11(surface.window_id()),
-                            context.clone(),
-                        );
-                    }
-                }
-            }
-            let res = shell.map_window(
-                &window,
-                &mut self.common.toplevel_info_state,
-                &mut self.common.workspace_state,
-                &self.common.event_loop_handle,
-            );
-            if let Some(target) = res {
-                let seat = shell.seats.last_active().clone();
-                std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, false);
-            }
-        }
+    fn map_window_notify(&mut self, _xwm: XwmId, _surface: X11Surface) {
+        // handled in `XWaylandShellHandler::surface_associated`, so that we correctly
+        // send the `wl_keyboard::enter`-event, once we actually have a wl_surface to send it to.
+        //
+        // Only mapped x11 windows will have an associated wl_surface
     }
 
     fn mapped_override_redirect_window(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -836,6 +803,9 @@ impl XwmHandler for State {
         for output in outputs.iter() {
             shell.refresh_active_space(output);
         }
+        std::mem::drop(shell);
+        // Make sure we send the `wl_keyboard::leave`-event, while the wl_surface is still associated.
+        Common::refresh_focus(self);
 
         for output in outputs.into_iter() {
             self.backend.schedule_render(&output);
