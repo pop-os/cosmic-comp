@@ -321,12 +321,7 @@ impl CosmicStack {
         swap: Option<NodeDesc>,
     ) -> bool {
         let (result, update) = self.0.with_program(|p| {
-            let last_mod_serial = seat.last_modifier_change();
-            let mut prev_idx = p.previous_index.lock().unwrap();
-            if !prev_idx.is_some_and(|(serial, _)| Some(serial) == last_mod_serial) {
-                *prev_idx = last_mod_serial.map(|s| (s, p.active.load(Ordering::SeqCst)));
-            }
-
+            let prev_idx = p.set_previous_index(Some(seat));
             match direction {
                 FocusDirection::Left => {
                     if !p.group_focused.load(Ordering::SeqCst) {
@@ -340,9 +335,8 @@ impl CosmicStack {
                             p.scroll_to_focus.store(true, Ordering::SeqCst);
                             (true, true)
                         } else {
-                            let new = prev_idx.unwrap().1;
-                            let old = p.active.swap(new, Ordering::SeqCst);
-                            if old != new {
+                            let old = p.active.swap(0, Ordering::SeqCst);
+                            if old != 0 {
                                 p.previous_keyboard.store(old, Ordering::SeqCst);
                                 p.scroll_to_focus.store(true, Ordering::SeqCst);
                                 (false, true)
@@ -371,9 +365,8 @@ impl CosmicStack {
                             p.scroll_to_focus.store(true, Ordering::SeqCst);
                             (true, true)
                         } else {
-                            let new = prev_idx.unwrap().1;
-                            let old = p.active.swap(new, Ordering::SeqCst);
-                            if old != new {
+                            let old = p.active.swap(max - 1, Ordering::SeqCst);
+                            if old != max - 1 {
                                 p.previous_keyboard.store(old, Ordering::SeqCst);
                                 p.scroll_to_focus.store(true, Ordering::SeqCst);
                                 (false, true)
@@ -415,12 +408,9 @@ impl CosmicStack {
                 }
                 FocusDirection::Up | FocusDirection::Down => {
                     if !p.group_focused.load(Ordering::SeqCst) {
-                        let new = prev_idx.unwrap().1;
-                        let old = p.active.swap(new, Ordering::SeqCst);
-                        if old != new {
-                            p.previous_keyboard.store(old, Ordering::SeqCst);
-                            p.scroll_to_focus.store(true, Ordering::SeqCst);
-                        }
+                        p.previous_keyboard
+                            .store(prev_idx.unwrap(), Ordering::SeqCst);
+                        p.scroll_to_focus.store(true, Ordering::SeqCst);
                         (false, true)
                     } else {
                         (false, false)
@@ -441,8 +431,6 @@ impl CosmicStack {
     pub fn handle_move(&self, direction: Direction) -> MoveResult {
         let loop_handle = self.0.loop_handle();
         let result = self.0.with_program(|p| {
-            let prev_idx = p.previous_index.lock().unwrap();
-
             if p.group_focused.load(Ordering::SeqCst) {
                 return MoveResult::Default;
             }
@@ -450,10 +438,10 @@ impl CosmicStack {
             let active = p.active.load(Ordering::SeqCst);
             let mut windows = p.windows.lock().unwrap();
 
-            let next = match direction {
-                Direction::Left => active.checked_sub(1),
-                Direction::Right => (active + 1 < windows.len()).then_some(active + 1),
-                Direction::Down | Direction::Up => None,
+            let (next, moved_horizontally) = match direction {
+                Direction::Left => (active.checked_sub(1), true),
+                Direction::Right => ((active + 1 < windows.len()).then_some(active + 1), true),
+                Direction::Down | Direction::Up => (None, false),
             };
 
             if let Some(val) = next {
@@ -466,19 +454,19 @@ impl CosmicStack {
                 if windows.len() == 1 {
                     return MoveResult::Default;
                 }
+
                 let window = windows.remove(active);
-                if let Some(prev_idx) = prev_idx
-                    .map(|(_, idx)| idx)
-                    .filter(|idx| *idx < windows.len())
-                {
-                    p.active.store(prev_idx, Ordering::SeqCst);
-                    p.scroll_to_focus.store(true, Ordering::SeqCst);
-                } else if active == windows.len() {
-                    p.active.store(active - 1, Ordering::SeqCst);
-                    p.scroll_to_focus.store(true, Ordering::SeqCst);
-                }
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
+
+                let active = moved_horizontally
+                    .then(|| if active == 0 { 0 } else { windows.len() - 1 })
+                    .unwrap_or_else(|| active.checked_sub(1).unwrap_or(0));
+
+                p.active.store(active, Ordering::SeqCst);
+                p.scroll_to_focus.store(true, Ordering::SeqCst);
+                let mut prev_idx = p.previous_index.lock().unwrap();
+                *prev_idx = prev_idx.map(|(s, _)| (s, active));
 
                 MoveResult::MoveOut(window, loop_handle)
             }
