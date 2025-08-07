@@ -479,7 +479,24 @@ impl Config {
             .map(Into::<crate::config::OutputInfo>::into)
             .collect::<Vec<_>>();
         infos.sort();
-        if let Some(configs) = self.dynamic_conf.outputs().config.get(&infos).cloned() {
+        if let Some(configs) = self
+            .dynamic_conf
+            .outputs()
+            .config
+            .get(&infos)
+            .filter(|configs| {
+                if configs
+                    .iter()
+                    .all(|config| config.enabled == OutputState::Disabled)
+                {
+                    error!("Broken config, all outputs disabled. Resetting...");
+                    false
+                } else {
+                    true
+                }
+            })
+            .cloned()
+        {
             let known_good_configs = outputs
                 .iter()
                 .map(|output| {
