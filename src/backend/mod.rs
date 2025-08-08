@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::State;
+use crate::wayland::protocols::a11y::A11yHandler;
+use crate::{config::ScreenFilter, state::State};
 use anyhow::{anyhow, Context, Result};
 use cosmic_comp_config::NumlockState;
+use cosmic_config::CosmicConfigEntry;
+use cosmic_settings_daemon_config::greeter;
 use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
 use tracing::{info, warn};
 
@@ -69,6 +72,37 @@ pub fn init_backend_auto(
             .write()
             .seats
             .add_seat(initial_seat.clone());
+
+        let helper = greeter::GreeterAccessibilityState::config()?;
+        let greeter_state = match greeter::GreeterAccessibilityState::get_entry(&helper) {
+            Ok(s) => s,
+            Err((errs, s)) => {
+                for err in errs {
+                    tracing::error!("Error loading greeter state: {err:?}");
+                }
+                s
+            }
+        };
+
+        if let Some(magnifier) = greeter_state.magnifier {
+            let mut zoom = state.common.config.cosmic_conf.accessibility_zoom;
+
+            zoom.start_on_login = magnifier;
+            if let Err(err) = state
+                .common
+                .config
+                .cosmic_conf
+                .set_accessibility_zoom(&state.common.config.cosmic_helper, zoom)
+            {
+                tracing::error!("Failed to set screen filter: {err:?}");
+            }
+        }
+
+        if let Some(inverted) = greeter_state.invert_colors {
+            if inverted != state.a11y_state().screen_inverted() {
+                state.request_screen_invert(inverted);
+            }
+        }
 
         if state
             .common

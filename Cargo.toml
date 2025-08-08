@@ -20,6 +20,7 @@ cosmic-comp-config = {path = "cosmic-comp-config", features = ["libdisplay-info"
 cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
 cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", rev = "e706814", default-features = false, features = ["server"]}
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
+cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", branch = "greeter", features = ["greeter"] }
 cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = ["shape-run-cache"] }
 libdisplay-info = "0.2.0"
 egui = {version = "0.31.0", optional = true}
