@@ -81,6 +81,10 @@ impl A11yState {
         self.global.clone()
     }
 
+    pub fn screen_inverted(&self) -> bool {
+        self.screen_inverted
+    }
+
     pub fn set_screen_magnifier(&mut self, enabled: bool) {
         self.magnifier_state = enabled;
 
