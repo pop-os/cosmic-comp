@@ -52,6 +52,8 @@ pub struct CosmicCompConfig {
     pub xwayland_eavesdropping: XwaylandEavesdropping,
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
+    /// How far the pointer can travel before it's considered as moved
+    pub pointer_moved_epsilon: u32,
     pub accessibility_zoom: ZoomConfig,
 }
 
@@ -86,6 +88,7 @@ impl Default for CosmicCompConfig {
             descale_xwayland: XwaylandDescaling::Fractional,
             xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
+            pointer_moved_epsilon: 10,
             accessibility_zoom: ZoomConfig::default(),
         }
     }

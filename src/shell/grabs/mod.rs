@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use cosmic_settings_config::shortcuts;
 use smithay::{
     input::{
@@ -65,6 +67,176 @@ impl GrabStartData {
 pub enum ReleaseMode {
     Click,
     NoMouseButtons,
+}
+
+#[derive(Debug, Clone)]
+pub struct DistanceSwitchGrab<Moved: FnOnce(&mut State), Unmoved: FnOnce(&mut State)> {
+    pub moved: Option<Moved>,
+    pub unmoved: Option<Unmoved>,
+    pub start: GrabStartData,
+    pub pointer_moved_epsilon: u32,
+}
+impl<Moved: Send + 'static + FnOnce(&mut State), Unmoved: Send + 'static + FnOnce(&mut State)>
+    PointerGrab<State> for DistanceSwitchGrab<Moved, Unmoved>
+{
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        let start = self.start.location();
+        let current = event.location;
+
+        let x = start.x - current.x;
+        let y = start.y - current.y;
+
+        let distance = ((x * x) + (y * y)).sqrt();
+        if distance > self.pointer_moved_epsilon as f64 {
+            drop(data.common.shell.try_write().unwrap());
+            self.moved.take().unwrap()(data);
+        } else {
+            handle.motion(data, focus, event)
+        }
+    }
+
+    fn relative_motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        focus: Option<(
+            <State as smithay::input::SeatHandler>::PointerFocus,
+            Point<f64, Logical>,
+        )>,
+        event: &RelativeMotionEvent,
+    ) {
+        handle.relative_motion(data, focus, event)
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &ButtonEvent,
+    ) {
+        handle.button(data, event)
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        details: AxisFrame,
+    ) {
+        handle.axis(data, details)
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
+        handle.frame(data)
+    }
+
+    fn gesture_swipe_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        handle.gesture_swipe_begin(data, event)
+    }
+
+    fn gesture_swipe_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        handle.gesture_swipe_update(data, event)
+    }
+
+    fn gesture_swipe_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeEndEvent,
+    ) {
+        handle.gesture_swipe_end(data, event)
+    }
+
+    fn gesture_pinch_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchBeginEvent,
+    ) {
+        handle.gesture_pinch_begin(data, event)
+    }
+
+    fn gesture_pinch_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        handle.gesture_pinch_update(data, event)
+    }
+
+    fn gesture_pinch_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchEndEvent,
+    ) {
+        handle.gesture_pinch_end(data, event)
+    }
+
+    fn gesture_hold_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldBeginEvent,
+    ) {
+        handle.gesture_hold_begin(data, event)
+    }
+
+    fn gesture_hold_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldEndEvent,
+    ) {
+        handle.gesture_hold_end(data, event)
+    }
+
+    fn start_data(&self) -> &PointerGrabStartData<State> {
+        match &self.start {
+            GrabStartData::Touch(_) => unreachable!(),
+            GrabStartData::Pointer(p) => p,
+        }
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        if self.moved.is_some() {
+            self.unmoved.take().unwrap()(data);
+        }
+        _ = data;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UngrabOnPointerUp(Cell<bool>);
+impl UngrabOnPointerUp {
+    pub fn new() -> Self {
+        Self(Cell::new(false))
+    }
+
+    pub fn get(&self) -> bool {
+        self.0.get()
+    }
+
+    pub fn set(&self, ungrab: bool) {
+        self.0.set(ungrab);
+    }
 }
 
 mod menu;
