@@ -148,6 +148,7 @@ pub fn init_backend(
         subpixel: Subpixel::Unknown,
         make: "COSMIC".to_string(),
         model: name.clone(),
+        serial_number: "Unknown".to_string(),
     };
     let mode = Mode {
         size: (size.w, size.h).into(),

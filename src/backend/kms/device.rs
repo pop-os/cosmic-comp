@@ -949,6 +949,10 @@ fn create_output_for_conn(drm: &mut DrmDevice, conn: connector::Handle) -> Resul
                 .as_ref()
                 .and_then(|info| info.model())
                 .unwrap_or_else(|| String::from("Unknown")),
+            serial_number: edid_info
+                .as_ref()
+                .and_then(|info| info.serial())
+                .unwrap_or_else(|| String::from("Unknown")),
         },
     );
     if let Some(edid) = edid_info.as_ref().and_then(|x| x.edid()) {
