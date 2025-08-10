@@ -507,6 +507,9 @@ where
         if physical.model != "Unknown" {
             instance.obj.model(physical.model);
         }
+        if physical.serial_number != "Unknown" {
+            instance.obj.serial_number(physical.serial_number);
+        }
     }
 
     if let Some(extension_obj) = instance.extension_obj.as_ref() {
