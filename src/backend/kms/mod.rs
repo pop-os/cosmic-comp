@@ -40,7 +40,7 @@ use smithay::{
     },
 };
 use surface::GbmDrmOutput;
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -141,6 +141,7 @@ pub fn init_backend(
     if let Err(err) = state.backend.kms().select_primary_gpu(dh) {
         warn!("Failed to determine primary gpu: {}", err);
     }
+    state.refresh_output_config();
 
     // start x11
     let primary = state.backend.kms().primary_node.read().unwrap().clone();
@@ -278,15 +279,20 @@ fn init_udev(
                 .with_context(|| format!("Failed to remove drm device: {}", device_id)),
         } {
             Ok(()) => {
-                trace!("Successfully handled udev event.");
-                let backend = state.backend.kms();
-                if matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. })
-                    && backend.primary_node.read().unwrap().is_none()
+                debug!("Successfully handled udev event.");
+
                 {
-                    if let Err(err) = state.backend.kms().select_primary_gpu(&dh) {
-                        warn!("Failed to determine a new primary gpu: {}", err);
+                    let backend = state.backend.kms();
+                    if matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. })
+                        && backend.primary_node.read().unwrap().is_none()
+                    {
+                        if let Err(err) = state.backend.kms().select_primary_gpu(&dh) {
+                            warn!("Failed to determine a new primary gpu: {}", err);
+                        }
                     }
                 }
+
+                state.refresh_output_config();
             }
             Err(err) => {
                 error!(?err, "Error while handling udev event.")
@@ -349,16 +355,7 @@ impl State {
             }
 
             // update outputs
-            state.common.config.read_outputs(
-                &mut state.common.output_configuration_state,
-                &mut state.backend,
-                &state.common.shell,
-                &state.common.event_loop_handle,
-                &mut state.common.workspace_state.update(),
-                &state.common.xdg_activation_state,
-                state.common.startup_done.clone(),
-                &state.common.clock,
-            );
+            state.refresh_output_config();
             state.common.refresh();
         });
         loop_signal.wakeup();

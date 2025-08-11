@@ -370,20 +370,8 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(wl_outputs.iter());
-        self.common.config.read_outputs(
-            &mut self.common.output_configuration_state,
-            &mut self.backend,
-            &self.common.shell,
-            &self.common.event_loop_handle,
-            &mut self.common.workspace_state.update(),
-            &self.common.xdg_activation_state,
-            self.common.startup_done.clone(),
-            &self.common.clock,
-        );
 
         self.backend.kms().refresh_used_devices()?;
-        self.common.refresh();
-
         Ok(())
     }
 
@@ -469,28 +457,12 @@ impl State {
         self.common
             .output_configuration_state
             .add_heads(outputs_added.iter());
-        {
-            self.common.config.read_outputs(
-                &mut self.common.output_configuration_state,
-                &mut self.backend,
-                &self.common.shell,
-                &self.common.event_loop_handle,
-                &mut self.common.workspace_state.update(),
-                &self.common.xdg_activation_state,
-                self.common.startup_done.clone(),
-                &self.common.clock,
-            );
-            // Don't remove the outputs, before potentially new ones have been initialized.
-            // reading a new config means outputs might become enabled, that were previously disabled.
-            // This gives the shell more information on how to move outputs.
-            for output in outputs_removed {
-                self.common.remove_output(&output);
-            }
-            self.common.refresh();
+
+        for output in outputs_removed {
+            self.common.remove_output(&output);
         }
 
         self.backend.kms().refresh_used_devices()?;
-
         Ok(())
     }
 
@@ -533,28 +505,31 @@ impl State {
         self.common
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
-        backend.refresh_used_devices()?;
 
         if backend.session.is_active() {
             for output in outputs_removed {
                 self.common.remove_output(&output);
             }
-            self.common.config.read_outputs(
-                &mut self.common.output_configuration_state,
-                &mut self.backend,
-                &self.common.shell,
-                &self.common.event_loop_handle,
-                &mut self.common.workspace_state.update(),
-                &self.common.xdg_activation_state,
-                self.common.startup_done.clone(),
-                &self.common.clock,
-            );
-            self.common.refresh();
         } else {
             self.common.output_configuration_state.update();
         }
 
+        backend.refresh_used_devices()?;
         Ok(())
+    }
+
+    pub fn refresh_output_config(&mut self) {
+        self.common.config.read_outputs(
+            &mut self.common.output_configuration_state,
+            &mut self.backend,
+            &self.common.shell,
+            &self.common.event_loop_handle,
+            &mut self.common.workspace_state.update(),
+            &self.common.xdg_activation_state,
+            self.common.startup_done.clone(),
+            &self.common.clock,
+        );
+        self.common.refresh();
     }
 }
 
