@@ -254,7 +254,7 @@ pub struct Common {
     pub atspi_ei: crate::wayland::handlers::atspi::AtspiEiState,
 
     #[cfg(feature = "systemd")]
-    inhibit_lid_fd: Option<OwnedFd>,
+    pub inhibit_lid_fd: Option<OwnedFd>,
 }
 
 #[derive(Debug)]
@@ -405,6 +405,37 @@ impl<'a> LockedBackend<'a> {
             LockedBackend::Kms(state) => state.all_outputs(),
             LockedBackend::X11(state) => state.all_outputs(),
             LockedBackend::Winit(state) => state.all_outputs(),
+        }
+    }
+
+    pub fn enable_internal_output(
+        &self,
+        output_configuration_state: &mut OutputConfigurationState<State>,
+    ) {
+        let outputs = self.all_outputs();
+        if let Some(internal) = outputs.iter().find(|o| o.is_internal()) {
+            let mut config = internal.config_mut();
+            if config.enabled == OutputState::Disabled {
+                // If it was previously mirrored, `read_outputs` will restore that correctly.
+                // But if we don't have a config for *some* reason or reading it fails,
+                // we don't want to write out `Disabled` accidentally.
+                config.enabled = OutputState::Enabled;
+                output_configuration_state.add_heads(std::iter::once(internal));
+            }
+        }
+    }
+
+    pub fn disable_internal_output(
+        &self,
+        output_configuration_state: &mut OutputConfigurationState<State>,
+    ) {
+        let outputs = self.all_outputs();
+        if let Some(internal) = outputs.iter().find(|o| o.is_internal()) {
+            let mut config = internal.config_mut();
+            if config.enabled != OutputState::Disabled {
+                config.enabled = OutputState::Disabled;
+                output_configuration_state.remove_heads(std::iter::once(internal));
+            }
         }
     }
 
@@ -740,10 +771,17 @@ impl State {
     fn update_inhibitor_locks(&mut self) {
         #[cfg(feature = "systemd")]
         {
+            use smithay::backend::session::Session;
             use tracing::{debug, error};
 
             let outputs = self.backend.lock().all_outputs();
-            let should_handle_lid = outputs.iter().any(|o| o.is_internal()) && outputs.len() >= 2;
+            let is_active = match &self.backend {
+                BackendData::Kms(kms) => kms.session.is_active(),
+                _ => true,
+            };
+
+            let should_handle_lid =
+                is_active && outputs.iter().any(|o| o.is_internal()) && outputs.len() >= 2;
 
             if should_handle_lid {
                 if self.common.inhibit_lid_fd.is_none() {
@@ -751,6 +789,18 @@ impl State {
                         Ok(fd) => {
                             debug!("Inhibiting lid switch");
                             self.common.inhibit_lid_fd = Some(fd);
+
+                            if crate::dbus::logind::lid_closed().unwrap_or(false) {
+                                self.backend.lock().disable_internal_output(
+                                    &mut self.common.output_configuration_state,
+                                );
+                            } else {
+                                self.backend.lock().enable_internal_output(
+                                    &mut self.common.output_configuration_state,
+                                );
+                            }
+
+                            self.refresh_output_config();
                         }
                         Err(err) => {
                             error!("Failed to inhibit lid switch: {}", err);
@@ -758,8 +808,15 @@ impl State {
                     }
                 }
             } else {
-                if self.common.inhibit_lid_fd.take().is_some() {
-                    debug!("Removing inhibitor-lock on lid switch")
+                if let Some(_fd) = self.common.inhibit_lid_fd.take() {
+                    debug!("Removing inhibitor-lock on lid switch");
+
+                    self.backend
+                        .lock()
+                        .enable_internal_output(&mut self.common.output_configuration_state);
+
+                    self.refresh_output_config();
+                    // drop _fd
                 }
             }
         }

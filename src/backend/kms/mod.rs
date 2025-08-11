@@ -68,7 +68,7 @@ pub struct KmsState {
     pub software_renderer: Option<GlowRenderer>,
     pub api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
 
-    session: LibSeatSession,
+    pub session: LibSeatSession,
     libinput: Libinput,
 
     pub syncobj_state: Option<DrmSyncobjState>,

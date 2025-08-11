@@ -7,7 +7,7 @@ use crate::{
             cosmic_keystate_from_smithay, cosmic_modifiers_eq_smithay,
             cosmic_modifiers_from_smithay,
         },
-        Action, Config, OutputConfig, OutputState, PrivateAction,
+        Action, Config, PrivateAction,
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
@@ -1508,37 +1508,19 @@ impl State {
             }
             InputEvent::Special(_) => {}
             InputEvent::SwitchToggle { event } => {
-                if event.switch() == Some(Switch::Lid) {
-                    let outputs = self.backend.lock().all_outputs();
-                    if let Some(internal) = outputs.into_iter().find(|o| o.is_internal()) {
-                        let config = internal.user_data().get::<RefCell<OutputConfig>>().unwrap();
-                        let enabled = config.borrow().enabled.clone();
-                        if enabled != OutputState::Disabled && event.state() == SwitchState::On {
-                            config.borrow_mut().enabled = OutputState::Disabled;
-                            self.common
-                                .output_configuration_state
-                                .remove_heads(std::iter::once(&internal));
-                        } else if enabled == OutputState::Disabled
-                            && event.state() == SwitchState::Off
-                        {
-                            self.common
-                                .output_configuration_state
-                                .add_heads(std::iter::once(&internal));
-                        } else {
-                            return;
-                        }
-
-                        self.common.config.read_outputs(
-                            &mut self.common.output_configuration_state,
-                            &mut self.backend,
-                            &self.common.shell,
-                            &self.common.event_loop_handle,
-                            &mut self.common.workspace_state.update(),
-                            &self.common.xdg_activation_state,
-                            self.common.startup_done.clone(),
-                            &self.common.clock,
-                        );
+                #[cfg(feature = "systemd")]
+                if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
+                    if event.state() == SwitchState::On {
+                        self.backend
+                            .lock()
+                            .disable_internal_output(&mut self.common.output_configuration_state);
+                    } else {
+                        self.backend
+                            .lock()
+                            .enable_internal_output(&mut self.common.output_configuration_state);
                     }
+
+                    self.refresh_output_config();
                 }
             }
         }
