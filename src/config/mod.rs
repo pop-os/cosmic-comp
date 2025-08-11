@@ -479,7 +479,30 @@ impl Config {
             .map(Into::<crate::config::OutputInfo>::into)
             .collect::<Vec<_>>();
         infos.sort();
-        if let Some(configs) = self.dynamic_conf.outputs().config.get(&infos).cloned() {
+
+        if let Some(configs) = self
+            .dynamic_conf
+            .outputs()
+            .config
+            .get(&infos)
+            .filter(|configs| {
+                if configs
+                    .iter()
+                    .all(|config| config.enabled == OutputState::Disabled)
+                {
+                    if !configs.is_empty() {
+                        error!(
+                            "Broken config, all outputs disabled. Resetting... {:?}",
+                            configs
+                        );
+                    }
+                    false
+                } else {
+                    true
+                }
+            })
+            .cloned()
+        {
             let known_good_configs = outputs
                 .iter()
                 .map(|output| {
@@ -565,6 +588,15 @@ impl Config {
             output_state.update();
             self.write_outputs(output_state.outputs());
         } else {
+            if outputs
+                .iter()
+                .all(|o| o.config().enabled == OutputState::Disabled)
+            {
+                for output in &outputs {
+                    output.config_mut().enabled = OutputState::Enabled;
+                }
+            }
+
             // we don't have a config, so lets generate somewhat sane positions
             let mut w = 0;
             if !outputs.iter().any(|o| o.config().xwayland_primary) {
