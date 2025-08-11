@@ -29,6 +29,8 @@ pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>>
                                 tracing::error!(?err, "Failed to update drm device {}.", node);
                             }
                         }
+                        state.refresh_output_config();
+
                         ()
                     }
                     calloop::channel::Event::Closed => (),
