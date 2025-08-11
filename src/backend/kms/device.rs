@@ -586,8 +586,10 @@ impl Device {
             .iter()
             .filter(|(conn, maybe)| match (surfaces.get(&conn), maybe) {
                 (Some(current_crtc), Some(new_crtc)) => current_crtc != new_crtc,
-                (None, _) => true,
-                _ => false,
+                // see `removed`
+                (Some(_), None) => true,
+                // if we already know about it, we don't consider it added
+                (None, _) => self.inner.outputs.get(conn).is_none(),
             })
             .map(|(conn, crtc)| (*conn, *crtc))
             .collect::<Vec<_>>();
@@ -598,6 +600,9 @@ impl Device {
             .iter()
             .filter(|(conn, _)| match config.get(conn) {
                 Some(Some(c)) => surfaces.get(&conn).is_some_and(|crtc| c != crtc),
+                // if don't have a crtc, we need to drop the surface if it exists.
+                // so it needs to be in both `removed` AND `added`.
+                Some(None) => surfaces.get(&conn).is_some(),
                 _ => true,
             })
             .map(|(conn, _)| *conn)
