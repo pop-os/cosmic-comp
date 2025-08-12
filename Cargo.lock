@@ -4819,7 +4819,7 @@ checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/smithay/smithay.git?rev=436d82a#436d82a4f72eab525fd634409f8c7a329b28bfb7"
+source = "git+https://github.com/smithay/smithay.git?rev=ae1faae#ae1faaeb71e2664f4ddb3db7423a5ec746a6a51d"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -4865,7 +4865,7 @@ dependencies = [
  "wayland-server",
  "winit",
  "x11rb",
- "xkbcommon 0.8.0",
+ "xkbcommon 0.9.0",
 ]
 
 [[package]]
@@ -6693,6 +6693,17 @@ name = "xkbcommon"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d66ca9352cbd4eecbbc40871d8a11b4ac8107cfc528a6e14d7c19c69d0e1ac9"
+dependencies = [
+ "libc",
+ "memmap2 0.9.5",
+ "xkeysym",
+]
+
+[[package]]
+name = "xkbcommon"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7a974f48060a14e95705c01f24ad9c3345022f4d97441b8a36beb7ed5c4a02d"
 dependencies = [
  "libc",
  "memmap2 0.9.5",
