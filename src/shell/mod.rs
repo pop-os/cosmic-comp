@@ -3424,10 +3424,12 @@ impl Shell {
             return None;
         }
 
-        for workspace in self.workspaces.spaces_mut() {
-            for seat in self.seats.iter() {
-                let mut stack = workspace.focus_stack.get_mut(seat);
-                stack.remove(&old_mapped);
+        if !move_out_of_stack {
+            for workspace in self.workspaces.spaces_mut() {
+                for seat in self.seats.iter() {
+                    let mut stack = workspace.focus_stack.get_mut(seat);
+                    stack.remove(&old_mapped);
+                }
             }
         }
 
@@ -3439,6 +3441,9 @@ impl Shell {
         let mapped = if move_out_of_stack {
             let new_mapped: CosmicMapped =
                 CosmicWindow::new(window.clone(), evlh.clone(), self.theme.clone()).into();
+            if old_mapped.is_maximized(false) {
+                new_mapped.set_maximized(false);
+            }
             start_data.set_focus(new_mapped.focus_under((0., 0.).into(), WindowSurfaceType::ALL));
             new_mapped
         } else {
@@ -3475,105 +3480,105 @@ impl Shell {
             seat.active_output()
         };
 
-        let (initial_window_location, layer, workspace_handle) = if let Some(workspace) =
-            self.space_for_mut(&old_mapped)
-        {
-            let elem_geo = element_geo.or_else(|| workspace.element_geometry(&old_mapped))?;
-            let mut initial_window_location = elem_geo.loc.to_global(workspace.output());
+        let (initial_window_location, layer, workspace_handle) =
+            if let Some(workspace) = self.space_for_mut(&old_mapped) {
+                let elem_geo = element_geo.or_else(|| workspace.element_geometry(&old_mapped))?;
+                let mut initial_window_location = elem_geo.loc.to_global(workspace.output());
 
-            let mut new_size = if mapped.maximized_state.lock().unwrap().is_some() {
-                // If surface is maximized then unmaximize it
-                workspace
-                    .unmaximize_request(&mapped)
-                    .map(|geo| geo.size.as_logical())
-            } else {
-                None
-            };
+                let mut new_size = if old_mapped.maximized_state.lock().unwrap().is_some() {
+                    // If surface is maximized then unmaximize it
+                    workspace
+                        .unmaximize_request(&old_mapped)
+                        .map(|geo| geo.size.as_logical())
+                } else {
+                    None
+                };
 
-            let layer = if mapped == old_mapped {
-                let was_floating = workspace.floating_layer.unmap(&mapped, None);
-                let was_tiled = workspace
-                    .tiling_layer
-                    .unmap_as_placeholder(&mapped, PlaceholderType::GrabbedWindow);
-                assert!(was_floating.is_some() != was_tiled.is_some());
-                if was_floating.is_some_and(|geo| geo.size != elem_geo.size) {
-                    new_size = was_floating.map(|geo| geo.size.as_logical());
+                let layer = if mapped == old_mapped {
+                    let was_floating = workspace.floating_layer.unmap(&mapped, None);
+                    let was_tiled = workspace
+                        .tiling_layer
+                        .unmap_as_placeholder(&mapped, PlaceholderType::GrabbedWindow);
+                    assert!(was_floating.is_some() != was_tiled.is_some());
+                    if was_floating.is_some_and(|geo| geo.size != elem_geo.size) {
+                        new_size = was_floating.map(|geo| geo.size.as_logical());
+                    }
+                    was_tiled.is_some()
+                } else {
+                    workspace
+                        .tiling_layer
+                        .mapped()
+                        .any(|(m, _)| m == &old_mapped)
                 }
-                was_tiled.is_some()
-            } else {
-                workspace
-                    .tiling_layer
-                    .mapped()
-                    .any(|(m, _)| m == &old_mapped)
-            }
-            .then_some(ManagedLayer::Tiling)
-            .unwrap_or(ManagedLayer::Floating);
+                .then_some(ManagedLayer::Tiling)
+                .unwrap_or(ManagedLayer::Floating);
 
-            // if this changed the width, the window was tiled in floating mode
-            if let Some(new_size) = new_size {
-                let output = workspace.output();
-                let ratio = pos.to_local(&output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
+                // if this changed the width, the window was tiled in floating mode
+                if let Some(new_size) = new_size {
+                    let output = workspace.output();
+                    let ratio = pos.to_local(&output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
 
-                initial_window_location = Point::from((
-                    pos.x - (new_size.w as f64 * ratio),
-                    pos.y - MOVE_GRAB_Y_OFFSET,
-                ))
-                .to_i32_round();
-            }
+                    initial_window_location = Point::from((
+                        pos.x - (new_size.w as f64 * ratio),
+                        pos.y - MOVE_GRAB_Y_OFFSET,
+                    ))
+                    .to_i32_round();
+                }
 
-            (initial_window_location, layer, workspace.handle)
-        } else if let Some(sticky_layer) = self
-            .workspaces
-            .sets
-            .get_mut(&cursor_output)
-            .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
-            .map(|set| &mut set.sticky_layer)
-        {
-            let elem_geo = sticky_layer.element_geometry(&old_mapped).unwrap();
-            let mut initial_window_location = elem_geo.loc.to_global(&cursor_output);
+                (initial_window_location, layer, workspace.handle)
+            } else if let Some(sticky_layer) = self
+                .workspaces
+                .sets
+                .get_mut(&cursor_output)
+                .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
+                .map(|set| &mut set.sticky_layer)
+            {
+                let elem_geo = sticky_layer.element_geometry(&old_mapped).unwrap();
+                let mut initial_window_location = elem_geo.loc.to_global(&cursor_output);
 
-            let mut new_size = if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
-                // If surface is maximized then unmaximize it
-                mapped.set_maximized(false);
-                let new_size = state.original_geometry.size.as_logical();
-                sticky_layer.map_internal(
-                    mapped.clone(),
-                    Some(state.original_geometry.loc),
-                    Some(new_size),
-                    None,
-                );
+                let mut new_size =
+                    if let Some(state) = old_mapped.maximized_state.lock().unwrap().take() {
+                        // If surface is maximized then unmaximize it
+                        old_mapped.set_maximized(false);
+                        let new_size = state.original_geometry.size.as_logical();
+                        sticky_layer.map_internal(
+                            mapped.clone(),
+                            Some(state.original_geometry.loc),
+                            Some(new_size),
+                            None,
+                        );
 
-                Some(new_size)
-            } else {
-                None
-            };
+                        Some(new_size)
+                    } else {
+                        None
+                    };
 
-            if mapped == old_mapped {
-                if let Some(geo) = sticky_layer.unmap(&mapped, None) {
-                    if geo.size != elem_geo.size {
-                        new_size = Some(geo.size.as_logical());
+                if mapped == old_mapped {
+                    if let Some(geo) = sticky_layer.unmap(&mapped, None) {
+                        if geo.size != elem_geo.size {
+                            new_size = Some(geo.size.as_logical());
+                        }
                     }
                 }
-            }
 
-            if let Some(new_size) = new_size {
-                let ratio =
-                    pos.to_local(&cursor_output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
-                initial_window_location = Point::<f64, _>::from((
-                    pos.x - (new_size.w as f64 * ratio),
-                    pos.y - MOVE_GRAB_Y_OFFSET,
-                ))
-                .to_i32_round();
-            }
+                if let Some(new_size) = new_size {
+                    let ratio =
+                        pos.to_local(&cursor_output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
+                    initial_window_location = Point::<f64, _>::from((
+                        pos.x - (new_size.w as f64 * ratio),
+                        pos.y - MOVE_GRAB_Y_OFFSET,
+                    ))
+                    .to_i32_round();
+                }
 
-            (
-                initial_window_location,
-                ManagedLayer::Sticky,
-                self.active_space(&cursor_output).unwrap().handle,
-            )
-        } else {
-            return None;
-        };
+                (
+                    initial_window_location,
+                    ManagedLayer::Sticky,
+                    self.active_space(&cursor_output).unwrap().handle,
+                )
+            } else {
+                return None;
+            };
 
         toplevel_leave_workspace(&window, &workspace_handle);
         toplevel_leave_output(&window, &cursor_output);
