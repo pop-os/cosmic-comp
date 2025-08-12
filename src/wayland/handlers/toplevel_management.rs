@@ -47,11 +47,11 @@ impl ToplevelManagementHandler for State {
                             .flat_map(|m| m.windows().map(|(s, _)| s))
                             .any(|w| &w == window)
                 });
-            if let Some((idx, workspace)) = maybe {
-                let seat = seat.unwrap_or(shell.seats.last_active().clone());
 
+            let seat = seat.clone().unwrap_or(shell.seats.last_active().clone());
+            let (target, new_pos) = if let Some((idx, workspace)) = maybe {
                 let handle = workspace.handle;
-                let res = shell.activate(
+                let new_pos = shell.activate(
                     &output,
                     idx,
                     WorkspaceDelta::new_shortcut(),
@@ -86,33 +86,51 @@ impl ToplevelManagementHandler for State {
                 } else {
                     KeyboardFocusTarget::Fullscreen(window.clone())
                 };
-                std::mem::drop(shell);
 
-                if seat.active_output() != *output {
-                    match res {
-                        Ok(new_pos) => {
-                            seat.set_active_output(&output);
-                            if let Some(ptr) = seat.get_pointer() {
-                                let serial = SERIAL_COUNTER.next_serial();
-                                ptr.motion(
-                                    self,
-                                    None,
-                                    &MotionEvent {
-                                        location: new_pos.to_f64().as_logical(),
-                                        serial,
-                                        time: self.common.clock.now().as_millis(),
-                                    },
-                                );
-                                ptr.frame(self);
-                            }
-                        }
-                        _ => {}
+                (target, new_pos.ok())
+            // sticky window?
+            } else if let Some(mapped) = shell
+                .workspaces
+                .sets
+                .get(output)
+                .unwrap()
+                .sticky_layer
+                .mapped()
+                .find(|m| m.windows().any(|(w, _)| &w == window))
+            {
+                mapped.focus_window(window);
+
+                let output_geo = output.geometry();
+                let new_pos =
+                    output_geo.loc + Point::from((output_geo.size.w / 2, output_geo.size.h / 2));
+                (KeyboardFocusTarget::Element(mapped.clone()), Some(new_pos))
+            } else {
+                continue;
+            };
+
+            std::mem::drop(shell);
+
+            if seat.active_output() != *output {
+                if let Some(new_pos) = new_pos {
+                    seat.set_active_output(&output);
+                    if let Some(ptr) = seat.get_pointer() {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        ptr.motion(
+                            self,
+                            None,
+                            &MotionEvent {
+                                location: new_pos.to_f64().as_logical(),
+                                serial,
+                                time: self.common.clock.now().as_millis(),
+                            },
+                        );
+                        ptr.frame(self);
                     }
                 }
-
-                Shell::set_focus(self, Some(&target), &seat, None, false);
-                return;
             }
+
+            Shell::set_focus(self, Some(&target), &seat, None, false);
+            return;
         }
     }
 
