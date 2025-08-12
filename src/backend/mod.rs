@@ -73,14 +73,19 @@ pub fn init_backend_auto(
             .seats
             .add_seat(initial_seat.clone());
 
-        let helper = greeter::GreeterAccessibilityState::config()?;
-        let greeter_state = match greeter::GreeterAccessibilityState::get_entry(&helper) {
-            Ok(s) => s,
-            Err((errs, s)) => {
-                for err in errs {
-                    tracing::error!("Error loading greeter state: {err:?}");
+        let greeter_state = match greeter::GreeterAccessibilityState::config() {
+            Ok(helper) => match greeter::GreeterAccessibilityState::get_entry(&helper) {
+                Ok(s) => s,
+                Err((errs, s)) => {
+                    for err in errs {
+                        tracing::error!("Error loading greeter state: {err:?}");
+                    }
+                    s
                 }
-                s
+            },
+            Err(_) => {
+                tracing::info!("`cosmic-greeter` state not found.");
+                greeter::GreeterAccessibilityState::default()
             }
         };
 
