@@ -244,7 +244,7 @@ where
         }
     }
 
-    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         match self {
             CosmicElement::Workspace(elem) => elem.underlying_storage(renderer),
             CosmicElement::Cursor(elem) => elem.underlying_storage(renderer),

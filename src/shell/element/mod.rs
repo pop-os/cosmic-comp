@@ -1322,7 +1322,7 @@ where
         }
     }
 
-    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage> {
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => elem.underlying_storage(renderer),
             CosmicMappedRenderElement::Window(elem) => elem.underlying_storage(renderer),

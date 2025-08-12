@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::state::State;
 use crate::wayland::protocols::a11y::A11yHandler;
-use crate::{config::ScreenFilter, state::State};
 use anyhow::{anyhow, Context, Result};
 use cosmic_comp_config::NumlockState;
 use cosmic_config::CosmicConfigEntry;
