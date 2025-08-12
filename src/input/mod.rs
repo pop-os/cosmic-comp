@@ -777,10 +777,23 @@ impl State {
                                                         else {
                                                             return;
                                                         };
-                                                        let Some(geom) =
-                                                            shell.space_for(target_elem).and_then(
-                                                                |f| f.element_geometry(target_elem),
-                                                            )
+                                                        let Some(geom) = shell
+                                                            .space_for(target_elem)
+                                                            .and_then(|f| {
+                                                                f.element_geometry(target_elem)
+                                                            })
+                                                            .or_else(|| {
+                                                                shell
+                                                                    .workspaces
+                                                                    .sets
+                                                                    .get(&output)
+                                                                    .and_then(|set| {
+                                                                        set.sticky_layer
+                                                                            .element_geometry(
+                                                                                target_elem,
+                                                                            )
+                                                                    })
+                                                            })
                                                         else {
                                                             return;
                                                         };
