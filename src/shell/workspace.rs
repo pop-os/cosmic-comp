@@ -1969,7 +1969,7 @@ where
     fn underlying_storage(
         &self,
         renderer: &mut R,
-    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage<'_>> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Fullscreen(elem) => elem.underlying_storage(renderer),

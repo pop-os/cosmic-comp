@@ -356,7 +356,7 @@ impl BackendData {
     pub fn offscreen_renderer<N: Into<KmsNodes>, F: FnOnce(&mut KmsState) -> Option<N>>(
         &mut self,
         kms_node_cb: F,
-    ) -> Result<RendererRef, GlMultiError> {
+    ) -> Result<RendererRef<'_>, GlMultiError> {
         match self {
             BackendData::Kms(kms) => {
                 if let Some(nodes) = kms_node_cb(kms) {
