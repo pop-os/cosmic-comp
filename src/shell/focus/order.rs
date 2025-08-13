@@ -206,6 +206,7 @@ fn render_input_order_internal<R: 'static>(
         for (surface, location) in shell
             .override_redirect_windows
             .iter()
+            .rev()
             .filter(|or| {
                 (*or)
                     .geometry()
