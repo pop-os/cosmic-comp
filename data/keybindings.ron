@@ -92,8 +92,8 @@
 
     (modifiers: [Super], key: "equal"): ZoomIn,
     (modifiers: [Super], key: "minus"): ZoomOut,
-    (modifiers: [Super], key: "Period"): ZoomIn,
-    (modifiers: [Super], key: "Comma"): ZoomOut,
+    (modifiers: [Super], key: "period"): ZoomIn,
+    (modifiers: [Super], key: "comma"): ZoomOut,
 
     (modifiers: [Super], key: "b"): System(WebBrowser),
     (modifiers: [Super], key: "f"): System(HomeFolder),
