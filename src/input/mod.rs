@@ -26,7 +26,7 @@ use crate::{
     },
     utils::{float::NextDown, prelude::*, quirks::workspace_overview_is_open},
     wayland::{
-        handlers::screencopy::SessionHolder,
+        handlers::{screencopy::SessionHolder, xwayland_keyboard_grab::XWaylandGrabSeat},
         protocols::screencopy::{BufferConstraints, CursorSessionRef},
     },
 };
@@ -241,12 +241,13 @@ impl State {
                                 let current_focus = seat.get_keyboard().unwrap().current_focus();
                                 let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
                                     f.wl_surface()
-                                        .and_then(|surface| {
+                                        .map(|surface| {
                                             seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
                                                 .map(|inhibitor| inhibitor.is_active())
+                                                .unwrap_or(false)
+                                                || seat.has_active_xwayland_grab(&surface)
                                         })
                                         .unwrap_or(false)
-                                        || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
                                 });
                                 let sym = handle.modified_sym();
 
@@ -686,12 +687,13 @@ impl State {
                 let current_focus = seat.get_keyboard().unwrap().current_focus();
                 let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
                     f.wl_surface()
-                        .and_then(|surface| {
+                        .map(|surface| {
                             seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
                                 .map(|inhibitor| inhibitor.is_active())
+                                .unwrap_or(false)
+                                || seat.has_active_xwayland_grab(&surface)
                         })
                         .unwrap_or(false)
-                        || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
                 });
 
                 let serial = SERIAL_COUNTER.next_serial();
@@ -1566,12 +1568,13 @@ impl State {
 
         let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
             f.wl_surface()
-                .and_then(|surface| {
+                .map(|surface| {
                     seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
                         .map(|inhibitor| inhibitor.is_active())
+                        .unwrap_or(false)
+                        || seat.has_active_xwayland_grab(&surface)
                 })
                 .unwrap_or(false)
-                || matches!(f, KeyboardFocusTarget::XWaylandGrab(_))
         });
 
         self.common.atspi_ei.input(

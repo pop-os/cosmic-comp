@@ -1665,30 +1665,6 @@ impl Shell {
             }?;
 
             focus_target = KeyboardFocusTarget::Element(new_target);
-        } else if let KeyboardFocusTarget::XWaylandGrab(surface) = &focus_target {
-            if let Some(new_target) = self.element_for_surface(surface) {
-                focus_target = KeyboardFocusTarget::Element(new_target.clone());
-            } else if let Some(new_target) = self
-                .workspaces
-                .spaces()
-                .find_map(|w| w.get_fullscreen().filter(|s| *s == surface))
-            {
-                focus_target = KeyboardFocusTarget::Fullscreen(new_target.clone());
-            } else if let Some(or) = self
-                .override_redirect_windows
-                .iter()
-                .find(|w| w.wl_surface().as_ref() == Some(surface))
-            {
-                // Find output the override redirect window overlaps the most with
-                let or_geo = or.geometry().as_global();
-                let (output, _) = self
-                    .outputs()
-                    .filter_map(|o| Some((o, o.geometry().intersection(or_geo)?)))
-                    .max_by_key(|(_, intersection)| intersection.size.w * intersection.size.h)?;
-                return Some(output.clone());
-            } else {
-                return None;
-            }
         }
 
         match focus_target {
@@ -1754,7 +1730,6 @@ impl Shell {
                 .iter()
                 .find_map(|(output, s)| (s == &surface).then_some(output))
                 .cloned(),
-            KeyboardFocusTarget::XWaylandGrab(_) => unreachable!(),
             KeyboardFocusTarget::Popup(_) => unreachable!(),
         }
     }

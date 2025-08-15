@@ -4,7 +4,7 @@ use crate::{shell::focus::target::KeyboardFocusTarget, state::State};
 use smithay::{
     delegate_xwayland_keyboard_grab,
     input::Seat,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
     wayland::xwayland_keyboard_grab::{XWaylandKeyboardGrab, XWaylandKeyboardGrabHandler},
 };
 use std::sync::Mutex;
@@ -33,4 +33,21 @@ impl XWaylandKeyboardGrabHandler for State {
         Some(KeyboardFocusTarget::Element(element))
     }
 }
+
+pub trait XWaylandGrabSeat {
+    fn has_active_xwayland_grab(&self, surface: &WlSurface) -> bool;
+}
+
+impl XWaylandGrabSeat for Seat<State> {
+    fn has_active_xwayland_grab(&self, surface: &WlSurface) -> bool {
+        self.user_data()
+            .get_or_insert(XWaylandGrabSeatData::default)
+            .grab
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|(s, g)| g.grab().is_alive() && s == surface)
+    }
+}
+
 delegate_xwayland_keyboard_grab!(State);

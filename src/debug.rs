@@ -344,7 +344,6 @@ fn format_keyboard_focus(focus: Option<KeyboardFocusTarget>) -> String {
         Some(Popup(x)) => format!("Popup {}", x.wl_surface().id().protocol_id()),
         Some(Group(_)) => format!("Window Group"),
         Some(LockSurface(x)) => format!("LockSurface {}", x.wl_surface().id().protocol_id()),
-        Some(XWaylandGrab(x)) => format!("XWayland Grab {}", x.id().protocol_id()),
         None => format!("None"),
     }
 }
