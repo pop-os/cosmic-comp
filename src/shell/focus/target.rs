@@ -74,7 +74,6 @@ pub enum KeyboardFocusTarget {
     LayerSurface(LayerSurface),
     Popup(PopupKind),
     LockSurface(LockSurface),
-    XWaylandGrab(WlSurface),
 }
 
 // TODO: This should be TryFrom, but PopupGrab needs to be able to convert. Fix this in smithay
@@ -199,7 +198,6 @@ impl KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => Some(l.wl_surface()),
             KeyboardFocusTarget::Popup(p) => Some(p.wl_surface()),
             KeyboardFocusTarget::LockSurface(l) => Some(l.wl_surface()),
-            KeyboardFocusTarget::XWaylandGrab(g) => Some(g),
         }
     }
 
@@ -276,7 +274,6 @@ impl IsAlive for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => l.alive(),
             KeyboardFocusTarget::Popup(p) => p.alive(),
             KeyboardFocusTarget::LockSurface(l) => l.alive(),
-            KeyboardFocusTarget::XWaylandGrab(g) => g.alive(),
         }
     }
 }
@@ -526,7 +523,6 @@ impl WaylandFocus for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
             KeyboardFocusTarget::Popup(p) => Some(Cow::Borrowed(p.wl_surface())),
             KeyboardFocusTarget::LockSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
-            KeyboardFocusTarget::XWaylandGrab(g) => Some(Cow::Borrowed(g)),
         }
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
@@ -537,7 +533,6 @@ impl WaylandFocus for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
             KeyboardFocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
             KeyboardFocusTarget::LockSurface(l) => l.wl_surface().id().same_client_as(object_id),
-            KeyboardFocusTarget::XWaylandGrab(g) => g.id().same_client_as(object_id),
         }
     }
 }
