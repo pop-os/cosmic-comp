@@ -18,7 +18,10 @@ use smithay::{
     desktop::space::SpaceElement,
     input::Seat,
     output::{Output, OutputNoMode},
-    reexports::wayland_server::protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat},
+    reexports::{
+        glow::HasContext,
+        wayland_server::protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat},
+    },
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size,
         Transform,
@@ -63,7 +66,7 @@ pub fn submit_buffer<R>(
     sync: SyncPoint,
 ) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, R::Error>
 where
-    R: ExportMem,
+    R: ExportMem + AsGlowRenderer,
     R::Error: FromGlesError,
 {
     let Some(damage) = damage else {
@@ -122,6 +125,11 @@ where
             frame.fail(FailureReason::Unknown);
             return Err(err);
         }
+    } else {
+        renderer
+            .glow_renderer_mut()
+            .with_context(|gl| unsafe { gl.finish() })
+            .map_err(R::Error::from_gles_error)?;
     }
 
     Ok(Some((
@@ -144,7 +152,7 @@ pub fn render_session<F, R, T>(
     render_fn: F,
 ) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<R::Error>>
 where
-    R: ExportMem + Offscreen<T>,
+    R: ExportMem + Offscreen<T> + AsGlowRenderer,
     R::Error: FromGlesError,
     F: for<'d> FnOnce(
         &WlBuffer,
