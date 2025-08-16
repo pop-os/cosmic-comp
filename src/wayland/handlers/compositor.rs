@@ -53,7 +53,7 @@ fn toplevel_ensure_initial_configure(
 }
 
 fn xdg_popup_ensure_initial_configure(popup: &PopupKind) {
-    if let PopupKind::Xdg(ref popup) = popup {
+    if let PopupKind::Xdg(popup) = popup {
         let initial_configure_sent = with_states(popup.wl_surface(), |states| {
             states
                 .data_map

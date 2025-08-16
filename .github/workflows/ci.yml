@@ -3,7 +3,7 @@ name: Continuous Integration
 on:
   push:
     branches:
-    - master
+      - master
   pull_request:
 
 jobs:
@@ -67,6 +67,7 @@ jobs:
           meson -Dbuiltin=enabled -Dserver=disabled -Dexamples=disabled -Dman-pages=disabled build .
           ninja -C build
           sudo meson install -C build
+          sudo ldconfig
       - name: Test features
         uses: actions-rs/cargo@v1
         env:

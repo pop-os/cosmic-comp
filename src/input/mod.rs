@@ -2030,7 +2030,7 @@ impl State {
                     Stage::SessionLock(lock_surface) => {
                         return ControlFlow::Break(Ok(lock_surface
                             .cloned()
-                            .map(KeyboardFocusTarget::LockSurface)))
+                            .map(KeyboardFocusTarget::LockSurface)));
                     }
                     Stage::LayerPopup {
                         layer,
