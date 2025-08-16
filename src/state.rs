@@ -8,6 +8,7 @@ use crate::{
         x11::X11State,
     },
     config::{Config, OutputConfig, OutputState, ScreenFilter},
+    dbus::a11y_keyboard_monitor::A11yKeyboardMonitorState,
     input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
@@ -31,6 +32,7 @@ use crate::{
 };
 use anyhow::Context;
 use calloop::RegistrationToken;
+use futures_executor::ThreadPool;
 use i18n_embed::{
     fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,
@@ -196,6 +198,7 @@ pub struct Common {
     pub display_handle: DisplayHandle,
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
+    pub async_executor: ThreadPool,
 
     pub popups: PopupManager,
     pub shell: Arc<parking_lot::RwLock<Shell>>,
@@ -236,6 +239,7 @@ pub struct Common {
     pub xdg_decoration_state: XdgDecorationState,
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
+    pub a11y_keyboard_monitor_state: A11yKeyboardMonitorState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -675,11 +679,15 @@ impl State {
         );
         let workspace_state = WorkspaceState::new(dh, client_is_privileged);
 
-        if let Err(err) = crate::dbus::init(&handle) {
+        let async_executor = ThreadPool::builder().pool_size(1).create().unwrap();
+
+        if let Err(err) = crate::dbus::init(&handle, &async_executor) {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
 
         let a11y_state = A11yState::new::<State, _>(dh, client_is_privileged);
+
+        let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
 
         // TODO: Restrict to only specific client?
         let atspi_state = AtspiState::new::<State, _>(dh, |_| true);
@@ -691,6 +699,7 @@ impl State {
                 display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
+                async_executor,
 
                 popups: PopupManager::default(),
                 shell,
@@ -738,6 +747,7 @@ impl State {
                 xdg_foreign_state,
                 workspace_state,
                 a11y_state,
+                a11y_keyboard_monitor_state,
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
