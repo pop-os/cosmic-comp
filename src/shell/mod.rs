@@ -1145,8 +1145,9 @@ impl Workspaces {
             .or(self.backup_set.as_ref())
             .map(|set| {
                 (
-                    set.previously_active
-                        .map(|(idx, start)| (&set.workspaces[idx], start)),
+                    set.previously_active.and_then(|(idx, start)| {
+                        set.workspaces.get(idx).map(|previous| (previous, start))
+                    }),
                     &set.workspaces[set.active],
                 )
             })
