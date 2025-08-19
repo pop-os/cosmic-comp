@@ -28,7 +28,7 @@ pub use smithay::{
     utils::{Logical, Physical, Point, Size, Transform, SERIAL_COUNTER},
 };
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell},
     collections::{BTreeMap, HashMap},
     fs::OpenOptions,
     io::Write,
@@ -39,17 +39,19 @@ use tracing::{error, warn};
 
 mod input_config;
 pub mod key_bindings;
-pub use key_bindings::{Action, PrivateAction};
 mod types;
-pub use self::types::*;
+
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::output::EdidProduct;
 use cosmic_comp_config::{
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
+    output::{load_outputs, OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef},
     workspace::WorkspaceConfig,
     CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
     XwaylandEavesdropping, ZoomConfig,
 };
+pub use key_bindings::{Action, PrivateAction};
+use types::WlXkbConfig;
 
 #[derive(Debug)]
 pub struct Config {
@@ -74,111 +76,81 @@ pub struct DynamicConfig {
     accessibility_filter: (Option<PathBuf>, ScreenFilter),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct OutputsConfig {
-    pub config: HashMap<Vec<OutputInfo>, Vec<OutputConfig>>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OutputInfo {
-    pub connector: String,
-    pub make: String,
-    pub model: String,
-}
-
-impl From<Output> for OutputInfo {
-    fn from(o: Output) -> OutputInfo {
-        let physical = o.physical_properties();
-        OutputInfo {
-            connector: o.name(),
-            make: physical.make,
-            model: physical.model,
-        }
-    }
-}
-
 #[derive(Default, Debug, Deserialize, Serialize)]
 pub struct NumlockStateConfig {
     pub last_state: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum OutputState {
-    #[serde(rename = "true")]
-    Enabled,
-    #[serde(rename = "false")]
-    Disabled,
-    Mirroring(String),
-}
+pub struct CompOutputConfig<'a>(pub Ref<'a, OutputConfig>);
 
-fn default_state() -> OutputState {
-    OutputState::Enabled
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum AdaptiveSync {
-    #[serde(rename = "true")]
-    Enabled,
-    #[serde(rename = "false")]
-    Disabled,
-    Force,
-}
-
-fn default_sync() -> AdaptiveSync {
-    AdaptiveSync::Enabled
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub struct OutputConfig {
-    pub mode: ((i32, i32), Option<u32>),
-    #[serde(default = "default_sync")]
-    pub vrr: AdaptiveSync,
-    pub scale: f64,
-    #[serde(with = "TransformDef")]
-    pub transform: Transform,
-    pub position: (u32, u32),
-    #[serde(default = "default_state")]
-    pub enabled: OutputState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_bpc: Option<u32>,
-    #[serde(default)]
-    pub xwayland_primary: bool,
-}
-
-impl Default for OutputConfig {
-    fn default() -> OutputConfig {
-        OutputConfig {
-            mode: ((0, 0), None),
-            vrr: AdaptiveSync::Enabled,
-            scale: 1.0,
-            transform: Transform::Normal,
-            position: (0, 0),
-            enabled: OutputState::Enabled,
-            max_bpc: None,
-            xwayland_primary: false,
-        }
-    }
-}
-
-impl OutputConfig {
+impl<'a> CompOutputConfig<'a> {
     pub fn mode_size(&self) -> Size<i32, Physical> {
-        self.mode.0.into()
+        self.0.mode.0.into()
     }
 
     pub fn mode_refresh(&self) -> u32 {
-        self.mode.1.unwrap_or(60_000)
+        self.0.mode.1.unwrap_or(60_000)
     }
 
     pub fn transformed_size(&self) -> Size<i32, Physical> {
-        self.transform.transform_size(self.mode_size())
+        self.transform().transform_size(self.mode_size())
     }
 
     pub fn output_mode(&self) -> Mode {
         Mode {
             size: self.mode_size(),
             refresh: self.mode_refresh() as i32,
+        }
+    }
+
+    pub fn transform(&self) -> Transform {
+        Transform::from(CompTransformDef(self.0.transform))
+    }
+}
+
+pub struct CompTransformDef(pub TransformDef);
+
+impl From<Transform> for CompTransformDef {
+    fn from(transform: Transform) -> Self {
+        let def = match transform {
+            Transform::Normal => TransformDef::Normal,
+            Transform::_90 => TransformDef::_90,
+            Transform::_180 => TransformDef::_180,
+            Transform::_270 => TransformDef::_270,
+            Transform::Flipped => TransformDef::Flipped,
+            Transform::Flipped90 => TransformDef::Flipped90,
+            Transform::Flipped180 => TransformDef::Flipped180,
+            Transform::Flipped270 => TransformDef::Flipped270,
+        };
+        CompTransformDef(def)
+    }
+}
+
+impl From<CompTransformDef> for Transform {
+    fn from(comp_transform: CompTransformDef) -> Self {
+        match comp_transform.0 {
+            TransformDef::Normal => Transform::Normal,
+            TransformDef::_90 => Transform::_90,
+            TransformDef::_180 => Transform::_180,
+            TransformDef::_270 => Transform::_270,
+            TransformDef::Flipped => Transform::Flipped,
+            TransformDef::Flipped90 => Transform::Flipped90,
+            TransformDef::Flipped180 => Transform::Flipped180,
+            TransformDef::Flipped270 => Transform::Flipped270,
+        }
+    }
+}
+
+#[cfg(feature = "libdisplay-info")]
+impl From<libdisplay_info::edid::VendorProduct> for EdidProduct {
+    fn from(vp: libdisplay_info::edid::VendorProduct) -> Self {
+        Self {
+            manufacturer: vp.manufacturer,
+            product: vp.product,
+            serial: vp.serial,
+            manufacture_week: vp.manufacture_week,
+            manufacture_year: vp.manufacture_year,
+            model_year: vp.model_year,
         }
     }
 }
@@ -355,7 +327,7 @@ impl Config {
 
     fn load_dynamic(xdg: &xdg::BaseDirectories) -> DynamicConfig {
         let output_path = xdg.place_state_file("cosmic-comp/outputs.ron").ok();
-        let outputs = Self::load_outputs(&output_path);
+        let outputs = load_outputs(output_path.as_ref());
         let numlock_path = xdg.place_state_file("cosmic-comp/numlock.ron").ok();
         let numlock = Self::load_numlock(&numlock_path);
 
@@ -368,54 +340,6 @@ impl Config {
             outputs: (output_path, outputs),
             numlock: (numlock_path, numlock),
             accessibility_filter: (filter_path, filter),
-        }
-    }
-
-    fn load_outputs(path: &Option<PathBuf>) -> OutputsConfig {
-        if let Some(path) = path.as_ref() {
-            if path.exists() {
-                match ron::de::from_reader::<_, OutputsConfig>(
-                    OpenOptions::new().read(true).open(path).unwrap(),
-                ) {
-                    Ok(mut config) => {
-                        for (info, config) in config.config.iter_mut() {
-                            let config_clone = config.clone();
-                            for conf in config.iter_mut() {
-                                if let OutputState::Mirroring(conn) = &conf.enabled {
-                                    if let Some((j, _)) = info
-                                        .iter()
-                                        .enumerate()
-                                        .find(|(_, info)| &info.connector == conn)
-                                    {
-                                        if config_clone[j].enabled != OutputState::Enabled {
-                                            warn!(
-                                                "Invalid Mirroring tag, overriding with `Enabled` instead"
-                                            );
-                                            conf.enabled = OutputState::Enabled;
-                                        }
-                                    } else {
-                                        warn!(
-                                            "Invalid Mirroring tag, overriding with `Enabled` instead"
-                                        );
-                                        conf.enabled = OutputState::Enabled;
-                                    }
-                                }
-                            }
-                        }
-                        return config;
-                    }
-                    Err(err) => {
-                        warn!(?err, "Failed to read output_config, resetting..");
-                        if let Err(err) = std::fs::remove_file(path) {
-                            error!(?err, "Failed to remove output_config.");
-                        }
-                    }
-                };
-            }
-        }
-
-        OutputsConfig {
-            config: HashMap::new(),
         }
     }
 
@@ -479,7 +403,8 @@ impl Config {
         let mut infos = outputs
             .iter()
             .cloned()
-            .map(Into::<crate::config::OutputInfo>::into)
+            .map(Into::<crate::config::CompOutputInfo>::into)
+            .map(|i| i.0)
             .collect::<Vec<_>>();
         infos.sort();
 
@@ -657,7 +582,7 @@ impl Config {
             .map(|o| {
                 let o = o.borrow();
                 (
-                    Into::<crate::config::OutputInfo>::into(o.clone()),
+                    Into::<CompOutputInfo>::into(o.clone()).0,
                     o.user_data()
                         .get::<RefCell<OutputConfig>>()
                         .unwrap()
@@ -798,6 +723,16 @@ impl DynamicConfig {
             self.accessibility_filter.0.clone(),
             &mut self.accessibility_filter.1,
         )
+    }
+}
+
+pub fn xkb_config_to_wl(config: &XkbConfig) -> WlXkbConfig<'_> {
+    WlXkbConfig {
+        rules: &config.rules,
+        model: &config.model,
+        layout: &config.layout,
+        variant: &config.variant,
+        options: config.options.clone(),
     }
 }
 
@@ -1002,12 +937,16 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
     }
 }
 
-pub fn xkb_config_to_wl(config: &XkbConfig) -> WlXkbConfig<'_> {
-    WlXkbConfig {
-        rules: &config.rules,
-        model: &config.model,
-        layout: &config.layout,
-        variant: &config.variant,
-        options: config.options.clone(),
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CompOutputInfo(OutputInfo);
+
+impl From<Output> for CompOutputInfo {
+    fn from(o: Output) -> CompOutputInfo {
+        let physical = o.physical_properties();
+        CompOutputInfo(OutputInfo {
+            connector: o.name(),
+            make: physical.make,
+            model: physical.model,
+        })
     }
 }

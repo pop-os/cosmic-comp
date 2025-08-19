@@ -1,3 +1,4 @@
+use cosmic_comp_config::output::{AdaptiveSync, OutputConfig, OutputState};
 use smithay::{
     backend::drm::VrrSupport as Support,
     output::{Output, WeakOutput},
@@ -8,10 +9,7 @@ pub use super::geometry::*;
 pub use crate::shell::{SeatExt, Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
-use crate::{
-    config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState},
-    shell::zoom::OutputZoomState,
-};
+use crate::{config::EdidProduct, shell::zoom::OutputZoomState};
 
 use std::{
     cell::{Ref, RefCell, RefMut},

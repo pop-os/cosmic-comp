@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::{AdaptiveSync, OutputState, ScreenFilter},
+    config::{CompOutputConfig, ScreenFilter},
     shell::Shell,
     state::BackendData,
     utils::{env::dev_var, prelude::*},
@@ -9,6 +9,7 @@ use crate::{
 
 use anyhow::{Context, Result};
 use calloop::LoopSignal;
+use cosmic_comp_config::output::{AdaptiveSync, OutputState};
 use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{
@@ -798,7 +799,7 @@ impl<'a> KmsGuard<'a> {
 
             // reconfigure existing
             for (crtc, surface) in device.inner.surfaces.iter_mut() {
-                let output_config = surface.output.config();
+                let output_config = CompOutputConfig(surface.output.config());
 
                 let drm = &mut device.drm;
                 let conn = surface.connector;
@@ -814,7 +815,7 @@ impl<'a> KmsGuard<'a> {
                     // and then select the closest refresh rate (e.g. to match 59.98 as 60)
                     .min_by_key(|mode| {
                         let refresh_rate = drm_helpers::calculate_refresh_rate(**mode);
-                        (output_config.mode.1.unwrap() as i32 - refresh_rate as i32).abs()
+                        (output_config.0.mode.1.unwrap() as i32 - refresh_rate as i32).abs()
                     })
                     .ok_or(anyhow::anyhow!("Unable to find matching mode"))?;
 
@@ -876,7 +877,7 @@ impl<'a> KmsGuard<'a> {
                             compositor
                         };
 
-                        if let Some(bpc) = output_config.max_bpc {
+                        if let Some(bpc) = output_config.0.max_bpc {
                             if let Err(err) = drm_helpers::set_max_bpc(drm.device(), conn, bpc) {
                                 warn!(
                                     ?bpc,
@@ -887,7 +888,7 @@ impl<'a> KmsGuard<'a> {
                             }
                         }
 
-                        let vrr = output_config.vrr;
+                        let vrr = output_config.0.vrr;
                         std::mem::drop(output_config);
 
                         let compositor_ref = drm.compositors().get(crtc).unwrap().lock().unwrap();
@@ -928,7 +929,7 @@ impl<'a> KmsGuard<'a> {
                             surface.output.set_adaptive_sync(AdaptiveSync::Disabled);
                         }
                     } else {
-                        let vrr = output_config.vrr;
+                        let vrr = output_config.0.vrr;
                         std::mem::drop(output_config);
                         if vrr != surface.output.adaptive_sync() {
                             if match surface.output.adaptive_sync_support() {
@@ -1030,7 +1031,7 @@ impl<'a> KmsGuard<'a> {
                         Some(
                             all_outputs
                                 .iter()
-                                .find(|output| &output.name() == conn)
+                                .find(|output| output.name() == *conn)
                                 .cloned()
                                 .ok_or(anyhow::anyhow!("Unable to find mirroring output"))?,
                         )
