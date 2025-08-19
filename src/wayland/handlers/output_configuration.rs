@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use cosmic_comp_config::output::{OutputConfig, OutputState, TransformDef};
 use smithay::{output::Output, utils::Point};
 use tracing::{error, warn};
 
 use crate::{
-    config::{OutputConfig, OutputState},
     state::State,
     utils::prelude::OutputExt,
     wayland::protocols::output_configuration::{
@@ -123,7 +123,16 @@ impl State {
                         current_config.scale = *scale;
                     }
                     if let Some(transform) = transform {
-                        current_config.transform = *transform;
+                        current_config.transform = match transform {
+                            smithay::utils::Transform::Normal => TransformDef::Normal,
+                            smithay::utils::Transform::_90 => TransformDef::_90,
+                            smithay::utils::Transform::_180 => TransformDef::_180,
+                            smithay::utils::Transform::_270 => TransformDef::_270,
+                            smithay::utils::Transform::Flipped => TransformDef::Flipped,
+                            smithay::utils::Transform::Flipped90 => TransformDef::Flipped90,
+                            smithay::utils::Transform::Flipped180 => TransformDef::Flipped180,
+                            smithay::utils::Transform::Flipped270 => TransformDef::Flipped270,
+                        }
                     }
                     if let Some(position) = position {
                         current_config.position = (position.x as u32, position.y as u32);

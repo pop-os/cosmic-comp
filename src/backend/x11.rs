@@ -2,12 +2,13 @@
 
 use crate::{
     backend::render,
-    config::{OutputConfig, ScreenFilter},
+    config::ScreenFilter,
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
 };
 use anyhow::{anyhow, Context, Result};
+use cosmic_comp_config::output::OutputConfig;
 use smithay::{
     backend::{
         allocator::{

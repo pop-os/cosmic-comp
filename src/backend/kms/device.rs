@@ -5,13 +5,14 @@ use crate::{
         kms::render::gles::GbmGlowBackend,
         render::{init_shaders, output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
     },
-    config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState, ScreenFilter},
+    config::{CompTransformDef, EdidProduct, ScreenFilter},
     shell::Shell,
     utils::{env::dev_list_var, prelude::*},
     wayland::handlers::screencopy::PendingImageCopyData,
 };
 
 use anyhow::{Context, Result};
+use cosmic_comp_config::output::{AdaptiveSync, OutputConfig, OutputState};
 use libc::dev_t;
 use smithay::{
     backend::{
@@ -1008,7 +1009,7 @@ fn populate_modes(
             position,
             max_bpc,
             scale,
-            transform,
+            transform: CompTransformDef::from(transform).0,
             // Try opportunistic VRR by default,
             // if not supported this will be turned off on `resume`,
             // when we have the `Surface` to actually check for support.

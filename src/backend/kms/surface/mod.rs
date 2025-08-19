@@ -6,7 +6,7 @@ use crate::{
         init_shaders, output_elements, CursorMode, GlMultiError, GlMultiRenderer,
         PostprocessOutputConfig, PostprocessShader, PostprocessState, CLEAR_COLOR,
     },
-    config::{AdaptiveSync, ScreenFilter},
+    config::ScreenFilter,
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
@@ -23,6 +23,7 @@ use crate::{
 
 use anyhow::{Context, Result};
 use calloop::channel::Channel;
+use cosmic_comp_config::output::AdaptiveSync;
 use smithay::{
     backend::{
         allocator::{
