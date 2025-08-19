@@ -1,3 +1,4 @@
+use calloop::LoopHandle;
 use smithay::{
     backend::{
         allocator::{dmabuf::Dmabuf, format::get_transparent, Buffer, Fourcc},
@@ -58,6 +59,39 @@ pub struct PendingImageCopyData {
     pub frame: Frame,
     pub damage: Vec<smithay::utils::Rectangle<i32, BufferCoords>>,
     pub sync: SyncPoint,
+}
+
+impl PendingImageCopyData {
+    /// Send `success` to image copy frame, once sync point is reached
+    pub fn send_success_when_ready<LoopData>(
+        self,
+        transform: Transform,
+        loop_handle: &LoopHandle<'static, LoopData>,
+        presented: impl Into<Duration>,
+    ) {
+        let presented = presented.into();
+        if self.sync.is_reached() {
+            self.frame.success(transform, self.damage, presented);
+        } else if let Some(fence_fd) = self.sync.export() {
+            let source = calloop::generic::Generic::new(
+                fence_fd,
+                calloop::Interest::READ,
+                calloop::Mode::OneShot,
+            );
+            let mut data = Some(self);
+            loop_handle
+                .insert_source(source, move |_, _, _| {
+                    let data = data.take().unwrap();
+                    data.frame.success(transform, data.damage, presented);
+                    Ok(calloop::PostAction::Remove)
+                })
+                .expect("Failed to wait on sync point");
+        } else {
+            // Should be able to export fence; but otherwise wait
+            let _ = self.sync.wait();
+            self.frame.success(transform, self.damage, presented);
+        }
+    }
 }
 
 pub fn submit_buffer<R>(
