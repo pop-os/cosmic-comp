@@ -7,7 +7,7 @@ use crate::{
         winit::WinitState,
         x11::X11State,
     },
-    config::{Config, OutputConfig, OutputState, ScreenFilter},
+    config::{CompOutputConfig, Config, ScreenFilter},
     input::{gestures::GestureState, PointerFocusState},
     shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
     utils::prelude::OutputExt,
@@ -31,6 +31,7 @@ use crate::{
 };
 use anyhow::Context;
 use calloop::RegistrationToken;
+use cosmic_comp_config::output::{OutputConfig, OutputState};
 use i18n_embed::{
     fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,
@@ -455,28 +456,30 @@ impl<'a> LockedBackend<'a> {
         // update outputs, so that `OutputModeSource`s are correct
         for output in &all_outputs {
             // apply to Output
-            let final_config = output
-                .user_data()
-                .get::<RefCell<OutputConfig>>()
-                .unwrap()
-                .borrow();
+            let final_config = CompOutputConfig(
+                output
+                    .user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow(),
+            );
 
             let mode = Some(final_config.output_mode()).filter(|m| match output.current_mode() {
                 None => true,
                 Some(c_m) => m.size != c_m.size || m.refresh != c_m.refresh,
             });
             let transform =
-                Some(final_config.transform.into()).filter(|x| *x != output.current_transform());
-            let scale = Some(final_config.scale)
+                Some(final_config.transform()).filter(|x| *x != output.current_transform());
+            let scale = Some(final_config.0.scale)
                 .filter(|x| *x != output.current_scale().fractional_scale());
             let location = Some(Point::from((
-                final_config.position.0 as i32,
-                final_config.position.1 as i32,
+                final_config.0.position.0 as i32,
+                final_config.0.position.1 as i32,
             )))
             .filter(|x| *x != output.current_location());
             output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
 
-            output.set_adaptive_sync(final_config.vrr);
+            output.set_adaptive_sync(final_config.0.vrr);
         }
 
         match self {

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub mod input;
+#[cfg(feature = "output")]
 pub mod output;
 pub mod workspace;
 
