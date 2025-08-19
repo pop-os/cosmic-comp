@@ -28,7 +28,7 @@ use crate::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
             data_device::get_dnd_icon,
-            screencopy::{render_session, FrameHolder, SessionData},
+            screencopy::{render_session, FrameHolder, PendingImageCopyData, SessionData},
         },
         protocols::workspace::WorkspaceHandle,
     },
@@ -1332,7 +1332,11 @@ where
     match result {
         Ok((res, mut elements)) => {
             for (session, frame) in output.take_pending_frames() {
-                if let Some((frame, damage)) = render_session::<_, _, GlesTexture>(
+                if let Some(PendingImageCopyData { frame, damage, .. }) = render_session::<
+                    _,
+                    _,
+                    GlesTexture,
+                >(
                     renderer,
                     &session.user_data().get::<SessionData>().unwrap(),
                     frame,

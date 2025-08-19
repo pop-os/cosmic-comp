@@ -54,6 +54,12 @@ use crate::{
 
 use super::{super::data_device::get_dnd_icon, user_data::SessionHolder};
 
+pub struct PendingImageCopyData {
+    pub frame: Frame,
+    pub damage: Vec<smithay::utils::Rectangle<i32, BufferCoords>>,
+    pub sync: SyncPoint,
+}
+
 pub fn submit_buffer<R>(
     frame: Frame,
     renderer: &mut R,
@@ -61,7 +67,7 @@ pub fn submit_buffer<R>(
     transform: Transform,
     damage: Option<&[Rectangle<i32, Physical>]>,
     sync: SyncPoint,
-) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, R::Error>
+) -> Result<Option<PendingImageCopyData>, R::Error>
 where
     R: ExportMem,
     R::Error: FromGlesError,
@@ -124,16 +130,17 @@ where
         }
     }
 
-    Ok(Some((
+    Ok(Some(PendingImageCopyData {
         frame,
-        damage
+        damage: damage
             .into_iter()
             .map(|rect| {
                 let logical = rect.to_logical(1);
                 logical.to_buffer(1, transform, &logical.size)
             })
             .collect(),
-    )))
+        sync,
+    }))
 }
 
 pub fn render_session<F, R, T>(
@@ -142,7 +149,7 @@ pub fn render_session<F, R, T>(
     frame: Frame,
     transform: Transform,
     render_fn: F,
-) -> Result<Option<(Frame, Vec<Rectangle<i32, BufferCoords>>)>, DTError<R::Error>>
+) -> Result<Option<PendingImageCopyData>, DTError<R::Error>>
 where
     R: ExportMem + Offscreen<T>,
     R::Error: FromGlesError,
@@ -430,7 +437,7 @@ pub fn render_workspace_to_buffer(
         }
     };
 
-    if let Some((frame, damage)) = result {
+    if let Some(PendingImageCopyData { frame, damage, .. }) = result {
         frame.success(transform, damage, common.clock.now())
     }
 }
@@ -661,7 +668,7 @@ pub fn render_window_to_buffer(
         },
     };
 
-    if let Some((frame, damage)) = result {
+    if let Some(PendingImageCopyData { frame, damage, .. }) = result {
         frame.success(Transform::Normal, damage, common.clock.now())
     }
 }
@@ -817,7 +824,7 @@ pub fn render_cursor_to_buffer(
         }
     };
 
-    if let Some((frame, damage)) = result {
+    if let Some(PendingImageCopyData { frame, damage, .. }) = result {
         frame.success(Transform::Normal, damage, common.clock.now())
     }
 }
