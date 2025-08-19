@@ -819,8 +819,12 @@ impl SurfaceThreadState {
 
                 self.timings.presented(clock);
 
-                while let Ok(PendingImageCopyData { frame, damage, .. }) = frames.recv() {
-                    frame.success(self.output.current_transform(), damage, clock);
+                while let Ok(pending_image_copy_data) = frames.recv() {
+                    pending_image_copy_data.send_success_when_ready(
+                        self.output.current_transform(),
+                        &self.loop_handle,
+                        clock,
+                    );
                 }
             }
         }
