@@ -8,7 +8,7 @@ use crate::{
     config::{AdaptiveSync, EdidProduct, OutputConfig, OutputState, ScreenFilter},
     shell::Shell,
     utils::{env::dev_list_var, prelude::*},
-    wayland::protocols::screencopy::Frame,
+    wayland::handlers::screencopy::PendingImageCopyData,
 };
 
 use anyhow::{Context, Result};
@@ -39,9 +39,7 @@ use smithay::{
         rustix::fs::OFlags,
         wayland_server::{protocol::wl_buffer::WlBuffer, DisplayHandle, Weak},
     },
-    utils::{
-        Buffer as BufferCoords, Clock, DevPath, DeviceFd, Monotonic, Point, Rectangle, Transform,
-    },
+    utils::{Clock, DevPath, DeviceFd, Monotonic, Point, Transform},
     wayland::drm_lease::{DrmLease, DrmLeaseState},
 };
 use tracing::{error, info, warn};
@@ -71,7 +69,7 @@ pub type LockedGbmDrmOutputManager<'a> = LockedDrmOutputManager<
     GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
-        Receiver<(Frame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Receiver<PendingImageCopyData>,
         Duration,
     )>,
     DrmDeviceFd,
@@ -82,7 +80,7 @@ pub type GbmDrmOutputManager = DrmOutputManager<
     GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
-        Receiver<(Frame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Receiver<PendingImageCopyData>,
         Duration,
     )>,
     DrmDeviceFd,

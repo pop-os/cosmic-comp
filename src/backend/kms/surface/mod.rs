@@ -13,7 +13,7 @@ use crate::{
     wayland::{
         handlers::{
             compositor::recursive_frame_time_estimation,
-            screencopy::{submit_buffer, FrameHolder, SessionData},
+            screencopy::{submit_buffer, FrameHolder, PendingImageCopyData, SessionData},
         },
         protocols::screencopy::{
             FailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
@@ -78,7 +78,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{Buffer as BufferCoords, Clock, Monotonic, Physical, Point, Rectangle, Transform},
+    utils::{Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
         dmabuf::{get_dmabuf, DmabufFeedbackBuilder},
         presentation::Refresh,
@@ -172,7 +172,7 @@ pub type GbmDrmOutput = DrmOutput<
     GbmFramebufferExporter<DrmDeviceFd>,
     Option<(
         OutputPresentationFeedback,
-        Receiver<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+        Receiver<PendingImageCopyData>,
         Duration,
     )>,
     DrmDeviceFd,
@@ -819,7 +819,7 @@ impl SurfaceThreadState {
 
                 self.timings.presented(clock);
 
-                while let Ok((frame, damage)) = frames.recv() {
+                while let Ok(PendingImageCopyData { frame, damage, .. }) = frames.recv() {
                     frame.success(self.output.current_transform(), damage, clock);
                 }
             }
@@ -1635,7 +1635,7 @@ fn send_screencopy_result<'a>(
     renderer: &mut GlMultiRenderer<'a>,
     output: &Output,
     pre_postprocess_data: &mut PrePostprocessData,
-    tx: &std::sync::mpsc::Sender<(ScreencopyFrame, Vec<Rectangle<i32, BufferCoords>>)>,
+    tx: &std::sync::mpsc::Sender<PendingImageCopyData>,
     frame_result: &RenderFrameResult<GbmBuffer, GbmFramebuffer, CosmicElement<GlMultiRenderer<'a>>>,
     elements: &[CosmicElement<GlMultiRenderer>],
     (session, frame, res): (
@@ -1807,7 +1807,7 @@ fn send_screencopy_result<'a>(
 
     let transform = output.current_transform();
 
-    if let Some((frame, damage)) = submit_buffer(
+    if let Some(data) = submit_buffer(
         frame,
         renderer,
         shm_buffer.then_some(fb.as_mut().unwrap()),
@@ -1816,9 +1816,10 @@ fn send_screencopy_result<'a>(
         sync,
     )? {
         if frame_result.is_empty {
-            frame.success(transform, damage, presentation_time);
+            data.frame
+                .success(transform, data.damage, presentation_time);
         } else {
-            let _ = tx.send((frame, damage));
+            let _ = tx.send(data);
         }
     }
 
