@@ -14,6 +14,8 @@ use smithay::{
     },
 };
 
+use cosmic_comp_config::output::OutputState as EnabledState;
+
 use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_configuration_head_v1::{self, ZcosmicOutputConfigurationHeadV1},
     zcosmic_output_configuration_v1::{self, ZcosmicOutputConfigurationV1},
@@ -21,7 +23,7 @@ use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_manager_v1::{self, ZcosmicOutputManagerV1},
 };
 
-use crate::{config::OutputState as EnabledState, wayland::protocols::output_configuration::*};
+use crate::wayland::protocols::output_configuration::*;
 
 impl<D> GlobalDispatch<ZcosmicOutputManagerV1, OutputMngrGlobalData, D>
     for OutputConfigurationState<D>

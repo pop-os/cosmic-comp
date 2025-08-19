@@ -830,6 +830,7 @@ dependencies = [
  "cosmic-text",
  "egui",
  "egui_plot",
+ "futures",
  "i18n-embed",
  "i18n-embed-fl",
  "iced_tiny_skia",
@@ -884,7 +885,9 @@ dependencies = [
  "cosmic-config",
  "input",
  "libdisplay-info",
+ "ron 0.9.0",
  "serde",
+ "tracing",
 ]
 
 [[package]]
