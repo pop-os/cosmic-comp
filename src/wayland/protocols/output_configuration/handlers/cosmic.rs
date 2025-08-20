@@ -14,7 +14,7 @@ use smithay::{
     },
 };
 
-use cosmic_comp_config::output::OutputState as EnabledState;
+use cosmic_comp_config::output::comp::OutputState as EnabledState;
 
 use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_configuration_head_v1::{self, ZcosmicOutputConfigurationHeadV1},

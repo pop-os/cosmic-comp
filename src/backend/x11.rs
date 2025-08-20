@@ -8,7 +8,7 @@ use crate::{
     utils::prelude::*,
 };
 use anyhow::{anyhow, Context, Result};
-use cosmic_comp_config::output::OutputConfig;
+use cosmic_comp_config::output::comp::OutputConfig;
 use smithay::{
     backend::{
         allocator::{

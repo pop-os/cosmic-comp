@@ -16,6 +16,7 @@ bytemuck = "1.23"
 calloop = { version = "0.14.2", features = ["executor"] }
 cosmic-comp-config = { path = "cosmic-comp-config", features = [
     "libdisplay-info",
+    "output",
 ] }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic/", features = [
     "calloop",
