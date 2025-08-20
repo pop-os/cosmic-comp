@@ -1379,14 +1379,17 @@ where
                             elements.truncate(old_len);
                         }
 
+                        let mut sync = SyncPoint::default();
+
                         if let (Some(damage), _) = &res {
+                            // TODO: On Vulkan, may need to combine sync points instead of just using latest?
                             let blit_to_buffer =
                                 |renderer: &mut R, blit_from: &mut R::Framebuffer<'_>| {
                                     if let Ok(dmabuf) = get_dmabuf(buffer) {
                                         let mut dmabuf_clone = dmabuf.clone();
                                         let mut fb = renderer.bind(&mut dmabuf_clone)?;
                                         for rect in damage.iter() {
-                                            renderer.blit(
+                                            sync = renderer.blit(
                                                 blit_from,
                                                 &mut fb,
                                                 *rect,
@@ -1398,7 +1401,7 @@ where
                                         let fb = offscreen
                                             .expect("shm buffers should have offscreen target");
                                         for rect in damage.iter() {
-                                            renderer.blit(
+                                            sync = renderer.blit(
                                                 blit_from,
                                                 fb,
                                                 *rect,
@@ -1425,7 +1428,7 @@ where
 
                         Ok(RenderOutputResult {
                             damage: res.0,
-                            sync: SyncPoint::default(),
+                            sync,
                             states: res.1,
                         })
                     },
