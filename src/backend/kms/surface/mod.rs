@@ -1729,7 +1729,8 @@ fn send_screencopy_result<'a>(
 
             if let Some(fb) = fb.as_mut() {
                 for rect in adjusted.iter().copied() {
-                    renderer
+                    // TODO: On Vulkan, may need to combine sync points instead of just using latest?
+                    sync = renderer
                         .blit(&mut tex_fb, fb, rect, rect, TextureFilter::Linear)
                         .map_err(
                             RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering,
