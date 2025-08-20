@@ -45,8 +45,10 @@ pub use self::types::*;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::output::EdidProduct;
 use cosmic_comp_config::{
-    input::InputConfig, workspace::WorkspaceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
-    XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
+    input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
+    workspace::WorkspaceConfig,
+    CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
+    XwaylandEavesdropping, ZoomConfig,
 };
 
 #[derive(Debug)]
@@ -678,34 +680,46 @@ impl Config {
 
     pub fn read_device(&self, device: &mut InputDevice) {
         let (device_config, default_config) = self.get_device_config(device);
-        input_config::update_device(device, device_config, default_config);
+        input_config::update_device(device, device_config.as_ref(), default_config);
     }
 
     pub fn scroll_factor(&self, device: &InputDevice) -> f64 {
         let (device_config, default_config) = self.get_device_config(device);
-        input_config::get_config(device_config, default_config, |x| {
+        input_config::get_config(device_config.as_ref(), default_config, |x| {
             x.scroll_config.as_ref()?.scroll_factor
         })
         .map_or(1.0, |x| x.0)
     }
 
-    pub fn map_to_output(&self, device: &InputDevice) -> Option<&str> {
+    pub fn map_to_output(&self, device: &InputDevice) -> Option<String> {
         let (device_config, default_config) = self.get_device_config(device);
         Some(
-            input_config::get_config(device_config, default_config, |x| {
-                x.map_to_output.as_deref()
+            input_config::get_config(device_config.as_ref(), default_config, |x| {
+                x.map_to_output.clone()
             })?
             .0,
         )
     }
 
-    fn get_device_config(&self, device: &InputDevice) -> (Option<&InputConfig>, &InputConfig) {
-        let default_config = if device.config_tap_finger_count() > 0 {
+    fn get_device_config(&self, device: &InputDevice) -> (Option<InputConfig>, &InputConfig) {
+        let is_touchpad = device.config_tap_finger_count() > 0;
+
+        let default_config = if is_touchpad {
             &self.cosmic_conf.input_touchpad
         } else {
             &self.cosmic_conf.input_default
         };
-        let device_config = self.cosmic_conf.input_devices.get(device.name());
+
+        let mut device_config = self.cosmic_conf.input_devices.get(device.name()).cloned();
+        if is_touchpad && self.cosmic_conf.input_touchpad_override == TouchpadOverride::ForceDisable
+        {
+            device_config = Some({
+                let mut config = device_config.unwrap_or_default();
+                config.state = InputDeviceState::Disabled;
+                config
+            });
+        }
+
         (device_config, default_config)
     }
 }
@@ -885,6 +899,11 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let value = get_config::<InputConfig>(&config, "input_touchpad");
                 state.common.config.cosmic_conf.input_touchpad = value;
                 update_input(state);
+            }
+            "input_touchpad_override" => {
+                let value = get_config::<TouchpadOverride>(&config, "input_touchpad_override");
+                state.common.config.cosmic_conf.input_touchpad_override = value;
+                update_input(state)
             }
             "input_devices" => {
                 let value = get_config::<HashMap<String, InputConfig>>(&config, "input_devices");
