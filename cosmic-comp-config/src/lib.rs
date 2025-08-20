@@ -4,6 +4,8 @@ use cosmic_config::{cosmic_config_derive::CosmicConfigEntry, CosmicConfigEntry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::input::TouchpadOverride;
+
 pub mod input;
 pub mod output;
 pub mod workspace;
@@ -29,6 +31,7 @@ pub struct CosmicCompConfig {
     pub pinned_workspaces: Vec<workspace::PinnedWorkspace>,
     pub input_default: input::InputConfig,
     pub input_touchpad: input::InputConfig,
+    pub input_touchpad_override: TouchpadOverride,
     pub input_devices: HashMap<String, input::InputConfig>,
     pub xkb_config: XkbConfig,
     pub keyboard_config: KeyboardConfig,
@@ -74,6 +77,7 @@ impl Default for CosmicCompConfig {
                 }),
                 ..Default::default()
             },
+            input_touchpad_override: Default::default(),
             input_devices: Default::default(),
             xkb_config: Default::default(),
             keyboard_config: Default::default(),

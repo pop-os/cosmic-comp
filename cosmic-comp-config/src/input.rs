@@ -56,6 +56,13 @@ pub enum DeviceState {
     DisabledOnExternalMouse,
 }
 
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TouchpadOverride {
+    #[default]
+    None,
+    ForceDisable,
+}
+
 impl Default for DeviceState {
     fn default() -> Self {
         Self::Enabled
