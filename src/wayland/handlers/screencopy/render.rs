@@ -100,7 +100,7 @@ pub fn submit_buffer<R>(
     offscreen: Option<&mut R::Framebuffer<'_>>,
     transform: Transform,
     damage: Option<&[Rectangle<i32, Physical>]>,
-    sync: SyncPoint,
+    mut sync: SyncPoint,
 ) -> Result<Option<PendingImageCopyData>, R::Error>
 where
     R: ExportMem,
@@ -154,6 +154,11 @@ where
                     );
                 }
             }
+
+            // We've already waited on the sync point and copied from the texture
+            // TODO: Don't block in this function, and defer copy until ready?
+            sync = SyncPoint::signaled();
+
             Ok(())
         })
         .map_err(|err| R::Error::from_gles_error(GlesError::BufferAccessError(err)))
