@@ -762,11 +762,11 @@ impl InnerDevice {
 
             Ok((output, false))
         } else {
-            output
+            let new_config = output
                 .user_data()
                 .insert_if_missing(|| RefCell::new(OutputConfig::default()));
 
-            populate_modes(drm, &output, conn, position)
+            populate_modes(drm, &output, conn, new_config, position)
                 .with_context(|| "Failed to enumerate connector modes")?;
 
             let has_surface = if let Some(crtc) = maybe_crtc {
@@ -947,6 +947,7 @@ fn populate_modes(
     drm: &mut DrmDevice,
     output: &Output,
     conn: connector::Handle,
+    new_config: bool,
     position: (u32, u32),
 ) -> Result<()> {
     let conn_info = drm.get_connector(conn, false)?;
@@ -960,10 +961,6 @@ fn populate_modes(
     else {
         anyhow::bail!("No mode found");
     };
-    let scale = conn_info
-        .size()
-        .map(|size| calculate_scale(conn_info.interface(), size, mode.size()))
-        .unwrap_or(1.0);
 
     let refresh_rate = drm_helpers::calculate_refresh_rate(mode);
     let output_mode = OutputMode {
@@ -971,40 +968,56 @@ fn populate_modes(
         refresh: refresh_rate as i32,
     };
 
+    let mut modes = Vec::new();
     for mode in conn_info.modes() {
         let refresh_rate = drm_helpers::calculate_refresh_rate(*mode);
         let mode = OutputMode {
             size: (mode.size().0 as i32, mode.size().1 as i32).into(),
             refresh: refresh_rate as i32,
         };
+        modes.push(mode.clone());
         output.add_mode(mode);
     }
+    for mode in output
+        .modes()
+        .into_iter()
+        .filter(|mode| !modes.contains(&mode))
+    {
+        output.delete_mode(mode);
+    }
     output.set_preferred(output_mode);
-    let transform = drm_helpers::panel_orientation(drm, conn).unwrap_or(Transform::Normal);
-    output.change_current_state(
-        Some(output_mode),
-        Some(transform),
-        Some(Scale::Fractional(scale)),
-        Some(Point::from((position.0 as i32, position.1 as i32))),
-    );
 
-    let mut output_config = output
-        .user_data()
-        .get::<RefCell<OutputConfig>>()
-        .unwrap()
-        .borrow_mut();
-    *output_config = OutputConfig {
-        mode: ((output_mode.size.w, output_mode.size.h), Some(refresh_rate)),
-        position,
-        max_bpc,
-        scale,
-        transform,
-        // Try opportunistic VRR by default,
-        // if not supported this will be turned off on `resume`,
-        // when we have the `Surface` to actually check for support.
-        vrr: AdaptiveSync::Enabled,
-        ..std::mem::take(&mut *output_config)
-    };
+    if new_config {
+        let scale = conn_info
+            .size()
+            .map(|size| calculate_scale(conn_info.interface(), size, mode.size()))
+            .unwrap_or(1.0);
+        let transform = drm_helpers::panel_orientation(drm, conn).unwrap_or(Transform::Normal);
+        output.change_current_state(
+            Some(output_mode),
+            Some(transform),
+            Some(Scale::Fractional(scale)),
+            Some(Point::from((position.0 as i32, position.1 as i32))),
+        );
+
+        let mut output_config = output
+            .user_data()
+            .get::<RefCell<OutputConfig>>()
+            .unwrap()
+            .borrow_mut();
+        *output_config = OutputConfig {
+            mode: ((output_mode.size.w, output_mode.size.h), Some(refresh_rate)),
+            position,
+            max_bpc,
+            scale,
+            transform,
+            // Try opportunistic VRR by default,
+            // if not supported this will be turned off on `resume`,
+            // when we have the `Surface` to actually check for support.
+            vrr: AdaptiveSync::Enabled,
+            ..std::mem::take(&mut *output_config)
+        };
+    }
 
     Ok(())
 }
