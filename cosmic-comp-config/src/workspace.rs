@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::output::EdidProduct;
+use crate::output::comp::EdidProduct;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceConfig {

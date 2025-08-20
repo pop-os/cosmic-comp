@@ -31,7 +31,7 @@ use crate::{
 };
 use anyhow::Context;
 use calloop::RegistrationToken;
-use cosmic_comp_config::output::{OutputConfig, OutputState};
+use cosmic_comp_config::output::comp::{OutputConfig, OutputState};
 use i18n_embed::{
     fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,

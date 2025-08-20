@@ -1,4 +1,4 @@
-use cosmic_comp_config::output::{AdaptiveSync, OutputConfig, OutputState};
+use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
 use smithay::{
     backend::drm::VrrSupport as Support,
     output::{Output, WeakOutput},

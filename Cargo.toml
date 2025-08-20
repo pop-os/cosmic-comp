@@ -16,7 +16,7 @@ anyhow = {version = "1.0.51", features = ["backtrace"]}
 bitflags = "2.4"
 bytemuck = "1.12"
 calloop = {version = "0.14.1", features = ["executor"]}
-cosmic-comp-config = {path = "cosmic-comp-config", features = ["libdisplay-info"]}
+cosmic-comp-config = {path = "cosmic-comp-config", features = ["libdisplay-info", "output"]}
 cosmic-config = {git = "https://github.com/pop-os/libcosmic/", features = ["calloop", "macro"]}
 cosmic-protocols = {git = "https://github.com/pop-os/cosmic-protocols", rev = "e706814", default-features = false, features = ["server"]}
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
