@@ -28,7 +28,7 @@ use crate::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
             data_device::get_dnd_icon,
-            screencopy::{render_session, FrameHolder, PendingImageCopyData, SessionData},
+            screencopy::{render_session, FrameHolder, SessionData},
         },
         protocols::workspace::WorkspaceHandle,
     },
@@ -1150,6 +1150,7 @@ pub fn render_output<'d, R>(
     output: &Output,
     cursor_mode: CursorMode,
     screen_filter: &'d mut ScreenFilterStorage,
+    loop_handle: &calloop::LoopHandle<'static, State>,
 ) -> Result<RenderOutputResult<'d>, RenderError<R::Error>>
 where
     R: Renderer
@@ -1332,11 +1333,7 @@ where
     match result {
         Ok((res, mut elements)) => {
             for (session, frame) in output.take_pending_frames() {
-                if let Some(PendingImageCopyData { frame, damage, .. }) = render_session::<
-                    _,
-                    _,
-                    GlesTexture,
-                >(
+                if let Some(pending_image_copy_data) = render_session::<_, _, GlesTexture>(
                     renderer,
                     &session.user_data().get::<SessionData>().unwrap(),
                     frame,
@@ -1437,7 +1434,11 @@ where
                         })
                     },
                 )? {
-                    frame.success(output.current_transform(), damage, now);
+                    pending_image_copy_data.send_success_when_ready(
+                        output.current_transform(),
+                        loop_handle,
+                        now,
+                    );
                 }
             }
 

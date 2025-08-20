@@ -63,6 +63,7 @@ impl WinitState {
             &self.output,
             CursorMode::NotDefault,
             &mut self.screen_filter_state,
+            &state.event_loop_handle,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 std::mem::drop(fb);

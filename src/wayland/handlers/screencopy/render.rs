@@ -471,8 +471,12 @@ pub fn render_workspace_to_buffer(
         }
     };
 
-    if let Some(PendingImageCopyData { frame, damage, .. }) = result {
-        frame.success(transform, damage, common.clock.now())
+    if let Some(pending_image_copy_data) = result {
+        pending_image_copy_data.send_success_when_ready(
+            transform,
+            &common.event_loop_handle,
+            common.clock.now(),
+        );
     }
 }
 
@@ -702,8 +706,12 @@ pub fn render_window_to_buffer(
         },
     };
 
-    if let Some(PendingImageCopyData { frame, damage, .. }) = result {
-        frame.success(Transform::Normal, damage, common.clock.now())
+    if let Some(pending_image_copy_data) = result {
+        pending_image_copy_data.send_success_when_ready(
+            Transform::Normal,
+            &common.event_loop_handle,
+            common.clock.now(),
+        );
     }
 }
 
@@ -858,7 +866,11 @@ pub fn render_cursor_to_buffer(
         }
     };
 
-    if let Some(PendingImageCopyData { frame, damage, .. }) = result {
-        frame.success(Transform::Normal, damage, common.clock.now())
+    if let Some(pending_image_copy_data) = result {
+        pending_image_copy_data.send_success_when_ready(
+            Transform::Normal,
+            &common.event_loop_handle,
+            common.clock.now(),
+        );
     }
 }

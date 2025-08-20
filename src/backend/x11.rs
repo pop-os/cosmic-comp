@@ -230,6 +230,7 @@ impl Surface {
             &self.output,
             render::CursorMode::NotDefault,
             &mut self.screen_filter_state,
+            &state.event_loop_handle,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 self.surface
