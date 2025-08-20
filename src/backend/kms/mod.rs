@@ -9,7 +9,7 @@ use crate::{
 
 use anyhow::{Context, Result};
 use calloop::LoopSignal;
-use cosmic_comp_config::output::{AdaptiveSync, OutputState};
+use cosmic_comp_config::output::comp::{AdaptiveSync, OutputState};
 use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{

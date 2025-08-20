@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use cosmic_comp_config::output::{OutputConfig, OutputState, TransformDef};
+use cosmic_comp_config::output::comp::{OutputConfig, OutputState, TransformDef};
 use smithay::{output::Output, utils::Point};
 use tracing::{error, warn};
 

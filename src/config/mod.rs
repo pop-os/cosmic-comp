@@ -42,10 +42,12 @@ pub mod key_bindings;
 mod types;
 
 use cosmic::config::CosmicTk;
-pub use cosmic_comp_config::output::EdidProduct;
+pub use cosmic_comp_config::output::comp::EdidProduct;
 use cosmic_comp_config::{
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
-    output::{load_outputs, OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef},
+    output::comp::{
+        load_outputs, OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef,
+    },
     workspace::WorkspaceConfig,
     CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
     XwaylandEavesdropping, ZoomConfig,
@@ -137,20 +139,6 @@ impl From<CompTransformDef> for Transform {
             TransformDef::Flipped90 => Transform::Flipped90,
             TransformDef::Flipped180 => Transform::Flipped180,
             TransformDef::Flipped270 => Transform::Flipped270,
-        }
-    }
-}
-
-#[cfg(feature = "libdisplay-info")]
-impl From<libdisplay_info::edid::VendorProduct> for EdidProduct {
-    fn from(vp: libdisplay_info::edid::VendorProduct) -> Self {
-        Self {
-            manufacturer: vp.manufacturer,
-            product: vp.product,
-            serial: vp.serial,
-            manufacture_week: vp.manufacture_week,
-            manufacture_year: vp.manufacture_year,
-            model_year: vp.model_year,
         }
     }
 }

@@ -8,7 +8,7 @@ use crate::{
     utils::prelude::*,
 };
 use anyhow::{anyhow, Context, Result};
-use cosmic_comp_config::output::{OutputConfig, TransformDef};
+use cosmic_comp_config::output::comp::{OutputConfig, TransformDef};
 use smithay::{
     backend::{
         drm::NodeType,

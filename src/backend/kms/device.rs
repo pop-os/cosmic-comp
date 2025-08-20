@@ -12,7 +12,7 @@ use crate::{
 };
 
 use anyhow::{Context, Result};
-use cosmic_comp_config::output::{AdaptiveSync, OutputConfig, OutputState};
+use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
 use libc::dev_t;
 use smithay::{
     backend::{

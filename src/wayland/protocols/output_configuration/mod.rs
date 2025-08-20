@@ -4,7 +4,7 @@ use calloop::{
     timer::{TimeoutAction, Timer},
     LoopHandle,
 };
-use cosmic_comp_config::output::AdaptiveSync;
+use cosmic_comp_config::output::comp::AdaptiveSync;
 use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_configuration_head_v1::ZcosmicOutputConfigurationHeadV1,
     zcosmic_output_configuration_v1::ZcosmicOutputConfigurationV1,
