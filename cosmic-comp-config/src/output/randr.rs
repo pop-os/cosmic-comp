@@ -29,8 +29,12 @@ impl From<CompList> for cosmic_randr_shell::List {
                     OutputState::Mirroring(m) => Some(m),
                     _ => None,
                 },
-                make: Some(info.make),
-                model: info.model,
+                make: Some(info.make).filter(|make| make != "Unknown"),
+                model: if info.model.as_str() == "Unknown" {
+                    String::new()
+                } else {
+                    info.model
+                },
                 position: (output.position.0 as i32, output.position.1 as i32),
                 scale: output.scale,
                 transform: Some(match output.transform {
