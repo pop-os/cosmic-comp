@@ -25,6 +25,7 @@ TARGET_BIN="$(DESTDIR)$(bindir)/$(BINARY)"
 
 KEYBINDINGS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults"
 TILING_EXCEPTIONS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults"
+TILING_EXCEPTIONS_CUST_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_custom"
 
 all: extract-vendor
 	cargo build $(ARGS)
@@ -51,6 +52,8 @@ install:
 	install -Dm0755 "$(CARGO_TARGET_DIR)/$(TARGET)/$(BINARY)" "$(TARGET_BIN)"
 	install -Dm0644 "data/keybindings.ron" "$(KEYBINDINGS_CONF)"
 	install -Dm0644 "data/tiling-exceptions.ron" "$(TILING_EXCEPTIONS_CONF)"
+	echo '[]' > "$(TILING_EXCEPTIONS_CUST_CONF)"
+	chmod 644 "$(TILING_EXCEPTIONS_CUST_CONF)"
 
 install-bare-session: install
 	install -Dm0644 "data/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
