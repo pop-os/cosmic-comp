@@ -3339,6 +3339,25 @@ impl TilingLayout {
         let last_overview_hover = &mut self.last_overview_hover;
         let tree = &self.queue.trees.back().unwrap().0;
         let Some(root) = tree.root_node_id() else {
+            if matches!(
+                overview.active_trigger(),
+                Some(Trigger::Pointer(_) | Trigger::Touch(_))
+            ) {
+                if location_f64.is_some() {
+                    let mut tree = tree.copy_clone();
+                    tree.insert(
+                        Node::new(Data::Placeholder {
+                            id: Id::new(),
+                            last_geometry: Rectangle::from_size((100, 100).into()),
+                            type_: PlaceholderType::DropZone,
+                        }),
+                        InsertBehavior::AsRoot,
+                    )
+                    .unwrap();
+                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                    self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+                }
+            }
             return;
         };
 
