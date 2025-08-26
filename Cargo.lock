@@ -828,7 +828,6 @@ dependencies = [
  "cosmic-text",
  "egui",
  "egui_plot",
- "futures",
  "i18n-embed",
  "i18n-embed-fl",
  "iced_tiny_skia",
