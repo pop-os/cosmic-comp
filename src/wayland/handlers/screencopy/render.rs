@@ -118,9 +118,10 @@ where
     };
 
     let buffer = frame.buffer();
+    let buffer_size = buffer_dimensions(&buffer).unwrap();
+
     if let Some(fb) = offscreen {
         assert!(matches!(buffer_type(&buffer), Some(BufferType::Shm)));
-        let buffer_size = buffer_dimensions(&buffer).unwrap();
         if let Err(err) = with_buffer_contents_mut(&buffer, |ptr, len, data| {
             let offset = data.offset;
             let width = data.width;
@@ -175,7 +176,7 @@ where
             .into_iter()
             .map(|rect| {
                 let logical = rect.to_logical(1);
-                logical.to_buffer(1, transform, &logical.size)
+                logical.to_buffer(1, transform.invert(), &buffer_size.to_logical(1, transform))
             })
             .collect(),
         sync,
