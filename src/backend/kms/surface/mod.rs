@@ -1657,6 +1657,11 @@ fn send_screencopy_result<'a>(
     let mut render_buffer;
     let buffer = frame.buffer();
     let mut shm_buffer = false;
+    let buffer_size = buffer_dimensions(&buffer).ok_or(RenderError::<
+        <GlMultiRenderer as RendererSuper>::Error,
+    >::Rendering(
+        MultiError::ImportFailed
+    ))?;
     let mut fb = if let Ok(dmabuf) = get_dmabuf(&buffer) {
         dmabuf_clone = dmabuf.clone();
         Some(
@@ -1666,10 +1671,6 @@ fn send_screencopy_result<'a>(
         )
     } else {
         shm_buffer = true;
-        let size =
-            buffer_dimensions(&buffer).ok_or(RenderError::<
-                <GlMultiRenderer as RendererSuper>::Error,
-            >::Rendering(MultiError::ImportFailed))?;
         let format = with_buffer_contents(&buffer, |_, _, data| shm_format_to_fourcc(data.format))
             .map_err(|_| OutputNoMode)? // eh, we have to do some error
             .expect("We should be able to convert all hardcoded shm screencopy formats");
@@ -1682,8 +1683,9 @@ fn send_screencopy_result<'a>(
         {
             None
         } else {
-            render_buffer = Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
-                .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
+            render_buffer =
+                Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, buffer_size)
+                    .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
             Some(
                 renderer
                     .bind(&mut render_buffer)
@@ -1716,14 +1718,16 @@ fn send_screencopy_result<'a>(
         let adjusted = damage
             .iter()
             .copied()
-            .map(|mut d| {
-                d.size = d
-                    .size
-                    .to_logical(1)
-                    .to_buffer(1, output_transform)
-                    .to_logical(1, Transform::Normal)
-                    .to_physical(1);
-                d
+            .map(|rect| {
+                let logical = rect.to_logical(1);
+                logical
+                    .to_buffer(
+                        1,
+                        output_transform.invert(),
+                        &buffer_size.to_logical(1, output_transform),
+                    )
+                    .to_logical(1, Transform::Normal, &buffer_size)
+                    .to_physical(1)
             })
             .collect::<Vec<_>>();
 
