@@ -9,6 +9,7 @@ stack-windows = كدِّس النوافذ
 unknown-keybinding = <غير مضبوط>
 window-menu-minimize = صغّر
 window-menu-maximize = كبّر
+window-menu-fullscreen = ملء الشاشة
 window-menu-tiled = نافذة عائمة
 window-menu-screenshot = خُذ لقطة شاشة
 window-menu-move = انقل
