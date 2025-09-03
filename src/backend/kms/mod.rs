@@ -437,16 +437,17 @@ impl KmsState {
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
     ) -> Result<DrmNode> {
-        let (expected_node, other_nodes) =
-            self.drm_devices
-                .values_mut()
-                .partition::<Vec<_>, _>(|device| {
-                    device
-                        .socket
-                        .as_ref()
-                        .map(|s| &s.dmabuf_global == global)
-                        .unwrap_or(false)
-                });
+        let (expected_node, mut other_nodes) = self
+            .drm_devices
+            .values_mut()
+            .partition::<Vec<_>, _>(|device| {
+                device
+                    .socket
+                    .as_ref()
+                    .map(|s| &s.dmabuf_global == global)
+                    .unwrap_or(false)
+            });
+        other_nodes.retain(|device| device.socket.is_some());
 
         let mut last_err = anyhow::anyhow!("Dmabuf cannot be imported on any gpu");
         for device in expected_node.into_iter().chain(other_nodes.into_iter()) {
