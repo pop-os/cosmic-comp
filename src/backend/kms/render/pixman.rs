@@ -152,4 +152,8 @@ impl ApiDevice for GbmPixmanDevice {
     fn node(&self) -> &DrmNode {
         &self.node
     }
+
+    fn can_do_cross_device_imports(&self) -> bool {
+        false
+    }
 }
