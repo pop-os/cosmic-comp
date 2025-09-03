@@ -237,7 +237,7 @@ impl State {
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
-        let (render_node, render_formats) = {
+        let (render_node, render_formats, is_software) = {
             let egl = init_egl(&gbm)?;
 
             let render_node = egl
@@ -248,7 +248,7 @@ impl State {
                 .unwrap_or(drm_node);
             let render_formats = egl.context.dmabuf_texture_formats().clone();
 
-            (render_node, render_formats)
+            (render_node, render_formats, egl.device.is_software())
         };
 
         let token = self
@@ -271,12 +271,30 @@ impl State {
             )
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
-        let socket = match self.create_socket(dh, render_node, render_formats.clone()) {
-            Ok(socket) => Some(socket),
+        let socket = match (!is_software)
+            .then(|| self.create_socket(dh, render_node, render_formats.clone()))
+            .transpose()
+        {
+            Ok(socket) => socket,
             Err(err) => {
                 warn!(
                     ?err,
                     "Failed to initialize hardware-acceleration for clients on {}.", render_node,
+                );
+                None
+            }
+        };
+
+        let leasing_global = match (!is_software)
+            .then(|| DrmLeaseState::new::<State>(dh, &drm_node))
+            .transpose()
+        {
+            Ok(global) => global,
+            Err(err) => {
+                // TODO: replace with inspect_err, once stable
+                warn!(
+                    ?err,
+                    "Failed to initialize drm lease global for: {}", drm_node
                 );
                 None
             }
@@ -311,16 +329,7 @@ impl State {
                 gbm,
 
                 leased_connectors: Vec::new(),
-                leasing_global: DrmLeaseState::new::<State>(dh, &drm_node)
-                    .map_err(|err| {
-                        // TODO: replace with inspect_err, once stable
-                        warn!(
-                            ?err,
-                            "Failed to initialize drm lease global for: {}", drm_node
-                        );
-                        err
-                    })
-                    .ok(),
+                leasing_global,
                 active_leases: Vec::new(),
                 active_buffers: HashSet::new(),
             },
