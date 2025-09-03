@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use crate::input::TouchpadOverride;
 
 pub mod input;
-#[cfg(feature = "output")]
 pub mod output;
 pub mod workspace;
 
