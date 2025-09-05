@@ -107,6 +107,7 @@ pub struct LockedDevice<'a> {
 pub struct InnerDevice {
     pub dev_node: DrmNode,
     pub render_node: DrmNode,
+    pub is_software: bool,
     pub egl: Option<EGLInternals>,
 
     pub outputs: HashMap<connector::Handle, Output>,
@@ -124,6 +125,7 @@ impl fmt::Debug for InnerDevice {
         f.debug_struct("Device")
             .field("dev_node", &self.dev_node)
             .field("render_node", &self.render_node)
+            .field("is_software", &self.is_software)
             .field("egl", &self.egl)
             .field("outputs", &self.outputs)
             .field("surfaces", &self.surfaces)
@@ -323,6 +325,7 @@ impl State {
             inner: InnerDevice {
                 dev_node: drm_node,
                 render_node,
+                is_software,
                 egl: None,
 
                 outputs: HashMap::new(),

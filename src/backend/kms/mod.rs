@@ -238,7 +238,11 @@ fn determine_primary_gpu(
     }
 
     // else just take the first
-    Ok(drm_devices.values().next().map(|dev| dev.inner.render_node))
+    Ok(drm_devices
+        .values()
+        .next()
+        .filter(|dev| !dev.inner.is_software)
+        .map(|dev| dev.inner.render_node))
 }
 
 /// Create `GlowRenderer` for `EGL_MESA_device_software` device, if present
