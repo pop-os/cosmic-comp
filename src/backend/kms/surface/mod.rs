@@ -87,7 +87,7 @@ use smithay::{
         shm::{shm_format_to_fourcc, with_buffer_contents},
     },
 };
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use std::{
     borrow::{Borrow, BorrowMut},
@@ -98,6 +98,7 @@ use std::{
         mpsc::{Receiver, SyncSender},
         Arc, RwLock,
     },
+    thread::JoinHandle,
     time::Duration,
 };
 
@@ -124,6 +125,7 @@ pub struct Surface {
     loop_handle: LoopHandle<'static, State>,
     thread_command: Sender<ThreadCommand>,
     thread_token: RegistrationToken,
+    thread: Option<JoinHandle<()>>,
 
     dpms: bool,
 }
@@ -213,9 +215,11 @@ pub enum ThreadCommand {
         node: DrmNode,
         gbm: GbmAllocator<DrmDeviceFd>,
         egl: EGLContext, // TODO: Option for software rendering
+        sync: SyncSender<()>,
     },
     NodeRemoved {
         node: DrmNode,
+        sync: SyncSender<()>,
     },
     UpdateMirroring(Option<Output>),
     UpdateScreenFilter(ScreenFilter),
@@ -262,7 +266,7 @@ impl Surface {
         let active_clone = active.clone();
         let output_clone = output.clone();
 
-        std::thread::Builder::new()
+        let thread = std::thread::Builder::new()
             .name(format!("surface-{}", output.name()))
             .spawn(move || {
                 if let Err(err) = surface_thread(
@@ -350,6 +354,7 @@ impl Surface {
             loop_handle: evlh.clone(),
             thread_command: tx,
             thread_token,
+            thread: Some(thread),
             dpms: true,
         })
     }
@@ -364,17 +369,26 @@ impl Surface {
 
     pub fn add_node(&mut self, node: DrmNode, gbm: GbmAllocator<DrmDeviceFd>, egl: EGLContext) {
         self.known_nodes.insert(node);
-        let _ = self
-            .thread_command
-            .send(ThreadCommand::NodeAdded { node, gbm, egl });
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self.thread_command.send(ThreadCommand::NodeAdded {
+            node,
+            gbm,
+            egl,
+            sync: tx,
+        });
+        let _ = rx.recv();
     }
 
     pub fn remove_node(&mut self, node: DrmNode) {
         self.known_nodes.remove(&node);
         self.feedback.remove(&node);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let _ = self
             .thread_command
-            .send(ThreadCommand::NodeRemoved { node });
+            .send(ThreadCommand::NodeRemoved { node, sync: tx });
+        // Block so we can be sure the file descriptor is closed
+        // (which is relevant for the udev device_removed callback).
+        let _ = rx.recv();
     }
 
     pub fn on_vblank(&self, metadata: Option<DrmEventMetadata>) {
@@ -460,6 +474,11 @@ impl Drop for Surface {
     fn drop(&mut self) {
         let _ = self.thread_command.send(ThreadCommand::End);
         self.loop_handle.remove(self.thread_token);
+        if let Some(thread) = self.thread.take() {
+            let name = thread.thread().name().unwrap().to_string();
+            let _ = thread.join();
+            info!("Thread {} terminated.", name)
+        }
     }
 }
 
@@ -547,13 +566,20 @@ fn surface_thread(
             Event::Msg(ThreadCommand::Resume { compositor }) => {
                 state.resume(compositor);
             }
-            Event::Msg(ThreadCommand::NodeAdded { node, gbm, egl }) => {
+            Event::Msg(ThreadCommand::NodeAdded {
+                node,
+                gbm,
+                egl,
+                sync,
+            }) => {
                 if let Err(err) = state.node_added(node, gbm, egl) {
                     warn!(?err, ?node, "Failed to add node to surface-thread");
                 }
+                let _ = sync.send(());
             }
-            Event::Msg(ThreadCommand::NodeRemoved { node }) => {
+            Event::Msg(ThreadCommand::NodeRemoved { node, sync }) => {
                 state.node_removed(node);
+                let _ = sync.send(());
             }
             Event::Msg(ThreadCommand::VBlank(metadata)) => {
                 state.on_vblank(metadata);
@@ -716,6 +742,8 @@ impl SurfaceThreadState {
 
     fn node_removed(&mut self, node: DrmNode) {
         self.api.as_mut().remove_node(&node);
+        // force enumeration
+        let _ = self.api.devices();
         //self.software_api.as_mut().remove_node(node);
     }
 
