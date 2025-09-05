@@ -834,7 +834,7 @@ impl<'a> KmsGuard<'a> {
                             let driver = drm.device().get_driver().ok();
 
                             // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
-                            if driver.is_some_and(|driver| {
+                            if driver.as_ref().is_some_and(|driver| {
                                 driver
                                     .name()
                                     .to_string_lossy()
@@ -842,6 +842,17 @@ impl<'a> KmsGuard<'a> {
                                     .contains("nvidia")
                             }) {
                                 planes.overlay = vec![];
+                            }
+                            // QUIRK: Cursor planes on evdi sometimes don't disappear correctly.
+                            // TODO: Debug and figure out, as they can be a nice improvement.
+                            if driver.as_ref().is_some_and(|driver| {
+                                driver
+                                    .name()
+                                    .to_string_lossy()
+                                    .to_lowercase()
+                                    .contains("evdi")
+                            }) {
+                                planes.cursor = vec![];
                             }
 
                             let mut renderer = self
