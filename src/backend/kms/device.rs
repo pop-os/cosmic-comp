@@ -249,7 +249,7 @@ impl State {
                 .ok()
                 .and_then(std::convert::identity)
                 .unwrap_or(drm_node);
-            let render_formats = egl.context.dmabuf_texture_formats().clone();
+            let render_formats = egl.context.dmabuf_render_formats().clone();
 
             (render_node, render_formats, egl.device.is_software())
         };
