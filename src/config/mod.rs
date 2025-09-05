@@ -42,7 +42,7 @@ pub mod key_bindings;
 mod types;
 
 use cosmic::config::CosmicTk;
-pub use cosmic_comp_config::output::comp::EdidProduct;
+pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
     output::comp::{
