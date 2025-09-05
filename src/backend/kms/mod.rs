@@ -238,7 +238,11 @@ fn determine_primary_gpu(
     }
 
     // else just take the first
-    Ok(drm_devices.values().next().map(|dev| dev.inner.render_node))
+    Ok(drm_devices
+        .values()
+        .next()
+        .filter(|dev| !dev.inner.is_software)
+        .map(|dev| dev.inner.render_node))
 }
 
 /// Create `GlowRenderer` for `EGL_MESA_device_software` device, if present
@@ -437,16 +441,17 @@ impl KmsState {
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
     ) -> Result<DrmNode> {
-        let (expected_node, other_nodes) =
-            self.drm_devices
-                .values_mut()
-                .partition::<Vec<_>, _>(|device| {
-                    device
-                        .socket
-                        .as_ref()
-                        .map(|s| &s.dmabuf_global == global)
-                        .unwrap_or(false)
-                });
+        let (expected_node, mut other_nodes) = self
+            .drm_devices
+            .values_mut()
+            .partition::<Vec<_>, _>(|device| {
+                device
+                    .socket
+                    .as_ref()
+                    .map(|s| &s.dmabuf_global == global)
+                    .unwrap_or(false)
+            });
+        other_nodes.retain(|device| device.socket.is_some());
 
         let mut last_err = anyhow::anyhow!("Dmabuf cannot be imported on any gpu");
         for device in expected_node.into_iter().chain(other_nodes.into_iter()) {
@@ -829,7 +834,7 @@ impl<'a> KmsGuard<'a> {
                             let driver = drm.device().get_driver().ok();
 
                             // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
-                            if driver.is_some_and(|driver| {
+                            if driver.as_ref().is_some_and(|driver| {
                                 driver
                                     .name()
                                     .to_string_lossy()
@@ -837,6 +842,17 @@ impl<'a> KmsGuard<'a> {
                                     .contains("nvidia")
                             }) {
                                 planes.overlay = vec![];
+                            }
+                            // QUIRK: Cursor planes on evdi sometimes don't disappear correctly.
+                            // TODO: Debug and figure out, as they can be a nice improvement.
+                            if driver.as_ref().is_some_and(|driver| {
+                                driver
+                                    .name()
+                                    .to_string_lossy()
+                                    .to_lowercase()
+                                    .contains("evdi")
+                            }) {
+                                planes.cursor = vec![];
                             }
 
                             let mut renderer = self

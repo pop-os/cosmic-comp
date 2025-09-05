@@ -50,6 +50,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fmt,
+    os::fd::OwnedFd,
     path::Path,
     sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
     time::Duration,
@@ -106,6 +107,7 @@ pub struct LockedDevice<'a> {
 pub struct InnerDevice {
     pub dev_node: DrmNode,
     pub render_node: DrmNode,
+    pub is_software: bool,
     pub egl: Option<EGLInternals>,
 
     pub outputs: HashMap<connector::Handle, Output>,
@@ -123,6 +125,7 @@ impl fmt::Debug for InnerDevice {
         f.debug_struct("Device")
             .field("dev_node", &self.dev_node)
             .field("render_node", &self.render_node)
+            .field("is_software", &self.is_software)
             .field("egl", &self.egl)
             .field("outputs", &self.outputs)
             .field("surfaces", &self.surfaces)
@@ -237,7 +240,7 @@ impl State {
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
-        let (render_node, render_formats) = {
+        let (render_node, render_formats, is_software) = {
             let egl = init_egl(&gbm)?;
 
             let render_node = egl
@@ -246,9 +249,9 @@ impl State {
                 .ok()
                 .and_then(std::convert::identity)
                 .unwrap_or(drm_node);
-            let render_formats = egl.context.dmabuf_texture_formats().clone();
+            let render_formats = egl.context.dmabuf_render_formats().clone();
 
-            (render_node, render_formats)
+            (render_node, render_formats, egl.device.is_software())
         };
 
         let token = self
@@ -271,12 +274,30 @@ impl State {
             )
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
-        let socket = match self.create_socket(dh, render_node, render_formats.clone()) {
-            Ok(socket) => Some(socket),
+        let socket = match (!is_software)
+            .then(|| self.create_socket(dh, render_node, render_formats.clone()))
+            .transpose()
+        {
+            Ok(socket) => socket,
             Err(err) => {
                 warn!(
                     ?err,
                     "Failed to initialize hardware-acceleration for clients on {}.", render_node,
+                );
+                None
+            }
+        };
+
+        let leasing_global = match (!is_software)
+            .then(|| DrmLeaseState::new::<State>(dh, &drm_node))
+            .transpose()
+        {
+            Ok(global) => global,
+            Err(err) => {
+                // TODO: replace with inspect_err, once stable
+                warn!(
+                    ?err,
+                    "Failed to initialize drm lease global for: {}", drm_node
                 );
                 None
             }
@@ -304,6 +325,7 @@ impl State {
             inner: InnerDevice {
                 dev_node: drm_node,
                 render_node,
+                is_software,
                 egl: None,
 
                 outputs: HashMap::new(),
@@ -311,16 +333,7 @@ impl State {
                 gbm,
 
                 leased_connectors: Vec::new(),
-                leasing_global: DrmLeaseState::new::<State>(dh, &drm_node)
-                    .map_err(|err| {
-                        // TODO: replace with inspect_err, once stable
-                        warn!(
-                            ?err,
-                            "Failed to initialize drm lease global for: {}", drm_node
-                        );
-                        err
-                    })
-                    .ok(),
+                leasing_global,
                 active_leases: Vec::new(),
                 active_buffers: HashSet::new(),
             },
@@ -477,7 +490,7 @@ impl State {
             .with_context(|| format!("Couldn't find drm node for {}", dev))?;
 
         let mut outputs_removed = Vec::new();
-        if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
+        let device_fd = if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
             if let Some(mut leasing_global) = device.inner.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
@@ -500,6 +513,10 @@ impl State {
                 .write()
                 .unwrap()
                 .take_if(|node| node == &device.inner.render_node);
+
+            Some(device.drm.device().device_fd().device_fd())
+        } else {
+            None
         };
         self.common
             .output_configuration_state
@@ -514,6 +531,19 @@ impl State {
         }
 
         backend.refresh_used_devices()?;
+
+        if let Some(fd) = device_fd {
+            match TryInto::<OwnedFd>::try_into(fd) {
+                Ok(fd) => {
+                    if let Err(err) = backend.session.close(fd) {
+                        warn!("Failed to close drm device fd: {}", err);
+                    }
+                }
+                Err(_) => {
+                    warn!(?drm_node, "Unable to close drm device fd cleanly.");
+                }
+            };
+        }
         Ok(())
     }
 
