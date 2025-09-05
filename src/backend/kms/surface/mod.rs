@@ -214,7 +214,7 @@ pub enum ThreadCommand {
     NodeAdded {
         node: DrmNode,
         gbm: GbmAllocator<DrmDeviceFd>,
-        egl: EGLContext, // TODO: Option for software rendering
+        egl: EGLContext,
         sync: SyncSender<()>,
     },
     NodeRemoved {
@@ -500,12 +500,6 @@ fn surface_thread(
 
     let api = GpuManager::new(GbmGlowBackend::<DrmDeviceFd>::default())
         .context("Failed to initialize rendering api")?;
-    /*
-    let software_api = GpuManager::new(GbmPixmanBackend::<DrmDeviceFd>::with_allocator_flags(
-        gbm_flags,
-    ))
-    .context("Failed to initialize software rendering");
-    */
 
     #[cfg(feature = "debug")]
     let egui = {
@@ -725,17 +719,11 @@ impl SurfaceThreadState {
         gbm: GbmAllocator<DrmDeviceFd>,
         egl: EGLContext,
     ) -> Result<()> {
-        //if let Some(egl) = egl {
         let mut renderer =
             unsafe { GlowRenderer::new(egl) }.context("Failed to create renderer")?;
         init_shaders(renderer.borrow_mut()).context("Failed to initialize shaders")?;
 
         self.api.as_mut().add_node(node, gbm, renderer);
-        /*
-        } else {
-            self.software_api.as_mut().add_node(node, gbm);
-        }
-        */
 
         Ok(())
     }
@@ -744,7 +732,6 @@ impl SurfaceThreadState {
         self.api.as_mut().remove_node(&node);
         // force enumeration
         let _ = self.api.devices();
-        //self.software_api.as_mut().remove_node(node);
     }
 
     #[profiling::function]
