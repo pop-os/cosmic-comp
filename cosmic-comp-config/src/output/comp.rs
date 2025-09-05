@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs::OpenOptions, path::Path};
+use std::collections::HashMap;
+#[cfg(feature = "output")]
+use std::{fs::OpenOptions, path::Path};
+#[cfg(feature = "output")]
 use tracing::{error, warn};
 
 #[derive(Debug, Deserialize, Serialize, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -99,6 +102,7 @@ pub struct OutputInfo {
     pub model: String,
 }
 
+#[cfg(feature = "output")]
 pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
     if let Some(path) = path.as_ref() {
         let path: &Path = path.as_ref();
