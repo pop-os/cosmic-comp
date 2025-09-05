@@ -50,6 +50,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fmt,
+    os::fd::OwnedFd,
     path::Path,
     sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
     time::Duration,
@@ -486,7 +487,7 @@ impl State {
             .with_context(|| format!("Couldn't find drm node for {}", dev))?;
 
         let mut outputs_removed = Vec::new();
-        if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
+        let device_fd = if let Some(mut device) = backend.drm_devices.shift_remove(&drm_node) {
             if let Some(mut leasing_global) = device.inner.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
@@ -509,6 +510,10 @@ impl State {
                 .write()
                 .unwrap()
                 .take_if(|node| node == &device.inner.render_node);
+
+            Some(device.drm.device().device_fd().device_fd())
+        } else {
+            None
         };
         self.common
             .output_configuration_state
@@ -523,6 +528,19 @@ impl State {
         }
 
         backend.refresh_used_devices()?;
+
+        if let Some(fd) = device_fd {
+            match TryInto::<OwnedFd>::try_into(fd) {
+                Ok(fd) => {
+                    if let Err(err) = backend.session.close(fd) {
+                        warn!("Failed to close drm device fd: {}", err);
+                    }
+                }
+                Err(_) => {
+                    warn!(?drm_node, "Unable to close drm device fd cleanly.");
+                }
+            };
+        }
         Ok(())
     }
 
