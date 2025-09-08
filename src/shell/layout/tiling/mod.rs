@@ -5286,7 +5286,7 @@ where
         swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
             IndicatorShader::focus_element(
                 renderer,
-                Key::Static(swapping_stack_surface_id.clone()),
+                Key::from(swapping_stack_surface_id.clone()),
                 swap_geo,
                 4,
                 transition.unwrap_or(1.0),
