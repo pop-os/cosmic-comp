@@ -49,7 +49,7 @@ use smithay::{
                     constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior,
                     CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
                 },
-                Element, Id, Kind, RenderElement,
+                Element, Id, Kind, RenderElement, WeakId,
             },
             gles::{
                 element::{PixelShaderElement, TextureShaderElement},
@@ -132,7 +132,7 @@ pub enum Usage {
 
 #[derive(Clone)]
 pub enum Key {
-    Static(Id),
+    Static(WeakId),
     Group(Weak<()>),
     Window(Usage, CosmicMappedKey),
 }
@@ -166,7 +166,7 @@ impl From<WindowGroup> for Key {
 }
 impl From<Id> for Key {
     fn from(id: Id) -> Self {
-        Key::Static(id)
+        Key::Static(id.downgrade())
     }
 }
 
@@ -236,7 +236,7 @@ impl IndicatorShader {
         user_data.insert_if_missing(|| IndicatorCache::new(HashMap::new()));
         let mut cache = user_data.get::<IndicatorCache>().unwrap().borrow_mut();
         cache.retain(|k, _| match k {
-            Key::Static(_) => true,
+            Key::Static(w) => w.upgrade().is_some(),
             Key::Group(w) => w.upgrade().is_some(),
             Key::Window(_, w) => w.alive(),
         });
@@ -318,7 +318,7 @@ impl BackdropShader {
         user_data.insert_if_missing(|| BackdropCache::new(HashMap::new()));
         let mut cache = user_data.get::<BackdropCache>().unwrap().borrow_mut();
         cache.retain(|k, _| match k {
-            Key::Static(_) => true,
+            Key::Static(w) => w.upgrade().is_some(),
             Key::Group(a) => a.upgrade().is_some(),
             Key::Window(_, w) => w.alive(),
         });
