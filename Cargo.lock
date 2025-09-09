@@ -4915,7 +4915,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/smithay/smithay.git?rev=d3bdae4#d3bdae43afb37a52acbeeada574cc05b06b539ba"
+source = "git+https://github.com/smithay/smithay.git?rev=eb45814#eb45814725597a7f0db07eccf4bd473d87c730bc"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -6217,7 +6217,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
