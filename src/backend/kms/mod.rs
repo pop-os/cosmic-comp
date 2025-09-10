@@ -705,11 +705,9 @@ impl<'a> KmsGuard<'a> {
                 .crtcs()
                 .iter()
                 .filter(|crtc| {
-                    !device
-                        .inner
-                        .surfaces
-                        .get(crtc)
-                        .is_some_and(|surface| surface.output.is_enabled())
+                    !device.inner.surfaces.get(crtc).is_some()
+                    // TODO: We can't do this. See https://github.com/Smithay/smithay/pull/1820
+                    //.is_some_and(|surface| surface.output.is_enabled())
                 })
                 .copied()
                 .collect::<HashSet<crtc::Handle>>();
