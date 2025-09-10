@@ -1,7 +1,12 @@
-use crate::state::{BackendData, Common, State};
+use crate::{
+    state::{BackendData, Common, State},
+    utils::prelude::OutputExt,
+};
 use anyhow::{Context, Result};
 use calloop::{InsertError, LoopHandle, RegistrationToken};
+use cosmic_comp_config::output::comp::OutputState;
 use std::collections::HashMap;
+use tracing::{error, warn};
 use zbus::blocking::{fdo::DBusProxy, Connection};
 
 #[cfg(feature = "systemd")]
@@ -24,12 +29,26 @@ pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>>
                             }
                             _ => Vec::new(),
                         };
+                        let mut added = Vec::new();
                         for node in nodes {
-                            if let Err(err) = state.device_changed(node.dev_id()) {
-                                tracing::error!(?err, "Failed to update drm device {}.", node);
+                            match state.device_changed(node.dev_id()) {
+                                Ok(outputs) => added.extend(outputs),
+                                Err(err) => {
+                                    tracing::error!(?err, "Failed to update drm device {}.", node)
+                                }
                             }
                         }
-                        state.refresh_output_config();
+                        if let Err(err) = state.refresh_output_config() {
+                            warn!("Unable to load output config: {}", err);
+                            if !added.is_empty() {
+                                for output in added {
+                                    output.config_mut().enabled = OutputState::Disabled;
+                                }
+                                if let Err(err) = state.refresh_output_config() {
+                                    error!("Unrecoverable config error: {}", err);
+                                }
+                            }
+                        }
 
                         ()
                     }

@@ -69,7 +69,7 @@ use smithay::{
         tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
 };
-use tracing::{error, trace};
+use tracing::{error, trace, warn};
 use xkbcommon::xkb::{Keycode, Keysym};
 
 use std::{
@@ -1525,17 +1525,38 @@ impl State {
             InputEvent::SwitchToggle { event } => {
                 #[cfg(feature = "systemd")]
                 if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
-                    if event.state() == SwitchState::On {
-                        self.backend
-                            .lock()
+                    let backend = self.backend.lock();
+                    let output = backend
+                        .all_outputs()
+                        .iter()
+                        .find(|o| o.is_internal())
+                        .cloned();
+                    let closed = event.state() == SwitchState::On;
+
+                    if closed {
+                        backend
                             .disable_internal_output(&mut self.common.output_configuration_state);
                     } else {
-                        self.backend
-                            .lock()
-                            .enable_internal_output(&mut self.common.output_configuration_state);
+                        backend.enable_internal_output(&mut self.common.output_configuration_state);
                     }
+                    std::mem::drop(backend);
 
-                    self.refresh_output_config();
+                    if let Err(err) = self.refresh_output_config() {
+                        if !closed {
+                            warn!(?err, "Failed to re-enable internal connector");
+                            if let Some(output) = output {
+                                use cosmic_comp_config::output::comp::OutputState;
+
+                                output.config_mut().enabled = OutputState::Disabled;
+                                if let Err(err) = self.refresh_output_config() {
+                                    error!("Unrecoverable output configuration error: {}", err);
+                                }
+                            }
+                        } else {
+                            // Disabling an output should never fail.
+                            error!("Unrecoverable output configuration error: {}", err);
+                        }
+                    }
                 }
             }
         }

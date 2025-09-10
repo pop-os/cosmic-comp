@@ -133,16 +133,40 @@ pub fn init_backend(
     });
 
     // manually add already present gpus
+    let mut outputs = Vec::new();
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
-        if let Err(err) = state.device_added(dev, path.into(), dh) {
-            warn!("Failed to add device {}: {:?}", path.display(), err);
+        match state.device_added(dev, path.into(), dh) {
+            Ok(added) => outputs.extend(added),
+            Err(err) => warn!("Failed to add device {}: {:?}", path.display(), err),
         }
     }
 
     if let Err(err) = state.backend.kms().select_primary_gpu(dh) {
         warn!("Failed to determine primary gpu: {}", err);
     }
-    state.refresh_output_config();
+
+    if let Err(err) = state.refresh_output_config() {
+        info!(
+            ?err,
+            "Couldn't enable all found outputs, trying to disable outputs."
+        );
+        if let Some(pos) = outputs
+            .iter()
+            .position(|o| o.is_internal())
+            .or((!outputs.is_empty()).then_some(0))
+        {
+            for (i, output) in outputs.iter().enumerate() {
+                output.config_mut().enabled = if i == pos {
+                    OutputState::Enabled
+                } else {
+                    OutputState::Disabled
+                };
+            }
+            if let Err(err) = state.refresh_output_config() {
+                error!("Couldn't enable any output: {}", err);
+            }
+        }
+    }
 
     // start x11
     let primary = state.backend.kms().primary_node.read().unwrap().clone();
@@ -281,9 +305,10 @@ fn init_udev(
                 .with_context(|| format!("Failed to update drm device: {}", device_id)),
             UdevEvent::Removed { device_id } => state
                 .device_removed(device_id, &dh)
-                .with_context(|| format!("Failed to remove drm device: {}", device_id)),
+                .with_context(|| format!("Failed to remove drm device: {}", device_id))
+                .map(|_| Vec::new()),
         } {
-            Ok(()) => {
+            Ok(added) => {
                 debug!("Successfully handled udev event.");
 
                 {
@@ -297,7 +322,17 @@ fn init_udev(
                     }
                 }
 
-                state.refresh_output_config();
+                if let Err(err) = state.refresh_output_config() {
+                    warn!("Unable to load output config: {}", err);
+                    if !added.is_empty() {
+                        for output in added {
+                            output.config_mut().enabled = OutputState::Disabled;
+                        }
+                        if let Err(err) = state.refresh_output_config() {
+                            error!("Unrecoverable config error: {}", err);
+                        }
+                    }
+                }
             }
             Err(err) => {
                 error!(?err, "Error while handling udev event.")
@@ -339,6 +374,7 @@ impl State {
         let dispatcher = dispatcher.clone();
         loop_handle.insert_idle(move |state| {
             // add new devices, update devices now
+            let mut added = Vec::new();
             for (dev, path) in dispatcher.as_source_ref().device_list() {
                 let drm_node = match DrmNode::from_dev_id(dev) {
                     Ok(node) => node,
@@ -348,19 +384,33 @@ impl State {
                     }
                 };
                 if state.backend.kms().drm_devices.contains_key(&drm_node) {
-                    if let Err(err) = state.device_changed(dev) {
-                        error!(?err, "Failed to update drm device {}.", path.display(),);
+                    match state.device_changed(dev) {
+                        Ok(outputs) => added.extend(outputs),
+                        Err(err) => {
+                            error!(?err, "Failed to update drm device {}.", path.display(),)
+                        }
                     }
                 } else {
                     let dh = state.common.display_handle.clone();
-                    if let Err(err) = state.device_added(dev, path.into(), &dh) {
-                        error!(?err, "Failed to add drm device {}.", path.display(),);
+                    match state.device_added(dev, path.into(), &dh) {
+                        Ok(outputs) => added.extend(outputs),
+                        Err(err) => error!(?err, "Failed to add drm device {}.", path.display(),),
                     }
                 }
             }
 
             // update outputs
-            state.refresh_output_config();
+            if let Err(err) = state.refresh_output_config() {
+                warn!("Unable to load output config: {}", err);
+                if !added.is_empty() {
+                    for output in added {
+                        output.config_mut().enabled = OutputState::Disabled;
+                    }
+                    if let Err(err) = state.refresh_output_config() {
+                        error!("Unrecoverable config error: {}", err);
+                    }
+                }
+            }
             state.common.refresh();
         });
         loop_signal.wakeup();

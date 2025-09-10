@@ -775,7 +775,7 @@ impl State {
         #[cfg(feature = "systemd")]
         {
             use smithay::backend::session::Session;
-            use tracing::{debug, error};
+            use tracing::{debug, error, warn};
 
             let outputs = self.backend.lock().all_outputs();
             let is_active = match &self.backend {
@@ -793,17 +793,42 @@ impl State {
                             debug!("Inhibiting lid switch");
                             self.common.inhibit_lid_fd = Some(fd);
 
-                            if crate::dbus::logind::lid_closed().unwrap_or(false) {
-                                self.backend.lock().disable_internal_output(
+                            let backend = self.backend.lock();
+                            let output = backend
+                                .all_outputs()
+                                .iter()
+                                .find(|o| o.is_internal())
+                                .cloned();
+                            let closed = crate::dbus::logind::lid_closed().unwrap_or(false);
+
+                            if closed {
+                                backend.disable_internal_output(
                                     &mut self.common.output_configuration_state,
                                 );
                             } else {
-                                self.backend.lock().enable_internal_output(
+                                backend.enable_internal_output(
                                     &mut self.common.output_configuration_state,
                                 );
                             }
+                            std::mem::drop(backend);
 
-                            self.refresh_output_config();
+                            if let Err(err) = self.refresh_output_config() {
+                                if !closed {
+                                    warn!(?err, "Failed to re-enable internal connector");
+                                    if let Some(output) = output {
+                                        output.config_mut().enabled = OutputState::Disabled;
+                                        if let Err(err) = self.refresh_output_config() {
+                                            error!(
+                                                "Unrecoverable output configuration error: {}",
+                                                err
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    // Disabling an output should never fail.
+                                    error!("Unrecoverable output configuration error: {}", err);
+                                }
+                            }
                         }
                         Err(err) => {
                             error!("Failed to inhibit lid switch: {}", err);
@@ -814,11 +839,24 @@ impl State {
                 if let Some(_fd) = self.common.inhibit_lid_fd.take() {
                     debug!("Removing inhibitor-lock on lid switch");
 
-                    self.backend
-                        .lock()
-                        .enable_internal_output(&mut self.common.output_configuration_state);
+                    let backend = self.backend.lock();
+                    let output = backend
+                        .all_outputs()
+                        .iter()
+                        .find(|o| o.is_internal())
+                        .cloned();
+                    backend.enable_internal_output(&mut self.common.output_configuration_state);
+                    std::mem::drop(backend);
 
-                    self.refresh_output_config();
+                    if let Err(err) = self.refresh_output_config() {
+                        warn!(?err, "Failed to re-enable internal connector");
+                        if let Some(output) = output {
+                            output.config_mut().enabled = OutputState::Disabled;
+                            if let Err(err) = self.refresh_output_config() {
+                                error!("Unrecoverable output configuration error: {}", err);
+                            }
+                        }
+                    }
                     // drop _fd
                 }
             }
