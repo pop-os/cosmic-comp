@@ -227,7 +227,7 @@ pub fn init_backend(
         .add_heads(std::iter::once(&output));
     {
         state.common.add_output(&output);
-        state.common.config.read_outputs(
+        if let Err(err) = state.common.config.read_outputs(
             &mut state.common.output_configuration_state,
             &mut state.backend,
             &state.common.shell,
@@ -236,7 +236,9 @@ pub fn init_backend(
             &state.common.xdg_activation_state,
             state.common.startup_done.clone(),
             &state.common.clock,
-        );
+        ) {
+            error!("Unrecoverable output config error: {}", err);
+        }
         state.common.refresh();
     }
     state.launch_xwayland(None);
