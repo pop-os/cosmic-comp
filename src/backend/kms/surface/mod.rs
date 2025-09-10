@@ -468,6 +468,16 @@ impl Surface {
             }
         }
     }
+
+    pub fn drop_and_join(mut self) {
+        let thread = self.thread.take();
+        let _ = self;
+        if let Some(thread) = thread {
+            let name = thread.thread().name().unwrap().to_string();
+            let _ = thread.join();
+            info!("Thread {} terminated.", name)
+        }
+    }
 }
 
 impl Drop for Surface {
@@ -475,9 +485,13 @@ impl Drop for Surface {
         let _ = self.thread_command.send(ThreadCommand::End);
         self.loop_handle.remove(self.thread_token);
         if let Some(thread) = self.thread.take() {
-            let name = thread.thread().name().unwrap().to_string();
-            let _ = thread.join();
-            info!("Thread {} terminated.", name)
+            let _ = thread;
+            // We want to do this, but this currently deadlocks on `apply_config_for_outputs`.
+            /*
+                let name = thread.thread().name().unwrap().to_string();
+                let _ = thread.join();
+                info!("Thread {} terminated.", name)
+            */
         }
     }
 }

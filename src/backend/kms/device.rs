@@ -494,8 +494,9 @@ impl State {
             if let Some(mut leasing_global) = device.inner.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
-            for surface in device.inner.surfaces.values_mut() {
+            for (_, surface) in device.inner.surfaces.drain() {
                 outputs_removed.push(surface.output.clone());
+                surface.drop_and_join();
             }
             if let Some(token) = device.event_token.take() {
                 self.common.event_loop_handle.remove(token);
