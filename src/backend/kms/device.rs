@@ -171,9 +171,14 @@ pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
 }
 
 impl State {
-    pub fn device_added(&mut self, dev: dev_t, path: &Path, dh: &DisplayHandle) -> Result<()> {
+    pub fn device_added(
+        &mut self,
+        dev: dev_t,
+        path: &Path,
+        dh: &DisplayHandle,
+    ) -> Result<Vec<Output>> {
         if !self.backend.kms().session.is_active() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         if let Some(allowlist) = dev_list_var("COSMIC_DRM_ALLOW_DEVICES") {
@@ -195,7 +200,7 @@ impl State {
                         "Skipping device {} due to COSMIC_DRM_ALLOW_DEVICE list.",
                         path.display()
                     );
-                    return Ok(());
+                    return Ok(Vec::new());
                 }
             }
         }
@@ -212,7 +217,7 @@ impl State {
                             "Skipping device {} due to COSMIC_DRM_BLOCK_DEVICE list.",
                             path.display()
                         );
-                        return Ok(());
+                        return Ok(Vec::new());
                     }
                 }
             }
@@ -384,12 +389,12 @@ impl State {
             .add_heads(wl_outputs.iter());
 
         self.backend.kms().refresh_used_devices()?;
-        Ok(())
+        Ok(wl_outputs)
     }
 
-    pub fn device_changed(&mut self, dev: dev_t) -> Result<()> {
+    pub fn device_changed(&mut self, dev: dev_t) -> Result<Vec<Output>> {
         if !self.backend.kms().session.is_active() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         let drm_node = DrmNode::from_dev_id(dev)?;
@@ -475,7 +480,7 @@ impl State {
         }
 
         self.backend.kms().refresh_used_devices()?;
-        Ok(())
+        Ok(outputs_added)
     }
 
     pub fn device_removed(&mut self, dev: dev_t, dh: &DisplayHandle) -> Result<()> {
@@ -548,7 +553,7 @@ impl State {
         Ok(())
     }
 
-    pub fn refresh_output_config(&mut self) {
+    pub fn refresh_output_config(&mut self) -> Result<()> {
         self.common.config.read_outputs(
             &mut self.common.output_configuration_state,
             &mut self.backend,
@@ -558,8 +563,9 @@ impl State {
             &self.common.xdg_activation_state,
             self.common.startup_done.clone(),
             &self.common.clock,
-        );
+        )?;
         self.common.refresh();
+        Ok(())
     }
 }
 

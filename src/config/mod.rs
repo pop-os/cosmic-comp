@@ -8,6 +8,7 @@ use crate::{
         output_configuration::OutputConfigurationState, workspace::WorkspaceUpdateGuard,
     },
 };
+use anyhow::Context;
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
 use cosmic_settings_config::window_rules::ApplicationException;
 use cosmic_settings_config::{shortcuts, window_rules, Shortcuts};
@@ -386,7 +387,7 @@ impl Config {
         xdg_activation_state: &XdgActivationState,
         startup_done: Arc<AtomicBool>,
         clock: &Clock<Monotonic>,
-    ) {
+    ) -> anyhow::Result<()> {
         let outputs = output_state.outputs().collect::<Vec<_>>();
         let mut infos = outputs
             .iter()
@@ -471,24 +472,24 @@ impl Config {
                     found_outputs.push((output.clone(), enabled));
                 }
 
-                if let Err(err) = backend.apply_config_for_outputs(
-                    false,
-                    loop_handle,
-                    self.dynamic_conf.screen_filter(),
-                    shell.clone(),
-                    workspace_state,
-                    xdg_activation_state,
-                    startup_done,
-                    clock,
-                ) {
-                    error!(?err, "Failed to reset config.");
-                } else {
-                    for (output, enabled) in found_outputs {
-                        if enabled == OutputState::Enabled {
-                            output_state.enable_head(&output);
-                        } else {
-                            output_state.disable_head(&output);
-                        }
+                backend
+                    .apply_config_for_outputs(
+                        false,
+                        loop_handle,
+                        self.dynamic_conf.screen_filter(),
+                        shell.clone(),
+                        workspace_state,
+                        xdg_activation_state,
+                        startup_done,
+                        clock,
+                    )
+                    .context("Failed to reset config")?;
+
+                for (output, enabled) in found_outputs {
+                    if enabled == OutputState::Enabled {
+                        output_state.enable_head(&output);
+                    } else {
+                        output_state.disable_head(&output);
                     }
                 }
             } else {
@@ -529,37 +530,39 @@ impl Config {
                 w += output.geometry().size.w as u32;
             }
 
-            if let Err(err) = backend.lock().apply_config_for_outputs(
-                false,
-                loop_handle,
-                self.dynamic_conf.screen_filter(),
-                shell.clone(),
-                workspace_state,
-                xdg_activation_state,
-                startup_done,
-                clock,
-            ) {
-                warn!(?err, "Failed to set new config.",);
-            } else {
-                for output in outputs {
-                    if output
-                        .user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow()
-                        .enabled
-                        == OutputState::Enabled
-                    {
-                        output_state.enable_head(&output);
-                    } else {
-                        output_state.disable_head(&output);
-                    }
+            let mut backend = backend.lock();
+            backend
+                .apply_config_for_outputs(
+                    false,
+                    loop_handle,
+                    self.dynamic_conf.screen_filter(),
+                    shell.clone(),
+                    workspace_state,
+                    xdg_activation_state,
+                    startup_done.clone(),
+                    clock,
+                )
+                .context("Failed to set new config")?;
+
+            for output in outputs {
+                if output
+                    .user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow()
+                    .enabled
+                    == OutputState::Enabled
+                {
+                    output_state.enable_head(&output);
+                } else {
+                    output_state.disable_head(&output);
                 }
             }
-
             output_state.update();
             self.write_outputs(output_state.outputs());
         }
+
+        Ok(())
     }
 
     pub fn write_outputs(
