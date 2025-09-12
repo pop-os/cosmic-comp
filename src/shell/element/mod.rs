@@ -39,7 +39,6 @@ use window::CosmicWindowInternal;
 
 use std::{
     borrow::Cow,
-    collections::HashMap,
     fmt,
     hash::Hash,
     sync::{atomic::AtomicBool, Arc, Mutex, Weak},
@@ -71,7 +70,7 @@ use super::{
         floating::{ResizeState, TiledCorners},
         tiling::NodeDesc,
     },
-    ManagedLayer, SeatExt,
+    ManagedLayer,
 };
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 
@@ -93,7 +92,6 @@ pub struct CosmicMapped {
     element: CosmicMappedInternal,
 
     // associated data
-    last_cursor_position: Arc<Mutex<HashMap<usize, Point<f64, Logical>>>>,
     pub maximized_state: Arc<Mutex<Option<MaximizedState>>>,
 
     //tiling
@@ -114,7 +112,6 @@ impl fmt::Debug for CosmicMapped {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CosmicMapped")
             .field("element", &self.element)
-            .field("last_cursor_position", &self.last_cursor_position)
             .field("maximized_state", &self.maximized_state)
             .field("tiling_node_id", &self.tiling_node_id)
             .field("resize_state", &self.resize_state)
@@ -232,14 +229,6 @@ impl CosmicMapped {
             }
             _ => unreachable!(),
         }
-    }
-
-    pub fn cursor_position(&self, seat: &Seat<State>) -> Option<Point<f64, Logical>> {
-        self.last_cursor_position
-            .lock()
-            .unwrap()
-            .get(&seat.id())
-            .cloned()
     }
 
     pub fn set_active<S>(&self, window: &S)
@@ -986,7 +975,6 @@ impl From<CosmicWindow> for CosmicMapped {
     fn from(w: CosmicWindow) -> Self {
         CosmicMapped {
             element: CosmicMappedInternal::Window(w),
-            last_cursor_position: Arc::new(Mutex::new(HashMap::new())),
             maximized_state: Arc::new(Mutex::new(None)),
             tiling_node_id: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
@@ -1004,7 +992,6 @@ impl From<CosmicStack> for CosmicMapped {
     fn from(s: CosmicStack) -> Self {
         CosmicMapped {
             element: CosmicMappedInternal::Stack(s),
-            last_cursor_position: Arc::new(Mutex::new(HashMap::new())),
             maximized_state: Arc::new(Mutex::new(None)),
             tiling_node_id: Arc::new(Mutex::new(None)),
             resize_state: Arc::new(Mutex::new(None)),
