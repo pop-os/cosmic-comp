@@ -541,13 +541,7 @@ pub fn render_window_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = AsRenderElements::<R>::render_elements::<WindowCaptureElement<R>>(
-            window,
-            renderer,
-            (-geometry.loc.x, -geometry.loc.y).into(),
-            Scale::from(1.0),
-            1.0,
-        );
+        let mut elements = Vec::new();
 
         elements.extend(
             additional_damage
@@ -616,6 +610,16 @@ pub fn render_window_to_buffer(
                 );
             }
         }
+
+        elements.extend(AsRenderElements::<R>::render_elements::<
+            WindowCaptureElement<R>,
+        >(
+            window,
+            renderer,
+            (-geometry.loc.x, -geometry.loc.y).into(),
+            Scale::from(1.0),
+            1.0,
+        ));
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
             let mut dmabuf_clone = dmabuf.clone();
