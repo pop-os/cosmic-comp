@@ -1,10 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, sync::Mutex};
+use std::{cell::RefCell, sync::Mutex};
 
-use smithay::{
-    backend::renderer::{damage::OutputDamageTracker, utils::CommitCounter},
-    output::Output,
-    reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource, Weak},
-};
+use smithay::{backend::renderer::damage::OutputDamageTracker, output::Output};
 
 use crate::{
     shell::{CosmicSurface, Workspace},
@@ -20,36 +16,11 @@ pub type SessionData = Mutex<SessionUserData>;
 
 pub struct SessionUserData {
     pub dt: OutputDamageTracker,
-    commit_counter: CommitCounter,
-    buffer_age: HashMap<Weak<WlBuffer>, CommitCounter>,
 }
 
 impl SessionUserData {
     pub fn new(tracker: OutputDamageTracker) -> SessionUserData {
-        SessionUserData {
-            dt: tracker,
-            commit_counter: CommitCounter::default(),
-            buffer_age: HashMap::new(),
-        }
-    }
-
-    pub fn age_for_buffer(&mut self, buffer: &WlBuffer) -> usize {
-        self.buffer_age.retain(|k, _| k.upgrade().is_ok());
-
-        let weak = buffer.downgrade();
-        let age = self
-            .commit_counter
-            .distance(self.buffer_age.get(&weak).copied())
-            .unwrap_or(0);
-        self.buffer_age.insert(weak, self.commit_counter);
-
-        self.commit_counter.increment();
-        age
-    }
-
-    pub fn reset(&mut self) {
-        self.commit_counter = CommitCounter::default();
-        self.buffer_age.clear();
+        SessionUserData { dt: tracker }
     }
 }
 
