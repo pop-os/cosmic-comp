@@ -223,7 +223,7 @@ where
         // TODO re-use offscreen buffer to damage track screencopy to shm
         0
     } else {
-        session_damage_tracking.age_for_buffer(&buffer)
+        1
     };
     let mut fb = offscreen
         .as_mut()
