@@ -490,7 +490,6 @@ smithay::render_elements! {
     pub WindowCaptureElement<R> where R: ImportAll + ImportMem;
     WaylandElement=WaylandSurfaceRenderElement<R>,
     CursorElement=RelocateRenderElement<cursor::CursorRenderElement<R>>,
-    AdditionalDamage=DamageElement,
 }
 
 pub fn render_window_to_buffer(
@@ -541,22 +540,19 @@ pub fn render_window_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = Vec::new();
-
-        elements.extend(
-            additional_damage
-                .into_iter()
-                .filter_map(|rect| {
-                    let logical_rect = rect.to_logical(
-                        1,
-                        Transform::Normal,
-                        &geometry.size.to_buffer(1, Transform::Normal),
-                    );
-                    logical_rect.intersection(Rectangle::from_size(geometry.size))
-                })
-                .map(DamageElement::new)
-                .map(Into::<WindowCaptureElement<R>>::into),
-        );
+        let additional_damage_elements: Vec<_> = additional_damage
+            .into_iter()
+            .filter_map(|rect| {
+                let logical_rect = rect.to_logical(
+                    1,
+                    Transform::Normal,
+                    &geometry.size.to_buffer(1, Transform::Normal),
+                );
+                logical_rect.intersection(Rectangle::from_size(geometry.size))
+            })
+            .map(DamageElement::new)
+            .collect();
+        dt.damage_output(age, &additional_damage_elements)?;
 
         let shell = common.shell.read();
         let seat = shell.seats.last_active().clone();
@@ -578,6 +574,8 @@ pub fn render_window_to_buffer(
             }
         };
         std::mem::drop(shell);
+
+        let mut elements = Vec::new();
 
         if let Some(location) = location {
             if draw_cursor {
@@ -777,7 +775,17 @@ pub fn render_cursor_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = cursor::draw_cursor(
+        let additional_damage_elements: Vec<_> = additional_damage
+            .into_iter()
+            .filter_map(|rect| {
+                let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
+                logical_rect.intersection(Rectangle::from_size((64, 64).into()))
+            })
+            .map(DamageElement::new)
+            .collect();
+        dt.damage_output(age, &additional_damage_elements)?;
+
+        let elements = cursor::draw_cursor(
             renderer,
             &seat,
             Point::from((0.0, 0.0)),
@@ -790,17 +798,6 @@ pub fn render_cursor_to_buffer(
         .map(|(elem, _)| RelocateRenderElement::from_element(elem, (0, 0), Relocate::Relative))
         .map(WindowCaptureElement::from)
         .collect::<Vec<_>>();
-
-        elements.extend(
-            additional_damage
-                .into_iter()
-                .filter_map(|rect| {
-                    let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
-                    logical_rect.intersection(Rectangle::from_size((64, 64).into()))
-                })
-                .map(DamageElement::new)
-                .map(Into::<WindowCaptureElement<R>>::into),
-        );
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
             let mut dmabuf_clone = dmabuf.clone();
