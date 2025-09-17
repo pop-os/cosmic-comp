@@ -1353,13 +1353,6 @@ impl SurfaceThreadState {
                                 (&session, frame, res),
                                 now.into(),
                             ) {
-                                session
-                                    .user_data()
-                                    .get::<SessionData>()
-                                    .unwrap()
-                                    .lock()
-                                    .unwrap()
-                                    .reset();
                                 tracing::warn!(?err, "Failed to screencopy");
                             }
                         }
@@ -1388,14 +1381,7 @@ impl SurfaceThreadState {
                         }
                     }
                     Err(err) => {
-                        for (session, frame, _) in frames {
-                            session
-                                .user_data()
-                                .get::<SessionData>()
-                                .unwrap()
-                                .lock()
-                                .unwrap()
-                                .reset();
+                        for (_session, frame, _) in frames {
                             frame.fail(CaptureFailureReason::Unknown);
                         }
                         return Err(err).with_context(|| "Failed to submit result for display");
@@ -1628,7 +1614,7 @@ fn take_screencopy_frames(
                 // TODO re-use offscreen buffer to damage track screencopy to shm
                 0
             } else {
-                damage_tracking.age_for_buffer(&buffer)
+                1
             };
 
             if !additional_damage.is_empty() {
