@@ -884,6 +884,11 @@ impl Workspaces {
         handle: &WorkspaceHandle,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
+        // If workspaces span across outputs, they can't be moved to a different output
+        if self.mode == WorkspaceMode::Global {
+            return;
+        }
+
         if !self.sets.contains_key(to) || from == to {
             return;
         }
