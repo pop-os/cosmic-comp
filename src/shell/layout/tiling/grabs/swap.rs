@@ -80,6 +80,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
                 modifiers: modifiers
                     .map(cosmic_modifiers_from_smithay)
                     .unwrap_or_default(),
+                keycode: None,
                 key: Some(handle.keysym_handle(keycode).modified_sym()),
                 description: None,
             },
