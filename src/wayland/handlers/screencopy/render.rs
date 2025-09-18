@@ -41,7 +41,7 @@ use crate::{
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{Common, KmsNodes, State},
-    utils::prelude::SeatExt,
+    utils::prelude::{PointExt, PointGlobalExt, RectExt, RectLocalExt, SeatExt},
     wayland::{
         handlers::screencopy::{
             constraints_for_output, constraints_for_toplevel, SessionData, SessionUserData,
@@ -223,7 +223,7 @@ where
         // TODO re-use offscreen buffer to damage track screencopy to shm
         0
     } else {
-        session_damage_tracking.age_for_buffer(&buffer)
+        1
     };
     let mut fb = offscreen
         .as_mut()
@@ -490,7 +490,6 @@ smithay::render_elements! {
     pub WindowCaptureElement<R> where R: ImportAll + ImportMem;
     WaylandElement=WaylandSurfaceRenderElement<R>,
     CursorElement=RelocateRenderElement<cursor::CursorRenderElement<R>>,
-    AdditionalDamage=DamageElement,
 }
 
 pub fn render_window_to_buffer(
@@ -531,7 +530,7 @@ pub fn render_window_to_buffer(
         additional_damage: Vec<Rectangle<i32, BufferCoords>>,
         draw_cursor: bool,
         common: &mut Common,
-        window: &CosmicSurface,
+        toplevel: &CosmicSurface,
         geometry: Rectangle<i32, Logical>,
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>
     where
@@ -541,44 +540,42 @@ pub fn render_window_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = AsRenderElements::<R>::render_elements::<WindowCaptureElement<R>>(
-            window,
-            renderer,
-            (-geometry.loc.x, -geometry.loc.y).into(),
-            Scale::from(1.0),
-            1.0,
-        );
-
-        elements.extend(
-            additional_damage
-                .into_iter()
-                .filter_map(|rect| {
-                    let logical_rect = rect.to_logical(
-                        1,
-                        Transform::Normal,
-                        &geometry.size.to_buffer(1, Transform::Normal),
-                    );
-                    logical_rect.intersection(Rectangle::from_size(geometry.size))
-                })
-                .map(DamageElement::new)
-                .map(Into::<WindowCaptureElement<R>>::into),
-        );
+        let additional_damage_elements: Vec<_> = additional_damage
+            .into_iter()
+            .filter_map(|rect| {
+                let logical_rect = rect.to_logical(
+                    1,
+                    Transform::Normal,
+                    &geometry.size.to_buffer(1, Transform::Normal),
+                );
+                logical_rect.intersection(Rectangle::from_size(geometry.size))
+            })
+            .map(DamageElement::new)
+            .collect();
+        dt.damage_output(age, &additional_damage_elements)?;
 
         let shell = common.shell.read();
         let seat = shell.seats.last_active().clone();
-        let location = if let Some(mapped) = shell.element_for_surface(window) {
-            mapped.cursor_position(&seat).and_then(|mut p| {
-                p -= mapped.active_window_offset().to_f64();
-                if p.x < 0. || p.y < 0. {
-                    None
-                } else {
-                    Some(p)
+        let pointer = seat.get_pointer().unwrap();
+        let pointer_loc = pointer.current_location().to_i32_round().as_global();
+        let mut location = None;
+        if let Some(element) = shell.element_for_surface(toplevel) {
+            if element.has_active_window(toplevel) {
+                if let Some(workspace) = shell.space_for(element) {
+                    if let Some(geometry) = workspace.element_geometry(element) {
+                        let mut surface_geo = element.active_window_geometry().as_local();
+                        surface_geo.loc += geometry.loc;
+                        let global_geo = surface_geo.to_global(workspace.output());
+                        if global_geo.contains(pointer_loc) {
+                            location = Some((pointer_loc - global_geo.loc).as_logical().to_f64());
+                        }
+                    }
                 }
-            })
-        } else {
-            None
+            }
         };
         std::mem::drop(shell);
+
+        let mut elements = Vec::new();
 
         if let Some(location) = location {
             if draw_cursor {
@@ -616,6 +613,16 @@ pub fn render_window_to_buffer(
                 );
             }
         }
+
+        elements.extend(AsRenderElements::<R>::render_elements::<
+            WindowCaptureElement<R>,
+        >(
+            toplevel,
+            renderer,
+            (-geometry.loc.x, -geometry.loc.y).into(),
+            Scale::from(1.0),
+            1.0,
+        ));
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
             let mut dmabuf_clone = dmabuf.clone();
@@ -768,7 +775,17 @@ pub fn render_cursor_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = cursor::draw_cursor(
+        let additional_damage_elements: Vec<_> = additional_damage
+            .into_iter()
+            .filter_map(|rect| {
+                let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
+                logical_rect.intersection(Rectangle::from_size((64, 64).into()))
+            })
+            .map(DamageElement::new)
+            .collect();
+        dt.damage_output(age, &additional_damage_elements)?;
+
+        let elements = cursor::draw_cursor(
             renderer,
             &seat,
             Point::from((0.0, 0.0)),
@@ -781,17 +798,6 @@ pub fn render_cursor_to_buffer(
         .map(|(elem, _)| RelocateRenderElement::from_element(elem, (0, 0), Relocate::Relative))
         .map(WindowCaptureElement::from)
         .collect::<Vec<_>>();
-
-        elements.extend(
-            additional_damage
-                .into_iter()
-                .filter_map(|rect| {
-                    let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
-                    logical_rect.intersection(Rectangle::from_size((64, 64).into()))
-                })
-                .map(DamageElement::new)
-                .map(Into::<WindowCaptureElement<R>>::into),
-        );
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
             let mut dmabuf_clone = dmabuf.clone();
