@@ -955,25 +955,23 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#19f10525ff00d76558147ea060bd856a87122353"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#8b3343794fb572e86fb835ec3b81648d67502288"
 dependencies = [
  "cosmic-config",
- "ron 0.9.0",
+ "ron 0.11.0",
  "serde",
  "serde_with",
- "thiserror 2.0.14",
  "tracing",
- "xkbcommon 0.7.0",
+ "xkbcommon 0.9.0",
 ]
 
 [[package]]
 name = "cosmic-settings-daemon-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#19f10525ff00d76558147ea060bd856a87122353"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#8b3343794fb572e86fb835ec3b81648d67502288"
 dependencies = [
  "cosmic-config",
  "cosmic-theme",
- "ron 0.8.1",
  "serde",
 ]
 
@@ -4504,18 +4502,6 @@ dependencies = [
 
 [[package]]
 name = "ron"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
-dependencies = [
- "base64 0.21.7",
- "bitflags 2.9.1",
- "serde",
- "serde_derive",
-]
-
-[[package]]
-name = "ron"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63f3aa105dea217ef30d89581b65a4d527a19afc95ef5750be3890e8d3c5b837"
@@ -4532,6 +4518,19 @@ name = "ron"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "beceb6f7bf81c73e73aeef6dd1356d9a1b2b4909e1f0fc3e59b034f9572d7b7f"
+dependencies = [
+ "base64 0.22.1",
+ "bitflags 2.9.1",
+ "serde",
+ "serde_derive",
+ "unicode-ident",
+]
+
+[[package]]
+name = "ron"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db09040cc89e461f1a265139777a2bde7f8d8c67c4936f700c63ce3e2904d468"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.9.1",
