@@ -25,10 +25,10 @@ cosmic-config = { git = "https://github.com/pop-os/libcosmic/", features = [
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "e706814", default-features = false, features = [
     "server",
 ] }
-cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", branch = "touchpad-toggle" }
+cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
 cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
     "greeter",
-], branch = "touchpad-toggle" }
+] }
 cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = [
     "shape-run-cache",
 ] }

@@ -955,7 +955,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon?branch=touchpad-toggle#3f14d97cfa129cdaed0d44eeed683f4c8ef2d4f6"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#8b3343794fb572e86fb835ec3b81648d67502288"
 dependencies = [
  "cosmic-config",
  "ron 0.11.0",
@@ -968,7 +968,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-daemon-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon?branch=touchpad-toggle#3f14d97cfa129cdaed0d44eeed683f4c8ef2d4f6"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#8b3343794fb572e86fb835ec3b81648d67502288"
 dependencies = [
  "cosmic-config",
  "cosmic-theme",
