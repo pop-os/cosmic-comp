@@ -1043,6 +1043,13 @@ impl SurfaceThreadState {
             vrr = has_active_fullscreen;
         }
 
+        // TODO commit timing `signal_until`
+        {
+            let shell = self.shell.read();
+            // XXX correct way to set time?
+            shell.signal_commit_timing(&self.output, self.clock.now() + estimated_presentation);
+        }
+
         let mut elements = output_elements(
             Some(&render_node),
             &mut renderer,
@@ -1360,6 +1367,9 @@ impl SurfaceThreadState {
                             // If postprocessing, use states from first render
                             let states = pre_postprocess_data.states.unwrap_or(frame_result.states);
                             self.send_dmabuf_feedback(states);
+
+                            let shell = self.shell.read();
+                            shell.signal_fifos(&self.output);
                         }
 
                         if x.is_ok() {
