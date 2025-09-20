@@ -22,7 +22,7 @@ use crate::{
             tiling::{NodeDesc, SwapWindowGrab, TilingLayout},
         },
         zoom::ZoomState,
-        LastModifierChange, SeatExt, Trigger,
+        LastAcknowlegedElement, LastModifierChange, SeatExt, Trigger,
     },
     utils::{float::NextDown, prelude::*, quirks::workspace_overview_is_open},
     wayland::{
@@ -392,18 +392,33 @@ impl State {
                         //If the pointer isn't grabbed, we should check if the focused element should be updated
                     } else if self.common.config.cosmic_conf.focus_follows_cursor {
                         let shell = self.common.shell.read();
-                        let old_keyboard_target = State::element_under(
-                            original_position,
-                            &current_output,
-                            &*shell,
-                            &seat,
-                        );
+                        let old_keyboard_target = seat
+                            .user_data()
+                            .get::<LastAcknowlegedElement>()
+                            .unwrap()
+                            .0
+                            .lock()
+                            .unwrap()
+                            .clone();
                         let new_keyboard_target =
                             State::element_under(position, &output, &*shell, &seat);
 
                         if old_keyboard_target != new_keyboard_target
                             && new_keyboard_target.is_some()
+                            && new_under.as_ref().is_some_and(|(target, relative_offset)| {
+                                target.should_follow_focus(
+                                    position.as_logical() - relative_offset.clone(),
+                                )
+                            })
                         {
+                            *seat
+                                .user_data()
+                                .get::<LastAcknowlegedElement>()
+                                .unwrap()
+                                .0
+                                .lock()
+                                .unwrap() = new_keyboard_target.clone();
+
                             let create_source = if self.common.pointer_focus_state.is_none() {
                                 true
                             } else {
