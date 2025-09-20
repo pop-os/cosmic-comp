@@ -1505,7 +1505,6 @@ impl Workspace {
         let focused = self.focus_stack.get(last_active_seat).last().cloned();
 
         let mut fullscreen_elements = if let Some(fullscreen) = self.fullscreen.as_ref() {
-            let bbox = fullscreen.surface.bbox();
             let fullscreen_geo = self.fullscreen_geometry().unwrap();
             let previous_geo = fullscreen
                 .previous_geometry
@@ -1548,9 +1547,18 @@ impl Workspace {
                 .loc
                 .as_logical()
                 .to_physical_precise_round(output_scale);
-            let scale = Scale {
-                x: target_geo.size.w as f64 / bbox.size.w as f64,
-                y: target_geo.size.h as f64 / bbox.size.h as f64,
+
+            // Only rescale geometry when animating
+            let animation_rescale = |elem| if fullscreen.is_animating() {
+                let fullscreen_geo = fullscreen.surface.0.geometry();
+                let scale = Scale {
+                    x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
+                    y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
+                };
+
+                RescaleRenderElement::from_element(elem, render_loc, scale).into()
+            } else {
+                Into::<WorkspaceRenderElement<_>>::into(elem)
             };
 
             fullscreen
@@ -1563,8 +1571,7 @@ impl Workspace {
                     Some(true),
                 )
                 .into_iter()
-                .map(|elem| RescaleRenderElement::from_element(elem, render_loc, scale))
-                .map(Into::into)
+                .map(animation_rescale)
                 .collect::<Vec<_>>()
         } else {
             Vec::new()
