@@ -1561,16 +1561,18 @@ impl Workspace {
                 .to_physical_precise_round(output_scale);
 
             // Only rescale geometry when animating
-            let animation_rescale = |elem| if fullscreen.is_animating() {
-                let fullscreen_geo = fullscreen.surface.0.geometry();
-                let scale = Scale {
-                    x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
-                    y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
-                };
+            let animation_rescale = |elem| {
+                if fullscreen.is_animating() {
+                    let fullscreen_geo = fullscreen.surface.0.geometry();
+                    let scale = Scale {
+                        x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
+                        y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
+                    };
 
-                RescaleRenderElement::from_element(elem, render_loc, scale).into()
-            } else {
-                Into::<WorkspaceRenderElement<_>>::into(elem)
+                    RescaleRenderElement::from_element(elem, render_loc, scale).into()
+                } else {
+                    Into::<WorkspaceRenderElement<_>>::into(elem)
+                }
             };
 
             fullscreen
