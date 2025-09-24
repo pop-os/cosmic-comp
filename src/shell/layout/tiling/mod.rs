@@ -29,6 +29,7 @@ use crate::{
     wayland::{
         handlers::xdg_shell::popup::get_popup_toplevel,
         protocols::{
+            corner_radius::CornerRadiusData,
             toplevel_info::{
                 toplevel_enter_output, toplevel_enter_workspace, toplevel_leave_output,
                 toplevel_leave_workspace,
@@ -37,7 +38,9 @@ use crate::{
         },
     },
 };
+use smithay::{reexports::wayland_server::Resource, wayland::compositor::with_states};
 
+use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use cosmic_settings_config::shortcuts::action::{FocusDirection, ResizeDirection};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use keyframe::{
@@ -59,13 +62,13 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind, WindowSurfaceType},
     input::Seat,
     output::Output,
-    reexports::wayland_server::Client,
+    reexports::wayland_server::{Client, Weak as WsWeak},
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{compositor::add_blocker, seat::WaylandFocus},
 };
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Weak},
+    sync::{Arc, Mutex, Weak},
     time::{Duration, Instant},
 };
 use tracing::trace;
@@ -5015,6 +5018,27 @@ where
                     x => Some(x),
                 }
             }));
+            let radius = mapped
+                .active_window()
+                .wl_surface()
+                .and_then(|surface| {
+                    with_states(&surface, |s| {
+                        let d = s
+                            .data_map
+                            .get::<Mutex<WsWeak<CosmicCornerRadiusToplevelV1>>>()?;
+                        let guard = d.lock().unwrap();
+
+                        let weak_data = guard.upgrade().ok()?;
+
+                        let corners = weak_data.data::<CornerRadiusData>()?;
+
+                        let guard = corners.lock().unwrap();
+
+                        // TODO support multiple radius values
+                        Some(guard.top_left)
+                    })
+                })
+                .unwrap_or(indicator_thickness);
             if is_minimizing && indicator_thickness > 0 {
                 elements.push(CosmicMappedRenderElement::FocusIndicator(
                     IndicatorShader::focus_element(
@@ -5022,6 +5046,7 @@ where
                         Key::Window(Usage::FocusIndicator, mapped.clone().key()),
                         geo,
                         indicator_thickness,
+                        radius,
                         alpha,
                         [window_hint.red, window_hint.green, window_hint.blue],
                     ),
@@ -5283,12 +5308,33 @@ where
         )
         .unwrap();
 
+        let radius = window
+            .wl_surface()
+            .and_then(|surface| {
+                with_states(&surface, |s| {
+                    let d = s
+                        .data_map
+                        .get::<Mutex<WsWeak<CosmicCornerRadiusToplevelV1>>>()?;
+                    let guard = d.lock().unwrap();
+
+                    let weak_data = guard.upgrade().ok()?;
+
+                    let corners = weak_data.data::<CornerRadiusData>()?;
+
+                    let guard = corners.lock().unwrap();
+
+                    // TODO support multiple radius values
+                    Some(guard.top_left)
+                })
+            })
+            .unwrap_or(indicator_thickness);
         swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
             IndicatorShader::focus_element(
                 renderer,
                 Key::from(swapping_stack_surface_id.clone()),
                 swap_geo,
                 4,
+                radius,
                 transition.unwrap_or(1.0),
                 [window_hint.red, window_hint.green, window_hint.blue],
             ),
@@ -5359,7 +5405,30 @@ where
                             group_color,
                         ));
                     }
+                    let radius = match data {
+                        Data::Mapped { mapped, .. } => mapped
+                            .active_window()
+                            .wl_surface()
+                            .and_then(|surface| {
+                                with_states(&surface, |s| {
+                                    let d = s
+                                        .data_map
+                                        .get::<Mutex<WsWeak<CosmicCornerRadiusToplevelV1>>>()?;
+                                    let guard = d.lock().unwrap();
 
+                                    let weak_data = guard.upgrade().ok()?;
+
+                                    let corners = weak_data.data::<CornerRadiusData>()?;
+
+                                    let guard = corners.lock().unwrap();
+
+                                    // TODO support multiple radius values
+                                    Some(guard.top_left)
+                                })
+                            })
+                            .unwrap_or(indicator_thickness),
+                        _ => 1,
+                    };
                     if !swap_desc
                         .as_ref()
                         .map(|desc| desc.stack_window.is_some())
@@ -5381,6 +5450,7 @@ where
                             } else {
                                 indicator_thickness
                             },
+                            radius,
                             alpha,
                             [window_hint.red, window_hint.green, window_hint.blue],
                         ));
