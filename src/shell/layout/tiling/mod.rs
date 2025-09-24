@@ -4483,7 +4483,7 @@ where
                                     Key::Group(Arc::downgrade(alive)),
                                     geo,
                                     4,
-                                    if render_active_child { 16 } else { 8 },
+                                    [if render_active_child { 16 } else { 8 }; 4],
                                     alpha * if render_potential_group { 0.40 } else { 1.0 },
                                     group_color,
                                 )
@@ -4500,7 +4500,7 @@ where
                                     Key::Group(Arc::downgrade(alive)),
                                     geo,
                                     4,
-                                    8,
+                                    [8; 4],
                                     alpha * 0.40,
                                     group_color,
                                 )
@@ -4563,7 +4563,7 @@ where
                                         Key::Group(Arc::downgrade(alive)),
                                         geo,
                                         4,
-                                        8,
+                                        [8; 4],
                                         alpha * 0.15,
                                         group_color,
                                     )
@@ -4799,7 +4799,7 @@ where
                                     Key::Window(Usage::PotentialGroupIndicator, mapped.key()),
                                     geo,
                                     4,
-                                    8,
+                                    [8; 4],
                                     alpha * 0.40,
                                     group_color,
                                 )
@@ -5035,10 +5035,15 @@ where
                         let guard = corners.lock().unwrap();
 
                         // TODO support multiple radius values
-                        Some(guard.top_left)
+                        Some([
+                            guard.top_right,
+                            guard.bottom_right,
+                            guard.top_left,
+                            guard.bottom_left,
+                        ])
                     })
                 })
-                .unwrap_or(indicator_thickness);
+                .unwrap_or([indicator_thickness; 4]);
             if is_minimizing && indicator_thickness > 0 {
                 elements.push(CosmicMappedRenderElement::FocusIndicator(
                     IndicatorShader::focus_element(
@@ -5323,11 +5328,15 @@ where
 
                     let guard = corners.lock().unwrap();
 
-                    // TODO support multiple radius values
-                    Some(guard.top_left)
+                    Some([
+                        guard.top_right,
+                        guard.bottom_right,
+                        guard.top_left,
+                        guard.bottom_left,
+                    ])
                 })
             })
-            .unwrap_or(indicator_thickness);
+            .unwrap_or([indicator_thickness; 4]);
         swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
             IndicatorShader::focus_element(
                 renderer,
@@ -5423,11 +5432,16 @@ where
                                     let guard = corners.lock().unwrap();
 
                                     // TODO support multiple radius values
-                                    Some(guard.top_left)
+                                    Some([
+                                        guard.top_right,
+                                        guard.bottom_right,
+                                        guard.top_left,
+                                        guard.bottom_left,
+                                    ])
                                 })
                             })
-                            .unwrap_or(indicator_thickness),
-                        _ => 1,
+                            .unwrap_or([indicator_thickness; 4]),
+                        _ => [1; 4],
                     };
                     if !swap_desc
                         .as_ref()

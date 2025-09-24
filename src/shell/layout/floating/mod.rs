@@ -1615,10 +1615,15 @@ impl FloatingLayout {
                             let guard = corners.lock().unwrap();
 
                             // TODO support multiple radius values
-                            Some(guard.top_left)
+                            Some([
+                                guard.top_right,
+                                guard.bottom_right,
+                                guard.top_left,
+                                guard.bottom_left,
+                            ])
                         })
                     })
-                    .unwrap_or(indicator_thickness);
+                    .unwrap_or([indicator_thickness; 4]);
                 if indicator_thickness > 0 {
                     let element = IndicatorShader::focus_element(
                         renderer,
