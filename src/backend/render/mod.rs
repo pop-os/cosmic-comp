@@ -195,6 +195,7 @@ impl IndicatorShader {
         key: impl Into<Key>,
         mut element_geo: Rectangle<i32, Local>,
         thickness: u8,
+        radius: u8,
         alpha: f32,
         active_window_hint: [f32; 3],
     ) -> PixelShaderElement {
@@ -207,7 +208,8 @@ impl IndicatorShader {
             key,
             element_geo,
             thickness,
-            thickness * 2,
+            // FIXME, this seems to look OK, but I doubt it is correct
+            radius + thickness,
             alpha,
             active_window_hint,
         )
