@@ -134,12 +134,16 @@ impl MoveGrabState {
                     let guard = corners.lock().unwrap();
 
                     // TODO support multiple radius values
-                    Some(guard.top_left)
+                    Some([
+                        guard.top_right,
+                        guard.bottom_right,
+                        guard.top_left,
+                        guard.bottom_left,
+                    ])
                 })
             })
-            .unwrap_or(self.indicator_thickness);
+            .unwrap_or([self.indicator_thickness; 4]);
 
-        tracing::error!("{radius}");
         let focus_element = if self.indicator_thickness > 0 {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
@@ -188,7 +192,12 @@ impl MoveGrabState {
                         Key::Window(Usage::SnappingIndicator, self.window.key()),
                         overlay_geometry,
                         thickness,
-                        theme.radius_s()[0] as u8, // TODO: Fix once shaders support 4 corner radii customization
+                        [
+                            theme.radius_s()[0] as u8,
+                            theme.radius_s()[1] as u8,
+                            theme.radius_s()[2] as u8,
+                            theme.radius_s()[3] as u8,
+                        ],
                         1.0,
                         [
                             active_window_hint.red,
