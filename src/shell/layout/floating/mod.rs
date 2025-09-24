@@ -1,11 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::wayland::protocols::corner_radius::CornerRadiusData;
+use smithay::{
+    reexports::wayland_server::{Resource, Weak},
+    wayland::compositor::with_states,
+};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     time::{Duration, Instant},
 };
 
+use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
@@ -1589,13 +1598,34 @@ impl FloatingLayout {
                 }
 
                 let active_window_hint = crate::theme::active_window_hint(theme);
+                let radius = elem
+                    .active_window()
+                    .wl_surface()
+                    .and_then(|surface| {
+                        with_states(&surface, |s| {
+                            let d = s
+                                .data_map
+                                .get::<Mutex<Weak<CosmicCornerRadiusToplevelV1>>>()?;
+                            let guard = d.lock().unwrap();
 
+                            let weak_data = guard.upgrade().ok()?;
+
+                            let corners = weak_data.data::<CornerRadiusData>()?;
+
+                            let guard = corners.lock().unwrap();
+
+                            // TODO support multiple radius values
+                            Some(guard.top_left)
+                        })
+                    })
+                    .unwrap_or(indicator_thickness);
                 if indicator_thickness > 0 {
                     let element = IndicatorShader::focus_element(
                         renderer,
                         Key::Window(Usage::FocusIndicator, elem.key()),
                         geometry,
                         indicator_thickness,
+                        radius,
                         alpha,
                         [
                             active_window_hint.red,

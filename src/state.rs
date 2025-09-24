@@ -16,6 +16,7 @@ use crate::{
         protocols::{
             a11y::A11yState,
             atspi::AtspiState,
+            corner_radius::CornerRadiusState,
             drm::WlDrmState,
             image_capture_source::ImageCaptureSourceState,
             output_configuration::OutputConfigurationState,
@@ -212,6 +213,7 @@ pub struct Common {
 
     // wayland state
     pub compositor_state: CompositorState,
+    pub corner_radius_state: CornerRadiusState,
     pub data_device_state: DataDeviceState,
     pub dmabuf_state: DmabufState,
     pub fractional_scale_state: FractionalScaleManagerState,
@@ -602,6 +604,7 @@ impl State {
         let clock = Clock::new();
         let config = Config::load(&handle);
         let compositor_state = CompositorState::new::<Self>(dh);
+        let corner_radius_state = CornerRadiusState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
         let dmabuf_state = DmabufState::new();
         let fractional_scale_state = FractionalScaleManagerState::new::<State>(dh);
@@ -709,6 +712,7 @@ impl State {
                 theme: cosmic::theme::system_preference(),
 
                 compositor_state,
+                corner_radius_state,
                 data_device_state,
                 dmabuf_state,
                 fractional_scale_state,

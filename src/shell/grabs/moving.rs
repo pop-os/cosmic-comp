@@ -14,11 +14,19 @@ use crate::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
     },
     utils::prelude::*,
-    wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
+    wayland::protocols::{
+        corner_radius::CornerRadiusData,
+        toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
+    },
+};
+use smithay::{
+    reexports::wayland_server::{Resource, Weak},
+    wayland::{compositor::with_states, seat::WaylandFocus},
 };
 
 use calloop::LoopHandle;
 use cosmic::theme::CosmicTheme;
+use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use smithay::{
     backend::{
         input::ButtonState,
@@ -109,6 +117,29 @@ impl MoveGrabState {
             - scaling_offset;
 
         let active_window_hint = crate::theme::active_window_hint(theme);
+        let radius = self
+            .window()
+            .wl_surface()
+            .and_then(|surface| {
+                with_states(&surface, |s| {
+                    let d = s
+                        .data_map
+                        .get::<Mutex<Weak<CosmicCornerRadiusToplevelV1>>>()?;
+                    let guard = d.lock().unwrap();
+
+                    let weak_data = guard.upgrade().ok()?;
+
+                    let corners = weak_data.data::<CornerRadiusData>()?;
+
+                    let guard = corners.lock().unwrap();
+
+                    // TODO support multiple radius values
+                    Some(guard.top_left)
+                })
+            })
+            .unwrap_or(self.indicator_thickness);
+
+        tracing::error!("{radius}");
         let focus_element = if self.indicator_thickness > 0 {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
@@ -125,6 +156,7 @@ impl MoveGrabState {
                     )
                     .as_local(),
                     self.indicator_thickness,
+                    radius,
                     alpha,
                     [
                         active_window_hint.red,
