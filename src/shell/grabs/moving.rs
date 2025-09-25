@@ -111,7 +111,7 @@ impl MoveGrabState {
         let active_window_hint = crate::theme::active_window_hint(theme);
         let radius = self
             .window()
-            .corner_radius()
+            .corner_radius(window_geo.size)
             .unwrap_or([self.indicator_thickness; 4]);
 
         let focus_element = if self.indicator_thickness > 0 {

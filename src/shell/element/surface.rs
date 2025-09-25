@@ -127,10 +127,10 @@ impl CosmicSurface {
         }
     }
 
-    pub fn corner_radius(&self) -> Option<[u8; 4]> {
+    pub fn corner_radius(&self, geometry_size: Size<i32, Logical>) -> Option<[u8; 4]> {
         self.wl_surface().and_then(|surface| {
-            with_states(&surface, |s| {
-                let d = s
+            with_states(&surface, |states| {
+                let d = states
                     .data_map
                     .get::<Mutex<Weak<CosmicCornerRadiusToplevelV1>>>()?;
                 let guard = d.lock().unwrap();
@@ -141,16 +141,18 @@ impl CosmicSurface {
 
                 let guard = corners.lock().unwrap();
 
-                let size = <CosmicSurface as SpaceElement>::geometry(self).size;
                 // guard against corner radius being too large, potentially disconnecting the outline
-                let half_min_dim = u8::try_from(size.w.min(size.h) / 2).unwrap_or(u8::MAX);
+                let half_min_dim =
+                    u8::try_from(geometry_size.w.min(geometry_size.h) / 2).unwrap_or(u8::MAX);
 
-                Some([
-                    guard.top_right.min(half_min_dim),
-                    guard.bottom_right.min(half_min_dim),
-                    guard.top_left.min(half_min_dim),
-                    guard.bottom_left.min(half_min_dim),
-                ])
+                guard.corners.map(|corners| {
+                    [
+                        corners.top_right.min(half_min_dim),
+                        corners.bottom_right.min(half_min_dim),
+                        corners.top_left.min(half_min_dim),
+                        corners.bottom_left.min(half_min_dim),
+                    ]
+                })
             })
         })
     }
