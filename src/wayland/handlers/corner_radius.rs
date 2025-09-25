@@ -1,28 +1,28 @@
+use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::wayland::shell::xdg::ToplevelSurface;
 
 use crate::wayland::protocols::corner_radius::{
-    delegate_corner_radius, CornerRadiusData, CornerRadiusHandler,
+    delegate_corner_radius, CornerRadiusData, CornerRadiusHandler, CornerRadiusState,
 };
 
 use crate::state::State;
 
 impl CornerRadiusHandler for State {
-    fn corner_radius_state(
-        &mut self,
-    ) -> &mut crate::wayland::protocols::corner_radius::CornerRadiusState {
+    fn corner_radius_state(&mut self) -> &mut CornerRadiusState {
         &mut self.common.corner_radius_state
     }
 
     fn toplevel_from_resource(
         &mut self,
-        toplevel: &smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel,
+        toplevel: &xdg_toplevel::XdgToplevel,
     ) -> Option<ToplevelSurface> {
         self.common.xdg_shell_state.get_toplevel(toplevel)
     }
 
     fn set_corner_radius(
         &mut self,
-        _toplevel: &cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
+        _toplevel: &cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
         _data: &CornerRadiusData,
         _top_left: u32,
         _top_right: u32,
@@ -34,7 +34,7 @@ impl CornerRadiusHandler for State {
 
     fn unset_corner_radius(
         &mut self,
-        _toplevel: &cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
+        _toplevel: &cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
         _data: &CornerRadiusData,
     ) {
         // TODO force redraw?
