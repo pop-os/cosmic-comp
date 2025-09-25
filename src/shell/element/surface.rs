@@ -147,10 +147,10 @@ impl CosmicSurface {
 
                 guard.corners.map(|corners| {
                     [
-                        corners.top_right.min(half_min_dim),
                         corners.bottom_right.min(half_min_dim),
-                        corners.top_left.min(half_min_dim),
+                        corners.top_right.min(half_min_dim),
                         corners.bottom_left.min(half_min_dim),
+                        corners.top_left.min(half_min_dim),
                     ]
                 })
             })
