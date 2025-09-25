@@ -5017,7 +5017,7 @@ where
             }));
             let radius = mapped
                 .active_window()
-                .corner_radius()
+                .corner_radius(geo.size.as_logical())
                 .unwrap_or([indicator_thickness; 4]);
             if is_minimizing && indicator_thickness > 0 {
                 elements.push(CosmicMappedRenderElement::FocusIndicator(
@@ -5288,7 +5288,9 @@ where
         )
         .unwrap();
 
-        let radius = window.corner_radius().unwrap_or([indicator_thickness; 4]);
+        let radius = window
+            .corner_radius(swap_geo.size.as_logical())
+            .unwrap_or([indicator_thickness; 4]);
         swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
             IndicatorShader::focus_element(
                 renderer,
@@ -5369,7 +5371,7 @@ where
                     let radius = match data {
                         Data::Mapped { mapped, .. } => mapped
                             .active_window()
-                            .corner_radius()
+                            .corner_radius(geo.size.as_logical())
                             .unwrap_or([indicator_thickness; 4]),
                         _ => [1; 4],
                     };

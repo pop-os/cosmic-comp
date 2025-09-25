@@ -1591,7 +1591,7 @@ impl FloatingLayout {
                 let active_window_hint = crate::theme::active_window_hint(theme);
                 let radius = elem
                     .active_window()
-                    .corner_radius()
+                    .corner_radius(geometry.size.as_logical())
                     .unwrap_or([indicator_thickness; 4]);
                 if indicator_thickness > 0 {
                     let element = IndicatorShader::focus_element(
