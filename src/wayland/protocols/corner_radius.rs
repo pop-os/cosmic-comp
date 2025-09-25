@@ -6,6 +6,7 @@ use smithay::reexports::{
     wayland_server::{Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak},
 };
 use smithay::wayland::compositor::with_states;
+use smithay::wayland::compositor::Cacheable;
 use smithay::wayland::shell::xdg::ToplevelSurface;
 use std::sync::Mutex;
 use wayland_backend::server::GlobalId;
@@ -110,17 +111,7 @@ where
                     toplevel: toplevel.downgrade(),
                     corners: None,
                 });
-                let instance = data_init.init(id, data);
-
-                if let Some(surface) = state.toplevel_from_resource(&toplevel) {
-                    with_states(surface.wl_surface(), |s| {
-                        let data = s
-                            .data_map
-                            .get_or_insert_threadsafe(|| Mutex::new(instance.downgrade()));
-                        let mut guard = data.lock().unwrap();
-                        *guard = instance.downgrade();
-                    });
-                }
+                let _ = data_init.init(id, data);
             }
             _ => unimplemented!(),
         }
@@ -160,6 +151,18 @@ where
             cosmic_corner_radius_toplevel_v1::Request::Destroy => {
                 let mut guard = data.lock().unwrap();
                 guard.corners = None;
+                if let Some(surface) = guard
+                    .toplevel
+                    .upgrade()
+                    .ok()
+                    .and_then(|toplevel| state.toplevel_from_resource(&toplevel))
+                {
+                    with_states(surface.wl_surface(), |s| {
+                        let mut cached = s.cached_state.get::<CacheableCorners>();
+                        let pending = cached.pending();
+                        *pending = CacheableCorners(None);
+                    });
+                }
                 drop(guard);
 
                 state.unset_corner_radius(resource, data);
@@ -172,6 +175,18 @@ where
             } => {
                 let mut guard = data.lock().unwrap();
                 guard.set_corner_radius(top_left, top_right, bottom_right, bottom_left);
+                if let Some(surface) = guard
+                    .toplevel
+                    .upgrade()
+                    .ok()
+                    .and_then(|toplevel| state.toplevel_from_resource(&toplevel))
+                {
+                    with_states(surface.wl_surface(), |s| {
+                        let mut cached = s.cached_state.get::<CacheableCorners>();
+                        let pending = cached.pending();
+                        *pending = CacheableCorners(guard.corners);
+                    });
+                }
                 drop(guard);
 
                 state.set_corner_radius(resource, data);
@@ -179,6 +194,18 @@ where
             cosmic_corner_radius_toplevel_v1::Request::UnsetRadius => {
                 let mut guard = data.lock().unwrap();
                 guard.corners = None;
+                if let Some(surface) = guard
+                    .toplevel
+                    .upgrade()
+                    .ok()
+                    .and_then(|toplevel| state.toplevel_from_resource(&toplevel))
+                {
+                    with_states(surface.wl_surface(), |s| {
+                        let mut cached = s.cached_state.get::<CacheableCorners>();
+                        let pending = cached.pending();
+                        *pending = CacheableCorners(None);
+                    });
+                }
                 drop(guard);
 
                 state.unset_corner_radius(resource, data);
@@ -202,6 +229,18 @@ pub struct Corners {
     pub top_right: u8,
     pub bottom_right: u8,
     pub bottom_left: u8,
+}
+
+#[derive(Default, Debug, Copy, Clone)]
+pub struct CacheableCorners(pub Option<Corners>);
+
+impl Cacheable for CacheableCorners {
+    fn commit(&mut self, _dh: &DisplayHandle) -> Self {
+        *self
+    }
+    fn merge_into(self, into: &mut Self, _dh: &DisplayHandle) {
+        *into = self;
+    }
 }
 
 impl CornerRadiusInternal {
