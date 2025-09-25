@@ -133,7 +133,6 @@ impl MoveGrabState {
 
                     let guard = corners.lock().unwrap();
 
-                    // TODO support multiple radius values
                     Some([
                         guard.top_right,
                         guard.bottom_right,
