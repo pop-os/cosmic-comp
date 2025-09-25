@@ -119,28 +119,7 @@ impl MoveGrabState {
         let active_window_hint = crate::theme::active_window_hint(theme);
         let radius = self
             .window()
-            .wl_surface()
-            .and_then(|surface| {
-                with_states(&surface, |s| {
-                    let d = s
-                        .data_map
-                        .get::<Mutex<Weak<CosmicCornerRadiusToplevelV1>>>()?;
-                    let guard = d.lock().unwrap();
-
-                    let weak_data = guard.upgrade().ok()?;
-
-                    let corners = weak_data.data::<CornerRadiusData>()?;
-
-                    let guard = corners.lock().unwrap();
-
-                    Some([
-                        guard.top_right,
-                        guard.bottom_right,
-                        guard.top_left,
-                        guard.bottom_left,
-                    ])
-                })
-            })
+            .corner_radius()
             .unwrap_or([self.indicator_thickness; 4]);
 
         let focus_element = if self.indicator_thickness > 0 {
