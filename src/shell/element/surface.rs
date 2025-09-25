@@ -1,3 +1,5 @@
+use crate::wayland::protocols::corner_radius::CornerRadiusData;
+use smithay::reexports::wayland_server::Resource;
 use std::{
     borrow::Cow,
     sync::{
@@ -7,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use smithay::{
     backend::renderer::{
         element::{
@@ -34,7 +37,7 @@ use smithay::{
             },
         },
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::Mode as KdeMode,
-        wayland_server::protocol::wl_surface::WlSurface,
+        wayland_server::{protocol::wl_surface::WlSurface, Weak},
     },
     utils::{
         user_data::UserDataMap, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
@@ -122,6 +125,30 @@ impl CosmicSurface {
             }),
             WindowSurface::X11(surface) => surface.title().replace('\0', ""),
         }
+    }
+
+    pub fn corner_radius(&self) -> Option<[u8; 4]> {
+        self.wl_surface().and_then(|surface| {
+            with_states(&surface, |s| {
+                let d = s
+                    .data_map
+                    .get::<Mutex<Weak<CosmicCornerRadiusToplevelV1>>>()?;
+                let guard = d.lock().unwrap();
+
+                let weak_data = guard.upgrade().ok()?;
+
+                let corners = weak_data.data::<CornerRadiusData>()?;
+
+                let guard = corners.lock().unwrap();
+
+                Some([
+                    guard.top_right,
+                    guard.bottom_right,
+                    guard.top_left,
+                    guard.bottom_left,
+                ])
+            })
+        })
     }
 
     pub fn app_id(&self) -> String {
