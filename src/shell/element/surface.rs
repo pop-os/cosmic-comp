@@ -141,11 +141,15 @@ impl CosmicSurface {
 
                 let guard = corners.lock().unwrap();
 
+                let size = <CosmicSurface as SpaceElement>::geometry(self).size;
+                // guard against corner radius being too large, potentially disconnecting the outline
+                let half_min_dim = u8::try_from(size.w.min(size.h) / 2).unwrap_or(u8::MAX);
+
                 Some([
-                    guard.top_right,
-                    guard.bottom_right,
-                    guard.top_left,
-                    guard.bottom_left,
+                    guard.top_right.min(half_min_dim),
+                    guard.bottom_right.min(half_min_dim),
+                    guard.top_left.min(half_min_dim),
+                    guard.bottom_left.min(half_min_dim),
                 ])
             })
         })
