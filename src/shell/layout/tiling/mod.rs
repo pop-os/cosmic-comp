@@ -29,7 +29,6 @@ use crate::{
     wayland::{
         handlers::xdg_shell::popup::get_popup_toplevel,
         protocols::{
-            corner_radius::CornerRadiusData,
             toplevel_info::{
                 toplevel_enter_output, toplevel_enter_workspace, toplevel_leave_output,
                 toplevel_leave_workspace,
@@ -38,9 +37,7 @@ use crate::{
         },
     },
 };
-use smithay::{reexports::wayland_server::Resource, wayland::compositor::with_states};
 
-use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use cosmic_settings_config::shortcuts::action::{FocusDirection, ResizeDirection};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use keyframe::{
@@ -62,13 +59,13 @@ use smithay::{
     desktop::{layer_map_for_output, space::SpaceElement, PopupKind, WindowSurfaceType},
     input::Seat,
     output::Output,
-    reexports::wayland_server::{Client, Weak as WsWeak},
+    reexports::wayland_server::Client,
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
     wayland::{compositor::add_blocker, seat::WaylandFocus},
 };
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Weak},
     time::{Duration, Instant},
 };
 use tracing::trace;

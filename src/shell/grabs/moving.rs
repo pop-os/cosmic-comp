@@ -14,19 +14,11 @@ use crate::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
     },
     utils::prelude::*,
-    wayland::protocols::{
-        corner_radius::CornerRadiusData,
-        toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
-    },
-};
-use smithay::{
-    reexports::wayland_server::{Resource, Weak},
-    wayland::{compositor::with_states, seat::WaylandFocus},
+    wayland::protocols::toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
 };
 
 use calloop::LoopHandle;
 use cosmic::theme::CosmicTheme;
-use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use smithay::{
     backend::{
         input::ButtonState,

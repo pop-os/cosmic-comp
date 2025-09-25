@@ -1,20 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::wayland::protocols::corner_radius::CornerRadiusData;
-use smithay::{
-    reexports::wayland_server::{Resource, Weak},
-    wayland::compositor::with_states,
-};
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex,
-    },
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
-use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
