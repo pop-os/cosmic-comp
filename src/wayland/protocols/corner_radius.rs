@@ -3,7 +3,7 @@ use cosmic_protocols::corner_radius::v1::server::{
 };
 use smithay::reexports::{
     wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel,
-    wayland_server::{Client, Dispatch, DisplayHandle, GlobalDispatch, Resource},
+    wayland_server::{Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak},
 };
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::ToplevelSurface;
@@ -50,10 +50,6 @@ pub trait CornerRadiusHandler {
         &mut self,
         toplevel: &cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
         data: &CornerRadiusData,
-        top_left: u32,
-        top_right: u32,
-        bottom_right: u32,
-        bottom_left: u32,
     );
     fn unset_corner_radius(
         &mut self,
@@ -110,7 +106,13 @@ where
                 corner_radius_state.instances.retain(|i| i != _resource);
             }
             cosmic_corner_radius_manager_v1::Request::GetCornerRadius { id, toplevel } => {
-                let data = CornerRadiusData::default();
+                let data = Mutex::new(CornerRadiusInternal {
+                    toplevel: toplevel.downgrade(),
+                    top_left: 0,
+                    top_right: 0,
+                    bottom_right: 0,
+                    bottom_left: 0,
+                });
                 let instance = data_init.init(id, data);
 
                 if let Some(surface) = state.toplevel_from_resource(&toplevel) {
@@ -178,14 +180,7 @@ where
                     );
                 }
 
-                _state.set_corner_radius(
-                    resource,
-                    data,
-                    top_left,
-                    top_right,
-                    bottom_right,
-                    bottom_left,
-                );
+                _state.set_corner_radius(resource, data);
             }
             cosmic_corner_radius_toplevel_v1::Request::UnsetRadius => {
                 _state.unset_corner_radius(resource, data);
@@ -197,8 +192,9 @@ where
 
 pub type CornerRadiusData = Mutex<CornerRadiusInternal>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CornerRadiusInternal {
+    pub toplevel: Weak<XdgToplevel>,
     pub top_left: u8,
     pub top_right: u8,
     pub bottom_right: u8,
