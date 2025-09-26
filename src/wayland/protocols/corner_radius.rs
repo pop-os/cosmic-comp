@@ -45,6 +45,11 @@ impl CornerRadiusState {
 }
 
 pub trait CornerRadiusHandler {
+    fn add_corners(
+        &mut self,
+        toplevel: &XdgToplevel,
+        toplevel_obj: cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
+    );
     fn corner_radius_state(&mut self) -> &mut CornerRadiusState;
     fn toplevel_from_resource(&mut self, toplevel: &XdgToplevel) -> Option<ToplevelSurface>;
     fn set_corner_radius(
@@ -111,7 +116,8 @@ where
                     toplevel: toplevel.downgrade(),
                     corners: None,
                 });
-                let _ = data_init.init(id, data);
+                let obj = data_init.init(id, data);
+                state.add_corners(&toplevel, obj);
             }
             _ => unimplemented!(),
         }
@@ -151,12 +157,16 @@ where
             cosmic_corner_radius_toplevel_v1::Request::Destroy => {
                 let mut guard = data.lock().unwrap();
                 guard.corners = None;
-                if let Some(surface) = guard
-                    .toplevel
-                    .upgrade()
-                    .ok()
-                    .and_then(|toplevel| state.toplevel_from_resource(&toplevel))
-                {
+
+                let Ok(toplevel) = guard.toplevel.upgrade() else {
+                    resource.post_error(
+                        cosmic_corner_radius_toplevel_v1::Error::ToplevelDestroyed as u32,
+                        format!("{:?} No toplevel found", resource),
+                    );
+                    return;
+                };
+
+                if let Some(surface) = state.toplevel_from_resource(&toplevel) {
                     with_states(surface.wl_surface(), |s| {
                         let mut cached = s.cached_state.get::<CacheableCorners>();
                         let pending = cached.pending();
@@ -175,12 +185,15 @@ where
             } => {
                 let mut guard = data.lock().unwrap();
                 guard.set_corner_radius(top_left, top_right, bottom_right, bottom_left);
-                if let Some(surface) = guard
-                    .toplevel
-                    .upgrade()
-                    .ok()
-                    .and_then(|toplevel| state.toplevel_from_resource(&toplevel))
-                {
+                let Ok(toplevel) = guard.toplevel.upgrade() else {
+                    resource.post_error(
+                        cosmic_corner_radius_toplevel_v1::Error::ToplevelDestroyed as u32,
+                        format!("{:?} No toplevel found", resource),
+                    );
+                    return;
+                };
+
+                if let Some(surface) = state.toplevel_from_resource(&toplevel) {
                     with_states(surface.wl_surface(), |s| {
                         let mut cached = s.cached_state.get::<CacheableCorners>();
                         let pending = cached.pending();
@@ -194,12 +207,15 @@ where
             cosmic_corner_radius_toplevel_v1::Request::UnsetRadius => {
                 let mut guard = data.lock().unwrap();
                 guard.corners = None;
-                if let Some(surface) = guard
-                    .toplevel
-                    .upgrade()
-                    .ok()
-                    .and_then(|toplevel| state.toplevel_from_resource(&toplevel))
-                {
+                let Ok(toplevel) = guard.toplevel.upgrade() else {
+                    resource.post_error(
+                        cosmic_corner_radius_toplevel_v1::Error::ToplevelDestroyed as u32,
+                        format!("{:?} No toplevel found", resource),
+                    );
+                    return;
+                };
+
+                if let Some(surface) = state.toplevel_from_resource(&toplevel) {
                     with_states(surface.wl_surface(), |s| {
                         let mut cached = s.cached_state.get::<CacheableCorners>();
                         let pending = cached.pending();
