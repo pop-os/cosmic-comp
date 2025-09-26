@@ -1,3 +1,4 @@
+use crate::wayland::protocols::corner_radius::CacheableCorners;
 use std::{
     borrow::Cow,
     sync::{
@@ -122,6 +123,27 @@ impl CosmicSurface {
             }),
             WindowSurface::X11(surface) => surface.title().replace('\0', ""),
         }
+    }
+
+    pub fn corner_radius(&self, geometry_size: Size<i32, Logical>) -> Option<[u8; 4]> {
+        self.wl_surface().and_then(|surface| {
+            with_states(&surface, |states| {
+                let mut guard = states.cached_state.get::<CacheableCorners>();
+
+                // guard against corner radius being too large, potentially disconnecting the outline
+                let half_min_dim =
+                    u8::try_from(geometry_size.w.min(geometry_size.h) / 2).unwrap_or(u8::MAX);
+
+                let corners = guard.current().0?;
+
+                Some([
+                    corners.bottom_right.min(half_min_dim),
+                    corners.top_right.min(half_min_dim),
+                    corners.bottom_left.min(half_min_dim),
+                    corners.top_left.min(half_min_dim),
+                ])
+            })
+        })
     }
 
     pub fn app_id(&self) -> String {

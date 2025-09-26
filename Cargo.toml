@@ -22,7 +22,7 @@ cosmic-config = { git = "https://github.com/pop-os/libcosmic/", features = [
     "calloop",
     "macro",
 ] }
-cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "e706814", default-features = false, features = [
+cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "d0e95be", default-features = false, features = [
     "server",
 ] }
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
@@ -142,9 +142,9 @@ inherits = "release"
 [profile.release]
 lto = "fat"
 
-[patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
+# [patch."https://github.com/pop-os/cosmic-protocols"]
+# cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols" }
+# cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols" }
 
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "eb45814" }

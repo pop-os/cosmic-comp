@@ -2,6 +2,7 @@
 
 pub mod a11y;
 pub mod atspi;
+pub mod corner_radius;
 pub mod drm;
 pub mod image_capture_source;
 pub mod output_configuration;

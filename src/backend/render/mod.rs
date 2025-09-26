@@ -173,7 +173,7 @@ impl From<Id> for Key {
 #[derive(PartialEq)]
 struct IndicatorSettings {
     thickness: u8,
-    radius: u8,
+    radius: [u8; 4],
     alpha: f32,
     color: [f32; 3],
 }
@@ -195,6 +195,7 @@ impl IndicatorShader {
         key: impl Into<Key>,
         mut element_geo: Rectangle<i32, Local>,
         thickness: u8,
+        radius: [u8; 4],
         alpha: f32,
         active_window_hint: [f32; 3],
     ) -> PixelShaderElement {
@@ -207,7 +208,7 @@ impl IndicatorShader {
             key,
             element_geo,
             thickness,
-            thickness * 2,
+            radius,
             alpha,
             active_window_hint,
         )
@@ -218,7 +219,7 @@ impl IndicatorShader {
         key: impl Into<Key>,
         geo: Rectangle<i32, Local>,
         thickness: u8,
-        radius: u8,
+        radius: [u8; 4],
         alpha: f32,
         color: [f32; 3],
     ) -> PixelShaderElement {
@@ -261,7 +262,15 @@ impl IndicatorShader {
                         [color[0] * alpha, color[1] * alpha, color[2] * alpha],
                     ),
                     Uniform::new("thickness", thickness),
-                    Uniform::new("radius", radius as f32),
+                    Uniform::new(
+                        "radius",
+                        [
+                            radius[0] as f32 + thickness / 2.,
+                            radius[1] as f32 + thickness / 2.,
+                            radius[2] as f32 + thickness / 2.,
+                            radius[3] as f32 + thickness / 2.,
+                        ],
+                    ),
                 ],
                 Kind::Unspecified,
             );
@@ -374,7 +383,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
         &[
             UniformName::new("color", UniformType::_3f),
             UniformName::new("thickness", UniformType::_1f),
-            UniformName::new("radius", UniformType::_1f),
+            UniformName::new("radius", UniformType::_4f),
         ],
     )?;
     let rectangle_shader = renderer.compile_custom_pixel_shader(

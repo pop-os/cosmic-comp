@@ -4480,7 +4480,7 @@ where
                                     Key::Group(Arc::downgrade(alive)),
                                     geo,
                                     4,
-                                    if render_active_child { 16 } else { 8 },
+                                    [if render_active_child { 16 } else { 8 }; 4],
                                     alpha * if render_potential_group { 0.40 } else { 1.0 },
                                     group_color,
                                 )
@@ -4497,7 +4497,7 @@ where
                                     Key::Group(Arc::downgrade(alive)),
                                     geo,
                                     4,
-                                    8,
+                                    [8; 4],
                                     alpha * 0.40,
                                     group_color,
                                 )
@@ -4560,7 +4560,7 @@ where
                                         Key::Group(Arc::downgrade(alive)),
                                         geo,
                                         4,
-                                        8,
+                                        [8; 4],
                                         alpha * 0.15,
                                         group_color,
                                     )
@@ -4796,7 +4796,7 @@ where
                                     Key::Window(Usage::PotentialGroupIndicator, mapped.key()),
                                     geo,
                                     4,
-                                    8,
+                                    [8; 4],
                                     alpha * 0.40,
                                     group_color,
                                 )
@@ -5015,6 +5015,10 @@ where
                     x => Some(x),
                 }
             }));
+            let radius = mapped
+                .active_window()
+                .corner_radius(geo.size.as_logical())
+                .unwrap_or([indicator_thickness; 4]);
             if is_minimizing && indicator_thickness > 0 {
                 elements.push(CosmicMappedRenderElement::FocusIndicator(
                     IndicatorShader::focus_element(
@@ -5022,6 +5026,7 @@ where
                         Key::Window(Usage::FocusIndicator, mapped.clone().key()),
                         geo,
                         indicator_thickness,
+                        radius,
                         alpha,
                         [window_hint.red, window_hint.green, window_hint.blue],
                     ),
@@ -5283,12 +5288,16 @@ where
         )
         .unwrap();
 
+        let radius = window
+            .corner_radius(swap_geo.size.as_logical())
+            .unwrap_or([indicator_thickness; 4]);
         swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
             IndicatorShader::focus_element(
                 renderer,
                 Key::from(swapping_stack_surface_id.clone()),
                 swap_geo,
                 4,
+                radius,
                 transition.unwrap_or(1.0),
                 [window_hint.red, window_hint.green, window_hint.blue],
             ),
@@ -5359,7 +5368,13 @@ where
                             group_color,
                         ));
                     }
-
+                    let radius = match data {
+                        Data::Mapped { mapped, .. } => mapped
+                            .active_window()
+                            .corner_radius(geo.size.as_logical())
+                            .unwrap_or([indicator_thickness; 4]),
+                        _ => [1; 4],
+                    };
                     if !swap_desc
                         .as_ref()
                         .map(|desc| desc.stack_window.is_some())
@@ -5381,6 +5396,7 @@ where
                             } else {
                                 indicator_thickness
                             },
+                            radius,
                             alpha,
                             [window_hint.red, window_hint.green, window_hint.blue],
                         ));

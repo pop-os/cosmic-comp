@@ -109,6 +109,11 @@ impl MoveGrabState {
             - scaling_offset;
 
         let active_window_hint = crate::theme::active_window_hint(theme);
+        let radius = self
+            .window()
+            .corner_radius(window_geo.size)
+            .unwrap_or([self.indicator_thickness; 4]);
+
         let focus_element = if self.indicator_thickness > 0 {
             Some(
                 CosmicMappedRenderElement::from(IndicatorShader::focus_element(
@@ -125,6 +130,7 @@ impl MoveGrabState {
                     )
                     .as_local(),
                     self.indicator_thickness,
+                    radius,
                     alpha,
                     [
                         active_window_hint.red,
@@ -156,7 +162,12 @@ impl MoveGrabState {
                         Key::Window(Usage::SnappingIndicator, self.window.key()),
                         overlay_geometry,
                         thickness,
-                        theme.radius_s()[0] as u8, // TODO: Fix once shaders support 4 corner radii customization
+                        [
+                            theme.radius_s()[0] as u8,
+                            theme.radius_s()[1] as u8,
+                            theme.radius_s()[2] as u8,
+                            theme.radius_s()[3] as u8,
+                        ],
                         1.0,
                         [
                             active_window_hint.red,
