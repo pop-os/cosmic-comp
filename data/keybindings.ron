@@ -4,6 +4,7 @@
     (modifiers: [Super, Ctrl], key: "Escape"): Debug,
     (modifiers: [Super], key: "Escape"): System(LockScreen),
     (modifiers: [Super], key: "q"): Close,
+    (modifiers: [Alt], key: "F4"): Close,
 
     (modifiers: [Super], key: "Left"): Focus(Left),
     (modifiers: [Super], key: "Right"): Focus(Right),
