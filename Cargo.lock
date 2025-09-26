@@ -807,10 +807,10 @@ dependencies = [
 [[package]]
 name = "cosmic-client-toolkit"
 version = "0.1.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?branch=corner-radius#633beb022dcb7c2f6247ab7c8100730d5b8bc16f"
+source = "git+https://github.com/pop-os/cosmic-protocols?rev=6254f50#6254f50abc6dbfccadc6939f80e20081ab5f9d51"
 dependencies = [
  "bitflags 2.9.4",
- "cosmic-protocols",
+ "cosmic-protocols 0.1.0 (git+https://github.com/pop-os/cosmic-protocols?rev=6254f50)",
  "libc",
  "smithay-client-toolkit 0.20.0",
  "wayland-client",
@@ -828,7 +828,7 @@ dependencies = [
  "clap_lex",
  "cosmic-comp-config",
  "cosmic-config",
- "cosmic-protocols",
+ "cosmic-protocols 0.1.0 (git+https://github.com/pop-os/cosmic-protocols?rev=d0e95be)",
  "cosmic-settings-config",
  "cosmic-settings-daemon-config",
  "cosmic-text",
@@ -938,11 +938,24 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.1.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?branch=corner-radius#633beb022dcb7c2f6247ab7c8100730d5b8bc16f"
+source = "git+https://github.com/pop-os/cosmic-protocols?rev=6254f50#6254f50abc6dbfccadc6939f80e20081ab5f9d51"
 dependencies = [
  "bitflags 2.9.4",
  "wayland-backend",
  "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wayland-scanner",
+ "wayland-server",
+]
+
+[[package]]
+name = "cosmic-protocols"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/cosmic-protocols?rev=d0e95be#d0e95be25e423cfe523b11111a3666ed7aaf0dc4"
+dependencies = [
+ "bitflags 2.9.4",
+ "wayland-backend",
  "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-scanner",
