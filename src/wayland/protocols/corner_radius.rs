@@ -1,13 +1,21 @@
+use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use cosmic_protocols::corner_radius::v1::server::{
     cosmic_corner_radius_manager_v1, cosmic_corner_radius_toplevel_v1,
 };
-use smithay::reexports::{
-    wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel,
-    wayland_server::{Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak},
-};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::utils::HookId;
+use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::compositor::Cacheable;
-use smithay::wayland::shell::xdg::ToplevelSurface;
+use smithay::wayland::shell::xdg::SurfaceCachedState;
+use smithay::{
+    reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel,
+        wayland_server::{Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak},
+    },
+    wayland::shell::xdg::XdgShellHandler,
+};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use wayland_backend::server::GlobalId;
 
@@ -44,14 +52,8 @@ impl CornerRadiusState {
     }
 }
 
-pub trait CornerRadiusHandler {
-    fn add_corners(
-        &mut self,
-        toplevel: &XdgToplevel,
-        toplevel_obj: cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
-    );
+pub trait CornerRadiusHandler: XdgShellHandler {
     fn corner_radius_state(&mut self) -> &mut CornerRadiusState;
-    fn toplevel_from_resource(&mut self, toplevel: &XdgToplevel) -> Option<ToplevelSurface>;
     fn set_corner_radius(
         &mut self,
         toplevel: &cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
@@ -100,7 +102,7 @@ where
     fn request(
         state: &mut D,
         _client: &Client,
-        _resource: &cosmic_corner_radius_manager_v1::CosmicCornerRadiusManagerV1,
+        resource: &cosmic_corner_radius_manager_v1::CosmicCornerRadiusManagerV1,
         request: <cosmic_corner_radius_manager_v1::CosmicCornerRadiusManagerV1 as smithay::reexports::wayland_server::Resource>::Request,
         _data: &(),
         _dhandle: &DisplayHandle,
@@ -109,15 +111,85 @@ where
         match request {
             cosmic_corner_radius_manager_v1::Request::Destroy => {
                 let corner_radius_state = state.corner_radius_state();
-                corner_radius_state.instances.retain(|i| i != _resource);
+                corner_radius_state.instances.retain(|i| i != resource);
             }
             cosmic_corner_radius_manager_v1::Request::GetCornerRadius { id, toplevel } => {
-                let data = Mutex::new(CornerRadiusInternal {
-                    toplevel: toplevel.downgrade(),
-                    corners: None,
-                });
-                let obj = data_init.init(id, data);
-                state.add_corners(&toplevel, obj);
+                if let Some(surface) = state.xdg_shell_state().get_toplevel(&toplevel) {
+                    let radius_exists = with_states(surface.wl_surface(), |surface_data| {
+                        let hook_ids = surface_data.data_map.get_or_insert_threadsafe(|| {
+                            Mutex::new(HashMap::<
+                                WlSurface,
+                                (HookId, Weak<CosmicCornerRadiusToplevelV1>),
+                            >::new())
+                        });
+                        let guard = hook_ids.lock().unwrap();
+                        guard
+                            .get(surface.wl_surface())
+                            .map(|(_, t)| t.upgrade().is_ok())
+                    });
+                    if radius_exists.unwrap_or_default() {
+                        resource.post_error(
+                            cosmic_corner_radius_manager_v1::Error::CornerRadiusExists as u32,
+                            format!("{resource:?} CosmicCornerRadiusToplevelV1 object already exists for the surface"),
+                        );
+                    }
+                    let data = Mutex::new(CornerRadiusInternal {
+                        toplevel: toplevel.downgrade(),
+                        corners: None,
+                    });
+                    let obj = data_init.init(id, data);
+                    let obj_downgrade = obj.downgrade();
+
+                    let needs_hook = radius_exists.is_none();
+                    if needs_hook {
+                        let hook_id = add_pre_commit_hook::<D, _>(
+                            surface.wl_surface(),
+                            move |_, _dh, surface| {
+                                let corner_radii_too_big = with_states(surface, |surface_data| {
+                                    let corners = surface_data
+                                        .cached_state
+                                        .get::<CacheableCorners>()
+                                        .pending()
+                                        .clone();
+                                    surface_data
+                                        .cached_state
+                                        .get::<SurfaceCachedState>()
+                                        .pending()
+                                        .geometry
+                                        .zip(corners.0.as_ref())
+                                        .is_some_and(|(geo, corners)| {
+                                            let half_min_dim =
+                                                u8::try_from(geo.size.w.min(geo.size.h) / 2)
+                                                    .unwrap_or(u8::MAX);
+                                            corners.top_right > half_min_dim
+                                                || corners.top_left > half_min_dim
+                                                || corners.bottom_right > half_min_dim
+                                                || corners.bottom_left > half_min_dim
+                                        })
+                                });
+
+                                if corner_radii_too_big {
+                                    obj.post_error(
+                                        cosmic_corner_radius_toplevel_v1::Error::RadiusTooLarge
+                                            as u32,
+                                        format!("{obj:?} corner radius too large"),
+                                    );
+                                }
+                            },
+                        );
+
+                        with_states(surface.wl_surface(), |surface_data| {
+                            let hook_ids = surface_data.data_map.get_or_insert_threadsafe(|| {
+                                Mutex::new(HashMap::<
+                                    WlSurface,
+                                    (HookId, Weak<CosmicCornerRadiusToplevelV1>),
+                                >::new())
+                            });
+                            let mut guard = hook_ids.lock().unwrap();
+                            guard.insert(surface.wl_surface().clone(), (hook_id, obj_downgrade));
+                        });
+                    }
+                }
             }
             _ => unimplemented!(),
         }
@@ -166,7 +238,20 @@ where
                     return;
                 };
 
-                if let Some(surface) = state.toplevel_from_resource(&toplevel) {
+                if let Some(surface) = state.xdg_shell_state().get_toplevel(&toplevel) {
+                    with_states(surface.wl_surface(), |surface_data| {
+                        if let Some(hook_ids_mutex) =
+                            surface_data.data_map.get::<Mutex<
+                                HashMap<WlSurface, (HookId, Weak<CosmicCornerRadiusToplevelV1>)>,
+                            >>()
+                        {
+                            let mut hook_ids = hook_ids_mutex.lock().unwrap();
+                            hook_ids.remove(surface.wl_surface());
+                        }
+                    });
+                }
+
+                if let Some(surface) = state.xdg_shell_state().get_toplevel(&toplevel) {
                     with_states(surface.wl_surface(), |s| {
                         let mut cached = s.cached_state.get::<CacheableCorners>();
                         let pending = cached.pending();
@@ -193,7 +278,7 @@ where
                     return;
                 };
 
-                if let Some(surface) = state.toplevel_from_resource(&toplevel) {
+                if let Some(surface) = state.xdg_shell_state().get_toplevel(&toplevel) {
                     with_states(surface.wl_surface(), |s| {
                         let mut cached = s.cached_state.get::<CacheableCorners>();
                         let pending = cached.pending();
@@ -215,7 +300,7 @@ where
                     return;
                 };
 
-                if let Some(surface) = state.toplevel_from_resource(&toplevel) {
+                if let Some(surface) = state.xdg_shell_state().get_toplevel(&toplevel) {
                     with_states(surface.wl_surface(), |s| {
                         let mut cached = s.cached_state.get::<CacheableCorners>();
                         let pending = cached.pending();
