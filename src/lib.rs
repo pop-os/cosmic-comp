@@ -33,6 +33,7 @@ pub mod config;
 pub mod dbus;
 #[cfg(feature = "debug")]
 pub mod debug;
+pub mod hooks;
 pub mod input;
 mod logger;
 pub mod session;
@@ -103,7 +104,7 @@ impl State {
     }
 }
 
-pub fn run() -> Result<(), Box<dyn Error>> {
+pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     let raw_args = RawArgs::from_args();
     let mut cursor = raw_args.cursor();
     let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
@@ -136,6 +137,10 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     tracy_client::Client::start();
 
     utils::rlimit::increase_nofile_limit();
+
+    // init hook globals
+    hooks::HOOKS.set(hooks)
+        .expect("Hooks global has already been initialized. Running multiple instances of COSMIC in one process is not supported.");
 
     // init event loop
     let mut event_loop = EventLoop::try_new().with_context(|| "Failed to initialize event loop")?;
