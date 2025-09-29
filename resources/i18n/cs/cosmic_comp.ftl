@@ -1,5 +1,5 @@
 a11y-zoom-move-continuously = Zobrazení se pohybuje plynule s ukazatelem
-a11y-zoom-move-onedge = Zobrazení se pohybuje, když ukazatel dosáhne okraje
+a11y-zoom-move-onedge = Zobrazení se pohybuje, když ukazatel dosáhne kraje
 a11y-zoom-move-centered = Zobrazení se pohybuje tak, aby ukazatel zůstal uprostřed
 a11y-zoom-settings = Nastavení lupy...
 grow-window = Zvětšit
@@ -25,3 +25,4 @@ window-menu-resize-edge-top = Horní
 window-menu-resize-edge-left = Levý
 window-menu-resize-edge-right = Pravý
 window-menu-resize-edge-bottom = Spodní
+window-menu-fullscreen = Režim celé obrazovky
