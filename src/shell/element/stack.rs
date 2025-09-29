@@ -4,6 +4,7 @@ use super::{
 };
 use crate::{
     backend::render::cursor::CursorState,
+    hooks::{Decorations, HOOKS},
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -1007,12 +1008,57 @@ impl Program for CosmicStackInternal {
     }
 
     fn view(&self) -> CosmicElement<'_, Self::Message> {
-        let windows = self.windows.lock().unwrap();
-        if self.geometry.lock().unwrap().is_none() {
+        HOOKS.get().unwrap().stack_decorations.view(self)
+    }
+
+    fn foreground(
+        &self,
+        pixels: &mut tiny_skia::PixmapMut<'_>,
+        damage: &[Rectangle<i32, Buffer>],
+        scale: f32,
+        theme: &Theme,
+    ) {
+        if self.group_focused.load(Ordering::SeqCst) {
+            let border = Rectangle::new(
+                (0, ((TAB_HEIGHT as f32 * scale) - scale).floor() as i32).into(),
+                (pixels.width() as i32, scale.ceil() as i32).into(),
+            );
+
+            let mut paint = tiny_skia::Paint::default();
+            let (b, g, r, a) = theme.cosmic().accent_color().into_components();
+            paint.set_color(tiny_skia::Color::from_rgba(r, g, b, a).unwrap());
+
+            for rect in damage {
+                if let Some(overlap) = rect.intersection(border) {
+                    pixels.fill_rect(
+                        tiny_skia::Rect::from_xywh(
+                            overlap.loc.x as f32,
+                            overlap.loc.y as f32,
+                            overlap.size.w as f32,
+                            overlap.size.h as f32,
+                        )
+                        .unwrap(),
+                        &paint,
+                        Default::default(),
+                        None,
+                    )
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DefaultDecorations;
+
+impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
+    fn view(&self, stack: &CosmicStackInternal) -> cosmic::Element<'_, Message> {
+        let windows = stack.windows.lock().unwrap();
+        if stack.geometry.lock().unwrap().is_none() {
             return iced_widget::row(Vec::new()).into();
         };
-        let active = self.active.load(Ordering::SeqCst);
-        let group_focused = self.group_focused.load(Ordering::SeqCst);
+        let active = stack.active.load(Ordering::SeqCst);
+        let group_focused = stack.group_focused.load(Ordering::SeqCst);
 
         let elements = vec![
             cosmic_widget::icon::from_name("window-stack-symbolic")
@@ -1057,7 +1103,8 @@ impl Program for CosmicStackInternal {
                 )
                 .id(SCROLLABLE_ID.clone())
                 .force_visible(
-                    self.scroll_to_focus
+                    stack
+                        .scroll_to_focus
                         .load(Ordering::SeqCst)
                         .then_some(active),
                 )
@@ -1079,7 +1126,7 @@ impl Program for CosmicStackInternal {
         } else {
             Radius::from([8.0, 8.0, 0.0, 0.0])
         };
-        let group_focused = self.group_focused.load(Ordering::SeqCst);
+        let group_focused = stack.group_focused.load(Ordering::SeqCst);
 
         iced_widget::row(elements)
             .height(TAB_HEIGHT as u16)
@@ -1108,42 +1155,6 @@ impl Program for CosmicStackInternal {
                 }
             }))
             .into()
-    }
-
-    fn foreground(
-        &self,
-        pixels: &mut tiny_skia::PixmapMut<'_>,
-        damage: &[Rectangle<i32, Buffer>],
-        scale: f32,
-        theme: &Theme,
-    ) {
-        if self.group_focused.load(Ordering::SeqCst) {
-            let border = Rectangle::new(
-                (0, ((TAB_HEIGHT as f32 * scale) - scale).floor() as i32).into(),
-                (pixels.width() as i32, scale.ceil() as i32).into(),
-            );
-
-            let mut paint = tiny_skia::Paint::default();
-            let (b, g, r, a) = theme.cosmic().accent_color().into_components();
-            paint.set_color(tiny_skia::Color::from_rgba(r, g, b, a).unwrap());
-
-            for rect in damage {
-                if let Some(overlap) = rect.intersection(border) {
-                    pixels.fill_rect(
-                        tiny_skia::Rect::from_xywh(
-                            overlap.loc.x as f32,
-                            overlap.loc.y as f32,
-                            overlap.size.w as f32,
-                            overlap.size.h as f32,
-                        )
-                        .unwrap(),
-                        &paint,
-                        Default::default(),
-                        None,
-                    )
-                }
-            }
-        }
     }
 }
 
