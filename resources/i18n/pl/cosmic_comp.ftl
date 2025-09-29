@@ -25,3 +25,4 @@ window-menu-resize-edge-top = Górnej
 window-menu-resize-edge-left = Lewej
 window-menu-resize-edge-right = Prawej
 window-menu-resize-edge-bottom = Dolnej
+window-menu-fullscreen = Tryb Pełnoekranowy
