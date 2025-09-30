@@ -21,3 +21,7 @@ window-menu-resize-edge-top = Trên
 window-menu-resize-edge-left = Trái
 window-menu-resize-edge-right = Phải
 window-menu-resize-edge-bottom = Dưới
+window-menu-fullscreen = Toàn màn hình
+a11y-zoom-move-continuously = Khung cảnh chuyển liện tục với chuột
+a11y-zoom-move-onedge = Khung cảnh chuyển khi chuột chạm rìa
+a11y-zoom-settings = Cài đặt kính lúp...
