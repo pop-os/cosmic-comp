@@ -494,7 +494,7 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
     }
     fn replace(
         &self,
-        replaced: <State as smithay::input::SeatHandler>::KeyboardFocus,
+        replaced: Self,
         seat: &Seat<State>,
         data: &mut State,
         keys: Vec<KeysymHandle<'_>>,
@@ -504,6 +504,9 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
         if !replaced
             .wl_surface()
             .is_some_and(|s| Some(s) == self.wl_surface())
+            && !replaced
+                .x11_surface()
+                .is_some_and(|s| Some(s) == self.x11_surface())
         {
             KeyboardTarget::leave(&replaced, seat, data, serial);
             KeyboardTarget::enter(self, seat, data, keys, serial);
