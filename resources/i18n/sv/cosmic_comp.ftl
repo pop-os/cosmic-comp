@@ -1,6 +1,6 @@
 a11y-zoom-move-continuously = Vyn flyttar sig kontinuerligt med pekaren
 a11y-zoom-move-onedge = Vyn flyttar på sig när pekaren når kanten
-a11y-zoom-move-centered =  Vyn flyttar på sig för att behålla pekaren centrerad
+a11y-zoom-move-centered = Vyn flyttar på sig för att behålla pekaren centrerad
 a11y-zoom-settings = Inställningar för förstoringsglas...
 grow-window = Väx
 shrink-window = Krymp
@@ -25,3 +25,4 @@ window-menu-resize-edge-top = Högst upp
 window-menu-resize-edge-left = Vänster
 window-menu-resize-edge-right = Höger
 window-menu-resize-edge-bottom = Längst ned
+window-menu-fullscreen = Helskärm
