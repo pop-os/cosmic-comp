@@ -33,7 +33,7 @@ use smithay::{
     },
     utils::{IsAlive, Logical, Point, Serial, Transform},
     wayland::{seat::WaylandFocus, session_lock::LockSurface},
-    xwayland::xwm::XwmId,
+    xwayland::{xwm::XwmId, X11Surface},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -220,22 +220,20 @@ impl KeyboardFocusTarget {
         }
     }
 
-    pub fn is_xwm(&self, xwm: XwmId) -> bool {
+    fn x11_surface(&self) -> Option<X11Surface> {
         match self {
-            KeyboardFocusTarget::Element(mapped) => {
-                if let Some(surface) = mapped.active_window().x11_surface() {
-                    return surface.xwm_id().unwrap() == xwm;
-                }
-            }
-            KeyboardFocusTarget::Fullscreen(surface) => {
-                if let Some(surface) = surface.x11_surface() {
-                    return surface.xwm_id().unwrap() == xwm;
-                }
-            }
-            _ => {}
+            KeyboardFocusTarget::Element(mapped) => mapped.active_window().x11_surface().cloned(),
+            KeyboardFocusTarget::Fullscreen(surface) => surface.x11_surface().cloned(),
+            _ => None,
         }
+    }
 
-        false
+    pub fn is_xwm(&self, xwm: XwmId) -> bool {
+        if let Some(surface) = self.x11_surface() {
+            surface.xwm_id().unwrap() == xwm
+        } else {
+            false
+        }
     }
 }
 
