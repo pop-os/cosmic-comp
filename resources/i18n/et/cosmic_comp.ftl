@@ -1,0 +1,11 @@
+window-menu-sticky = Kleepuv aken
+window-menu-close = Sulge
+window-menu-close-all = Sulge kõik aknad
+window-menu-screenshot = Tee ekraanitõmmis
+window-menu-move = Liiguta
+window-menu-resize = Muuda suurust
+window-menu-move-prev-workspace = Tõsta eelmisesse tööruumi
+window-menu-move-next-workspace = Tõsta järgmisesse tööruumi
+window-menu-minimize = Minimeeri
+window-menu-maximize = Maksimeeri
+window-menu-fullscreen = Täisekraanivaade
