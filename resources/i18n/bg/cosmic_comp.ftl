@@ -1,0 +1,15 @@
+window-menu-close = Затваряне
+window-menu-close-all = Затваряне на всички прозорци
+window-menu-resize = Преоразмеряване
+window-menu-move = Преместване
+window-menu-fullscreen = На цял екран
+window-menu-maximize = Максимизиране
+window-menu-minimize = Минимизиране
+a11y-zoom-settings = Настройки на лупата...
+swap-windows = Разменяне на прозорци
+window-menu-move-prev-workspace = Преместване в предишното работно пространство
+window-menu-move-next-workspace = Преместване в следващото работно пространство
+window-menu-resize-edge-top = Горе
+window-menu-resize-edge-left = Ляво
+window-menu-resize-edge-right = Дясно
+window-menu-resize-edge-bottom = Долу

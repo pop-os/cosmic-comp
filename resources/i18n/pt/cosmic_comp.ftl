@@ -25,3 +25,4 @@ window-menu-resize-edge-top = Cima
 window-menu-resize-edge-left = Esquerda
 window-menu-resize-edge-right = Direita
 window-menu-resize-edge-bottom = Baixo
+window-menu-fullscreen = Ecrã inteiro
