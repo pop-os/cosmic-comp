@@ -873,26 +873,22 @@ impl State {
             }
 
             Action::Minimize => {
-                let Some(focused_output) = seat.focused_output() else {
-                    return;
-                };
                 let mut shell = self.common.shell.write();
-                let workspace = shell.active_space_mut(&focused_output).unwrap();
-                let focus_stack = workspace.focus_stack.get(seat);
-                if let Some(surface) = focus_stack.last().and_then(FocusTarget::wl_surface) {
-                    shell.minimize_request(&surface);
+                if let Some(focused_window) = seat
+                    .get_keyboard()
+                    .unwrap()
+                    .current_focus()
+                    .and_then(|f| f.active_window())
+                {
+                    shell.minimize_request(&focused_window);
                 }
             }
 
             Action::Maximize => {
-                let Some(focused_output) = seat.focused_output() else {
-                    return;
-                };
                 let mut shell = self.common.shell.write();
-                let workspace = shell.active_space(&focused_output).unwrap();
-                let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last().cloned();
-                if let Some(FocusTarget::Window(window)) = focused_window {
+                if let Some(KeyboardFocusTarget::Element(window)) =
+                    seat.get_keyboard().unwrap().current_focus()
+                {
                     shell.maximize_toggle(&window, seat, &self.common.event_loop_handle);
                 }
             }
@@ -902,22 +898,18 @@ impl State {
                     return;
                 };
                 let mut shell = self.common.shell.write();
-                let workspace = shell.active_space(&focused_output).unwrap();
-                let focus_stack = workspace.focus_stack.get(seat);
-                let focused_window = focus_stack.last().cloned();
-                match focused_window {
-                    Some(FocusTarget::Window(window)) => {
-                        let output = workspace.output.clone();
+                match seat.get_keyboard().unwrap().current_focus() {
+                    Some(KeyboardFocusTarget::Element(window)) => {
                         if let Some(target) = shell.fullscreen_request(
                             &window.active_window(),
-                            output,
+                            focused_output,
                             &self.common.event_loop_handle,
                         ) {
                             std::mem::drop(shell);
                             Shell::set_focus(self, Some(&target), seat, Some(serial), true);
                         }
                     }
-                    Some(FocusTarget::Fullscreen(surface)) => {
+                    Some(KeyboardFocusTarget::Fullscreen(surface)) => {
                         if let Some(target) =
                             shell.unfullscreen_request(&surface, &self.common.event_loop_handle)
                         {
