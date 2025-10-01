@@ -602,17 +602,21 @@ pub fn render_window_to_buffer(
                 );
             }
 
-            if let Some(dnd_icon) = get_dnd_icon(&seat) {
-                elements.extend(
-                    cursor::draw_dnd_icon(
-                        renderer,
-                        &dnd_icon.surface,
-                        (location + dnd_icon.offset.to_f64()).to_i32_round(),
-                        1.0,
-                    )
-                    .into_iter()
-                    .map(WindowCaptureElement::from),
-                );
+            // TODO cosmic-workspaces wants to omit, but metadata cursor capture in portal should
+            // still include dnd surface in window capture buffer?
+            if draw_cursor {
+                if let Some(dnd_icon) = get_dnd_icon(&seat) {
+                    elements.extend(
+                        cursor::draw_dnd_icon(
+                            renderer,
+                            &dnd_icon.surface,
+                            (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                            1.0,
+                        )
+                        .into_iter()
+                        .map(WindowCaptureElement::from),
+                    );
+                }
             }
         }
 
