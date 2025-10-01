@@ -220,6 +220,14 @@ impl KeyboardFocusTarget {
         }
     }
 
+    pub fn active_window(&self) -> Option<CosmicSurface> {
+        match self {
+            KeyboardFocusTarget::Element(mapped) => Some(mapped.active_window()),
+            KeyboardFocusTarget::Fullscreen(surface) => Some(surface.clone()),
+            _ => None,
+        }
+    }
+
     pub fn is_xwm(&self, xwm: XwmId) -> bool {
         match self {
             KeyboardFocusTarget::Element(mapped) => {

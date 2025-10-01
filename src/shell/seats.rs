@@ -262,8 +262,7 @@ impl SeatExt for Seat<State> {
     }
 
     /// Returns the output that contains the cursor associated with a seat. Note that the window which has keyboard focus
-    /// may be on a different output. Currently, to get the focused output, first get the keyboard focus target and pass
-    /// it to get_focused_output in the shell.
+    /// may be on a different output. Currently, to get the focused output, use [`Self::focused_output`].
     fn active_output(&self) -> Output {
         self.user_data()
             .get::<ActiveOutput>()
