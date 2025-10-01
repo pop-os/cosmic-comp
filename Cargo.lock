@@ -955,7 +955,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#8b3343794fb572e86fb835ec3b81648d67502288"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#fce63e520aa83158988e731440b9afe25845b301"
 dependencies = [
  "cosmic-config",
  "ron 0.11.0",
@@ -968,7 +968,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-daemon-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#8b3343794fb572e86fb835ec3b81648d67502288"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#fce63e520aa83158988e731440b9afe25845b301"
 dependencies = [
  "cosmic-config",
  "cosmic-theme",
