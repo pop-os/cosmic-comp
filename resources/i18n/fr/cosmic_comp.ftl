@@ -21,3 +21,4 @@ window-menu-resize-edge-top = Haut
 window-menu-resize-edge-left = Gauche
 window-menu-resize-edge-right = Droite
 window-menu-resize-edge-bottom = Bas
+window-menu-fullscreen = Plein écran
