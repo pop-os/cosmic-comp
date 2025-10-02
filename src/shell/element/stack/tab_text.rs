@@ -15,6 +15,34 @@ use cosmic::{
 
 use super::tab::Model;
 
+const OVERLAY_DARK: Color = Color {
+    a: 1.0,
+    r: 0.149,
+    g: 0.149,
+    b: 0.149,
+};
+
+const OVERLAY_DARK_SELECTED: Color = Color {
+    a: 1.0,
+    r: 0.196,
+    g: 0.196,
+    b: 0.196,
+};
+
+const OVERLAY_LIGHT: Color = Color {
+    a: 1.0,
+    r: 0.894,
+    g: 0.894,
+    b: 0.894,
+};
+
+const OVERLAY_LIGHT_SELECTED: Color = Color {
+    a: 1.0,
+    r: 0.831,
+    g: 0.831,
+    b: 0.831,
+};
+
 /// Text in a stack tab with an overflow gradient.
 pub fn tab_text(model: &Model, selected: bool) -> TabText {
     TabText::new(model, selected)
@@ -152,30 +180,10 @@ impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText<'
             renderer.with_layer(bounds, |renderer| {
                 if state.overflowed {
                     let overlay = match (theme.cosmic().is_dark, self.selected) {
-                        (true, false) => Color {
-                            a: 1.0,
-                            r: 0.149,
-                            g: 0.149,
-                            b: 0.149,
-                        },
-                        (true, true) => Color {
-                            a: 1.0,
-                            r: 0.196,
-                            g: 0.196,
-                            b: 0.196,
-                        },
-                        (false, false) => Color {
-                            a: 1.0,
-                            r: 0.894,
-                            g: 0.894,
-                            b: 0.894,
-                        },
-                        (false, true) => Color {
-                            a: 1.0,
-                            r: 0.831,
-                            g: 0.831,
-                            b: 0.831,
-                        },
+                        (true, false) => OVERLAY_DARK,
+                        (true, true) => OVERLAY_DARK_SELECTED,
+                        (false, false) => OVERLAY_LIGHT,
+                        (false, true) => OVERLAY_LIGHT_SELECTED,
                     };
 
                     let transparent = Color { a: 0.0, ..overlay };
