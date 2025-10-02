@@ -23,9 +23,8 @@ use cosmic::{
     Apply,
 };
 
-use crate::shell::CosmicSurface;
-
 use super::tab_text::tab_text;
+use crate::shell::CosmicSurface;
 
 #[derive(Clone, Copy)]
 pub(super) enum TabRuleTheme {
@@ -230,7 +229,7 @@ impl<'a, Message: TabMessage + 'static> Tab<'a, Message> {
             close_button = close_button.on_press(close_message);
         }
 
-        let items = vec![
+        let items = [
             widget::vertical_rule(4).class(self.rule_theme).into(),
             cosmic::widget::icon(self.model.app_icon.clone())
                 .clone()
@@ -278,7 +277,7 @@ pub(super) struct TabInternal<'a, Message: TabMessage> {
     idx: usize,
     active: bool,
     background: TabBackgroundTheme,
-    elements: Vec<cosmic::Element<'a, Message>>,
+    elements: [cosmic::Element<'a, Message>; 4],
     press_message: Option<Message>,
     right_click_message: Option<Message>,
 }
