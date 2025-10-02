@@ -25,13 +25,14 @@ use keyframe::{
     ease,
     functions::{EaseInOutCubic, EaseOutCubic},
 };
+use smallvec::SmallVec;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
 };
 
 pub struct Tabs<'a, Message> {
-    elements: Vec<cosmic::Element<'a, Message>>,
+    elements: SmallVec<[cosmic::Element<'a, Message>; 16]>,
     id: Option<Id>,
     height: Length,
     width: Length,
@@ -194,7 +195,7 @@ where
             .class(theme::iced::Button::Text)
             .on_press(Message::scroll_further());
 
-        let mut elements = Vec::with_capacity(tabs.len() + 5);
+        let mut elements = SmallVec::with_capacity(tabs.len() + 5);
 
         elements.push(widget::vertical_rule(4).class(rule_style).into());
         elements.push(prev_button.into());
