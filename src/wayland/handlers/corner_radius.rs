@@ -1,8 +1,7 @@
 use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1;
 
 use crate::wayland::protocols::corner_radius::{
-    delegate_corner_radius, CornerRadiusData, CornerRadiusHandler,
-    CornerRadiusState,
+    delegate_corner_radius, CornerRadiusData, CornerRadiusHandler, CornerRadiusState,
 };
 
 use crate::state::State;
