@@ -421,6 +421,11 @@ impl CosmicWindow {
                 }
             })
     }
+
+    pub fn corner_radius(&self, geometry_size: Size<i32, Logical>) -> Option<[u8; 4]> {
+        self.0
+            .with_program(|p| p.window.corner_radius(geometry_size))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
