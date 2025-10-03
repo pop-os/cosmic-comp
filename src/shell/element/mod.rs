@@ -848,6 +848,16 @@ impl CosmicMapped {
             _ => unreachable!(),
         }
     }
+
+    pub fn corner_radius(&self, geometry_size: Size<i32, Logical>, default_radius: u8) -> [u8; 4] {
+        match &self.element {
+            CosmicMappedInternal::Window(w) => w
+                .corner_radius(geometry_size)
+                .unwrap_or([default_radius; 4]),
+            CosmicMappedInternal::Stack(s) => s.corner_radius(geometry_size, default_radius),
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl IsAlive for CosmicMapped {

@@ -5015,10 +5015,7 @@ where
                     x => Some(x),
                 }
             }));
-            let radius = mapped
-                .active_window()
-                .corner_radius(geo.size.as_logical())
-                .unwrap_or([indicator_thickness; 4]);
+            let radius = mapped.corner_radius(geo.size.as_logical(), indicator_thickness);
             if is_minimizing && indicator_thickness > 0 {
                 elements.push(CosmicMappedRenderElement::FocusIndicator(
                     IndicatorShader::focus_element(
@@ -5369,10 +5366,9 @@ where
                         ));
                     }
                     let radius = match data {
-                        Data::Mapped { mapped, .. } => mapped
-                            .active_window()
-                            .corner_radius(geo.size.as_logical())
-                            .unwrap_or([indicator_thickness; 4]),
+                        Data::Mapped { mapped, .. } => {
+                            mapped.corner_radius(geo.size.as_logical(), indicator_thickness)
+                        }
                         _ => [1; 4],
                     };
                     if !swap_desc

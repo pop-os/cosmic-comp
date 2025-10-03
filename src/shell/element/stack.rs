@@ -785,6 +785,20 @@ impl CosmicStack {
             (Some(max), Some(min)) => Some((max.w.max(min.w), max.h.max(min.h)).into()),
         }
     }
+
+    pub fn corner_radius(&self, geometry_size: Size<i32, Logical>, default_radius: u8) -> [u8; 4] {
+        self.0.with_program(|p| {
+            let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+            let mut corners = active_window
+                .corner_radius(geometry_size)
+                .unwrap_or([default_radius; 4]);
+
+            corners[1] = 8;
+            corners[3] = 8;
+
+            corners
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
