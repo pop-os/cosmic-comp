@@ -416,8 +416,9 @@ impl CosmicSurface {
             .get_or_insert_threadsafe(Minimized::default)
             .0
             .store(minimized, Ordering::SeqCst);
-        if !minimized {
-            if let WindowSurface::X11(surface) = self.0.underlying_surface() {
+        if let WindowSurface::X11(surface) = self.0.underlying_surface() {
+            let _ = surface.set_hidden(minimized);
+            if !minimized {
                 let _ = surface.set_mapped(false);
                 let _ = surface.set_mapped(true);
             }
@@ -441,17 +442,14 @@ impl CosmicSurface {
     }
 
     pub fn set_suspended(&self, suspended: bool) {
-        match self.0.underlying_surface() {
-            WindowSurface::Wayland(window) => window.with_pending_state(|state| {
+        if let WindowSurface::Wayland(window) = self.0.underlying_surface() {
+            window.with_pending_state(|state| {
                 if suspended {
                     state.states.set(ToplevelState::Suspended);
                 } else {
                     state.states.unset(ToplevelState::Suspended);
                 }
-            }),
-            WindowSurface::X11(surface) => {
-                let _ = surface.set_suspended(suspended);
-            }
+            });
         }
     }
 
