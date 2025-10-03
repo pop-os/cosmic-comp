@@ -2,7 +2,6 @@ use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v
 use cosmic_protocols::corner_radius::v1::server::{
     cosmic_corner_radius_manager_v1, cosmic_corner_radius_toplevel_v1,
 };
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::HookId;
 use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::compositor::with_states;
@@ -15,9 +14,10 @@ use smithay::{
     },
     wayland::shell::xdg::XdgShellHandler,
 };
-use std::collections::HashMap;
 use std::sync::Mutex;
 use wayland_backend::server::GlobalId;
+
+type ToplevelHookId = Mutex<Option<(HookId, Weak<CosmicCornerRadiusToplevelV1>)>>;
 
 #[derive(Debug)]
 pub struct CornerRadiusState {
@@ -116,16 +116,11 @@ where
             cosmic_corner_radius_manager_v1::Request::GetCornerRadius { id, toplevel } => {
                 if let Some(surface) = state.xdg_shell_state().get_toplevel(&toplevel) {
                     let radius_exists = with_states(surface.wl_surface(), |surface_data| {
-                        let hook_ids = surface_data.data_map.get_or_insert_threadsafe(|| {
-                            Mutex::new(HashMap::<
-                                WlSurface,
-                                (HookId, Weak<CosmicCornerRadiusToplevelV1>),
-                            >::new())
-                        });
-                        let guard = hook_ids.lock().unwrap();
-                        guard
-                            .get(surface.wl_surface())
-                            .map(|(_, t)| t.upgrade().is_ok())
+                        let hook_id = surface_data
+                            .data_map
+                            .get_or_insert_threadsafe(|| ToplevelHookId::new(None));
+                        let guard = hook_id.lock().unwrap();
+                        guard.as_ref().map(|(_, t)| t.upgrade().is_ok())
                     });
                     if radius_exists.unwrap_or_default() {
                         resource.post_error(
@@ -179,14 +174,11 @@ where
                         );
 
                         with_states(surface.wl_surface(), |surface_data| {
-                            let hook_ids = surface_data.data_map.get_or_insert_threadsafe(|| {
-                                Mutex::new(HashMap::<
-                                    WlSurface,
-                                    (HookId, Weak<CosmicCornerRadiusToplevelV1>),
-                                >::new())
-                            });
+                            let hook_ids = surface_data
+                                .data_map
+                                .get_or_insert_threadsafe(|| ToplevelHookId::new(None));
                             let mut guard = hook_ids.lock().unwrap();
-                            guard.insert(surface.wl_surface().clone(), (hook_id, obj_downgrade));
+                            *guard = Some((hook_id, obj_downgrade));
                         });
                     }
                 }
@@ -231,22 +223,15 @@ where
                 guard.corners = None;
 
                 let Ok(toplevel) = guard.toplevel.upgrade() else {
-                    resource.post_error(
-                        cosmic_corner_radius_toplevel_v1::Error::ToplevelDestroyed as u32,
-                        format!("{:?} No toplevel found", resource),
-                    );
                     return;
                 };
 
                 if let Some(surface) = state.xdg_shell_state().get_toplevel(&toplevel) {
                     with_states(surface.wl_surface(), |surface_data| {
-                        if let Some(hook_ids_mutex) =
-                            surface_data.data_map.get::<Mutex<
-                                HashMap<WlSurface, (HookId, Weak<CosmicCornerRadiusToplevelV1>)>,
-                            >>()
+                        if let Some(hook_ids_mutex) = surface_data.data_map.get::<ToplevelHookId>()
                         {
-                            let mut hook_ids = hook_ids_mutex.lock().unwrap();
-                            hook_ids.remove(surface.wl_surface());
+                            let mut hook_id = hook_ids_mutex.lock().unwrap();
+                            *hook_id = None;
                         }
                     });
                 }
