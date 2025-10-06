@@ -25,3 +25,4 @@ window-menu-resize-edge-top = Arriba
 window-menu-resize-edge-left = Izquierda
 window-menu-resize-edge-right = Derecha
 window-menu-resize-edge-bottom = Abajo
+window-menu-fullscreen = Pantalla completa
