@@ -214,18 +214,9 @@ impl CosmicSurface {
 
     pub fn is_activated(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
-            WindowSurface::Wayland(toplevel) => {
-                if pending {
-                    toplevel.with_pending_state(|pending| {
-                        pending.states.contains(ToplevelState::Activated)
-                    })
-                } else {
-                    toplevel
-                        .current_state()
-                        .states
-                        .contains(ToplevelState::Activated)
-                }
-            }
+            WindowSurface::Wayland(toplevel) => with_toplevel_state(toplevel, pending, |state| {
+                state.states.contains(ToplevelState::Activated)
+            }),
             WindowSurface::X11(surface) => surface.is_activated(),
         }
     }
@@ -255,18 +246,11 @@ impl CosmicSurface {
                         .and_then(|data| data.lock().unwrap().mode.map(|m| m != KdeMode::Server))
                 });
 
-                let xdg_state = if pending {
-                    toplevel.with_pending_state(|pending| {
-                        pending
-                            .decoration_mode
-                            .map(|mode| mode == DecorationMode::ClientSide)
-                    })
-                } else {
-                    toplevel
-                        .current_state()
+                let xdg_state = with_toplevel_state(toplevel, pending, |state| {
+                    state
                         .decoration_mode
                         .map(|mode| mode == DecorationMode::ClientSide)
-                };
+                });
 
                 kde_state.or(xdg_state).unwrap_or(true)
             }
@@ -313,18 +297,9 @@ impl CosmicSurface {
     pub fn is_resizing(&self, pending: bool) -> Option<bool> {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
-                if pending {
-                    Some(toplevel.with_pending_state(|pending| {
-                        pending.states.contains(ToplevelState::Resizing)
-                    }))
-                } else {
-                    Some(
-                        toplevel
-                            .current_state()
-                            .states
-                            .contains(ToplevelState::Resizing),
-                    )
-                }
+                Some(with_toplevel_state(toplevel, pending, |state| {
+                    state.states.contains(ToplevelState::Resizing)
+                }))
             }
             WindowSurface::X11(_surface) => None,
         }
@@ -346,18 +321,9 @@ impl CosmicSurface {
     pub fn is_tiled(&self, pending: bool) -> Option<bool> {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
-                if pending {
-                    Some(toplevel.with_pending_state(|pending| {
-                        pending.states.contains(ToplevelState::TiledLeft)
-                    }))
-                } else {
-                    Some(
-                        toplevel
-                            .current_state()
-                            .states
-                            .contains(ToplevelState::TiledLeft),
-                    )
-                }
+                Some(with_toplevel_state(toplevel, pending, |state| {
+                    state.states.contains(ToplevelState::TiledLeft)
+                }))
             }
             WindowSurface::X11(_surface) => None,
         }
@@ -384,18 +350,9 @@ impl CosmicSurface {
 
     pub fn is_fullscreen(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
-            WindowSurface::Wayland(toplevel) => {
-                if pending {
-                    toplevel.with_pending_state(|pending| {
-                        pending.states.contains(ToplevelState::Fullscreen)
-                    })
-                } else {
-                    toplevel
-                        .current_state()
-                        .states
-                        .contains(ToplevelState::Fullscreen)
-                }
-            }
+            WindowSurface::Wayland(toplevel) => with_toplevel_state(toplevel, pending, |state| {
+                state.states.contains(ToplevelState::Fullscreen)
+            }),
             WindowSurface::X11(surface) => surface.is_fullscreen(),
         }
     }
@@ -417,18 +374,9 @@ impl CosmicSurface {
 
     pub fn is_maximized(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
-            WindowSurface::Wayland(toplevel) => {
-                if pending {
-                    toplevel.with_pending_state(|pending| {
-                        pending.states.contains(ToplevelState::Maximized)
-                    })
-                } else {
-                    toplevel
-                        .current_state()
-                        .states
-                        .contains(ToplevelState::Maximized)
-                }
-            }
+            WindowSurface::Wayland(toplevel) => with_toplevel_state(toplevel, pending, |state| {
+                state.states.contains(ToplevelState::Maximized)
+            }),
             WindowSurface::X11(surface) => surface.is_maximized(),
         }
     }
@@ -976,5 +924,18 @@ where
         alpha: f32,
     ) -> Vec<C> {
         self.0.render_elements(renderer, location, scale, alpha)
+    }
+}
+
+fn with_toplevel_state<T, F: FnOnce(&smithay::wayland::shell::xdg::ToplevelState) -> T>(
+    toplevel: &ToplevelSurface,
+    pending: bool,
+    cb: F,
+) -> T {
+    if pending {
+        toplevel.with_pending_state(|pending| cb(pending))
+    } else {
+        let current = toplevel.current_state();
+        cb(&current)
     }
 }
