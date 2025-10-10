@@ -15,7 +15,9 @@ use smithay::{
     wayland::{
         compositor::{get_role, with_states},
         seat::WaylandFocus,
-        shell::xdg::{PopupSurface, ToplevelSurface, XDG_POPUP_ROLE, XdgPopupSurfaceData},
+        shell::xdg::{
+            PopupCachedState, PopupSurface, ToplevelSurface, XDG_POPUP_ROLE, XdgPopupSurfaceData,
+        },
     },
 };
 use tracing::warn;
@@ -87,14 +89,12 @@ pub fn update_reactive_popups<'a>(
     for (popup, _) in PopupManager::popups_for_surface(toplevel.wl_surface()) {
         match popup {
             PopupKind::Xdg(surface) => {
-                let positioner = with_states(surface.wl_surface(), |states| {
-                    let attributes = states
-                        .data_map
-                        .get::<XdgPopupSurfaceData>()
-                        .unwrap()
-                        .lock()
-                        .unwrap();
-                    attributes.current.positioner
+                let positioner = with_states(&surface.wl_surface(), |states| {
+                    let mut guard = states.cached_state.get::<PopupCachedState>();
+                    guard
+                        .current()
+                        .last_acked
+                        .map_or_else(Default::default, |configure| configure.state.positioner)
                 });
                 if positioner.reactive {
                     let anchor_point = loc + positioner.get_anchor_point().as_global();
