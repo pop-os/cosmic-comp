@@ -216,7 +216,7 @@ impl CosmicSurface {
     pub fn is_activated(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => with_toplevel_state(toplevel, pending, |state| {
-                state.states.contains(ToplevelState::Activated)
+                state.is_some_and(|state| state.states.contains(ToplevelState::Activated))
             }),
             WindowSurface::X11(surface) => surface.is_activated(),
         }
@@ -248,9 +248,11 @@ impl CosmicSurface {
                 });
 
                 let xdg_state = with_toplevel_state(toplevel, pending, |state| {
-                    state
-                        .decoration_mode
-                        .map(|mode| mode == DecorationMode::ClientSide)
+                    state.and_then(|state| {
+                        state
+                            .decoration_mode
+                            .map(|mode| mode == DecorationMode::ClientSide)
+                    })
                 });
 
                 kde_state.or(xdg_state).unwrap_or(true)
@@ -263,8 +265,9 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 if enable {
-                    let previous_decoration_state =
-                        toplevel.current_state().decoration_mode.clone();
+                    let previous_decoration_state = toplevel.with_committed_state(|state| {
+                        state.map_or_else(Default::default, |state| state.decoration_mode.clone())
+                    });
                     if PreferredDecorationMode::is_unset(&self.0) {
                         PreferredDecorationMode::update(&self.0, previous_decoration_state);
                     }
@@ -300,7 +303,7 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 Some(with_toplevel_state(toplevel, pending, |state| {
-                    state.states.contains(ToplevelState::Resizing)
+                    state.is_some_and(|state| state.states.contains(ToplevelState::Resizing))
                 }))
             }
             WindowSurface::X11(_surface) => None,
@@ -324,7 +327,7 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 Some(with_toplevel_state(toplevel, pending, |state| {
-                    state.states.contains(ToplevelState::TiledLeft)
+                    state.is_some_and(|state| state.states.contains(ToplevelState::TiledLeft))
                 }))
             }
             WindowSurface::X11(_surface) => None,
@@ -353,7 +356,7 @@ impl CosmicSurface {
     pub fn is_fullscreen(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => with_toplevel_state(toplevel, pending, |state| {
-                state.states.contains(ToplevelState::Fullscreen)
+                state.is_some_and(|state| state.states.contains(ToplevelState::Fullscreen))
             }),
             WindowSurface::X11(surface) => surface.is_fullscreen(),
         }
@@ -377,7 +380,7 @@ impl CosmicSurface {
     pub fn is_maximized(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => with_toplevel_state(toplevel, pending, |state| {
-                state.states.contains(ToplevelState::Maximized)
+                state.is_some_and(|state| state.states.contains(ToplevelState::Maximized))
             }),
             WindowSurface::X11(surface) => surface.is_maximized(),
         }
@@ -492,11 +495,11 @@ impl CosmicSurface {
                     .unwrap()
                     .lock()
                     .unwrap();
+                // XXX
                 attrs
-                    .configure_serial
+                    .last_acked
                     .as_ref()
-                    .map(|s| s >= serial)
-                    .unwrap_or(false)
+                    .is_some_and(|configure| configure.serial >= *serial)
             }),
             WindowSurface::X11(_surface) => true,
         }
@@ -511,11 +514,12 @@ impl CosmicSurface {
                     .unwrap()
                     .lock()
                     .unwrap();
+                //attrs.current_serial.as_ref().is_some_and(|s| s >= serial)
+                // XXX
                 attrs
-                    .current_serial
+                    .last_acked
                     .as_ref()
-                    .map(|s| s >= serial)
-                    .unwrap_or(false)
+                    .is_some_and(|configure| configure.serial >= *serial)
             }),
             WindowSurface::X11(_surface) => true,
         }
@@ -533,12 +537,16 @@ impl CosmicSurface {
                         .unwrap();
 
                     let current_server = attributes.current_server_state();
-                    if attributes.current.size == current_server.size {
+                    if attributes
+                        .last_acked
+                        .as_ref()
+                        .is_some_and(|configure| configure.state.size == current_server.size)
+                    {
                         // The window had committed for our previous size change, so we can
                         // change the size again.
                         trace!(
                             "current size matches server size: {:?}",
-                            attributes.current.size
+                            attributes.last_acked.as_ref().unwrap().state.size
                         );
                         true
                     } else {
@@ -931,15 +939,14 @@ where
     }
 }
 
-fn with_toplevel_state<T, F: FnOnce(&smithay::wayland::shell::xdg::ToplevelState) -> T>(
+fn with_toplevel_state<T, F: FnOnce(Option<&smithay::wayland::shell::xdg::ToplevelState>) -> T>(
     toplevel: &ToplevelSurface,
     pending: bool,
     cb: F,
 ) -> T {
     if pending {
-        toplevel.with_pending_state(|pending| cb(pending))
+        toplevel.with_pending_state(|pending| cb(Some(pending)))
     } else {
-        let current = toplevel.current_state();
-        cb(&current)
+        toplevel.with_committed_state(|committed| cb(committed))
     }
 }
