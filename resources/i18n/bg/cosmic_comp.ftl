@@ -13,3 +13,4 @@ window-menu-resize-edge-top = Горе
 window-menu-resize-edge-left = Ляво
 window-menu-resize-edge-right = Дясно
 window-menu-resize-edge-bottom = Долу
+window-menu-screenshot = Снимане на екрана
