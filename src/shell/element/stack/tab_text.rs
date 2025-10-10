@@ -13,9 +13,39 @@ use cosmic::{
     },
 };
 
+use super::tab::Model;
+
+const OVERLAY_DARK: Color = Color {
+    a: 1.0,
+    r: 0.149,
+    g: 0.149,
+    b: 0.149,
+};
+
+const OVERLAY_DARK_SELECTED: Color = Color {
+    a: 1.0,
+    r: 0.196,
+    g: 0.196,
+    b: 0.196,
+};
+
+const OVERLAY_LIGHT: Color = Color {
+    a: 1.0,
+    r: 0.894,
+    g: 0.894,
+    b: 0.894,
+};
+
+const OVERLAY_LIGHT_SELECTED: Color = Color {
+    a: 1.0,
+    r: 0.831,
+    g: 0.831,
+    b: 0.831,
+};
+
 /// Text in a stack tab with an overflow gradient.
-pub fn tab_text(text: String, selected: bool) -> TabText {
-    TabText::new(text, selected)
+pub fn tab_text(model: &Model, selected: bool) -> TabText {
+    TabText::new(model, selected)
 }
 
 struct LocalState {
@@ -25,8 +55,8 @@ struct LocalState {
 }
 
 /// Text in a stack tab with an overflow gradient.
-pub struct TabText {
-    text: String,
+pub struct TabText<'a> {
+    model: &'a Model,
     font: cosmic::font::Font,
     font_size: f32,
     selected: bool,
@@ -34,15 +64,15 @@ pub struct TabText {
     width: Length,
 }
 
-impl TabText {
-    pub fn new(text: String, selected: bool) -> Self {
+impl<'a> TabText<'a> {
+    pub fn new(model: &'a Model, selected: bool) -> Self {
         TabText {
             width: Length::Shrink,
             height: Length::Shrink,
             font: cosmic::font::default(),
             font_size: 14.0,
             selected,
-            text,
+            model,
         }
     }
 
@@ -70,14 +100,14 @@ impl TabText {
 
     fn create_hash(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.text.hash(&mut hasher);
+        self.model.title_hash.hash(&mut hasher);
         self.selected.hash(&mut hasher);
         hasher.finish()
     }
 
     fn create_paragraph(&self) -> <cosmic::Renderer as TextRenderer>::Paragraph {
         <cosmic::Renderer as TextRenderer>::Paragraph::with_text(Text {
-            content: &self.text,
+            content: &self.model.title,
             size: cosmic::iced_core::Pixels(self.font_size),
             bounds: Size::INFINITY,
             font: self.font,
@@ -90,7 +120,7 @@ impl TabText {
     }
 }
 
-impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
+impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText<'a> {
     fn tag(&self) -> tree::Tag {
         tree::Tag::of::<LocalState>()
     }
@@ -142,54 +172,50 @@ impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
         renderer.with_layer(bounds, |renderer| {
             renderer.fill_paragraph(
                 &state.paragraph,
-                Point::new(bounds.x, bounds.y + bounds.height / 2.0),
+                Point::new(bounds.x, bounds.height.mul_add(0.5, bounds.y)),
                 style.text_color,
                 bounds,
             );
+
+            renderer.with_layer(bounds, |renderer| {
+                if state.overflowed {
+                    let overlay = match (theme.cosmic().is_dark, self.selected) {
+                        (true, false) => OVERLAY_DARK,
+                        (true, true) => OVERLAY_DARK_SELECTED,
+                        (false, false) => OVERLAY_LIGHT,
+                        (false, true) => OVERLAY_LIGHT_SELECTED,
+                    };
+
+                    let transparent = Color { a: 0.0, ..overlay };
+
+                    renderer.fill_quad(
+                        renderer::Quad {
+                            bounds: Rectangle {
+                                x: (bounds.x + bounds.width - 27.).max(bounds.x),
+                                width: 27.0_f32.min(bounds.width),
+                                ..bounds
+                            },
+                            border: Border {
+                                radius: 0.0.into(),
+                                width: 0.0,
+                                color: Color::TRANSPARENT,
+                            },
+                            shadow: Default::default(),
+                        },
+                        Background::Gradient(Gradient::Linear(
+                            gradient::Linear::new(Degrees(90.))
+                                .add_stop(0.0, transparent)
+                                .add_stop(1.0, overlay),
+                        )),
+                    );
+                }
+            });
         });
-
-        if state.overflowed {
-            let background = if self.selected {
-                theme
-                    .cosmic()
-                    .primary
-                    .component
-                    .selected_state_color()
-                    .into()
-            } else {
-                theme.cosmic().primary_container_color().into()
-            };
-            let transparent = Color {
-                a: 0.0,
-                ..background
-            };
-
-            renderer.fill_quad(
-                renderer::Quad {
-                    bounds: Rectangle {
-                        x: (bounds.x + bounds.width - 24.).max(bounds.x),
-                        width: 24.0_f32.min(bounds.width),
-                        ..bounds
-                    },
-                    border: Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                },
-                Background::Gradient(Gradient::Linear(
-                    gradient::Linear::new(Degrees(90.))
-                        .add_stop(0.0, transparent)
-                        .add_stop(1.0, background),
-                )),
-            );
-        }
     }
 }
 
-impl<Message: 'static> From<TabText> for cosmic::Element<'_, Message> {
-    fn from(value: TabText) -> Self {
+impl<'a, Message: 'static> From<TabText<'a>> for cosmic::Element<'a, Message> {
+    fn from(value: TabText<'a>) -> Self {
         Self::new(value)
     }
 }
