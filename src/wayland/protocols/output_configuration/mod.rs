@@ -37,7 +37,8 @@ mod handlers;
 pub fn head_is_enabled(output: &Output) -> bool {
     output
         .user_data()
-        .get::<OutputState>().is_some_and(|inner| inner.lock().unwrap().enabled)
+        .get::<OutputState>()
+        .is_some_and(|inner| inner.lock().unwrap().enabled)
 }
 
 #[derive(Debug)]

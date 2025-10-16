@@ -773,223 +773,208 @@ where
         )
     };
 
-    render_input_order::<()>(
-        &shell,
-        output,
-        previous,
-        current,
-        element_filter,
-        |stage| {
-            match stage {
-                Stage::ZoomUI => {
-                    elements.extend(ZoomState::render(renderer, output));
-                }
-                Stage::SessionLock(lock_surface) => {
-                    elements.extend(
-                        session_lock_elements(renderer, output, lock_surface)
-                            .into_iter()
-                            .map(Into::into)
-                            .flat_map(crop_to_output)
-                            .map(Into::into),
-                    );
-                }
-                Stage::LayerPopup {
-                    popup, location, ..
-                } => {
-                    elements.extend(
-                        render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
-                            renderer,
-                            popup.wl_surface(),
-                            location
-                                .to_local(output)
-                                .as_logical()
-                                .to_physical_precise_round(scale),
-                            Scale::from(scale),
-                            1.0,
-                            FRAME_TIME_FILTER,
-                        )
+    render_input_order::<()>(&shell, output, previous, current, element_filter, |stage| {
+        match stage {
+            Stage::ZoomUI => {
+                elements.extend(ZoomState::render(renderer, output));
+            }
+            Stage::SessionLock(lock_surface) => {
+                elements.extend(
+                    session_lock_elements(renderer, output, lock_surface)
                         .into_iter()
-                        .flat_map(crop_to_output)
-                        .map(Into::into),
-                    );
-                }
-                Stage::LayerSurface { layer, location } => {
-                    elements.extend(
-                        render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
-                            renderer,
-                            layer.wl_surface(),
-                            location
-                                .to_local(output)
-                                .as_logical()
-                                .to_physical_precise_round(scale),
-                            Scale::from(scale),
-                            1.0,
-                            FRAME_TIME_FILTER,
-                        )
-                        .into_iter()
-                        .flat_map(crop_to_output)
-                        .map(Into::into),
-                    );
-                }
-                Stage::OverrideRedirect { surface, location } => {
-                    elements.extend(surface.wl_surface().into_iter().flat_map(|surface| {
-                        render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
-                            renderer,
-                            &surface,
-                            location
-                                .to_local(output)
-                                .as_logical()
-                                .to_physical_precise_round(scale),
-                            Scale::from(scale),
-                            1.0,
-                            FRAME_TIME_FILTER,
-                        )
-                        .into_iter()
-                        .flat_map(crop_to_output)
                         .map(Into::into)
-                    }));
-                }
-                Stage::StickyPopups(layout) => {
-                    let alpha = match &overview.0 {
-                        OverviewMode::Started(_, started) => {
-                            (1.0 - (Instant::now().duration_since(*started).as_millis()
-                                / ANIMATION_DURATION.as_millis())
-                                as f32)
-                                .max(0.0)
-                                * 0.4
-                                + 0.6
-                        }
-                        OverviewMode::Ended(_, ended) => {
-                            ((Instant::now().duration_since(*ended).as_millis()
-                                / ANIMATION_DURATION.as_millis())
-                                as f32)
-                                * 0.4
-                                + 0.6
-                        }
-                        OverviewMode::Active(_) => 0.6,
-                        OverviewMode::None => 1.0,
-                    };
-
-                    elements.extend(
-                        layout
-                            .render_popups(renderer, alpha)
-                            .into_iter()
-                            .map(Into::into)
-                            .flat_map(crop_to_output)
-                            .map(Into::into),
-                    );
-                }
-                Stage::Sticky(layout) => {
-                    let alpha = match &overview.0 {
-                        OverviewMode::Started(_, started) => {
-                            (1.0 - (Instant::now().duration_since(*started).as_millis()
-                                / ANIMATION_DURATION.as_millis())
-                                as f32)
-                                .max(0.0)
-                                * 0.4
-                                + 0.6
-                        }
-                        OverviewMode::Ended(_, ended) => {
-                            ((Instant::now().duration_since(*ended).as_millis()
-                                / ANIMATION_DURATION.as_millis())
-                                as f32)
-                                * 0.4
-                                + 0.6
-                        }
-                        OverviewMode::Active(_) => 0.6,
-                        OverviewMode::None => 1.0,
-                    };
-
-                    let current_focus = (!move_active && is_active_space)
-                        .then_some(last_active_seat)
-                        .map(|seat| workspace.focus_stack.get(seat));
-
-                    elements.extend(
-                        layout
-                            .render(
-                                renderer,
-                                current_focus.as_ref().and_then(|stack| {
-                                    stack.last().and_then(|t| match t {
-                                        FocusTarget::Window(w) => Some(w),
-                                        _ => None,
-                                    })
-                                }),
-                                resize_indicator.clone(),
-                                active_hint,
-                                alpha,
-                                theme.cosmic(),
-                            )
-                            .into_iter()
-                            .map(Into::into)
-                            .flat_map(crop_to_output)
-                            .map(Into::into),
+                        .flat_map(crop_to_output)
+                        .map(Into::into),
+                );
+            }
+            Stage::LayerPopup {
+                popup, location, ..
+            } => {
+                elements.extend(
+                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
+                        renderer,
+                        popup.wl_surface(),
+                        location
+                            .to_local(output)
+                            .as_logical()
+                            .to_physical_precise_round(scale),
+                        Scale::from(scale),
+                        1.0,
+                        FRAME_TIME_FILTER,
                     )
-                }
-                Stage::WorkspacePopups { workspace, offset } => {
-                    elements.extend(
-                        match workspace.render_popups(
+                    .into_iter()
+                    .flat_map(crop_to_output)
+                    .map(Into::into),
+                );
+            }
+            Stage::LayerSurface { layer, location } => {
+                elements.extend(
+                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
+                        renderer,
+                        layer.wl_surface(),
+                        location
+                            .to_local(output)
+                            .as_logical()
+                            .to_physical_precise_round(scale),
+                        Scale::from(scale),
+                        1.0,
+                        FRAME_TIME_FILTER,
+                    )
+                    .into_iter()
+                    .flat_map(crop_to_output)
+                    .map(Into::into),
+                );
+            }
+            Stage::OverrideRedirect { surface, location } => {
+                elements.extend(surface.wl_surface().into_iter().flat_map(|surface| {
+                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
+                        renderer,
+                        &surface,
+                        location
+                            .to_local(output)
+                            .as_logical()
+                            .to_physical_precise_round(scale),
+                        Scale::from(scale),
+                        1.0,
+                        FRAME_TIME_FILTER,
+                    )
+                    .into_iter()
+                    .flat_map(crop_to_output)
+                    .map(Into::into)
+                }));
+            }
+            Stage::StickyPopups(layout) => {
+                let alpha = match &overview.0 {
+                    OverviewMode::Started(_, started) => {
+                        (1.0 - (Instant::now().duration_since(*started).as_millis()
+                            / ANIMATION_DURATION.as_millis()) as f32)
+                            .max(0.0)
+                            * 0.4
+                            + 0.6
+                    }
+                    OverviewMode::Ended(_, ended) => {
+                        ((Instant::now().duration_since(*ended).as_millis()
+                            / ANIMATION_DURATION.as_millis()) as f32)
+                            * 0.4
+                            + 0.6
+                    }
+                    OverviewMode::Active(_) => 0.6,
+                    OverviewMode::None => 1.0,
+                };
+
+                elements.extend(
+                    layout
+                        .render_popups(renderer, alpha)
+                        .into_iter()
+                        .map(Into::into)
+                        .flat_map(crop_to_output)
+                        .map(Into::into),
+                );
+            }
+            Stage::Sticky(layout) => {
+                let alpha = match &overview.0 {
+                    OverviewMode::Started(_, started) => {
+                        (1.0 - (Instant::now().duration_since(*started).as_millis()
+                            / ANIMATION_DURATION.as_millis()) as f32)
+                            .max(0.0)
+                            * 0.4
+                            + 0.6
+                    }
+                    OverviewMode::Ended(_, ended) => {
+                        ((Instant::now().duration_since(*ended).as_millis()
+                            / ANIMATION_DURATION.as_millis()) as f32)
+                            * 0.4
+                            + 0.6
+                    }
+                    OverviewMode::Active(_) => 0.6,
+                    OverviewMode::None => 1.0,
+                };
+
+                let current_focus = (!move_active && is_active_space)
+                    .then_some(last_active_seat)
+                    .map(|seat| workspace.focus_stack.get(seat));
+
+                elements.extend(
+                    layout
+                        .render(
                             renderer,
-                            last_active_seat,
-                            !move_active && is_active_space,
-                            overview.clone(),
-                            theme.cosmic(),
-                        ) {
-                            Ok(elements) => {
-                                elements
-                                    .into_iter()
-                                    .flat_map(crop_to_output)
-                                    .map(|element| {
-                                        CosmicElement::Workspace(
-                                            RelocateRenderElement::from_element(
-                                                element,
-                                                offset.to_physical_precise_round(scale),
-                                                Relocate::Relative,
-                                            ),
-                                        )
-                                    })
-                            }
-                            Err(_) => {
-                                return ControlFlow::Break(Err(OutputNoMode));
-                            }
-                        },
-                    );
-                }
-                Stage::Workspace { workspace, offset } => {
-                    elements.extend(
-                        match workspace.render(
-                            renderer,
-                            last_active_seat,
-                            !move_active && is_active_space,
-                            overview.clone(),
+                            current_focus.as_ref().and_then(|stack| {
+                                stack.last().and_then(|t| match t {
+                                    FocusTarget::Window(w) => Some(w),
+                                    _ => None,
+                                })
+                            }),
                             resize_indicator.clone(),
                             active_hint,
+                            alpha,
                             theme.cosmic(),
-                        ) {
-                            Ok(elements) => {
-                                elements
-                                    .into_iter()
-                                    .flat_map(crop_to_output)
-                                    .map(|element| {
-                                        CosmicElement::Workspace(
-                                            RelocateRenderElement::from_element(
-                                                element,
-                                                offset.to_physical_precise_round(scale),
-                                                Relocate::Relative,
-                                            ),
-                                        )
-                                    })
-                            }
-                            Err(_) => {
-                                return ControlFlow::Break(Err(OutputNoMode));
-                            }
-                        },
-                    );
-                }
-            };
+                        )
+                        .into_iter()
+                        .map(Into::into)
+                        .flat_map(crop_to_output)
+                        .map(Into::into),
+                )
+            }
+            Stage::WorkspacePopups { workspace, offset } => {
+                elements.extend(
+                    match workspace.render_popups(
+                        renderer,
+                        last_active_seat,
+                        !move_active && is_active_space,
+                        overview.clone(),
+                        theme.cosmic(),
+                    ) {
+                        Ok(elements) => {
+                            elements
+                                .into_iter()
+                                .flat_map(crop_to_output)
+                                .map(|element| {
+                                    CosmicElement::Workspace(RelocateRenderElement::from_element(
+                                        element,
+                                        offset.to_physical_precise_round(scale),
+                                        Relocate::Relative,
+                                    ))
+                                })
+                        }
+                        Err(_) => {
+                            return ControlFlow::Break(Err(OutputNoMode));
+                        }
+                    },
+                );
+            }
+            Stage::Workspace { workspace, offset } => {
+                elements.extend(
+                    match workspace.render(
+                        renderer,
+                        last_active_seat,
+                        !move_active && is_active_space,
+                        overview.clone(),
+                        resize_indicator.clone(),
+                        active_hint,
+                        theme.cosmic(),
+                    ) {
+                        Ok(elements) => {
+                            elements
+                                .into_iter()
+                                .flat_map(crop_to_output)
+                                .map(|element| {
+                                    CosmicElement::Workspace(RelocateRenderElement::from_element(
+                                        element,
+                                        offset.to_physical_precise_round(scale),
+                                        Relocate::Relative,
+                                    ))
+                                })
+                        }
+                        Err(_) => {
+                            return ControlFlow::Break(Err(OutputNoMode));
+                        }
+                    },
+                );
+            }
+        };
 
-            ControlFlow::Continue(())
-        },
-    )?;
+        ControlFlow::Continue(())
+    })?;
 
     Ok(elements)
 }

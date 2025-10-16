@@ -141,9 +141,7 @@ impl Timings {
         if let Some(frame) = self.pending_frame.as_mut() {
             frame.render_duration_draw = Some(
                 Time::elapsed(&frame.render_start, clock.now())
-                    - frame
-                        .render_duration_elements
-                        .unwrap_or(Duration::ZERO),
+                    - frame.render_duration_elements.unwrap_or(Duration::ZERO),
             );
         }
     }

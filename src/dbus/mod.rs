@@ -49,8 +49,6 @@ pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>>
                                 }
                             }
                         }
-
-                        
                     }
                     calloop::channel::Event::Closed => (),
                 })

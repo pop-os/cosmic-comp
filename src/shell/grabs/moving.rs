@@ -95,7 +95,8 @@ impl MoveGrabState {
         if output
             .geometry()
             .as_logical()
-            .intersection(window_geo).is_none()
+            .intersection(window_geo)
+            .is_none()
         {
             return Vec::new();
         }
@@ -113,8 +114,8 @@ impl MoveGrabState {
             .corner_radius(window_geo.size, self.indicator_thickness);
 
         let focus_element = if self.indicator_thickness > 0 {
-            Some(
-                CosmicMappedRenderElement::from(IndicatorShader::focus_element(
+            Some(CosmicMappedRenderElement::from(
+                IndicatorShader::focus_element(
                     renderer,
                     Key::Window(Usage::MoveGrabIndicator, self.window.key()),
                     Rectangle::new(
@@ -135,8 +136,8 @@ impl MoveGrabState {
                         active_window_hint.green,
                         active_window_hint.blue,
                     ],
-                )),
-            )
+                ),
+            ))
         } else {
             None
         };
@@ -435,8 +436,7 @@ impl MoveGrab {
                 }
             }
 
-            let indicator_location =
-                shell.stacking_indicator(&current_output, self.previous);
+            let indicator_location = shell.stacking_indicator(&current_output, self.previous);
             if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
                     let element = stack_hover(

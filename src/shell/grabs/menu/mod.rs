@@ -962,45 +962,35 @@ impl MenuAlignment {
                     AxisAlignment::Centered,
                 )
                 .into_iter()
-                .chain(
-                    for_alignment(
-                        position,
-                        size,
-                        AxisAlignment::Centered,
-                        AxisAlignment::Corner(0),
-                    ),
-                )
-                .chain(
-                    for_alignment(
-                        position,
-                        size,
-                        AxisAlignment::Corner(0),
-                        AxisAlignment::Centered,
-                    ),
-                )
-                .chain(
-                    for_alignment(
-                        position,
-                        size,
-                        AxisAlignment::Corner(0),
-                        AxisAlignment::Corner(0),
-                    ),
-                )
+                .chain(for_alignment(
+                    position,
+                    size,
+                    AxisAlignment::Centered,
+                    AxisAlignment::Corner(0),
+                ))
+                .chain(for_alignment(
+                    position,
+                    size,
+                    AxisAlignment::Corner(0),
+                    AxisAlignment::Centered,
+                ))
+                .chain(for_alignment(
+                    position,
+                    size,
+                    AxisAlignment::Corner(0),
+                    AxisAlignment::Corner(0),
+                ))
                 .collect(),
                 (AxisAlignment::PreferCentered, y) => {
                     for_alignment(position, size, AxisAlignment::Centered, y)
                         .into_iter()
-                        .chain(
-                            for_alignment(position, size, AxisAlignment::Corner(0), y),
-                        )
+                        .chain(for_alignment(position, size, AxisAlignment::Corner(0), y))
                         .collect()
                 }
                 (x, AxisAlignment::PreferCentered) => {
                     for_alignment(position, size, x, AxisAlignment::Centered)
                         .into_iter()
-                        .chain(
-                            for_alignment(position, size, x, AxisAlignment::Corner(0)),
-                        )
+                        .chain(for_alignment(position, size, x, AxisAlignment::Corner(0)))
                         .collect()
                 }
             }

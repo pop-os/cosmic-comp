@@ -336,9 +336,7 @@ impl BackendData {
     ) -> Result<Option<DrmNode>, anyhow::Error> {
         match self {
             BackendData::Kms(state) => {
-                return state
-                    .dmabuf_imported(client, global, dmabuf)
-                    .map(Some);
+                return state.dmabuf_imported(client, global, dmabuf).map(Some);
             }
             BackendData::Winit(state) => {
                 state.backend.renderer().import_dmabuf(&dmabuf, None)?;
@@ -574,12 +572,14 @@ impl From<DrmNode> for KmsNodes {
 
 pub fn client_has_no_security_context(client: &Client) -> bool {
     client
-        .get_data::<ClientState>().is_none_or(|client_state| client_state.security_context.is_none())
+        .get_data::<ClientState>()
+        .is_none_or(|client_state| client_state.security_context.is_none())
 }
 
 pub fn client_is_privileged(client: &Client) -> bool {
     client
-        .get_data::<ClientState>().is_some_and(|client_state| client_state.privileged)
+        .get_data::<ClientState>()
+        .is_some_and(|client_state| client_state.privileged)
 }
 
 fn enable_wayland_security() -> bool {
