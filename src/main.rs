@@ -60,7 +60,6 @@ impl State {
             if let state::BackendData::Kms(_) = &self.backend {
                 #[cfg(feature = "systemd")]
                 systemd::ready(&self.common);
-                #[cfg(not(feature = "systemd"))]
                 if let Err(err) = dbus::ready(&self.common) {
                     error!(?err, "Failed to update the D-Bus activation environment");
                 }
