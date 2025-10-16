@@ -797,7 +797,9 @@ impl KmsGuard<'_> {
                             break 'outer;
                         }
                     }
+                }
 
+                if !new_pairings.contains_key(&conn) {
                     // test failed, we don't have a crtc for conn
                     anyhow::bail!("Missing crtc for {conn:?}, gpu doesn't have enough resources.");
                 }
