@@ -106,16 +106,16 @@ impl State {
         match action {
             SwipeAction::NextWorkspace => {
                 let _ = to_next_workspace(
-                    &mut *self.common.shell.write(),
-                    &seat,
+                    &mut self.common.shell.write(),
+                    seat,
                     true,
                     &mut self.common.workspace_state.update(),
                 );
             }
             SwipeAction::PrevWorkspace => {
                 let _ = to_previous_workspace(
-                    &mut *self.common.shell.write(),
-                    &seat,
+                    &mut self.common.shell.write(),
+                    seat,
                     true,
                     &mut self.common.workspace_state.update(),
                 );
@@ -201,7 +201,7 @@ impl State {
                 }
 
                 let next = to_next_workspace(
-                    &mut *self.common.shell.write(),
+                    &mut self.common.shell.write(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
@@ -247,7 +247,7 @@ impl State {
                 }
 
                 let previous = to_previous_workspace(
-                    &mut *self.common.shell.write(),
+                    &mut self.common.shell.write(),
                     seat,
                     false,
                     &mut self.common.workspace_state.update(),
@@ -543,7 +543,7 @@ impl State {
                         let workspace = shell.workspaces.active(&next_output).unwrap().1;
                         let new_target = workspace
                             .focus_stack
-                            .get(&seat)
+                            .get(seat)
                             .last()
                             .cloned()
                             .map(Into::<KeyboardFocusTarget>::into);
@@ -940,7 +940,7 @@ impl State {
                 let output = seat.active_output();
                 let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
-                workspace.tiling_layer.update_orientation(None, &seat);
+                workspace.tiling_layer.update_orientation(None, seat);
             }
 
             Action::Orientation(orientation) => {
@@ -949,7 +949,7 @@ impl State {
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace
                     .tiling_layer
-                    .update_orientation(Some(orientation), &seat);
+                    .update_orientation(Some(orientation), seat);
             }
 
             Action::ToggleStacking => {
@@ -1066,7 +1066,10 @@ impl State {
             .env("XDG_ACTIVATION_TOKEN", &*token)
             .env("DESKTOP_STARTUP_ID", &*token)
             .env_remove("COSMIC_SESSION_SOCK");
-        unsafe { cmd.pre_exec(|| Ok(crate::utils::rlimit::restore_nofile_limit())) };
+        unsafe { cmd.pre_exec(|| {
+            crate::utils::rlimit::restore_nofile_limit();
+            Ok(())
+        }) };
 
         std::thread::spawn(move || match cmd.spawn() {
             Ok(mut child) => {
@@ -1093,7 +1096,7 @@ impl State {
         if zoom_seat == *seat {
             let new_level = (current_level + change).max(1.0);
             shell.trigger_zoom(
-                &seat,
+                seat,
                 Some(&output),
                 new_level,
                 &self.common.config.cosmic_conf.accessibility_zoom,

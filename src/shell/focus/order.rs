@@ -125,13 +125,13 @@ fn render_input_order_internal<R: 'static>(
         .last()
         .zip(fullscreen)
         .is_some_and(|(target, fullscreen)| target == &fullscreen.surface);
-    let overview_is_open = workspace_overview_is_open(&output);
+    let overview_is_open = workspace_overview_is_open(output);
     let has_focused_fullscreen = if is_active_workspace {
         let current_focus = seat.get_keyboard().unwrap().current_focus();
         matches!(current_focus, Some(KeyboardFocusTarget::Fullscreen(_)))
             || (current_focus.is_none()
                 && focus_stack_is_valid_fullscreen
-                && !workspace_overview_is_open(&output))
+                && !workspace_overview_is_open(output))
     } else {
         focus_stack_is_valid_fullscreen && !overview_is_open
     };
@@ -141,7 +141,7 @@ fn render_input_order_internal<R: 'static>(
         Some((previous, previous_idx, start)) => {
             let layout = shell.workspaces.layout;
 
-            let Some(workspace) = shell.workspaces.space_for_handle(&previous) else {
+            let Some(workspace) = shell.workspaces.space_for_handle(previous) else {
                 return ControlFlow::Break(Err(OutputNoMode));
             };
             let has_fullscreen = workspace.fullscreen.is_some();
@@ -368,13 +368,13 @@ fn render_input_order_internal<R: 'static>(
     ControlFlow::Continue(())
 }
 
-fn layer_popups<'a>(
-    output: &'a Output,
+fn layer_popups(
+    output: &Output,
     layer: Layer,
     element_filter: ElementFilter,
-) -> impl Iterator<Item = (LayerSurface, PopupKind, Point<i32, Global>)> + 'a {
+) -> impl Iterator<Item = (LayerSurface, PopupKind, Point<i32, Global>)> + '_ {
     layer_surfaces(output, layer, element_filter).flat_map(move |(surface, location)| {
-        let location_clone = location.clone();
+        let location_clone = location;
         let surface_clone = surface.clone();
         PopupManager::popups_for_surface(surface.wl_surface()).map(move |(popup, popup_offset)| {
             let offset = (popup_offset - popup.geometry().loc).as_global();
@@ -383,11 +383,11 @@ fn layer_popups<'a>(
     })
 }
 
-fn layer_surfaces<'a>(
-    output: &'a Output,
+fn layer_surfaces(
+    output: &Output,
     layer: Layer,
     element_filter: ElementFilter,
-) -> impl Iterator<Item = (LayerSurface, Point<i32, Global>)> + 'a {
+) -> impl Iterator<Item = (LayerSurface, Point<i32, Global>)> + '_ {
     // we want to avoid deadlocks on the layer-map in callbacks, so we need to clone the layer surfaces
     let layers = {
         let layer_map = layer_map_for_output(output);

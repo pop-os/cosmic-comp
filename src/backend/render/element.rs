@@ -348,7 +348,7 @@ impl AsGlowRenderer for GlowRenderer {
     }
 }
 
-impl<'a> AsGlowRenderer for GlMultiRenderer<'a> {
+impl AsGlowRenderer for GlMultiRenderer<'_> {
     fn glow_renderer(&self) -> &GlowRenderer {
         self.as_ref()
     }
@@ -403,7 +403,7 @@ impl Element for DamageElement {
         scale: Scale<f64>,
         _commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size).into()])
+        DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size)])
     }
 }
 

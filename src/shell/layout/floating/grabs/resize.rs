@@ -101,22 +101,18 @@ impl ResizeSurfaceGrab {
             // If the resizing vertical edge is close to our output's edge in the same direction, snap to it.
             let output_geom = self.output.geometry().to_local(&self.output);
             if self.edges.intersects(ResizeEdge::LEFT) {
-                if ((self.initial_window_location.x - dx as i32 - output_geom.loc.x).abs() as u32)
+                if (self.initial_window_location.x - dx as i32 - output_geom.loc.x).unsigned_abs()
                     < self.edge_snap_threshold
                 {
                     new_window_width = self.initial_window_size.w - output_geom.loc.x
                         + self.initial_window_location.x;
                 }
-            } else {
-                if ((self.initial_window_location.x + self.initial_window_size.w + dx as i32
-                    - output_geom.loc.x
-                    - output_geom.size.w)
-                    .abs() as u32)
-                    < self.edge_snap_threshold
-                {
-                    new_window_width =
-                        output_geom.loc.x - self.initial_window_location.x + output_geom.size.w;
-                }
+            } else if (self.initial_window_location.x + self.initial_window_size.w + dx as i32
+                - output_geom.loc.x - output_geom.size.w).unsigned_abs()
+                < self.edge_snap_threshold
+            {
+                new_window_width =
+                    output_geom.loc.x - self.initial_window_location.x + output_geom.size.w;
             }
         }
 
@@ -131,22 +127,18 @@ impl ResizeSurfaceGrab {
             // If the resizing horizontal edge is close to our output's edge in the same direction, snap to it.
             let output_geom = self.output.geometry().to_local(&self.output);
             if self.edges.intersects(ResizeEdge::TOP) {
-                if ((self.initial_window_location.y - dy as i32 - output_geom.loc.y).abs() as u32)
+                if (self.initial_window_location.y - dy as i32 - output_geom.loc.y).unsigned_abs()
                     < self.edge_snap_threshold
                 {
                     new_window_height = self.initial_window_size.h - output_geom.loc.y
                         + self.initial_window_location.y;
                 }
-            } else {
-                if ((self.initial_window_location.y + self.initial_window_size.h + dy as i32
-                    - output_geom.loc.y
-                    - output_geom.size.h)
-                    .abs() as u32)
-                    < self.edge_snap_threshold
-                {
-                    new_window_height =
-                        output_geom.loc.y - self.initial_window_location.y + output_geom.size.h;
-                }
+            } else if (self.initial_window_location.y + self.initial_window_size.h + dy as i32
+                - output_geom.loc.y - output_geom.size.h).unsigned_abs()
+                < self.edge_snap_threshold
+            {
+                new_window_height =
+                    output_geom.loc.y - self.initial_window_location.y + output_geom.size.h;
             }
         }
 
@@ -361,10 +353,8 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         event: &TouchMotionEvent,
         seq: Serial,
     ) {
-        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
-            if self.update_location(event.location.as_global()) {
-                handle.unset_grab(self, data);
-            }
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot && self.update_location(event.location.as_global()) {
+            handle.unset_grab(self, data);
         }
 
         handle.motion(data, None, event, seq);
@@ -514,7 +504,7 @@ impl ResizeSurfaceGrab {
 
                     if edges.intersects(ResizeEdge::TOP_LEFT) {
                         let size = window.geometry().size;
-                        let mut new = location.clone();
+                        let mut new = location;
                         if edges.intersects(ResizeEdge::LEFT) {
                             new.x = initial_window_location.x + (initial_window_size.w - size.w);
                         }
@@ -555,7 +545,7 @@ impl ResizeSurfaceGrab {
                 }
                 floating_layer.space.map_element(
                     window,
-                    new_location.to_local(&output).as_logical(),
+                    new_location.to_local(output).as_logical(),
                     false,
                 );
             }

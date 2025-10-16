@@ -92,11 +92,10 @@ impl MoveGrabState {
 
         let mut window_geo = self.window.geometry();
         window_geo.loc += self.location.to_i32_round() + self.window_offset;
-        if !output
+        if output
             .geometry()
             .as_logical()
-            .intersection(window_geo)
-            .is_some()
+            .intersection(window_geo).is_none()
         {
             return Vec::new();
         }
@@ -136,15 +135,14 @@ impl MoveGrabState {
                         active_window_hint.green,
                         active_window_hint.blue,
                     ],
-                ))
-                .into(),
+                )),
             )
         } else {
             None
         };
 
         let non_exclusive_geometry = {
-            let layers = layer_map_for_output(&output);
+            let layers = layer_map_for_output(output);
             layers.non_exclusive_zone()
         };
 
@@ -173,8 +171,7 @@ impl MoveGrabState {
                             active_window_hint.green,
                             active_window_hint.blue,
                         ],
-                    ))
-                    .into(),
+                    )),
                     CosmicMappedRenderElement::from(BackdropShader::element(
                         renderer,
                         Key::Window(Usage::SnappingIndicator, self.window.key()),
@@ -182,8 +179,7 @@ impl MoveGrabState {
                         theme.radius_s()[0], // TODO: Fix once shaders support 4 corner radii customization
                         0.4,
                         [base_color.red, base_color.green, base_color.blue],
-                    ))
-                    .into(),
+                    )),
                 ]
             }
             _ => vec![],
@@ -431,7 +427,7 @@ impl MoveGrab {
                             indicator.output_enter(output, overlap);
                         }
                     }
-                } else if self.window_outputs.remove(&output) {
+                } else if self.window_outputs.remove(output) {
                     self.window.output_leave(output);
                     if let Some(indicator) = grab_state.stacking_indicator.as_ref().map(|x| &x.0) {
                         indicator.output_leave(output);
@@ -440,7 +436,7 @@ impl MoveGrab {
             }
 
             let indicator_location =
-                shell.stacking_indicator(&current_output, self.previous.clone());
+                shell.stacking_indicator(&current_output, self.previous);
             if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
                     let element = stack_hover(
@@ -739,7 +735,7 @@ impl MoveGrab {
             start: Instant::now(),
             stacking_indicator: None,
             snapping_zone: None,
-            previous: previous_layer.clone(),
+            previous: previous_layer,
             location: start_data.location(),
             cursor_output: cursor_output.clone(),
         };
@@ -787,7 +783,7 @@ impl Drop for MoveGrab {
         let output = self.cursor_output.clone();
         let seat = self.seat.clone();
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
-        let previous = self.previous.clone();
+        let previous = self.previous;
         let window = self.window.clone();
         let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
 

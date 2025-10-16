@@ -181,15 +181,14 @@ pub type GbmDrmOutput = DrmOutput<
     DrmDeviceFd,
 >;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum QueueState {
+    #[default]
     Idle,
     /// A redraw is queued.
     Queued(RegistrationToken),
     /// We submitted a frame to the KMS and waiting for it to be presented.
-    WaitingForVBlank {
-        redraw_needed: bool,
-    },
+    WaitingForVBlank { redraw_needed: bool },
     /// We did not submit anything to KMS and made a timer to fire at the estimated VBlank.
     WaitingForEstimatedVBlank(RegistrationToken),
     /// A redraw is queued on top of the above.
@@ -197,12 +196,6 @@ pub enum QueueState {
         estimated_vblank: RegistrationToken,
         queued_render: RegistrationToken,
     },
-}
-
-impl Default for QueueState {
-    fn default() -> Self {
-        QueueState::Idle
-    }
 }
 
 #[derive(Debug)]
@@ -760,7 +753,7 @@ impl SurfaceThreadState {
 
         let now = self.clock.now();
         let presentation_time = match metadata.as_ref().map(|data| &data.time) {
-            Some(DrmEventTime::Monotonic(tp)) => Some(tp.clone()),
+            Some(DrmEventTime::Monotonic(tp)) => Some(*tp),
             _ => None,
         };
         let sequence = metadata.as_ref().map(|data| data.sequence).unwrap_or(0);
@@ -944,7 +937,7 @@ impl SurfaceThreadState {
                     warn!(?name, "Failed to submit rendering: {:?}", err);
                     state.queue_redraw(true);
                 }
-                return TimeoutAction::Drop;
+                TimeoutAction::Drop
             })
             .expect("Failed to schedule render");
 
@@ -954,7 +947,7 @@ impl SurfaceThreadState {
             }
             QueueState::WaitingForEstimatedVBlank(estimated_vblank) => {
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
-                    estimated_vblank: estimated_vblank.clone(),
+                    estimated_vblank: *estimated_vblank,
                     queued_render: token,
                 };
             }
@@ -968,7 +961,7 @@ impl SurfaceThreadState {
             } if force => {
                 self.loop_handle.remove(*queued_render);
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
-                    estimated_vblank: estimated_vblank.clone(),
+                    estimated_vblank: *estimated_vblank,
                     queued_render: token,
                 };
             }
@@ -990,7 +983,7 @@ impl SurfaceThreadState {
                 .as_ref()
                 .unwrap_or(&self.target_node),
             &self.target_node,
-            &*self.shell.read(),
+            &self.shell.read(),
         );
 
         let mut renderer = if render_node != self.target_node {
@@ -1016,7 +1009,7 @@ impl SurfaceThreadState {
                     (
                         true,
                         fullscreen_surface.wl_surface().is_some_and(|surface| {
-                            recursive_frame_time_estimation(&self.clock, &*surface)
+                            recursive_frame_time_estimation(&self.clock, &surface)
                                 .is_some_and(|dur| dur <= _30_FPS)
                         }),
                         animations_going,
@@ -1079,7 +1072,7 @@ impl SurfaceThreadState {
         let source_output = self
             .mirroring
             .as_ref()
-            .or((!self.screen_filter.is_noop()).then(|| &self.output))
+            .or((!self.screen_filter.is_noop()).then_some(&self.output))
             .filter(|output| {
                 PostprocessOutputConfig::for_output_untransformed(output)
                     != PostprocessOutputConfig::for_output(&self.output)
@@ -1258,7 +1251,7 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &self.output,
                 &pre_postprocess_data,
-                &postprocess_state,
+                postprocess_state,
                 &self.screen_filter,
             );
 
@@ -1507,7 +1500,7 @@ fn render_node_for_output(
         .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s)))
         .collect::<Vec<_>>();
 
-    if nodes.contains(&target_node) || nodes.is_empty() {
+    if nodes.contains(target_node) || nodes.is_empty() {
         *target_node
     } else {
         *primary_node
@@ -1575,7 +1568,7 @@ fn get_surface_dmabuf_feedback(
                 FormatSet::from_iter(
                     primary_plane_formats
                         .into_iter()
-                        .chain(overlay_plane_formats.into_iter()),
+                        .chain(overlay_plane_formats),
                 ),
             )
             .build()
@@ -1648,7 +1641,7 @@ fn take_screencopy_frames(
             } else {
                 damage_tracking.age_for_buffer(&buffer)
             };
-            let res = damage_tracking.dt.damage_output(age, &elements);
+            let res = damage_tracking.dt.damage_output(age, elements);
 
             if let Some(old_len) = old_len {
                 elements.truncate(old_len);
@@ -1708,7 +1701,7 @@ fn send_screencopy_result<'a>(
             .texture
             .as_ref()
             .is_some_and(|tex| tex.format() == Some(format))
-            && (session.draw_cursor() == false || pre_postprocess_data.cursor_texture.is_none())
+            && (!session.draw_cursor() || pre_postprocess_data.cursor_texture.is_none())
         {
             None
         } else {

@@ -206,10 +206,10 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             additional_scale: self.additional_scale,
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
-            pending_realloc: self.pending_realloc.clone(),
-            size: self.size.clone(),
+            pending_realloc: self.pending_realloc,
+            size: self.size,
             last_seat: self.last_seat.clone(),
-            cursor_pos: self.cursor_pos.clone(),
+            cursor_pos: self.cursor_pos,
             touch_map: self.touch_map.clone(),
             theme: self.theme.clone(),
             renderer,
@@ -632,7 +632,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
         internal.touch_map.insert(id, position);
         internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
-        let _ = internal.update(false);
+        internal.update(false);
     }
 
     fn up(
@@ -649,7 +649,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
             internal
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
-            let _ = internal.update(false);
+            internal.update(false);
         }
     }
 
@@ -670,7 +670,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
             .queue_event(Event::Touch(TouchEvent::FingerMoved { id, position }));
         internal.touch_map.insert(id, position);
         internal.cursor_pos = Some(event_location);
-        let _ = internal.update(false);
+        internal.update(false);
     }
 
     fn frame(
@@ -693,7 +693,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLost { id, position }));
         }
-        let _ = internal.update(false);
+        internal.update(false);
     }
 
     fn shape(
@@ -771,7 +771,7 @@ impl<P: Program + Send + 'static> KeyboardTarget<crate::state::State> for IcedEl
         internal
             .state
             .queue_event(Event::Keyboard(KeyboardEvent::ModifiersChanged(mods)));
-        let _ = internal.update(false);
+        internal.update(false);
     }
 }
 
@@ -804,7 +804,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         } else {
             WindowEvent::Unfocused
         }));
-        let _ = internal.update(false);
+        internal.update(false);
     }
 
     fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
@@ -940,7 +940,7 @@ where
                         .and_then(|(last_primitives, last_color)| {
                             (last_color == &background_color).then(|| {
                                 damage::diff(
-                                    &last_primitives,
+                                    last_primitives,
                                     current_layers,
                                     |_| {
                                         vec![cosmic::iced::Rectangle::new(
@@ -1012,7 +1012,7 @@ where
             match MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location.to_f64(),
-                &buffer,
+                buffer,
                 Some(alpha),
                 Some(Rectangle::from_size(
                     size.to_f64()

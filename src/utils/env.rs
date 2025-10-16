@@ -106,8 +106,7 @@ fn try_parse_dev_from_str(val: &str) -> Option<DeviceIdentifier> {
 
         let node = node
             .node_with_type(NodeType::Render)
-            .map(|res| res.ok())
-            .flatten()
+            .and_then(|res| res.ok())
             .unwrap_or(node);
         Some(DeviceIdentifier::Node(node))
     } else if val.contains(':') {
@@ -140,8 +139,7 @@ fn try_parse_dev_from_str(val: &str) -> Option<DeviceIdentifier> {
 
         let node = node
             .node_with_type(NodeType::Render)
-            .map(|res| res.ok())
-            .flatten()
+            .and_then(|res| res.ok())
             .unwrap_or(node);
         Some(DeviceIdentifier::Node(node))
     } else {
@@ -159,8 +157,7 @@ fn try_parse_dev_from_str(val: &str) -> Option<DeviceIdentifier> {
 
         let node = node
             .node_with_type(NodeType::Render)
-            .map(|res| res.ok())
-            .flatten()
+            .and_then(|res| res.ok())
             .unwrap_or(node);
         Some(DeviceIdentifier::Node(node))
     }

@@ -14,7 +14,7 @@ use smithay::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    ffi::{CStr, CString},
+    ffi::CString,
     mem,
     os::unix::{io::AsFd, net::UnixStream},
 };
@@ -49,7 +49,7 @@ impl AtspiClient {
         modifiers: &ModifiersState,
     ) {
         let keymap_text = keymap.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1);
-        let name = CStr::from_bytes_with_nul(b"eis-keymap\0").unwrap();
+        let name = c"eis-keymap";
         let file = SealedFile::with_content(name, &CString::new(keymap_text).unwrap()).unwrap();
 
         let device = seat.add_device(
@@ -260,7 +260,7 @@ fn handle_event(
         }
         Ok(EisRequestSourceEvent::Request(EisRequest::Bind(request))) => {
             if connection.has_interface("ei_keyboard")
-                && request.capabilities & 2 << DeviceCapability::Keyboard as u64 != 0
+                && request.capabilities & (2 << DeviceCapability::Keyboard as u64) != 0
             {
                 let keymap = keymap_or_default(state.common.config.xkb_config());
                 client.add_keyboard(

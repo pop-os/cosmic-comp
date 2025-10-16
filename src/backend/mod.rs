@@ -155,7 +155,7 @@ pub fn init_backend_auto(
                     .startup_done
                     .store(true, std::sync::atomic::Ordering::SeqCst);
                 for output in state.common.shell.read().outputs() {
-                    state.backend.schedule_render(&output);
+                    state.backend.schedule_render(output);
                 }
             }
         }

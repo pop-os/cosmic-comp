@@ -52,7 +52,7 @@ impl ToplevelManagementHandler for State {
             let (target, new_pos) = if let Some((idx, workspace)) = maybe {
                 let handle = workspace.handle;
                 let new_pos = shell.activate(
-                    &output,
+                    output,
                     idx,
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
@@ -112,7 +112,7 @@ impl ToplevelManagementHandler for State {
 
             if seat.active_output() != *output {
                 if let Some(new_pos) = new_pos {
-                    seat.set_active_output(&output);
+                    seat.set_active_output(output);
                     if let Some(ptr) = seat.get_pointer() {
                         let serial = SERIAL_COUNTER.next_serial();
                         ptr.motion(
@@ -150,7 +150,7 @@ impl ToplevelManagementHandler for State {
         let Some(surface) = window.wl_surface() else {
             return;
         };
-        let Some((from_workspace, _)) = shell.workspace_for_surface(&*surface) else {
+        let Some((from_workspace, _)) = shell.workspace_for_surface(&surface) else {
             return;
         };
 
@@ -182,7 +182,7 @@ impl ToplevelManagementHandler for State {
             .or_else(|| {
                 window
                     .wl_surface()
-                    .and_then(|surface| shell.visible_output_for_surface(&*surface).cloned())
+                    .and_then(|surface| shell.visible_output_for_surface(&surface).cloned())
             })
             .unwrap_or_else(|| seat.focused_or_active_output());
         if let Some(target) =

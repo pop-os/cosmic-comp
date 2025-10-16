@@ -252,7 +252,7 @@ impl CosmicWindow {
                 let geo = p.window.geometry();
 
                 let point_i32 = relative_pos.to_i32_round::<i32>();
-                let ssd_height = has_ssd.then_some(SSD_HEIGHT).unwrap_or(0);
+                let ssd_height = if has_ssd { SSD_HEIGHT } else { 0 };
 
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
@@ -708,7 +708,7 @@ impl PointerTarget<State> for CosmicWindow {
             if has_ssd || p.is_tiled(false) {
                 let Some(next) = Focus::under(
                     &p.window,
-                    has_ssd.then_some(SSD_HEIGHT).unwrap_or(0),
+                    if has_ssd { SSD_HEIGHT } else { 0 },
                     event.location,
                 ) else {
                     return;
@@ -734,7 +734,7 @@ impl PointerTarget<State> for CosmicWindow {
             if has_ssd || p.is_tiled(false) {
                 let Some(next) = Focus::under(
                     &p.window,
-                    has_ssd.then_some(SSD_HEIGHT).unwrap_or(0),
+                    if has_ssd { SSD_HEIGHT } else { 0 },
                     event.location,
                 ) else {
                     return;
@@ -804,17 +804,11 @@ impl PointerTarget<State> for CosmicWindow {
     }
 
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
-        match self.0.with_program(|p| p.current_focus()) {
-            Some(Focus::Header) => PointerTarget::axis(&self.0, seat, data, frame),
-            _ => {}
-        }
+        if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) { PointerTarget::axis(&self.0, seat, data, frame) }
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
-        match self.0.with_program(|p| p.current_focus()) {
-            Some(Focus::Header) => PointerTarget::frame(&self.0, seat, data),
-            _ => {}
-        }
+        if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) { PointerTarget::frame(&self.0, seat, data) }
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
@@ -901,7 +895,7 @@ impl TouchTarget<State> for CosmicWindow {
     }
 
     fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent, seq: Serial) {
-        TouchTarget::up(&self.0, seat, data, &event, seq)
+        TouchTarget::up(&self.0, seat, data, event, seq)
     }
 
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {

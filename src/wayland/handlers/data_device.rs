@@ -68,7 +68,7 @@ impl ClientDndGrabHandler for State {
         seat: Seat<Self>,
     ) {
         let user_data = seat.user_data();
-        user_data.insert_if_missing_threadsafe::<Mutex<Option<DnDIcon>>, _>(|| Default::default());
+        user_data.insert_if_missing_threadsafe::<Mutex<Option<DnDIcon>>, _>(Default::default);
 
         let offset = if let CursorImageStatus::Surface(ref surface) = seat.cursor_image_status() {
             compositor::with_states(surface, |states| {

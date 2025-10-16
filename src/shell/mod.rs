@@ -170,7 +170,7 @@ impl OverviewMode {
     }
 
     pub fn trigger(&self) -> Option<&Trigger> {
-        self.active_trigger().or_else(|| {
+        self.active_trigger().or({
             if let OverviewMode::Ended(trigger, _) = self {
                 trigger.as_ref()
             } else {
@@ -361,7 +361,7 @@ fn create_workspace(
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
-            &group_handle,
+            group_handle,
             if tiling {
                 TilingState::TilingEnabled
             } else {
@@ -394,7 +394,7 @@ fn create_workspace_from_pinned(
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
-            &group_handle,
+            group_handle,
             if pinned.tiling_enabled {
                 TilingState::TilingEnabled
             } else {
@@ -533,7 +533,7 @@ impl WorkspaceSet {
         self.sticky_layer.set_output(new_output);
         for window in self.sticky_layer.windows() {
             toplevel_leave_output(&window, &self.output);
-            toplevel_enter_output(&window, &new_output);
+            toplevel_enter_output(&window, new_output);
         }
         for workspace in &mut self.workspaces {
             workspace.set_output(new_output, explicit);
@@ -591,8 +591,7 @@ impl WorkspaceSet {
         // add empty at the end, if necessary
         if self
             .workspaces
-            .last()
-            .map_or(true, |last| !last.is_empty() || last.pinned)
+            .last().is_none_or(|last| !last.is_empty() || last.pinned)
         {
             self.add_empty_workspace(state);
         }
@@ -607,8 +606,7 @@ impl WorkspaceSet {
                 let previous_is_empty = i > 0
                     && self
                         .workspaces
-                        .get(i - 1)
-                        .map_or(false, |w| w.is_empty() && !w.pinned);
+                        .get(i - 1).is_some_and(|w| w.is_empty() && !w.pinned);
                 let keep = if workspace.can_auto_remove(xdg_activation_state) {
                     // Keep empty workspace if it's active, or it's the last workspace,
                     // and the previous worspace is not both active and empty.
@@ -632,7 +630,7 @@ impl WorkspaceSet {
             .filter(|kept| !**kept)
             .count();
 
-        if kept.iter().any(|val| *val == false) {
+        if kept.iter().any(|val| !(*val)) {
             self.update_workspace_idxs(state);
         }
     }
@@ -736,9 +734,9 @@ impl Workspaces {
                 set
             })
             .unwrap_or_else(|| {
-                WorkspaceSet::new(workspace_state, &output, self.autotile, self.theme.clone())
+                WorkspaceSet::new(workspace_state, output, self.autotile, self.theme.clone())
             });
-        workspace_state.add_group_output(&set.group, &output);
+        workspace_state.add_group_output(&set.group, output);
 
         // If this is the first output added, create workspaces for pinned workspaces from config
         for pinned in std::mem::take(&mut self.persisted_workspaces) {
@@ -1152,7 +1150,7 @@ impl Workspaces {
                     s.active = active;
                 });
 
-                if keep.iter().any(|val| *val == false) {
+                if keep.iter().any(|val| !(*val)) {
                     for set in self.sets.values_mut() {
                         set.update_workspace_idxs(workspace_state);
                     }
@@ -1751,7 +1749,7 @@ impl Shell {
             KeyboardFocusTarget::Fullscreen(elem) => self
                 .outputs()
                 .find(|output| {
-                    let workspace = self.active_space(&output).unwrap();
+                    let workspace = self.active_space(output).unwrap();
                     workspace.get_fullscreen() == Some(&elem)
                 })
                 .cloned(),
@@ -1759,7 +1757,7 @@ impl Shell {
                 .outputs()
                 .find(|output| {
                     self.workspaces
-                        .active(&output)
+                        .active(output)
                         .unwrap()
                         .1
                         .tiling_layer
@@ -1809,7 +1807,6 @@ impl Shell {
         match focus_target {
             KeyboardFocusTarget::Group(_group) => {
                 //TODO: decide if we want close actions to apply to groups
-                return;
             }
             KeyboardFocusTarget::Fullscreen(surface) => {
                 surface.close();
@@ -1937,7 +1934,7 @@ impl Shell {
                 .workspaces
                 .spaces()
                 .find(move |workspace| workspace.output() == output)
-                .map(|w| (w.handle.clone(), output.clone())),
+                .map(|w| (w.handle, output.clone())),
             None => self
                 .workspaces
                 .spaces()
@@ -1951,7 +1948,7 @@ impl Shell {
                                 .is_some_and(|m| m.has_surface(surface, WindowSurfaceType::ALL))
                         })
                 })
-                .map(|w| (w.handle.clone(), w.output().clone())),
+                .map(|w| (w.handle, w.output().clone())),
         }
     }
 
@@ -2130,24 +2127,22 @@ impl Shell {
                 }
                 self.overview_mode = OverviewMode::Started(trigger, Instant::now());
             }
-        } else {
-            if matches!(
-                self.overview_mode,
-                OverviewMode::Started(_, _) | OverviewMode::Active(_)
-            ) {
-                let (reverse_duration, trigger) =
-                    if let OverviewMode::Started(trigger, start) = self.overview_mode.clone() {
-                        (
-                            ANIMATION_DURATION
-                                - Instant::now().duration_since(start).min(ANIMATION_DURATION),
-                            Some(trigger),
-                        )
-                    } else {
-                        (Duration::ZERO, self.overview_mode.active_trigger().cloned())
-                    };
-                self.overview_mode =
-                    OverviewMode::Ended(trigger, Instant::now() - reverse_duration);
-            }
+        } else if matches!(
+            self.overview_mode,
+            OverviewMode::Started(_, _) | OverviewMode::Active(_)
+        ) {
+            let (reverse_duration, trigger) =
+                if let OverviewMode::Started(trigger, start) = self.overview_mode.clone() {
+                    (
+                        ANIMATION_DURATION
+                            - Instant::now().duration_since(start).min(ANIMATION_DURATION),
+                        Some(trigger),
+                    )
+                } else {
+                    (Duration::ZERO, self.overview_mode.active_trigger().cloned())
+                };
+            self.overview_mode =
+                OverviewMode::Ended(trigger, Instant::now() - reverse_duration);
         }
     }
 
@@ -2188,12 +2183,10 @@ impl Shell {
                 evlh,
                 self.theme.clone(),
             ));
-        } else {
-            if let Some(direction) = self.resize_mode.active_direction() {
-                self.resize_mode = ResizeMode::Ended(Instant::now(), direction);
-                if let Some((_, direction, edge, _, _, _)) = self.resize_state.as_ref() {
-                    self.finish_resize(*direction, *edge);
-                }
+        } else if let Some(direction) = self.resize_mode.active_direction() {
+            self.resize_mode = ResizeMode::Ended(Instant::now(), direction);
+            if let Some((_, direction, edge, _, _, _)) = self.resize_state.as_ref() {
+                self.finish_resize(*direction, *edge);
             }
         }
     }
@@ -2449,7 +2442,7 @@ impl Shell {
                 .workspaces
                 .sets
                 .get_mut(&output)
-                .or_else(|| self.workspaces.backup_set.as_mut())
+                .or(self.workspaces.backup_set.as_mut())
                 .unwrap();
             set.sticky_layer.map_internal(
                 window.clone(),
@@ -2464,7 +2457,7 @@ impl Shell {
         let workspace = match &state {
             Some(FullscreenRestoreState::Floating { workspace, .. })
             | Some(FullscreenRestoreState::Tiling { workspace, .. }) => {
-                let workspace = self.workspaces.space_for_handle_mut(&workspace);
+                let workspace = self.workspaces.space_for_handle_mut(workspace);
                 let workspace = match workspace {
                     Some(workspace) => workspace,
                     None => self.workspaces.active_mut(&seat.active_output()).unwrap(),
@@ -2936,12 +2929,12 @@ impl Shell {
                 node, focus_stack, ..
             })) => {
                 let new_pos = if follow {
-                    seat.set_active_output(&to_output);
+                    seat.set_active_output(to_output);
                     self.workspaces
-                        .idx_for_handle(&to_output, &to)
+                        .idx_for_handle(to_output, &to)
                         .and_then(|to_idx| {
                             self.activate(
-                                &to_output,
+                                to_output,
                                 to_idx,
                                 WorkspaceDelta::new_shortcut(),
                                 workspace_state,
@@ -2957,7 +2950,7 @@ impl Shell {
                 if let Some(from_workspace) = from_w.get_mut(0) {
                     if let Some(to_workspace) = other_w.iter_mut().find(|w| w.handle == to) {
                         {
-                            let mut stack = to_workspace.focus_stack.get_mut(&seat);
+                            let mut stack = to_workspace.focus_stack.get_mut(seat);
                             for elem in focus_stack.iter().flat_map(|node_id| {
                                 from_workspace.tiling_layer.element_for_node(node_id)
                             }) {
@@ -2982,7 +2975,7 @@ impl Shell {
                             &mut to_workspace.tiling_layer,
                             &to,
                             seat,
-                            to_workspace.focus_stack.get(&seat).iter(),
+                            to_workspace.focus_stack.get(seat).iter(),
                             NodeDesc {
                                 handle: from,
                                 node,
@@ -3003,7 +2996,7 @@ impl Shell {
                                 .collect::<Vec<_>>()
                                 .into_iter()
                             {
-                                to_workspace.toggle_floating_window(&seat, &mapped);
+                                to_workspace.toggle_floating_window(seat, &mapped);
                             }
                             to_workspace.tiling_enabled = false;
                         }
@@ -3145,7 +3138,7 @@ impl Shell {
                 {
                     to_workspace.unmaximize_request(&mapped);
                 }
-                let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(&seat));
+                let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(seat));
                 to_workspace.tiling_layer.map(
                     mapped.clone(),
                     focus_stack.as_ref().map(|x| x.iter()),
@@ -3239,7 +3232,7 @@ impl Shell {
             {
                 to_workspace.unmaximize_request(&mapped);
             }
-            let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(&seat));
+            let focus_stack = seat.map(|seat| to_workspace.focus_stack.get(seat));
             to_workspace.tiling_layer.map(
                 mapped.clone(),
                 focus_stack.as_ref().map(|x| x.iter()),
@@ -3301,7 +3294,7 @@ impl Shell {
     ) -> Option<(MenuGrab, Focus)> {
         let serial = serial.into();
         let Some(GrabStartData::Pointer(start_data)) =
-            check_grab_preconditions(&seat, serial, Some(surface))
+            check_grab_preconditions(seat, serial, Some(surface))
         else {
             return None; // TODO: an application can send a menu request for a touch event
         };
@@ -3316,7 +3309,7 @@ impl Shell {
             if target_stack || !is_stacked {
                 Box::new(
                     window_items(
-                        &mapped,
+                        mapped,
                         is_tiled,
                         is_stacked,
                         is_sticky,
@@ -3333,7 +3326,7 @@ impl Shell {
                     .find(|(s, _)| s.wl_surface().as_deref() == Some(surface))
                     .unwrap();
                 Box::new(
-                    tab_items(&mapped, &tab, is_tiled, config)
+                    tab_items(mapped, &tab, is_tiled, config)
                         .collect::<Vec<Item>>()
                         .into_iter(),
                 ) as Box<dyn Iterator<Item = Item>>
@@ -3352,13 +3345,13 @@ impl Shell {
                     .map(|(mapped, relative_loc)| (set, mapped, relative_loc))
             }) {
             let output = set.output.clone();
-            let global_position = (set.sticky_layer.element_geometry(&mapped).unwrap().loc
+            let global_position = (set.sticky_layer.element_geometry(mapped).unwrap().loc
                 + relative_loc.as_local()
                 + location.as_local())
             .to_global(&output);
             (
                 global_position,
-                items_for_element(&mapped, false, true, false, ResizeEdge::all()),
+                items_for_element(mapped, false, true, false, ResizeEdge::all()),
             )
         } else if let Some((workspace, output)) = self.workspace_for_surface(surface) {
             let workspace = self.workspaces.space_for_handle(&workspace).unwrap();
@@ -3396,7 +3389,7 @@ impl Shell {
 
                 (
                     global_position,
-                    items_for_element(&mapped, is_tiled, false, workspace.tiling_enabled, edge),
+                    items_for_element(mapped, is_tiled, false, workspace.tiling_enabled, edge),
                 )
             }
         } else {
@@ -3436,7 +3429,7 @@ impl Shell {
         let mut element_geo = None;
 
         let mut start_data =
-            check_grab_preconditions(&seat, serial, client_initiated.then_some(surface))?;
+            check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
 
         let maybe_fullscreen_workspace = self
             .workspaces
@@ -3523,7 +3516,7 @@ impl Shell {
                     None
                 };
 
-                let layer = if mapped == old_mapped {
+                let layer = if if mapped == old_mapped {
                     let was_floating = workspace.floating_layer.unmap(&mapped, None);
                     let was_tiled = workspace
                         .tiling_layer
@@ -3538,14 +3531,12 @@ impl Shell {
                         .tiling_layer
                         .mapped()
                         .any(|(m, _)| m == &old_mapped)
-                }
-                .then_some(ManagedLayer::Tiling)
-                .unwrap_or(ManagedLayer::Floating);
+                } { ManagedLayer::Tiling } else { ManagedLayer::Floating };
 
                 // if this changed the width, the window was tiled in floating mode
                 if let Some(new_size) = new_size {
                     let output = workspace.output();
-                    let ratio = pos.to_local(&output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
+                    let ratio = pos.to_local(output).x / (elem_geo.loc.x + elem_geo.size.w) as f64;
 
                     initial_window_location = Point::from((
                         pos.x - (new_size.w as f64 * ratio),
@@ -3650,7 +3641,7 @@ impl Shell {
             KeyboardFocusTarget::Fullscreen(surface) => {
                 if let Some(workspace) = surface
                     .wl_surface()
-                    .and_then(|s| self.workspace_for_surface(&*s))
+                    .and_then(|s| self.workspace_for_surface(&s))
                     .and_then(|(handle, _)| self.workspaces.space_for_handle(&handle))
                 {
                     workspace
@@ -3683,9 +3674,9 @@ impl Shell {
                 .unwrap()
                 .to_global(&set.output);
             Some(geometry)
-        } else if let Some(workspace) = self.space_for(&mapped) {
+        } else if let Some(workspace) = self.space_for(mapped) {
             let geometry = workspace
-                .element_geometry(&mapped)
+                .element_geometry(mapped)
                 .unwrap()
                 .to_global(workspace.output());
             Some(geometry)
@@ -3910,7 +3901,7 @@ impl Shell {
             return None;
         }
 
-        let mut start_data = check_grab_preconditions(&seat, None, None)?;
+        let mut start_data = check_grab_preconditions(seat, None, None)?;
 
         let (floating_layer, geometry) = if let Some(set) = self
             .workspaces
@@ -3924,9 +3915,9 @@ impl Shell {
                 .unwrap()
                 .to_global(&set.output);
             (&mut set.sticky_layer, geometry)
-        } else if let Some(workspace) = self.space_for_mut(&mapped) {
+        } else if let Some(workspace) = self.space_for_mut(mapped) {
             let geometry = workspace
-                .element_geometry(&mapped)
+                .element_geometry(mapped)
                 .unwrap()
                 .to_global(workspace.output());
             (&mut workspace.floating_layer, geometry)
@@ -3968,7 +3959,7 @@ impl Shell {
             ReleaseMode::Click,
         ) {
             grab.into()
-        } else if let Some(ws) = self.space_for_mut(&mapped) {
+        } else if let Some(ws) = self.space_for_mut(mapped) {
             let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
             let (node, left_up_idx, orientation) = ws.tiling_layer.resize_request(node_id, edge)?;
             ResizeForkGrab::new(
@@ -4026,22 +4017,20 @@ impl Shell {
                     was_maximized: false,
                 },
             });
-        } else {
-            if let Some((workspace, window)) = self.workspaces.sets.values_mut().find_map(|set| {
-                set.workspaces.iter_mut().find_map(|workspace| {
-                    let window = workspace
-                        .get_fullscreen()
-                        .cloned()
-                        .into_iter()
-                        .chain(workspace.mapped().map(|m| m.active_window()))
-                        .find(|s| s == surface);
-                    window.map(|s| (workspace, s))
-                })
-            }) {
-                let to = minimize_rectangle(workspace.output(), &window);
-                if let Some(minimized) = workspace.minimize(&surface, to) {
-                    workspace.minimized_windows.push(minimized);
-                }
+        } else if let Some((workspace, window)) = self.workspaces.sets.values_mut().find_map(|set| {
+            set.workspaces.iter_mut().find_map(|workspace| {
+                let window = workspace
+                    .get_fullscreen()
+                    .cloned()
+                    .into_iter()
+                    .chain(workspace.mapped().map(|m| m.active_window()))
+                    .find(|s| s == surface);
+                window.map(|s| (workspace, s))
+            })
+        }) {
+            let to = minimize_rectangle(workspace.output(), &window);
+            if let Some(minimized) = workspace.minimize(surface, to) {
+                workspace.minimized_windows.push(minimized);
             }
         }
     }
@@ -4113,7 +4102,7 @@ impl Shell {
         {
             let geometry = set.sticky_layer.element_geometry(mapped).unwrap();
             (ManagedLayer::Sticky, &mut set.sticky_layer, geometry)
-        } else if let Some(workspace) = self.space_for_mut(&mapped) {
+        } else if let Some(workspace) = self.space_for_mut(mapped) {
             let layer = if workspace.is_tiled(&mapped.active_window()) {
                 ManagedLayer::Tiling
             } else {
@@ -4187,7 +4176,7 @@ impl Shell {
     ) -> Option<(ResizeGrab, Focus)> {
         let serial = serial.into();
         let start_data =
-            check_grab_preconditions(&seat, serial, client_initiated.then_some(surface))?;
+            check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_maximized(true) {
             return None;
@@ -4556,9 +4545,9 @@ impl Shell {
                 mapped.active_window()
             };
 
-            toplevel_leave_output(&window, &old_output);
+            toplevel_leave_output(&window, old_output);
             let old_output = old_output.downgrade();
-            let workspace_handle = self.active_space(&output).unwrap().handle.clone();
+            let workspace_handle = self.active_space(&output).unwrap().handle;
             toplevel_enter_output(&window, &output);
             toplevel_enter_workspace(&window, &workspace_handle);
 
@@ -4585,7 +4574,7 @@ impl Shell {
             let from = workspace.element_geometry(&mapped).unwrap();
             let (surface, state) = workspace.unmap_surface(surface).unwrap();
             window = surface;
-            let handle = workspace.handle.clone();
+            let handle = workspace.handle;
 
             toplevel_leave_output(&window, &workspace.output);
             toplevel_leave_workspace(&window, &workspace.handle);
@@ -4619,7 +4608,7 @@ impl Shell {
         };
 
         if let Some((old_fullscreen, restore, _)) = old_fullscreen {
-            self.remap_unfullscreened_window(old_fullscreen, restore, &loop_handle);
+            self.remap_unfullscreened_window(old_fullscreen, restore, loop_handle);
         }
 
         Some(KeyboardFocusTarget::Fullscreen(window))
@@ -4662,7 +4651,7 @@ impl Shell {
         }
 
         let mut container = cosmic::config::COSMIC_TK.write().unwrap();
-        if &*container != &toolkit {
+        if *container != toolkit {
             *container = toolkit;
             drop(container);
             self.refresh(xdg_activation_state, workspace_state);
@@ -4777,7 +4766,7 @@ pub fn check_grab_preconditions(
     let touch = seat.get_touch().unwrap();
 
     let start_data =
-        if serial.map_or(false, |serial| touch.has_grab(serial)) {
+        if serial.is_some_and(|serial| touch.has_grab(serial)) {
             GrabStartData::Touch(touch.grab_start_data().unwrap())
         } else {
             GrabStartData::Pointer(pointer.grab_start_data().unwrap_or_else(|| {

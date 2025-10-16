@@ -49,7 +49,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
             return;
         }
 
-        let syms = Vec::from(handle.keysym_handle(keycode).raw_syms());
+        let syms = handle.keysym_handle(keycode).raw_syms();
         let focus_bindings = &data
             .common
             .config

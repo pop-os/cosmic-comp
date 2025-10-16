@@ -122,7 +122,7 @@ pub fn frame_time_estimation(clock: &Clock<Monotonic>, states: &SurfaceData) -> 
     if let Some(ref last) = data.last_commit {
         // if the time since the last commit is already higher than our estimation,
         // there is no reason to not use that as a better "guess"
-        let diff = Time::elapsed(&last, clock.now());
+        let diff = Time::elapsed(last, clock.now());
         Some(diff.max(data.estimation))
     } else {
         Some(data.estimation)
@@ -275,7 +275,7 @@ impl CompositorHandler for State {
 
         // schedule a new render
         if let Some(output) = shell.visible_output_for_surface(surface) {
-            self.backend.schedule_render(&output);
+            self.backend.schedule_render(output);
         }
 
         if mapped {
@@ -349,7 +349,7 @@ impl CompositorHandler for State {
             if let Some(element) = shell.element_for_surface(surface).cloned() {
                 crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
                     element.clone(),
-                    &mut *shell,
+                    &mut shell,
                 );
             }
         }
@@ -392,8 +392,8 @@ impl State {
                 } else {
                     None
                 };
-                if toplevel_ensure_initial_configure(&toplevel, initial_size)
-                    && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
+                if toplevel_ensure_initial_configure(toplevel, initial_size)
+                    && with_renderer_surface_state(surface, |state| state.buffer().is_some())
                         .unwrap_or(false)
                 {
                     let window = pending.surface.clone();

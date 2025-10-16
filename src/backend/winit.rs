@@ -143,7 +143,7 @@ pub fn init_backend(
 
     init_egl_client_side(dh, state, &mut backend)?;
 
-    let name = format!("WINIT-0");
+    let name = "WINIT-0".to_string();
     let size = backend.window_size();
     let props = PhysicalProperties {
         size: (0, 0).into(),

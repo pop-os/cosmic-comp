@@ -42,6 +42,12 @@ impl fmt::Debug for GbmPixmanDevice {
     }
 }
 
+impl<A: AsFd + 'static> Default for GbmPixmanBackend<A> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<A: AsFd + 'static> GbmPixmanBackend<A> {
     pub fn new() -> Self {
         GbmPixmanBackend {

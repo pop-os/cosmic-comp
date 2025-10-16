@@ -148,19 +148,16 @@ where
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            zcosmic_output_head_v1::Request::Release => {
-                let inner = state.output_configuration_state();
-                if let Some(head) = inner
-                    .instances
-                    .iter_mut()
-                    .flat_map(|instance| instance.heads.iter_mut())
-                    .find(|head| head.extension_obj.as_ref().is_some_and(|o| o == obj))
-                {
-                    head.extension_obj.take();
-                }
+        if let zcosmic_output_head_v1::Request::Release = request {
+            let inner = state.output_configuration_state();
+            if let Some(head) = inner
+                .instances
+                .iter_mut()
+                .flat_map(|instance| instance.heads.iter_mut())
+                .find(|head| head.extension_obj.as_ref().is_some_and(|o| o == obj))
+            {
+                head.extension_obj.take();
             }
-            _ => {}
         }
     }
 }

@@ -205,7 +205,7 @@ impl KeyboardFocusTarget {
         match self {
             KeyboardFocusTarget::Element(mapped) => mapped.wl_surface(),
             KeyboardFocusTarget::Popup(PopupKind::Xdg(xdg)) => {
-                get_popup_toplevel(&xdg).map(Cow::Owned)
+                get_popup_toplevel(xdg).map(Cow::Owned)
             }
             _ => None,
         }
@@ -278,7 +278,7 @@ impl IsAlive for KeyboardFocusTarget {
 
 impl PointerTarget<State> for PointerFocusTarget {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
-        let toplevel = self.toplevel(&*data.common.shell.read());
+        let toplevel = self.toplevel(&data.common.shell.read());
         if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(Some(
@@ -300,7 +300,7 @@ impl PointerTarget<State> for PointerFocusTarget {
         self.inner_pointer_target().enter(seat, data, event);
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
-        let toplevel = self.toplevel(&*data.common.shell.read());
+        let toplevel = self.toplevel(&data.common.shell.read());
         if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(Some(
@@ -335,7 +335,7 @@ impl PointerTarget<State> for PointerFocusTarget {
         self.inner_pointer_target().frame(seat, data);
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
-        let toplevel = self.toplevel(&*data.common.shell.read());
+        let toplevel = self.toplevel(&data.common.shell.read());
         if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
                 session.set_cursor_pos(None);
