@@ -23,6 +23,6 @@ window-menu-resize-edge-right = Праворуч
 window-menu-resize-edge-bottom = Знизу
 a11y-zoom-settings = Налаштування лупи...
 window-menu-fullscreen = Розгорнути на повний екран
-a11y-zoom-move-continuously = Вид рухається послідовно за вказівником
+a11y-zoom-move-continuously = Огляд постійно слідкує за вказівником
 a11y-zoom-move-onedge = Вид рухається, коли вказівник торкається краю
 a11y-zoom-move-centered = Вид рухається так, щоб вказівник завжди залишався по центру
