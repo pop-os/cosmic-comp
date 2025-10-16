@@ -500,7 +500,7 @@ impl TilingLayout {
 
             if sibling
                 .as_ref()
-                .is_some_and(|sibling| tree.get(&sibling).is_ok())
+                .is_some_and(|sibling| tree.get(sibling).is_ok())
             {
                 let sibling_id = sibling.unwrap();
                 let new_node = Node::new(Data::Mapped {
@@ -542,7 +542,7 @@ impl TilingLayout {
     }
 
     fn map_to_tree(
-        mut tree: &mut Tree<Data>,
+        tree: &mut Tree<Data>,
         window: impl Into<CosmicMapped>,
         output: &Output,
         node: Option<NodeId>,
@@ -564,7 +564,7 @@ impl TilingLayout {
                 };
 
                 let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-                TilingLayout::new_group(&mut tree, &root_id, &new_id, orientation).unwrap();
+                TilingLayout::new_group(tree, &root_id, &new_id, orientation).unwrap();
                 tree.make_nth_sibling(
                     &new_id,
                     match direction {
@@ -577,36 +577,34 @@ impl TilingLayout {
             } else {
                 tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
             }
+        } else if let Some(ref node_id) = node {
+            let orientation = {
+                let window_size = tree.get(node_id).unwrap().data().geometry().size;
+                if window_size.w > window_size.h {
+                    Orientation::Vertical
+                } else {
+                    Orientation::Horizontal
+                }
+            };
+            let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
+            TilingLayout::new_group(tree, node_id, &new_id, orientation).unwrap();
+            new_id
         } else {
-            if let Some(ref node_id) = node {
+            // nothing? then we add to the root
+            if let Some(root_id) = tree.root_node_id().cloned() {
                 let orientation = {
-                    let window_size = tree.get(node_id).unwrap().data().geometry().size;
-                    if window_size.w > window_size.h {
+                    let output_size = output.geometry().size;
+                    if output_size.w > output_size.h {
                         Orientation::Vertical
                     } else {
                         Orientation::Horizontal
                     }
                 };
                 let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-                TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation).unwrap();
+                TilingLayout::new_group(tree, &root_id, &new_id, orientation).unwrap();
                 new_id
             } else {
-                // nothing? then we add to the root
-                if let Some(root_id) = tree.root_node_id().cloned() {
-                    let orientation = {
-                        let output_size = output.geometry().size;
-                        if output_size.w > output_size.h {
-                            Orientation::Vertical
-                        } else {
-                            Orientation::Horizontal
-                        }
-                    };
-                    let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-                    TilingLayout::new_group(&mut tree, &root_id, &new_id, orientation).unwrap();
-                    new_id
-                } else {
-                    tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
-                }
+                tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
             }
         };
 
@@ -666,7 +664,7 @@ impl TilingLayout {
                 let this_stack = this_mapped.stack_ref()?;
                 this_stack.remove_window(&stack_surface);
                 if !this_stack.alive() {
-                    let _ = this.unmap(&this_mapped, None);
+                    let _ = this.unmap(this_mapped, None);
                 }
 
                 let mapped: CosmicMapped =
@@ -687,13 +685,13 @@ impl TilingLayout {
 
                 mapped.set_tiled(true);
                 other.map(mapped.clone(), Some(focus_stack), direction);
-                return Some(KeyboardFocusTarget::Element(mapped));
+                Some(KeyboardFocusTarget::Element(mapped))
             }
             None => {
                 let node = this_tree.get(&desc.node).ok()?;
                 let mut children = node
                     .children()
-                    .into_iter()
+                    .iter()
                     .map(|child_id| (desc.node.clone(), child_id.clone()))
                     .collect::<Vec<_>>();
                 let node = Node::new(node.data().clone());
@@ -819,7 +817,7 @@ impl TilingLayout {
                     .push_tree(other_tree, ANIMATION_DURATION, blocker);
 
                 other.node_desc_to_focus(&NodeDesc {
-                    handle: other_handle.clone(),
+                    handle: *other_handle,
                     node: id.clone(),
                     stack_window: None,
                     focus_stack: Vec::new(), // node_desc_to_focus doesn't use this
@@ -915,12 +913,12 @@ impl TilingLayout {
                 // swap children
                 let mut this_children = this_node
                     .children()
-                    .into_iter()
+                    .iter()
                     .map(|child_id| (other_desc.node.clone(), child_id.clone()))
                     .collect::<Vec<_>>();
                 let mut other_children = other_node
                     .children()
-                    .into_iter()
+                    .iter()
                     .map(|child_id| (this_desc.node.clone(), child_id.clone()))
                     .collect::<Vec<_>>();
 
@@ -1070,7 +1068,7 @@ impl TilingLayout {
                     toplevel_leave_workspace(this_surface, &this_desc.handle);
                     toplevel_enter_workspace(this_surface, &other_desc.handle);
                 }
-                this_stack.remove_window(&this_surface);
+                this_stack.remove_window(this_surface);
 
                 let mapped: CosmicMapped = CosmicWindow::new(
                     this_surface.clone(),
@@ -1157,7 +1155,7 @@ impl TilingLayout {
                     toplevel_leave_workspace(other_surface, &other_desc.handle);
                     toplevel_enter_workspace(other_surface, &this_desc.handle);
                 }
-                other_stack.remove_window(&other_surface);
+                other_stack.remove_window(other_surface);
 
                 let mapped: CosmicMapped = CosmicWindow::new(
                     other_surface.clone(),
@@ -1266,12 +1264,12 @@ impl TilingLayout {
         }
 
         match (&this_desc.stack_window, &other_desc.stack_window) {
-            (None, None) if !has_other_tree => this.node_desc_to_focus(&this_desc),
+            (None, None) if !has_other_tree => this.node_desc_to_focus(this_desc),
             //(None, Some(_)) => None,
             _ => other
                 .as_ref()
                 .unwrap_or(&this)
-                .node_desc_to_focus(&other_desc),
+                .node_desc_to_focus(other_desc),
         }
     }
 
@@ -1311,7 +1309,7 @@ impl TilingLayout {
         let state = {
             let tree = &self.queue.trees.back().unwrap().0;
             tree.get(&node_id).unwrap().parent().and_then(|parent_id| {
-                let parent = tree.get(&parent_id).unwrap();
+                let parent = tree.get(parent_id).unwrap();
                 let idx = parent
                     .children()
                     .iter()
@@ -1325,7 +1323,7 @@ impl TilingLayout {
                         // this group will be flattened
                         Some(RestoreTilingState {
                             parent: None,
-                            sibling: parent.children().iter().cloned().find(|id| id != &node_id),
+                            sibling: parent.children().iter().find(|&id| id != &node_id).cloned(),
                             orientation: *orientation,
                             idx,
                             sizes: sizes.clone(),
@@ -1390,7 +1388,7 @@ impl TilingLayout {
             .data_mut();
         *data = Data::Placeholder {
             id: Id::new(),
-            last_geometry: data.geometry().clone(),
+            last_geometry: *data.geometry(),
             type_,
         };
 
@@ -1435,7 +1433,7 @@ impl TilingLayout {
     fn unmap_internal(tree: &mut Tree<Data>, node: &NodeId) {
         let parent_id = tree.get(node).ok().and_then(|node| node.parent()).cloned();
         let position = parent_id.as_ref().and_then(|parent_id| {
-            tree.children_ids(&parent_id)
+            tree.children_ids(parent_id)
                 .unwrap()
                 .position(|id| id == node)
         });
@@ -1470,7 +1468,7 @@ impl TilingLayout {
                         &other_child,
                         parent_parent_id
                             .as_ref()
-                            .map(|parent_id| MoveBehavior::ToParent(parent_id))
+                            .map(MoveBehavior::ToParent)
                             .unwrap_or(MoveBehavior::ToRoot),
                     )
                     .unwrap();
@@ -1736,9 +1734,7 @@ impl TilingLayout {
                                 // we move again by making a new fork
                                 let old_id = tree
                                     .children_ids(&next_child_id)
-                                    .unwrap()
-                                    .skip(group_len / 2)
-                                    .next()
+                                    .unwrap().nth(group_len / 2)
                                     .unwrap()
                                     .clone();
                                 TilingLayout::new_group(
@@ -1887,7 +1883,7 @@ impl TilingLayout {
         let mut node_id = last_node_id.clone();
         while let Some(group) = tree.get(&node_id).unwrap().parent() {
             let child = node_id.clone();
-            let group_data = tree.get(&group).unwrap().data();
+            let group_data = tree.get(group).unwrap().data();
             let main_orientation = group_data.orientation();
             assert!(group_data.is_group());
 
@@ -1908,7 +1904,7 @@ impl TilingLayout {
                     WindowGroup {
                         node: group.clone(),
                         alive: match group_data {
-                            &Data::Group { ref alive, .. } => Arc::downgrade(alive),
+                            Data::Group { alive, .. } => Arc::downgrade(alive),
                             _ => unreachable!(),
                         },
                         focus_stack: match data {
@@ -1925,7 +1921,7 @@ impl TilingLayout {
 
             // which child are we?
             let idx = tree
-                .children_ids(&group)
+                .children_ids(group)
                 .unwrap()
                 .position(|id| id == &child)
                 .unwrap();
@@ -1936,13 +1932,13 @@ impl TilingLayout {
                 | (Orientation::Vertical, FocusDirection::Right)
                     if idx < (len - 1) =>
                 {
-                    tree.children_ids(&group).unwrap().skip(idx + 1).next()
+                    tree.children_ids(group).unwrap().nth(idx + 1)
                 }
                 (Orientation::Horizontal, FocusDirection::Up)
                 | (Orientation::Vertical, FocusDirection::Left)
                     if idx > 0 =>
                 {
-                    tree.children_ids(&group).unwrap().skip(idx - 1).next()
+                    tree.children_ids(group).unwrap().nth(idx - 1)
                 }
                 _ => None, // continue iterating
             };
@@ -1965,7 +1961,7 @@ impl TilingLayout {
                                 Data::Group { alive, .. } => {
                                     FocusResult::Some(KeyboardFocusTarget::Group(WindowGroup {
                                         node: replacement_id.clone(),
-                                        alive: Arc::downgrade(&alive),
+                                        alive: Arc::downgrade(alive),
                                         focus_stack: tree
                                             .children_ids(replacement_id)
                                             .unwrap()
@@ -2653,7 +2649,7 @@ impl TilingLayout {
         }
 
         let mapped = match self.last_overview_hover.as_ref().map(|x| &x.1) {
-            Some(TargetZone::GroupEdge(group_id, direction)) if tree.get(&group_id).is_ok() => {
+            Some(TargetZone::GroupEdge(group_id, direction)) if tree.get(group_id).is_ok() => {
                 let new_id = tree
                     .insert(
                         Node::new(Data::Mapped {
@@ -2671,7 +2667,7 @@ impl TilingLayout {
                     Orientation::Horizontal
                 };
                 if tree.get(group_id).unwrap().data().orientation() != orientation {
-                    TilingLayout::new_group(&mut tree, &group_id, &new_id, orientation).unwrap();
+                    TilingLayout::new_group(&mut tree, group_id, &new_id, orientation).unwrap();
                 } else {
                     let data = tree.get_mut(group_id).unwrap().data_mut();
                     let len = data.len();
@@ -2689,7 +2685,7 @@ impl TilingLayout {
                 *window.tiling_node_id.lock().unwrap() = Some(new_id);
                 window
             }
-            Some(TargetZone::GroupInterior(group_id, idx)) if tree.get(&group_id).is_ok() => {
+            Some(TargetZone::GroupInterior(group_id, idx)) if tree.get(group_id).is_ok() => {
                 let new_id = tree
                     .insert(
                         Node::new(Data::Mapped {
@@ -2710,9 +2706,9 @@ impl TilingLayout {
                 *window.tiling_node_id.lock().unwrap() = Some(new_id);
                 window
             }
-            Some(TargetZone::InitialPlaceholder(node_id)) if tree.get(&node_id).is_ok() => {
-                let data = tree.get_mut(&node_id).unwrap().data_mut();
-                let geo = data.geometry().clone();
+            Some(TargetZone::InitialPlaceholder(node_id)) if tree.get(node_id).is_ok() => {
+                let data = tree.get_mut(node_id).unwrap().data_mut();
+                let geo = *data.geometry();
 
                 *data = Data::Mapped {
                     mapped: window.clone(),
@@ -2722,7 +2718,7 @@ impl TilingLayout {
                 *window.tiling_node_id.lock().unwrap() = Some(node_id.clone());
                 window
             }
-            Some(TargetZone::WindowSplit(window_id, direction)) if tree.get(&window_id).is_ok() => {
+            Some(TargetZone::WindowSplit(window_id, direction)) if tree.get(window_id).is_ok() => {
                 let new_id = tree
                     .insert(
                         Node::new(Data::Mapped {
@@ -2730,7 +2726,7 @@ impl TilingLayout {
                             last_geometry: Rectangle::from_size((100, 100).into()),
                             minimize_rect: None,
                         }),
-                        InsertBehavior::UnderNode(&window_id),
+                        InsertBehavior::UnderNode(window_id),
                     )
                     .unwrap();
                 let orientation = if matches!(direction, Direction::Left | Direction::Right) {
@@ -2738,14 +2734,14 @@ impl TilingLayout {
                 } else {
                     Orientation::Horizontal
                 };
-                TilingLayout::new_group(&mut tree, &window_id, &new_id, orientation).unwrap();
+                TilingLayout::new_group(&mut tree, window_id, &new_id, orientation).unwrap();
                 if matches!(direction, Direction::Left | Direction::Up) {
                     tree.make_first_sibling(&new_id).unwrap();
                 }
                 *window.tiling_node_id.lock().unwrap() = Some(new_id.clone());
                 window
             }
-            Some(TargetZone::WindowStack(window_id, _)) if tree.get(&window_id).is_ok() => {
+            Some(TargetZone::WindowStack(window_id, _)) if tree.get(window_id).is_ok() => {
                 match tree.get_mut(window_id).unwrap().data_mut() {
                     Data::Mapped { mapped, .. } => {
                         mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone());
@@ -2978,7 +2974,7 @@ impl TilingLayout {
             let mut configures = Vec::new();
 
             let (outer, inner) = gaps;
-            let mut geo = layer_map_for_output(&output)
+            let mut geo = layer_map_for_output(output)
                 .non_exclusive_zone()
                 .as_local();
             geo.loc.x += outer;
@@ -3095,7 +3091,7 @@ impl TilingLayout {
                         Data::Mapped { mapped, .. } => {
                             if !(mapped.is_fullscreen(true) || mapped.is_maximized(true)) {
                                 mapped.set_tiled(true);
-                                let internal_geometry = geo.to_global(&output);
+                                let internal_geometry = geo.to_global(output);
                                 mapped.set_geometry(internal_geometry);
                                 if let Some(serial) = mapped.configure() {
                                     configures.push((mapped.active_window(), serial));
@@ -3312,9 +3308,7 @@ impl TilingLayout {
                         (last_geometry.loc
                             + tree
                                 .children(&id)
-                                .unwrap()
-                                .skip(idx)
-                                .next()
+                                .unwrap().nth(idx)
                                 .map(|node| {
                                     let geo = node.data().geometry();
                                     geo.loc + geo.size
@@ -3647,7 +3641,7 @@ impl TilingLayout {
                                     } => true,
                                     _ => false,
                                 })
-                                .map(|node_id| TargetZone::InitialPlaceholder(node_id))
+                                .map(TargetZone::InitialPlaceholder)
                                 .unwrap_or(TargetZone::Initial),
                         ));
                     }
@@ -3684,14 +3678,14 @@ impl TilingLayout {
                                 let removed = if let TargetZone::InitialPlaceholder(node_id) =
                                     old_target_zone
                                 {
-                                    if tree.get(&node_id).is_ok() {
-                                        TilingLayout::unmap_internal(&mut tree, &node_id);
+                                    if tree.get(node_id).is_ok() {
+                                        TilingLayout::unmap_internal(&mut tree, node_id);
                                     }
                                     true
                                 } else if let TargetZone::WindowSplit(node_id, _) = old_target_zone
                                 {
                                     if let Some(children) = tree
-                                        .get(&node_id)
+                                        .get(node_id)
                                         .ok()
                                         .and_then(|node| node.parent())
                                         .and_then(|parent_id| tree.get(parent_id).ok())
@@ -3714,7 +3708,7 @@ impl TilingLayout {
                                     }
                                     true
                                 } else if let TargetZone::GroupEdge(node_id, _) = old_target_zone {
-                                    if let Ok(node) = tree.get_mut(&node_id) {
+                                    if let Ok(node) = tree.get_mut(node_id) {
                                         match node.data_mut() {
                                             Data::Group { pill_indicator, .. } => {
                                                 *pill_indicator = None;
@@ -3726,7 +3720,7 @@ impl TilingLayout {
                                 } else if let TargetZone::GroupInterior(node_id, _) =
                                     old_target_zone
                                 {
-                                    if let Ok(node) = tree.get_mut(&node_id) {
+                                    if let Ok(node) = tree.get_mut(node_id) {
                                         match node.data_mut() {
                                             Data::Group { pill_indicator, .. } => {
                                                 *pill_indicator = None;
@@ -3761,7 +3755,7 @@ impl TilingLayout {
                                         } else {
                                             Orientation::Horizontal
                                         };
-                                    TilingLayout::new_group(&mut tree, &node_id, &id, orientation)
+                                    TilingLayout::new_group(&mut tree, node_id, &id, orientation)
                                         .unwrap();
                                     if matches!(dir, Direction::Left | Direction::Up) {
                                         tree.make_first_sibling(&id).unwrap();
@@ -3771,7 +3765,7 @@ impl TilingLayout {
                                 } else if let TargetZone::GroupEdge(node_id, direction) =
                                     &target_zone
                                 {
-                                    if let Ok(node) = tree.get_mut(&node_id) {
+                                    if let Ok(node) = tree.get_mut(node_id) {
                                         match node.data_mut() {
                                             Data::Group { pill_indicator, .. } => {
                                                 *pill_indicator =
@@ -3785,7 +3779,7 @@ impl TilingLayout {
                                     }
                                 } else if let TargetZone::GroupInterior(node_id, idx) = &target_zone
                                 {
-                                    if let Ok(node) = tree.get_mut(&node_id) {
+                                    if let Ok(node) = tree.get_mut(node_id) {
                                         match node.data_mut() {
                                             Data::Group { pill_indicator, .. } => {
                                                 *pill_indicator = Some(PillIndicator::Inner(*idx));
@@ -3823,9 +3817,7 @@ impl TilingLayout {
 
     pub fn mapped(&self) -> impl Iterator<Item = (&CosmicMapped, Rectangle<i32, Local>)> {
         let tree = &self.queue.trees.back().unwrap().0;
-        let iter = if let Some(root) = tree.root_node_id() {
-            Some(
-                tree.traverse_pre_order(root)
+        let iter = tree.root_node_id().map(|root| tree.traverse_pre_order(root)
                     .unwrap()
                     .filter(|node| node.data().is_mapped(None))
                     .filter(|node| match node.data() {
@@ -3837,7 +3829,7 @@ impl TilingLayout {
                             mapped,
                             last_geometry,
                             ..
-                        } => (mapped, last_geometry.clone()),
+                        } => (mapped, *last_geometry),
                         _ => unreachable!(),
                     })
                     .chain(
@@ -3853,14 +3845,10 @@ impl TilingLayout {
                                     mapped,
                                     last_geometry,
                                     ..
-                                } => (mapped, last_geometry.clone()),
+                                } => (mapped, *last_geometry),
                                 _ => unreachable!(),
                             }),
-                    ),
-            )
-        } else {
-            None
-        };
+                    ));
         iter.into_iter().flatten()
     }
 
@@ -3868,7 +3856,7 @@ impl TilingLayout {
         self.mapped().flat_map(|(mapped, geo)| {
             mapped.windows().map(move |(w, p)| {
                 (w, {
-                    let mut geo = geo.clone();
+                    let mut geo = geo;
                     geo.loc += p.as_local();
                     geo.size -= p.to_size().as_local();
                     geo
@@ -3933,7 +3921,7 @@ impl TilingLayout {
 
             while let Some((src_id, dst_id)) = stack.pop() {
                 for child_id in src.children_ids(&src_id).unwrap() {
-                    let src_node = src.get(&child_id).unwrap();
+                    let src_node = src.get(child_id).unwrap();
                     let new_node = Node::new(src_node.data().clone());
                     let new_child_id = dst
                         .insert(new_node, InsertBehavior::UnderNode(&dst_id))
@@ -4027,7 +4015,7 @@ impl TilingLayout {
                     &self.backdrop_id,
                     is_mouse_tiling,
                     swap_desc.clone(),
-                    overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
+                    overview.1.as_ref().and_then(|(_, tree)| *tree),
                     theme,
                 ))
             } else {
@@ -4064,7 +4052,7 @@ impl TilingLayout {
                 &self.backdrop_id,
                 is_mouse_tiling,
                 swap_desc.clone(),
-                overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
+                overview.1.as_ref().and_then(|(_, tree)| *tree),
                 theme,
             ))
         } else {
@@ -4176,7 +4164,7 @@ impl TilingLayout {
                     &self.backdrop_id,
                     is_mouse_tiling,
                     swap_desc.clone(),
-                    overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
+                    overview.1.as_ref().and_then(|(_, tree)| *tree),
                     theme,
                 ))
             } else {
@@ -4211,7 +4199,7 @@ impl TilingLayout {
                 &self.backdrop_id,
                 is_mouse_tiling,
                 swap_desc.clone(),
-                overview.1.as_ref().and_then(|(_, tree)| tree.clone()),
+                overview.1.as_ref().and_then(|(_, tree)| *tree),
                 theme,
             ))
         } else {
@@ -4326,14 +4314,10 @@ where
             seat.get_keyboard()
                 .unwrap()
                 .current_focus()
-                .and_then(|target| TilingLayout::currently_focused_node(&tree, target))
+                .and_then(|target| TilingLayout::currently_focused_node(tree, target))
         })
         .map(|(id, _)| id);
-    let focused_geo = if let Some(focused_id) = focused.as_ref() {
-        Some(*tree.get(focused_id).unwrap().data().geometry())
-    } else {
-        None
-    };
+    let focused_geo = focused.as_ref().map(|focused_id| *tree.get(focused_id).unwrap().data().geometry());
 
     let has_potential_groups = if let Some(focused_id) = focused.as_ref() {
         let focused_node = tree.get(focused_id).unwrap();
@@ -4510,7 +4494,7 @@ where
                                 .parent()
                                 .map(|parent_id| {
                                     matches!(
-                                        tree.get(&parent_id).unwrap().data(),
+                                        tree.get(parent_id).unwrap().data(),
                                         Data::Group {
                                             pill_indicator: Some(_),
                                             ..
@@ -4630,7 +4614,7 @@ where
                         };
                     }
 
-                    if matches!(swap_desc, Some(ref desc) if &desc.node == &node_id) {
+                    if matches!(swap_desc, Some(ref desc) if desc.node == node_id) {
                         if let Some(renderer) = renderer.as_mut() {
                             elements.push(
                                 BackdropShader::element(
@@ -4855,7 +4839,7 @@ where
                         geo.size -= (WINDOW_BACKDROP_GAP * 2, WINDOW_BACKDROP_GAP * 2).into();
                     }
 
-                    if matches!(swap_desc, Some(ref desc) if &desc.node == &node_id && desc.stack_window.is_none())
+                    if matches!(swap_desc, Some(ref desc) if desc.node == node_id && desc.stack_window.is_none())
                     {
                         let swap_geo = swap_geometry(
                             geo.size.as_logical(),
@@ -5092,8 +5076,8 @@ fn render_old_tree(
                 }
 
                 let (scale, offset) = scaled_geo
-                    .map(|adapted_geo| scale_to_center(&original_geo, &adapted_geo))
-                    .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
+                    .map(|adapted_geo| scale_to_center(original_geo, &adapted_geo))
+                    .unwrap_or_else(|| (1.0, (0, 0).into()));
                 let geo = scaled_geo
                     .map(|adapted_geo| {
                         Rectangle::new(
@@ -5206,7 +5190,7 @@ where
             seat.get_keyboard()
                 .unwrap()
                 .current_focus()
-                .and_then(|target| TilingLayout::currently_focused_node(&target_tree, target))
+                .and_then(|target| TilingLayout::currently_focused_node(target_tree, target))
         })
         .map(|(id, _)| id);
     let focused_geo = if let Some(focused) = focused.as_ref() {
@@ -5275,7 +5259,7 @@ where
         let swap_geo = ease(
             Linear,
             EaseRectangle({
-                let mut geo = focused_geo.clone();
+                let mut geo = focused_geo;
                 geo.loc.x += STACK_TAB_HEIGHT;
                 geo.size.h -= STACK_TAB_HEIGHT;
                 geo
@@ -5344,7 +5328,7 @@ where
                 || focused.as_ref() == Some(&node_id)
             {
                 if indicator_thickness > 0 || data.is_group() {
-                    let mut geo = geo.clone();
+                    let mut geo = geo;
 
                     if data.is_group() {
                         let outer_gap: i32 = (if is_overview { GAP_KEYBOARD } else { 4 } as f32
@@ -5437,7 +5421,7 @@ where
                 }
 
                 if let Some((mode, resize)) = resize_indicator.as_mut() {
-                    let mut geo = geo.clone();
+                    let mut geo = geo;
                     geo.loc -= (18, 18).into();
                     geo.size += (36, 36).into();
 
@@ -5572,7 +5556,7 @@ where
                 if swap_desc
                     .as_ref()
                     .map(|swap_desc| {
-                        (&swap_desc.node == &node_id
+                        (swap_desc.node == node_id
                             || target_tree
                                 .ancestor_ids(&node_id)
                                 .unwrap()
@@ -5582,12 +5566,10 @@ where
                     .unwrap_or(false)
                 {
                     swap_elements.extend(elements);
+                } else if animating {
+                    animating_window_elements.extend(elements);
                 } else {
-                    if animating {
-                        animating_window_elements.extend(elements);
-                    } else {
-                        window_elements.extend(elements);
-                    }
+                    window_elements.extend(elements);
                 }
             }
         },
@@ -5666,7 +5648,7 @@ fn render_new_tree(
                 let (scale, offset) = old_scaled_geo
                     .unwrap()
                     .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
-                    .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
+                    .unwrap_or_else(|| (1.0, (0, 0).into()));
                 (
                     old_scaled_geo
                         .unwrap()
@@ -5694,7 +5676,7 @@ fn render_new_tree(
 
             let (scale, offset) = scaled_geo
                 .map(|adapted_geo| scale_to_center(original_geo, adapted_geo))
-                .unwrap_or_else(|| (1.0.into(), (0, 0).into()));
+                .unwrap_or_else(|| (1.0, (0, 0).into()));
             let new_geo = scaled_geo
                 .map(|adapted_geo| {
                     Rectangle::new(

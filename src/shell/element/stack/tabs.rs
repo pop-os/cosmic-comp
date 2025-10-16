@@ -125,7 +125,7 @@ impl Offset {
 const SCROLL_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 const TAB_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 
-impl<'a, Message> Tabs<'a, Message>
+impl<Message> Tabs<'_, Message>
 where
     Message: TabMessage + 'static,
 {
@@ -308,7 +308,7 @@ impl State {
     }
 }
 
-impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for Tabs<'a, Message>
+impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for Tabs<'_, Message>
 where
     Message: TabMessage,
 {

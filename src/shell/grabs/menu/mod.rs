@@ -381,7 +381,7 @@ impl Program for ContextMenu {
             .row_width
             .lock()
             .unwrap()
-            .map(|size| Length::Fixed(size))
+            .map(Length::Fixed)
             .unwrap_or(Length::Shrink);
         let mode = match width {
             Length::Shrink => Length::Shrink,
@@ -968,8 +968,7 @@ impl MenuAlignment {
                         size,
                         AxisAlignment::Centered,
                         AxisAlignment::Corner(0),
-                    )
-                    .into_iter(),
+                    ),
                 )
                 .chain(
                     for_alignment(
@@ -977,8 +976,7 @@ impl MenuAlignment {
                         size,
                         AxisAlignment::Corner(0),
                         AxisAlignment::Centered,
-                    )
-                    .into_iter(),
+                    ),
                 )
                 .chain(
                     for_alignment(
@@ -986,15 +984,14 @@ impl MenuAlignment {
                         size,
                         AxisAlignment::Corner(0),
                         AxisAlignment::Corner(0),
-                    )
-                    .into_iter(),
+                    ),
                 )
                 .collect(),
                 (AxisAlignment::PreferCentered, y) => {
                     for_alignment(position, size, AxisAlignment::Centered, y)
                         .into_iter()
                         .chain(
-                            for_alignment(position, size, AxisAlignment::Corner(0), y).into_iter(),
+                            for_alignment(position, size, AxisAlignment::Corner(0), y),
                         )
                         .collect()
                 }
@@ -1002,7 +999,7 @@ impl MenuAlignment {
                     for_alignment(position, size, x, AxisAlignment::Centered)
                         .into_iter()
                         .chain(
-                            for_alignment(position, size, x, AxisAlignment::Corner(0)).into_iter(),
+                            for_alignment(position, size, x, AxisAlignment::Corner(0)),
                         )
                         .collect()
                 }

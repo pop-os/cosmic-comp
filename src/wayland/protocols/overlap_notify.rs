@@ -120,7 +120,7 @@ impl OverlapNotifyState {
 
                                     w.is_sticky()
                                         || active_workspaces.iter().any(|active_workspace| {
-                                            state.in_workspace(&active_workspace)
+                                            state.in_workspace(active_workspace)
                                         })
                                 })
                         {
@@ -208,8 +208,8 @@ impl LayerOverlapNotificationDataInternal {
                 }
             }
         }
-        for (_, (identifier, namespace, exclusive, layer, overlap)) in
-            &self.last_snapshot.layer_overlaps
+        for (identifier, namespace, exclusive, layer, overlap) in
+            self.last_snapshot.layer_overlaps.values()
         {
             new_notification.layer_enter(
                 identifier.clone(),
@@ -414,22 +414,19 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut smithay::reexports::wayland_server::DataInit<'_, D>,
     ) {
-        match request {
-            zcosmic_overlap_notify_v1::Request::NotifyOnOverlap {
+        if let zcosmic_overlap_notify_v1::Request::NotifyOnOverlap {
                 overlap_notification,
                 layer_surface,
-            } => {
-                let notification = data_init.init(overlap_notification, ());
-                if let Some(surface) = state.layer_surface_from_resource(layer_surface) {
-                    let mut data = surface
-                        .user_data()
-                        .get_or_insert_threadsafe(LayerOverlapNotificationData::default)
-                        .lock()
-                        .unwrap();
-                    data.add_notification(notification);
-                }
+            } = request {
+            let notification = data_init.init(overlap_notification, ());
+            if let Some(surface) = state.layer_surface_from_resource(layer_surface) {
+                let mut data = surface
+                    .user_data()
+                    .get_or_insert_threadsafe(LayerOverlapNotificationData::default)
+                    .lock()
+                    .unwrap();
+                data.add_notification(notification);
             }
-            _ => {}
         }
     }
 
@@ -461,9 +458,7 @@ where
         _dhandle: &DisplayHandle,
         _data_init: &mut smithay::reexports::wayland_server::DataInit<'_, D>,
     ) {
-        match request {
-            _ => {}
-        }
+        {}
     }
 }
 

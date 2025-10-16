@@ -2,7 +2,7 @@ use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
 use smithay::{
     backend::drm::VrrSupport as Support,
     output::{Output, WeakOutput},
-    utils::{Rectangle, Transform},
+    utils::Rectangle,
 };
 
 pub use super::geometry::*;
@@ -50,7 +50,7 @@ impl OutputExt for Output {
 
     fn geometry(&self) -> Rectangle<i32, Global> {
         Rectangle::new(self.current_location(), {
-            Transform::from(self.current_transform())
+            self.current_transform()
                 .transform_size(
                     self.current_mode()
                         .map(|m| m.size)
@@ -104,13 +104,12 @@ impl OutputExt for Output {
     fn adaptive_sync_support(&self) -> Option<Support> {
         self.user_data()
             .get::<VrrSupport>()
-            .map(|vrr| match vrr.0.load(Ordering::SeqCst) {
+            .and_then(|vrr| match vrr.0.load(Ordering::SeqCst) {
                 0 => None,
                 2 => Some(Support::RequiresModeset),
                 3 => Some(Support::Supported),
                 _ => Some(Support::NotSupported),
             })
-            .flatten()
     }
 
     fn set_adaptive_sync_support(&self, vrr: Option<Support>) {

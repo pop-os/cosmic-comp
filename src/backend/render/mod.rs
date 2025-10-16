@@ -93,7 +93,7 @@ pub enum RendererRef<'a> {
     GlMulti(GlMultiRenderer<'a>),
 }
 
-impl<'a> AsRef<GlowRenderer> for RendererRef<'a> {
+impl AsRef<GlowRenderer> for RendererRef<'_> {
     fn as_ref(&self) -> &GlowRenderer {
         match self {
             Self::Glow(renderer) => renderer,
@@ -102,7 +102,7 @@ impl<'a> AsRef<GlowRenderer> for RendererRef<'a> {
     }
 }
 
-impl<'a> AsMut<GlowRenderer> for RendererRef<'a> {
+impl AsMut<GlowRenderer> for RendererRef<'_> {
     fn as_mut(&mut self) -> &mut GlowRenderer {
         match self {
             Self::Glow(renderer) => renderer,
@@ -442,8 +442,8 @@ where
     let (focal_point, zoom_scale) = zoom_state
         .map(|state| {
             (
-                state.animating_focal_point(Some(&output)).to_local(&output),
-                state.animating_level(&output),
+                state.animating_focal_point(Some(output)).to_local(output),
+                state.animating_level(output),
             )
         })
         .unwrap_or_else(|| ((0., 0.).into(), 1.));
@@ -460,7 +460,7 @@ where
             elements.extend(
                 cursor::draw_cursor(
                     renderer,
-                    &seat,
+                    seat,
                     location,
                     scale.into(),
                     zoom_scale,
@@ -486,7 +486,7 @@ where
         }
 
         if !exclude_dnd_icon {
-            if let Some(dnd_icon) = get_dnd_icon(&seat) {
+            if let Some(dnd_icon) = get_dnd_icon(seat) {
                 elements.extend(
                     cursor::draw_dnd_icon(
                         renderer,
@@ -620,7 +620,7 @@ where
         return Ok(debug_elements);
     };
 
-    let (previous_idx, idx) = shell_guard.workspaces.active_num(&output);
+    let (previous_idx, idx) = shell_guard.workspaces.active_num(output);
     let previous_workspace = previous_workspace
         .zip(previous_idx)
         .map(|((w, start), idx)| (w.handle, idx, start));
@@ -694,7 +694,7 @@ where
     elements.extend(cursor_elements(
         renderer,
         seats.iter(),
-        zoom_level.clone(),
+        zoom_level,
         &theme,
         now,
         output,
@@ -752,8 +752,8 @@ where
     let (focal_point, zoom_scale) = zoom_level
         .map(|state| {
             (
-                state.animating_focal_point(Some(&output)).to_local(&output),
-                state.animating_level(&output),
+                state.animating_focal_point(Some(output)).to_local(output),
+                state.animating_level(output),
             )
         })
         .unwrap_or_else(|| ((0., 0.).into(), 1.));
@@ -761,7 +761,7 @@ where
     let crop_to_output = |element: WorkspaceRenderElement<R>| {
         CropRenderElement::from_element(
             RescaleRenderElement::from_element(
-                element.into(),
+                element,
                 focal_point
                     .as_logical()
                     .to_physical(output.current_scale().fractional_scale())
@@ -774,7 +774,7 @@ where
     };
 
     render_input_order::<()>(
-        &*shell,
+        &shell,
         output,
         previous,
         current,
@@ -817,7 +817,7 @@ where
                     elements.extend(
                         render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
                             renderer,
-                            &layer.wl_surface(),
+                            layer.wl_surface(),
                             location
                                 .to_local(output)
                                 .as_logical()
@@ -917,7 +917,7 @@ where
                                 resize_indicator.clone(),
                                 active_hint,
                                 alpha,
-                                &theme.cosmic(),
+                                theme.cosmic(),
                             )
                             .into_iter()
                             .map(Into::into)
@@ -932,7 +932,7 @@ where
                             last_active_seat,
                             !move_active && is_active_space,
                             overview.clone(),
-                            &theme.cosmic(),
+                            theme.cosmic(),
                         ) {
                             Ok(elements) => {
                                 elements
@@ -963,7 +963,7 @@ where
                             overview.clone(),
                             resize_indicator.clone(),
                             active_hint,
-                            &theme.cosmic(),
+                            theme.cosmic(),
                         ) {
                             Ok(elements) => {
                                 elements
@@ -1344,7 +1344,7 @@ where
             for (session, frame) in output.take_pending_frames() {
                 if let Some(pending_image_copy_data) = render_session::<_, _, GlesTexture>(
                     renderer,
-                    &session.user_data().get::<SessionData>().unwrap(),
+                    session.user_data().get::<SessionData>().unwrap(),
                     frame,
                     output.current_transform(),
                     |buffer, renderer, offscreen, dt, age, additional_damage| {
@@ -1496,7 +1496,7 @@ where
     )?;
 
     if let Some(additional_damage) = additional_damage {
-        let output_geo = output.geometry().to_local(&output).as_logical();
+        let output_geo = output.geometry().to_local(output).as_logical();
         elements.extend(
             additional_damage
                 .into_iter()

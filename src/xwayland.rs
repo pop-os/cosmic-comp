@@ -143,7 +143,6 @@ impl State {
             Err(err) => {
                 error!(?err, "Failed to listen for Xwayland");
                 self.notify_ready();
-                return;
             }
         }
     }
@@ -188,7 +187,7 @@ fn scale_cursor(
         &[Rectangle::new((0, 0).into(), output_size)],
     )?;
     let sync = frame.finish()?;
-    while let Err(_) = sync.wait() {}
+    while sync.wait().is_err() {}
 
     let len = (buffer_size.w * buffer_size.h * 4) as usize;
     let mut data = Vec::with_capacity(len);
@@ -750,7 +749,7 @@ impl XwmHandler for State {
         {
             shell.pending_activations.insert(
                 crate::shell::ActivationKey::X11(window.window_id()),
-                context.clone(),
+                *context,
             );
         }
 
@@ -771,10 +770,8 @@ impl XwmHandler for State {
             .find(|pending| pending.surface.x11_surface() == Some(&surface))
             .map(|pending| pending.surface.clone())
         {
-            if !shell
-                .pending_activations
-                .contains_key(&crate::shell::ActivationKey::X11(surface.window_id()))
-            {
+            if let std::collections::hash_map::Entry::Vacant(e) = shell
+                .pending_activations.entry(crate::shell::ActivationKey::X11(surface.window_id())) {
                 if let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id()) {
                     if let Some(context) = self
                         .common
@@ -782,10 +779,7 @@ impl XwmHandler for State {
                         .data_for_token(&XdgActivationToken::from(startup_id))
                         .and_then(|data| data.user_data.get::<ActivationContext>())
                     {
-                        shell.pending_activations.insert(
-                            crate::shell::ActivationKey::X11(surface.window_id()),
-                            context.clone(),
-                        );
+                        e.insert(*context);
                     }
                 }
             }
@@ -875,7 +869,7 @@ impl XwmHandler for State {
                     set.sticky_layer
                         .element_geometry(mapped)
                         .unwrap()
-                        .to_global(&output),
+                        .to_global(output),
                 )
             } else {
                 None
@@ -1100,14 +1094,12 @@ impl XwmHandler for State {
             if should_focus {
                 Shell::set_focus(self, Some(&target), &seat, None, true);
             }
-        } else {
-            if let Some(pending) = shell
-                .pending_windows
-                .iter_mut()
-                .find(|pending| pending.surface.x11_surface() == Some(&window))
-            {
-                pending.fullscreen.take();
-            }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.fullscreen.take();
         }
     }
 

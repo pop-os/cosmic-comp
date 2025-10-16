@@ -141,11 +141,10 @@ where
                             surface.wl_surface(),
                             move |_, _dh, surface| {
                                 let corner_radii_too_big = with_states(surface, |surface_data| {
-                                    let corners = surface_data
+                                    let corners = *surface_data
                                         .cached_state
                                         .get::<CacheableCorners>()
-                                        .pending()
-                                        .clone();
+                                        .pending();
                                     surface_data
                                         .cached_state
                                         .get::<SurfaceCachedState>()

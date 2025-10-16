@@ -350,7 +350,7 @@ where
             let retain =
                 wl_output.is_alive() && group.outputs.iter().any(|output| output.owns(wl_output));
             if !retain {
-                instance.output_leave(&wl_output);
+                instance.output_leave(wl_output);
                 changed = true;
             }
             retain
@@ -361,7 +361,7 @@ where
 
     if handle_state.capabilities != Some(group.capabilities) {
         instance.capabilities(group.capabilities);
-        handle_state.capabilities = Some(group.capabilities.clone());
+        handle_state.capabilities = Some(group.capabilities);
         changed = true;
     }
 

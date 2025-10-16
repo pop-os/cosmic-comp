@@ -37,6 +37,12 @@ pub struct Seats {
     last_active: Option<Seat<State>>,
 }
 
+impl Default for Seats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Seats {
     pub fn new() -> Seats {
         Seats {
@@ -131,7 +137,7 @@ impl Devices {
 
         let mut map = self.capabilities.borrow_mut();
         map.remove(&id)
-            .unwrap_or(Vec::new())
+            .unwrap_or_default()
             .into_iter()
             .filter(|c| map.values().flatten().all(|has| *c != *has))
             .collect()

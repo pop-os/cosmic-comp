@@ -86,7 +86,7 @@ pub struct NumlockStateConfig {
 
 pub struct CompOutputConfig<'a>(pub Ref<'a, OutputConfig>);
 
-impl<'a> CompOutputConfig<'a> {
+impl CompOutputConfig<'_> {
     pub fn mode_size(&self) -> Size<i32, Physical> {
         self.0.mode.0.into()
     }
@@ -153,7 +153,7 @@ pub struct ScreenFilter {
 
 impl ScreenFilter {
     pub fn is_noop(&self) -> bool {
-        self.inverted == false && self.color_filter.is_none()
+        !self.inverted && self.color_filter.is_none()
     }
 }
 
@@ -582,7 +582,7 @@ impl Config {
                 )
             })
             .collect::<Vec<(OutputInfo, OutputConfig)>>();
-        infos.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
+        infos.sort_by(|(a, _), (b, _)| a.cmp(b));
         let (infos, configs) = infos.into_iter().unzip();
         self.dynamic_conf
             .outputs_mut()
@@ -642,20 +642,20 @@ impl Config {
 
 pub struct PersistenceGuard<'a, T: Serialize>(Option<PathBuf>, &'a mut T);
 
-impl<'a, T: Serialize> std::ops::Deref for PersistenceGuard<'a, T> {
+impl<T: Serialize> std::ops::Deref for PersistenceGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {
-        &self.1
+        self.1
     }
 }
 
-impl<'a, T: Serialize> std::ops::DerefMut for PersistenceGuard<'a, T> {
+impl<T: Serialize> std::ops::DerefMut for PersistenceGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
-        &mut self.1
+        self.1
     }
 }
 
-impl<'a, T: Serialize> Drop for PersistenceGuard<'a, T> {
+impl<T: Serialize> Drop for PersistenceGuard<'_, T> {
     fn drop(&mut self) {
         if let Some(path) = self.0.as_ref() {
             let content = match ron::ser::to_string_pretty(&self.1, Default::default()) {

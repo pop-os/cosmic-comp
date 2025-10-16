@@ -239,7 +239,7 @@ pub(super) struct TabInternal<'a, Message: TabMessage> {
     right_click_message: Option<Message>,
 }
 
-impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabInternal<'a, Message>
+impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabInternal<'_, Message>
 where
     Message: TabMessage,
 {

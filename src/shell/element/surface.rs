@@ -81,14 +81,13 @@ impl From<X11Surface> for CosmicSurface {
 
 impl PartialEq<WlSurface> for CosmicSurface {
     fn eq(&self, other: &WlSurface) -> bool {
-        self.wl_surface().map_or(false, |s| &*s == other)
+        self.wl_surface().is_some_and(|s| &*s == other)
     }
 }
 
 impl PartialEq<ToplevelSurface> for CosmicSurface {
     fn eq(&self, other: &ToplevelSurface) -> bool {
-        self.wl_surface()
-            .map_or(false, |s| &*s == other.wl_surface())
+        self.wl_surface().is_some_and(|s| &*s == other.wl_surface())
     }
 }
 
@@ -280,7 +279,7 @@ impl CosmicSurface {
             WindowSurface::Wayland(toplevel) => {
                 if enable {
                     let previous_decoration_state =
-                        toplevel.current_state().decoration_mode.clone();
+                        toplevel.current_state().decoration_mode;
                     if PreferredDecorationMode::is_unset(&self.0) {
                         PreferredDecorationMode::update(&self.0, previous_decoration_state);
                     }
@@ -639,10 +638,8 @@ impl CosmicSurface {
             return false;
         };
 
-        if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-            if *toplevel == *surface {
-                return true;
-            }
+        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && *toplevel == *surface {
+            return true;
         }
 
         if surface_type.contains(WindowSurfaceType::SUBSURFACE) {

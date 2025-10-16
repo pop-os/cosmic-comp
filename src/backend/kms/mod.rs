@@ -135,7 +135,7 @@ pub fn init_backend(
     // manually add already present gpus
     let mut outputs = Vec::new();
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
-        match state.device_added(dev, path.into(), dh) {
+        match state.device_added(dev, path, dh) {
             Ok(added) => outputs.extend(added),
             Err(err) => warn!("Failed to add device {}: {:?}", path.display(), err),
         }
@@ -169,7 +169,7 @@ pub fn init_backend(
     }
 
     // start x11
-    let primary = state.backend.kms().primary_node.read().unwrap().clone();
+    let primary = *state.backend.kms().primary_node.read().unwrap();
     state.launch_xwayland(primary);
 
     Ok(())
@@ -209,7 +209,7 @@ fn init_libinput(
     .context("Failed to initialize libinput event source")?;
 
     // Create relative pointer global
-    RelativePointerManagerState::new::<State>(&dh);
+    RelativePointerManagerState::new::<State>(dh);
 
     Ok(libinput_context)
 }
@@ -239,7 +239,7 @@ fn determine_primary_gpu(
     // try to find builtin display
     for dev in drm_devices.values() {
         if dev.inner.surfaces.values().any(|s| {
-            if let Some(conn_info) = dev.drm.device().get_connector(s.connector, false).ok() {
+            if let Ok(conn_info) = dev.drm.device().get_connector(s.connector, false) {
                 let i = conn_info.interface();
                 i == Interface::EmbeddedDisplayPort || i == Interface::LVDS || i == Interface::DSI
             } else {
@@ -392,7 +392,7 @@ impl State {
                     }
                 } else {
                     let dh = state.common.display_handle.clone();
-                    match state.device_added(dev, path.into(), &dh) {
+                    match state.device_added(dev, path, &dh) {
                         Ok(outputs) => added.extend(outputs),
                         Err(err) => error!(?err, "Failed to add drm device {}.", path.display(),),
                     }
@@ -465,7 +465,7 @@ impl KmsState {
                         if let Some(state) = self.syncobj_state.as_mut() {
                             state.update_device(import_device);
                         } else {
-                            let syncobj_state = DrmSyncobjState::new::<State>(&dh, import_device);
+                            let syncobj_state = DrmSyncobjState::new::<State>(dh, import_device);
                             self.syncobj_state = Some(syncobj_state);
                         }
                         return Ok(());
@@ -646,7 +646,7 @@ impl KmsState {
     }
 }
 
-impl<'a> KmsGuard<'a> {
+impl KmsGuard<'_> {
     pub fn schedule_render(&mut self, output: &Output) {
         for surface in self
             .drm_devices
@@ -755,7 +755,7 @@ impl<'a> KmsGuard<'a> {
                 .crtcs()
                 .iter()
                 .filter(|crtc| {
-                    !device.inner.surfaces.get(crtc).is_some()
+                    device.inner.surfaces.get(crtc).is_none()
                     // TODO: We can't do this. See https://github.com/Smithay/smithay/pull/1820
                     //.is_some_and(|surface| surface.output.is_enabled())
                 })
@@ -915,7 +915,7 @@ impl<'a> KmsGuard<'a> {
                                     &mut renderer,
                                     &shell,
                                     now,
-                                    &output,
+                                    output,
                                     CursorMode::All,
                                     None,
                                 )
@@ -1024,7 +1024,7 @@ impl<'a> KmsGuard<'a> {
                                 &mut renderer,
                                 &shell,
                                 now,
-                                &output,
+                                output,
                                 CursorMode::All,
                                 None,
                             )
@@ -1068,7 +1068,7 @@ impl<'a> KmsGuard<'a> {
                         &mut renderer,
                         &shell,
                         now,
-                        &output,
+                        output,
                         CursorMode::All,
                         None,
                     )
@@ -1103,10 +1103,8 @@ impl<'a> KmsGuard<'a> {
                         None
                     };
 
-                if !test_only {
-                    if mirrored_output != surface.output.mirroring() {
-                        surface.set_mirroring(mirrored_output.clone());
-                    }
+                if !test_only && mirrored_output != surface.output.mirroring() {
+                    surface.set_mirroring(mirrored_output.clone());
                 }
             }
         }

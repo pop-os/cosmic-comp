@@ -241,10 +241,7 @@ impl CosmicMapped {
     }
 
     pub fn focus_window(&self, window: &CosmicSurface) {
-        match &self.element {
-            CosmicMappedInternal::Stack(stack) => stack.set_active(window),
-            _ => {}
-        }
+        if let CosmicMappedInternal::Stack(stack) = &self.element { stack.set_active(window) }
     }
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
@@ -446,7 +443,7 @@ impl CosmicMapped {
     pub fn set_bounds(&self, size: impl Into<Option<Size<i32, Logical>>>) {
         let size = size.into();
         for (surface, _) in self.windows() {
-            surface.set_bounds(size.clone())
+            surface.set_bounds(size)
         }
     }
 
@@ -508,24 +505,21 @@ impl CosmicMapped {
         (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
     ) {
-        match &self.element {
-            CosmicMappedInternal::Window(window) => {
-                let surface = window.surface();
-                let activated = surface.is_activated(true);
-                let handle = window.loop_handle();
+        if let CosmicMappedInternal::Window(window) = &self.element {
+            let surface = window.surface();
+            let activated = surface.is_activated(true);
+            let handle = window.loop_handle();
 
-                let stack = CosmicStack::new(std::iter::once(surface), handle, theme);
-                if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
-                    stack.set_geometry(geo.to_global(&output));
-                }
-                stack.output_enter(output, overlap);
-                stack.set_activate(activated);
-                stack.active().send_configure();
-                stack.refresh();
-
-                self.element = CosmicMappedInternal::Stack(stack);
+            let stack = CosmicStack::new(std::iter::once(surface), handle, theme);
+            if let Some(geo) = *self.last_geometry.lock().unwrap() {
+                stack.set_geometry(geo.to_global(output));
             }
-            _ => {}
+            stack.output_enter(output, overlap);
+            stack.set_activate(activated);
+            stack.active().send_configure();
+            stack.refresh();
+
+            self.element = CosmicMappedInternal::Stack(stack);
         }
     }
 
@@ -540,8 +534,8 @@ impl CosmicMapped {
         surface.set_tiled(false);
         let window = CosmicWindow::new(surface, handle, theme);
 
-        if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
-            window.set_geometry(geo.to_global(&output));
+        if let Some(geo) = *self.last_geometry.lock().unwrap() {
+            window.set_geometry(geo.to_global(output));
         }
         window.output_enter(output, overlap);
         window.set_activate(self.is_activated(true));
@@ -843,7 +837,7 @@ impl CosmicMapped {
     pub fn ssd_height(&self, pending: bool) -> Option<i32> {
         match &self.element {
             CosmicMappedInternal::Window(w) => (!w.surface().is_decorated(pending))
-                .then(|| crate::shell::element::window::SSD_HEIGHT),
+                .then_some(crate::shell::element::window::SSD_HEIGHT),
             CosmicMappedInternal::Stack(_) => Some(crate::shell::element::stack::TAB_HEIGHT),
             _ => unreachable!(),
         }

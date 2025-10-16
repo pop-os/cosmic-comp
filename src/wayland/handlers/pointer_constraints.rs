@@ -16,8 +16,7 @@ impl PointerConstraintsHandler for State {
     fn new_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
         // XXX region
         if pointer
-            .current_focus()
-            .map_or(false, |x| x.wl_surface().as_deref() == Some(surface))
+            .current_focus().is_some_and(|x| x.wl_surface().as_deref() == Some(surface))
         {
             with_pointer_constraint(surface, pointer, |constraint| {
                 constraint.unwrap().activate();

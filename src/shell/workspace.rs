@@ -578,7 +578,7 @@ impl Workspace {
     pub fn unmap_element(&mut self, mapped: &CosmicMapped) -> Option<WorkspaceRestoreData> {
         let was_maximized = if mapped.maximized_state.lock().unwrap().is_some() {
             // If surface is maximized then unmaximize it, so it is assigned to only one layer
-            self.unmaximize_request(&mapped)
+            self.unmaximize_request(mapped)
         } else {
             None
         };
@@ -601,7 +601,7 @@ impl Workspace {
             });
         }
 
-        if let Ok(state) = self.tiling_layer.unmap(&mapped, None) {
+        if let Ok(state) = self.tiling_layer.unmap(mapped, None) {
             return Some(WorkspaceRestoreData::Tiling(Some(TilingRestoreData {
                 state,
                 was_maximized: was_maximized.is_some(),
@@ -610,7 +610,7 @@ impl Workspace {
 
         // unmaximize_request might have triggered a `floating_layer.refresh()`,
         // which may have already removed a non-alive surface.
-        if let Some(floating_geometry) = self.floating_layer.unmap(&mapped, None).or(was_maximized)
+        if let Some(floating_geometry) = self.floating_layer.unmap(mapped, None).or(was_maximized)
         {
             return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
                 geometry: floating_geometry,
@@ -667,10 +667,8 @@ impl Workspace {
         if let Some(stack) = maybe_stack {
             if stack.len() > 1 {
                 let idx = stack.surfaces().position(|s| &s == surface);
-                let layer = self
-                    .is_tiled(surface)
-                    .then_some(ManagedLayer::Tiling)
-                    .unwrap_or(ManagedLayer::Floating);
+                let layer = if self
+                    .is_tiled(surface) { ManagedLayer::Tiling } else { ManagedLayer::Floating };
                 return idx
                     .and_then(|idx| stack.remove_idx(idx))
                     .map(|s| (s, layer.into()));
@@ -856,14 +854,14 @@ impl Workspace {
         self.fullscreen
             .as_ref()
             .filter(|f| last_focused.is_some_and(|t| t == &f.surface))
-            .and_then(|f| check_fullscreen(f))
+            .and_then(check_fullscreen)
             .or_else(|| self.floating_layer.popup_surface_under(location))
             .or_else(|| self.tiling_layer.popup_surface_under(location, overview))
             .or_else(|| {
                 self.fullscreen
                     .as_ref()
                     .filter(|f| last_focused.is_none_or(|t| t != &f.surface))
-                    .and_then(|f| check_fullscreen(f))
+                    .and_then(check_fullscreen)
             })
             .map(|(m, p)| (m, p.to_global(&self.output)))
     }
@@ -909,14 +907,14 @@ impl Workspace {
         self.fullscreen
             .as_ref()
             .filter(|f| last_focused.is_some_and(|t| t == &f.surface))
-            .and_then(|f| check_fullscreen(f))
+            .and_then(check_fullscreen)
             .or_else(|| self.floating_layer.toplevel_surface_under(location))
             .or_else(|| self.tiling_layer.toplevel_surface_under(location, overview))
             .or_else(|| {
                 self.fullscreen
                     .as_ref()
                     .filter(|f| last_focused.is_none_or(|t| t != &f.surface))
-                    .and_then(|f| check_fullscreen(f))
+                    .and_then(check_fullscreen)
             })
             .map(|(m, p)| (m, p.to_global(&self.output)))
     }
@@ -952,8 +950,8 @@ impl Workspace {
                 match state.original_layer {
                     ManagedLayer::Tiling if self.tiling_enabled => {
                         // should still be mapped in tiling
-                        let geo = self.tiling_layer.element_geometry(&elem);
-                        self.floating_layer.unmap(&elem, geo);
+                        let geo = self.tiling_layer.element_geometry(elem);
+                        self.floating_layer.unmap(elem, geo);
                         elem.output_enter(&self.output, elem.bbox());
                         elem.set_maximized(false);
                         elem.set_geometry(state.original_geometry.to_global(&self.output));
@@ -1252,7 +1250,7 @@ impl Workspace {
             Some((
                 surface.surface.clone(),
                 surface.previous_state.clone(),
-                surface.previous_geometry.clone(),
+                surface.previous_geometry,
             ))
         } else {
             None
@@ -1360,7 +1358,7 @@ impl Workspace {
                 self.floating_layer.map(window.clone(), None);
             } else if self.floating_layer.mapped().any(|w| w == window) {
                 let focus_stack = self.focus_stack.get(seat);
-                self.floating_layer.unmap(&window, None);
+                self.floating_layer.unmap(window, None);
                 self.tiling_layer
                     .map(window.clone(), Some(focus_stack.iter()), None)
             }
@@ -1446,7 +1444,7 @@ impl Workspace {
                             .unwrap()
                             .clone()
                             .map(|node_id| NodeDesc {
-                                handle: self.handle.clone(),
+                                handle: self.handle,
                                 node: node_id.clone(),
                                 stack_window: if mapped
                                     .stack_ref()
@@ -1467,7 +1465,7 @@ impl Workspace {
             KeyboardFocusTarget::Group(WindowGroup {
                 node, focus_stack, ..
             }) => Some(NodeDesc {
-                handle: self.handle.clone(),
+                handle: self.handle,
                 node,
                 stack_window: None,
                 focus_stack,
@@ -1571,7 +1569,7 @@ impl Workspace {
         };
 
         if matches!(focused, Some(FocusTarget::Fullscreen(_))) {
-            elements.extend(fullscreen_elements.drain(..));
+            elements.append(&mut fullscreen_elements);
         }
 
         if !matches!(focused, Some(FocusTarget::Fullscreen(_)))

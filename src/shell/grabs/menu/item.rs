@@ -40,7 +40,7 @@ struct State {
     cursor_over: bool,
 }
 
-impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for SubmenuItem<'a, Message>
+impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for SubmenuItem<'_, Message>
 where
     Message: CursorEvents,
 {
@@ -216,11 +216,11 @@ where
     }
 }
 
-impl<'a, Message> Into<cosmic::Element<'a, Message>> for SubmenuItem<'a, Message>
+impl<'a, Message> From<SubmenuItem<'a, Message>> for cosmic::Element<'a, Message>
 where
     Message: CursorEvents + 'a,
 {
-    fn into(self) -> cosmic::Element<'a, Message> {
-        Element::new(self)
+    fn from(val: SubmenuItem<'a, Message>) -> Self {
+        Element::new(val)
     }
 }
