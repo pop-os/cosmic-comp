@@ -304,9 +304,11 @@ impl XdgShellHandler for State {
             if should_focus {
                 Shell::set_focus(self, Some(&target), &seat, None, true);
             }
-        } else if let Some(pending) = shell.pending_windows.iter_mut().find(|pending| {
-            pending.surface.wl_surface().as_deref() == Some(surface.wl_surface())
-        }) {
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
+        {
             pending.fullscreen.take();
         }
     }

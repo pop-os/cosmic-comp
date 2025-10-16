@@ -51,7 +51,8 @@ fn next_workspace(
     shell
         .workspaces
         .spaces_for_output(&output)
-        .skip_while(|space| space.handle != current_handle).nth(1)
+        .skip_while(|space| space.handle != current_handle)
+        .nth(1)
         .map(|space| (current_handle, space.handle))
 }
 

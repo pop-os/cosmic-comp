@@ -81,10 +81,12 @@ impl State {
                 command.envs(
                     session::get_env(&self.common).expect("WAYLAND_DISPLAY should be valid UTF-8"),
                 );
-                unsafe { command.pre_exec(|| {
-                    utils::rlimit::restore_nofile_limit();
-                    Ok(())
-                }) };
+                unsafe {
+                    command.pre_exec(|| {
+                        utils::rlimit::restore_nofile_limit();
+                        Ok(())
+                    })
+                };
 
                 info!("Running {:?}", exec);
                 command

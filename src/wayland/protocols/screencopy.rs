@@ -800,7 +800,9 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
-        if let ext_image_copy_capture_cursor_session_v1::Request::GetCaptureSession { session } = request {
+        if let ext_image_copy_capture_cursor_session_v1::Request::GetCaptureSession { session } =
+            request
+        {
             let new_data = CursorSessionData {
                 inner: data.inner.clone(),
             };
