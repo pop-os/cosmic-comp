@@ -544,12 +544,8 @@ impl CosmicStack {
     }
 
     pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
-        self.0.with_program(|p| {
-            (*p.geometry
-                .lock()
-                .unwrap())
-                .map(|geo| geo.size.as_logical())
-        })
+        self.0
+            .with_program(|p| (*p.geometry.lock().unwrap()).map(|geo| geo.size.as_logical()))
     }
 
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
@@ -1465,11 +1461,15 @@ impl PointerTarget<State> for CosmicStack {
     }
 
     fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
-        if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) { PointerTarget::axis(&self.0, seat, data, frame) }
+        if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) {
+            PointerTarget::axis(&self.0, seat, data, frame)
+        }
     }
 
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
-        if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) { PointerTarget::frame(&self.0, seat, data) }
+        if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) {
+            PointerTarget::frame(&self.0, seat, data)
+        }
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {

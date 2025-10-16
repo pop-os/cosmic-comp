@@ -29,10 +29,10 @@ use std::{os::unix::process::CommandExt, thread};
 use super::gestures;
 
 fn propagate_by_default(action: &shortcuts::Action) -> bool {
-    match action {
-        shortcuts::Action::Focus(_) | shortcuts::Action::Move(_) => true,
-        _ => false,
-    }
+    matches!(
+        action,
+        shortcuts::Action::Focus(_) | shortcuts::Action::Move(_)
+    )
 }
 
 impl State {
@@ -1066,10 +1066,12 @@ impl State {
             .env("XDG_ACTIVATION_TOKEN", &*token)
             .env("DESKTOP_STARTUP_ID", &*token)
             .env_remove("COSMIC_SESSION_SOCK");
-        unsafe { cmd.pre_exec(|| {
-            crate::utils::rlimit::restore_nofile_limit();
-            Ok(())
-        }) };
+        unsafe {
+            cmd.pre_exec(|| {
+                crate::utils::rlimit::restore_nofile_limit();
+                Ok(())
+            })
+        };
 
         std::thread::spawn(move || match cmd.spawn() {
             Ok(mut child) => {

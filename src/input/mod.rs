@@ -306,14 +306,14 @@ impl State {
             InputEvent::PointerMotion { event, .. } => {
                 use smithay::backend::input::PointerMotionEvent;
 
-                let mut shell = self.common.shell.write();
+                let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let current_output = seat.active_output();
 
                     let mut position = seat.get_pointer().unwrap().current_location().as_global();
 
-                    let under = State::surface_under(position, &current_output, &mut shell)
+                    let under = State::surface_under(position, &current_output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
                     let ptr = seat.get_pointer().unwrap();
@@ -357,7 +357,7 @@ impl State {
                         .cloned()
                         .unwrap_or(current_output.clone());
 
-                    let new_under = State::surface_under(position, &output, &mut shell)
+                    let new_under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
                     std::mem::drop(shell);
@@ -381,19 +381,17 @@ impl State {
                             .user_data()
                             .get::<ResizeGrabMarker>()
                             .map(|marker| marker.get())
-                            .unwrap_or(false) && output != current_output {
+                            .unwrap_or(false)
+                            && output != current_output
+                        {
                             ptr.frame(self);
                             return;
                         }
                         //If the pointer isn't grabbed, we should check if the focused element should be updated
                     } else if self.common.config.cosmic_conf.focus_follows_cursor {
                         let shell = self.common.shell.read();
-                        let old_keyboard_target = State::element_under(
-                            original_position,
-                            &current_output,
-                            &shell,
-                            &seat,
-                        );
+                        let old_keyboard_target =
+                            State::element_under(original_position, &current_output, &shell, &seat);
                         let new_keyboard_target =
                             State::element_under(position, &output, &shell, &seat);
 
@@ -621,9 +619,8 @@ impl State {
                         )
                         .as_global();
                     let serial = SERIAL_COUNTER.next_serial();
-                    let under =
-                        State::surface_under(position, &output, &mut self.common.shell.write())
-                            .map(|(target, pos)| (target, pos.as_logical()));
+                    let under = State::surface_under(position, &output, &self.common.shell.write())
+                        .map(|(target, pos)| (target, pos.as_logical()));
 
                     let ptr = seat.get_pointer().unwrap();
                     ptr.motion(
@@ -1241,7 +1238,7 @@ impl State {
             }
 
             InputEvent::TouchDown { event, .. } => {
-                let mut shell = self.common.shell.write();
+                let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1253,7 +1250,7 @@ impl State {
 
                     let position =
                         transform_output_mapped_position(&output, &event, shell.zoom_state());
-                    let under = State::surface_under(position, &output, &mut shell)
+                    let under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
                     std::mem::drop(shell);
@@ -1273,7 +1270,7 @@ impl State {
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
-                let mut shell = self.common.shell.write();
+                let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1285,7 +1282,7 @@ impl State {
 
                     let position =
                         transform_output_mapped_position(&output, &event, shell.zoom_state());
-                    let under = State::surface_under(position, &output, &mut shell)
+                    let under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
                     std::mem::drop(shell);
@@ -1356,7 +1353,7 @@ impl State {
             }
 
             InputEvent::TabletToolAxis { event, .. } => {
-                let mut shell = self.common.shell.write();
+                let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1368,7 +1365,7 @@ impl State {
 
                     let position =
                         transform_output_mapped_position(&output, &event, shell.zoom_state());
-                    let under = State::surface_under(position, &output, &mut shell)
+                    let under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
                     std::mem::drop(shell);
@@ -1421,7 +1418,7 @@ impl State {
                 }
             }
             InputEvent::TabletToolProximity { event, .. } => {
-                let mut shell = self.common.shell.write();
+                let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
@@ -1433,7 +1430,7 @@ impl State {
 
                     let position =
                         transform_output_mapped_position(&output, &event, shell.zoom_state());
-                    let under = State::surface_under(position, &output, &mut shell)
+                    let under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
 
                     std::mem::drop(shell);
@@ -1594,12 +1591,9 @@ impl State {
                 .unwrap_or(false)
         });
 
-        self.common.atspi_ei.input(
-            modifiers,
-            &handle,
-            event.state(),
-            event.time() * 1000,
-        );
+        self.common
+            .atspi_ei
+            .input(modifiers, &handle, event.state(), event.time() * 1000);
 
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
@@ -1770,7 +1764,10 @@ impl State {
                 .active_virtual_mods
                 .remove(&event.key_code());
             // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
-            if removed && handle.modified_sym() == Keysym::Caps_Lock && (modifiers.serialized.locked & 2) != 0 {
+            if removed
+                && handle.modified_sym() == Keysym::Caps_Lock
+                && (modifiers.serialized.locked & 2) != 0
+            {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = self.common.clock.now().as_millis();
                 keyboard.input(
@@ -2323,7 +2320,7 @@ fn cursor_sessions_for_output<'a>(
         })
 }
 
-fn transform_output_mapped_position<'a, B, E>(
+fn transform_output_mapped_position<B, E>(
     output: &Output,
     event: &E,
     zoom_state: Option<&ZoomState>,

@@ -598,7 +598,7 @@ impl Device {
                 // see `removed`
                 (Some(_), None) => true,
                 // if we already know about it, we don't consider it added
-                (None, _) => self.inner.outputs.get(conn).is_none(),
+                (None, _) => !self.inner.outputs.contains_key(conn),
             })
             .map(|(conn, crtc)| (*conn, *crtc))
             .collect::<Vec<_>>();
@@ -611,7 +611,7 @@ impl Device {
                 Some(Some(c)) => surfaces.get(conn).is_some_and(|crtc| c != crtc),
                 // if don't have a crtc, we need to drop the surface if it exists.
                 // so it needs to be in both `removed` AND `added`.
-                Some(None) => surfaces.get(conn).is_some(),
+                Some(None) => surfaces.contains_key(conn),
                 _ => true,
             })
             .map(|(conn, _)| *conn)

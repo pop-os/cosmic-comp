@@ -415,9 +415,10 @@ where
         data_init: &mut smithay::reexports::wayland_server::DataInit<'_, D>,
     ) {
         if let zcosmic_overlap_notify_v1::Request::NotifyOnOverlap {
-                overlap_notification,
-                layer_surface,
-            } = request {
+            overlap_notification,
+            layer_surface,
+        } = request
+        {
             let notification = data_init.init(overlap_notification, ());
             if let Some(surface) = state.layer_surface_from_resource(layer_surface) {
                 let mut data = surface
@@ -453,7 +454,7 @@ where
         _state: &mut D,
         _client: &Client,
         _resource: &ZcosmicOverlapNotificationV1,
-        request: <ZcosmicOverlapNotificationV1 as Resource>::Request,
+        _request: <ZcosmicOverlapNotificationV1 as Resource>::Request,
         _data: &(),
         _dhandle: &DisplayHandle,
         _data_init: &mut smithay::reexports::wayland_server::DataInit<'_, D>,

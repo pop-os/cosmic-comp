@@ -610,8 +610,7 @@ impl Workspace {
 
         // unmaximize_request might have triggered a `floating_layer.refresh()`,
         // which may have already removed a non-alive surface.
-        if let Some(floating_geometry) = self.floating_layer.unmap(mapped, None).or(was_maximized)
-        {
+        if let Some(floating_geometry) = self.floating_layer.unmap(mapped, None).or(was_maximized) {
             return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
                 geometry: floating_geometry,
                 output_size: self.output.geometry().size.as_logical(),
@@ -659,16 +658,16 @@ impl Workspace {
             return Some((surface, WorkspaceRestoreData::Fullscreen(previous)));
         }
 
-        let Some(mapped) = self.element_for_surface(surface) else {
-            return None;
-        };
-
+        let mapped = self.element_for_surface(surface)?;
         let maybe_stack = mapped.stack_ref().filter(|s| s.len() > 1);
         if let Some(stack) = maybe_stack {
             if stack.len() > 1 {
                 let idx = stack.surfaces().position(|s| &s == surface);
-                let layer = if self
-                    .is_tiled(surface) { ManagedLayer::Tiling } else { ManagedLayer::Floating };
+                let layer = if self.is_tiled(surface) {
+                    ManagedLayer::Tiling
+                } else {
+                    ManagedLayer::Floating
+                };
                 return idx
                     .and_then(|idx| stack.remove_idx(idx))
                     .map(|s| (s, layer.into()));

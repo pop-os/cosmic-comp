@@ -202,10 +202,7 @@ impl Data {
         }
     }
     fn is_placeholder(&self) -> bool {
-        match self {
-            Data::Placeholder { .. } => true,
-            _ => false,
-        }
+        matches!(self, Data::Placeholder { .. })
     }
 
     fn orientation(&self) -> Orientation {
@@ -409,7 +406,7 @@ impl TilingLayout {
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
         let last_active = focus_stack
-            .and_then(|focus_stack| TilingLayout::last_active_window(&mut tree, focus_stack))
+            .and_then(|focus_stack| TilingLayout::last_active_window(&tree, focus_stack))
             .map(|(node_id, _)| node_id);
         let duration = if minimize_rect.is_some() {
             MINIMIZE_ANIMATION_DURATION
@@ -1502,7 +1499,7 @@ impl TilingLayout {
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return MoveResult::None;
         };
-        let Some((node_id, data)) = TilingLayout::currently_focused_node(&mut tree, target) else {
+        let Some((node_id, data)) = TilingLayout::currently_focused_node(&tree, target) else {
             return MoveResult::None;
         };
 
@@ -1734,7 +1731,8 @@ impl TilingLayout {
                                 // we move again by making a new fork
                                 let old_id = tree
                                     .children_ids(&next_child_id)
-                                    .unwrap().nth(group_len / 2)
+                                    .unwrap()
+                                    .nth(group_len / 2)
                                     .unwrap()
                                     .clone();
                                 TilingLayout::new_group(
@@ -2122,11 +2120,7 @@ impl TilingLayout {
         mut focus_stack: FocusStackMut,
     ) -> Option<KeyboardFocusTarget> {
         let gaps = self.gaps();
-
-        let Some(node_id) = mapped.tiling_node_id.lock().unwrap().clone() else {
-            return None;
-        };
-
+        let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
         if tree.get(&node_id).is_err() {
             return None;
@@ -2239,11 +2233,7 @@ impl TilingLayout {
         mut focus_stack: FocusStackMut,
     ) -> Option<KeyboardFocusTarget> {
         let gaps = self.gaps();
-
-        let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
-            return None;
-        };
-
+        let target = seat.get_keyboard().unwrap().current_focus()?;
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
         if let Some((last_active, last_active_data)) =
             TilingLayout::currently_focused_node(&tree, target)
@@ -2974,9 +2964,7 @@ impl TilingLayout {
             let mut configures = Vec::new();
 
             let (outer, inner) = gaps;
-            let mut geo = layer_map_for_output(output)
-                .non_exclusive_zone()
-                .as_local();
+            let mut geo = layer_map_for_output(output).non_exclusive_zone().as_local();
             geo.loc.x += outer;
             geo.loc.y += outer;
             geo.size.w -= outer * 2;
@@ -3308,7 +3296,8 @@ impl TilingLayout {
                         (last_geometry.loc
                             + tree
                                 .children(&id)
-                                .unwrap().nth(idx)
+                                .unwrap()
+                                .nth(idx)
                                 .map(|node| {
                                     let geo = node.data().geometry();
                                     geo.loc + geo.size
@@ -3634,12 +3623,14 @@ impl TilingLayout {
                             None,
                             tree.traverse_pre_order_ids(root)
                                 .unwrap()
-                                .find(|id| match tree.get(id).unwrap().data() {
-                                    Data::Placeholder {
-                                        type_: PlaceholderType::GrabbedWindow,
-                                        ..
-                                    } => true,
-                                    _ => false,
+                                .find(|id| {
+                                    matches!(
+                                        tree.get(id).unwrap().data(),
+                                        Data::Placeholder {
+                                            type_: PlaceholderType::GrabbedWindow,
+                                            ..
+                                        }
+                                    )
                                 })
                                 .map(TargetZone::InitialPlaceholder)
                                 .unwrap_or(TargetZone::Initial),
@@ -3817,38 +3808,40 @@ impl TilingLayout {
 
     pub fn mapped(&self) -> impl Iterator<Item = (&CosmicMapped, Rectangle<i32, Local>)> {
         let tree = &self.queue.trees.back().unwrap().0;
-        let iter = tree.root_node_id().map(|root| tree.traverse_pre_order(root)
-                    .unwrap()
-                    .filter(|node| node.data().is_mapped(None))
-                    .filter(|node| match node.data() {
-                        Data::Mapped { mapped, .. } => mapped.is_activated(false),
-                        _ => unreachable!(),
-                    })
-                    .map(|node| match node.data() {
-                        Data::Mapped {
-                            mapped,
-                            last_geometry,
-                            ..
-                        } => (mapped, *last_geometry),
-                        _ => unreachable!(),
-                    })
-                    .chain(
-                        tree.traverse_pre_order(root)
-                            .unwrap()
-                            .filter(|node| node.data().is_mapped(None))
-                            .filter(|node| match node.data() {
-                                Data::Mapped { mapped, .. } => !mapped.is_activated(false),
-                                _ => unreachable!(),
-                            })
-                            .map(|node| match node.data() {
-                                Data::Mapped {
-                                    mapped,
-                                    last_geometry,
-                                    ..
-                                } => (mapped, *last_geometry),
-                                _ => unreachable!(),
-                            }),
-                    ));
+        let iter = tree.root_node_id().map(|root| {
+            tree.traverse_pre_order(root)
+                .unwrap()
+                .filter(|node| node.data().is_mapped(None))
+                .filter(|node| match node.data() {
+                    Data::Mapped { mapped, .. } => mapped.is_activated(false),
+                    _ => unreachable!(),
+                })
+                .map(|node| match node.data() {
+                    Data::Mapped {
+                        mapped,
+                        last_geometry,
+                        ..
+                    } => (mapped, *last_geometry),
+                    _ => unreachable!(),
+                })
+                .chain(
+                    tree.traverse_pre_order(root)
+                        .unwrap()
+                        .filter(|node| node.data().is_mapped(None))
+                        .filter(|node| match node.data() {
+                            Data::Mapped { mapped, .. } => !mapped.is_activated(false),
+                            _ => unreachable!(),
+                        })
+                        .map(|node| match node.data() {
+                            Data::Mapped {
+                                mapped,
+                                last_geometry,
+                                ..
+                            } => (mapped, *last_geometry),
+                            _ => unreachable!(),
+                        }),
+                )
+        });
         iter.into_iter().flatten()
     }
 
@@ -4317,7 +4310,9 @@ where
                 .and_then(|target| TilingLayout::currently_focused_node(tree, target))
         })
         .map(|(id, _)| id);
-    let focused_geo = focused.as_ref().map(|focused_id| *tree.get(focused_id).unwrap().data().geometry());
+    let focused_geo = focused
+        .as_ref()
+        .map(|focused_id| *tree.get(focused_id).unwrap().data().geometry());
 
     let has_potential_groups = if let Some(focused_id) = focused.as_ref() {
         let focused_node = tree.get(focused_id).unwrap();

@@ -650,10 +650,7 @@ impl FloatingLayout {
         window: &CosmicMapped,
         to: Option<Rectangle<i32, Local>>,
     ) -> Option<Rectangle<i32, Local>> {
-        let Some(mut mapped_geometry) = self.space.element_geometry(window).map(RectExt::as_local)
-        else {
-            return None;
-        };
+        let mut mapped_geometry = self.space.element_geometry(window).map(RectExt::as_local)?;
         let _ = self.animations.remove(window);
 
         if let Some(to) = to {
@@ -673,7 +670,7 @@ impl FloatingLayout {
             );
         }
 
-        if let Some(_) = window.floating_tiled.lock().unwrap().take() {
+        if window.floating_tiled.lock().unwrap().take().is_some() {
             if let Some(last_size) = window.last_geometry.lock().unwrap().map(|geo| geo.size) {
                 let geometry = Rectangle::new(mapped_geometry.loc, last_size);
                 window.set_tiled(false);
@@ -972,8 +969,8 @@ impl FloatingLayout {
         let (min_size, max_size) = (mapped.min_size(), mapped.max_size());
         let min_width = min_size.map(|s| s.w).unwrap_or(360);
         let min_height = min_size.map(|s| s.h).unwrap_or(240);
-        let max_width = max_size.map(|s| s.w).unwrap_or(i32::max_value());
-        let max_height = max_size.map(|s| s.h).unwrap_or(i32::max_value());
+        let max_width = max_size.map(|s| s.w).unwrap_or(i32::MAX);
+        let max_height = max_size.map(|s| s.h).unwrap_or(i32::MAX);
 
         geo.size.w = min_width.max(geo.size.w).min(max_width);
         geo.size.h = min_height.max(geo.size.h).min(max_height);
@@ -1313,29 +1310,26 @@ impl FloatingLayout {
             let window_geometry = if mapped.is_maximized(false) {
                 geometry
             } else {
-                prev
-                    .map(|mut rect| {
-                        if let Some(old_size) = old_output_size {
-                            rect = Rectangle::new(
-                                Point::new(
-                                    (rect.loc.x as f64 + rect.size.w as f64 / 2.)
-                                        / old_size.w as f64
-                                        * output_size.w as f64
-                                        - rect.size.w as f64 / 2.,
-                                    (rect.loc.y as f64 + rect.size.h as f64 / 2.)
-                                        / old_size.h as f64
-                                        * output_size.h as f64
-                                        - rect.size.h as f64 / 2.,
-                                ),
-                                rect.size.to_f64(),
-                            )
-                            .to_i32_round();
-                        }
-                        Rectangle::new(rect.loc.constrain(geometry), rect.size)
-                    })
-                    .unwrap_or_else(|| {
-                        Rectangle::new(Point::from((0, 0)), mapped.geometry().size.as_local())
-                    })
+                prev.map(|mut rect| {
+                    if let Some(old_size) = old_output_size {
+                        rect = Rectangle::new(
+                            Point::new(
+                                (rect.loc.x as f64 + rect.size.w as f64 / 2.) / old_size.w as f64
+                                    * output_size.w as f64
+                                    - rect.size.w as f64 / 2.,
+                                (rect.loc.y as f64 + rect.size.h as f64 / 2.) / old_size.h as f64
+                                    * output_size.h as f64
+                                    - rect.size.h as f64 / 2.,
+                            ),
+                            rect.size.to_f64(),
+                        )
+                        .to_i32_round();
+                    }
+                    Rectangle::new(rect.loc.constrain(geometry), rect.size)
+                })
+                .unwrap_or_else(|| {
+                    Rectangle::new(Point::from((0, 0)), mapped.geometry().size.as_local())
+                })
             };
             mapped.set_geometry(window_geometry.to_global(&output));
 
@@ -1529,7 +1523,7 @@ impl FloatingLayout {
                                         .to_physical_precise_round(output_scale),
                                     scale,
                                 );
-                                
+
                                 RelocateRenderElement::from_element(
                                     rescaled,
                                     (geometry.loc - original_geo.loc)
@@ -1549,7 +1543,7 @@ impl FloatingLayout {
                                         .to_physical_precise_round(output_scale),
                                     scale,
                                 );
-                                
+
                                 RelocateRenderElement::from_element(
                                     rescaled,
                                     (geometry.loc - original_geo.loc)

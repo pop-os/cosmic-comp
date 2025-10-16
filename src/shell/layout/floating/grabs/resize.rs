@@ -108,7 +108,9 @@ impl ResizeSurfaceGrab {
                         + self.initial_window_location.x;
                 }
             } else if (self.initial_window_location.x + self.initial_window_size.w + dx as i32
-                - output_geom.loc.x - output_geom.size.w).unsigned_abs()
+                - output_geom.loc.x
+                - output_geom.size.w)
+                .unsigned_abs()
                 < self.edge_snap_threshold
             {
                 new_window_width =
@@ -134,7 +136,9 @@ impl ResizeSurfaceGrab {
                         + self.initial_window_location.y;
                 }
             } else if (self.initial_window_location.y + self.initial_window_size.h + dy as i32
-                - output_geom.loc.y - output_geom.size.h).unsigned_abs()
+                - output_geom.loc.y
+                - output_geom.size.h)
+                .unsigned_abs()
                 < self.edge_snap_threshold
             {
                 new_window_height =
@@ -146,8 +150,8 @@ impl ResizeSurfaceGrab {
 
         let min_width = min_size.map(|s| s.w).unwrap_or(360);
         let min_height = min_size.map(|s| s.h).unwrap_or(240);
-        let max_width = max_size.map(|s| s.w).unwrap_or(i32::max_value());
-        let max_height = max_size.map(|s| s.h).unwrap_or(i32::max_value());
+        let max_width = max_size.map(|s| s.w).unwrap_or(i32::MAX);
+        let max_height = max_size.map(|s| s.h).unwrap_or(i32::MAX);
 
         new_window_width = new_window_width.max(min_width).min(max_width);
         new_window_height = new_window_height.max(min_height).min(max_height);
@@ -353,7 +357,9 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         event: &TouchMotionEvent,
         seq: Serial,
     ) {
-        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot && self.update_location(event.location.as_global()) {
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot
+            && self.update_location(event.location.as_global())
+        {
             handle.unset_grab(self, data);
         }
 

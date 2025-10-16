@@ -46,10 +46,7 @@ impl WorkspaceHandler for State {
                     if let Some(workspace) = shell.workspaces.space_for_handle_mut(&workspace) {
                         let mut guard = self.common.workspace_state.update();
                         workspace.set_tiling(
-                            match state.into_result() {
-                                Ok(TilingState::FloatingOnly) => false,
-                                _ => true,
-                            },
+                            !matches!(state.into_result(), Ok(TilingState::FloatingOnly)),
                             &seat,
                             &mut guard,
                         );
