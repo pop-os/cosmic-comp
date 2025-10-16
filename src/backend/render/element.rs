@@ -4,21 +4,21 @@ use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
 use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
 use smithay::{
     backend::renderer::{
+        ImportAll, ImportMem, Renderer,
         element::{
+            Element, Id, Kind, RenderElement, UnderlyingStorage,
             memory::MemoryRenderBufferRenderElement,
             surface::WaylandSurfaceRenderElement,
             utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
-            Element, Id, Kind, RenderElement, UnderlyingStorage,
         },
-        gles::{element::TextureShaderElement, GlesError},
+        gles::{GlesError, element::TextureShaderElement},
         glow::{GlowFrame, GlowRenderer},
         utils::{CommitCounter, DamageSet, OpaqueRegions},
-        ImportAll, ImportMem, Renderer,
     },
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale},
 };
 
-use super::{cursor::CursorRenderElement, GlMultiRenderer};
+use super::{GlMultiRenderer, cursor::CursorRenderElement};
 
 pub enum CosmicElement<R>
 where

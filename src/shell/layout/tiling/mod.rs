@@ -2,11 +2,14 @@
 
 use crate::{
     backend::render::{
-        element::AsGlowRenderer, BackdropShader, IndicatorShader, Key, Usage, ACTIVE_GROUP_COLOR,
-        GROUP_COLOR,
+        ACTIVE_GROUP_COLOR, BackdropShader, GROUP_COLOR, IndicatorShader, Key, Usage,
+        element::AsGlowRenderer,
     },
     shell::{
+        CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
+        ResizeMode, Trigger,
         element::{
+            CosmicMapped, CosmicMappedRenderElement, CosmicStack, CosmicWindow,
             resize_indicator::ResizeIndicator,
             stack::{
                 CosmicStackRenderElement, MoveResult as StackMoveResult,
@@ -14,16 +17,13 @@ use crate::{
             },
             swap_indicator::SwapIndicator,
             window::CosmicWindowRenderElement,
-            CosmicMapped, CosmicMappedRenderElement, CosmicStack, CosmicWindow,
         },
         focus::{
-            target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
             FocusStackMut, FocusTarget,
+            target::{KeyboardFocusTarget, PointerFocusTarget, WindowGroup},
         },
         grabs::ResizeEdge,
         layout::Orientation,
-        CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
-        ResizeMode, Trigger,
     },
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
@@ -46,17 +46,17 @@ use keyframe::{
 };
 use smithay::{
     backend::renderer::{
+        ImportAll, ImportMem, Renderer,
         element::{
-            utils::{
-                constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior,
-                RescaleRenderElement,
-            },
             AsRenderElements, Id, RenderElement,
+            utils::{
+                ConstrainAlign, ConstrainScaleBehavior, RescaleRenderElement,
+                constrain_render_elements,
+            },
         },
         glow::GlowRenderer,
-        ImportAll, ImportMem, Renderer,
     },
-    desktop::{layer_map_for_output, space::SpaceElement, PopupKind, WindowSurfaceType},
+    desktop::{PopupKind, WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
     output::Output,
     reexports::wayland_server::Client,
@@ -2209,12 +2209,14 @@ impl TilingLayout {
                 Data::Group { alive, .. } => KeyboardFocusTarget::Group(WindowGroup {
                     node: node_id.clone(),
                     alive: Arc::downgrade(alive),
-                    focus_stack: vec![new_elements[0]
-                        .tiling_node_id
-                        .lock()
-                        .unwrap()
-                        .clone()
-                        .unwrap()],
+                    focus_stack: vec![
+                        new_elements[0]
+                            .tiling_node_id
+                            .lock()
+                            .unwrap()
+                            .clone()
+                            .unwrap(),
+                    ],
                 }),
                 Data::Mapped { mapped, .. } => KeyboardFocusTarget::Element(mapped.clone()),
                 _ => unreachable!(),

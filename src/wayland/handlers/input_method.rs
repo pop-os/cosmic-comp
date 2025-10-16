@@ -3,7 +3,7 @@
 use crate::state::State;
 use smithay::{
     delegate_input_method_manager,
-    desktop::{space::SpaceElement, PopupKind, PopupManager},
+    desktop::{PopupKind, PopupManager, space::SpaceElement},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::Rectangle,
     wayland::input_method::{InputMethodHandler, PopupSurface},

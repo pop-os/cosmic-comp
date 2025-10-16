@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use calloop::{
-    timer::{TimeoutAction, Timer},
     LoopHandle,
+    timer::{TimeoutAction, Timer},
 };
 use cosmic_comp_config::output::comp::AdaptiveSync;
 use cosmic_protocols::output_management::v1::server::{
@@ -23,8 +23,8 @@ use smithay::{
             zwlr_output_mode_v1::ZwlrOutputModeV1,
         },
         wayland_server::{
-            backend::GlobalId, protocol::wl_output::WlOutput, Client, Dispatch, DisplayHandle,
-            GlobalDispatch, Resource, Weak,
+            Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak, backend::GlobalId,
+            protocol::wl_output::WlOutput,
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},

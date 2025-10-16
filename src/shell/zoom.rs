@@ -2,18 +2,19 @@ use std::{sync::Mutex, time::Instant};
 
 use calloop::LoopHandle;
 use cosmic::{
-    iced::{alignment::Vertical, Alignment, Background, Border, Length},
+    Apply,
+    iced::{Alignment, Background, Border, Length, alignment::Vertical},
     iced_widget, theme,
     widget::{self, icon::Named},
-    Apply,
 };
 use cosmic_comp_config::ZoomMovement;
 use cosmic_config::ConfigSet;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::renderer::{element::AsRenderElements, ImportMem, Renderer},
+    backend::renderer::{ImportMem, Renderer, element::AsRenderElements},
     desktop::space::SpaceElement,
     input::{
+        Seat,
         pointer::{
             AxisFrame, ButtonEvent, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -24,7 +25,6 @@ use smithay::{
             DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
             UpEvent,
         },
-        Seat,
     },
     output::Output,
     utils::{IsAlive, Point, Rectangle, Serial, Size},
@@ -42,10 +42,9 @@ use crate::{
 };
 
 use super::{
-    check_grab_preconditions,
+    ANIMATION_DURATION, check_grab_preconditions,
     focus::target::PointerFocusTarget,
     grabs::{ContextMenu, Item, MenuAlignment, MenuGrab},
-    ANIMATION_DURATION,
 };
 
 #[derive(Debug, Clone)]

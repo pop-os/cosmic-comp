@@ -3,7 +3,7 @@ use std::{ops::ControlFlow, time::Instant};
 use cosmic_comp_config::workspace::WorkspaceLayout;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    desktop::{layer_map_for_output, LayerSurface, PopupKind, PopupManager},
+    desktop::{LayerSurface, PopupKind, PopupManager, layer_map_for_output},
     output::{Output, OutputNoMode},
     utils::{Logical, Point},
     wayland::{session_lock::LockSurface, shell::wlr_layer::Layer},
@@ -13,14 +13,14 @@ use smithay::{
 use crate::{
     backend::render::ElementFilter,
     shell::{
+        SeatExt, Shell, Workspace, WorkspaceDelta,
         focus::target::KeyboardFocusTarget,
         layout::{floating::FloatingLayout, tiling::ANIMATION_DURATION},
-        SeatExt, Shell, Workspace, WorkspaceDelta,
     },
     utils::{
         geometry::*,
         prelude::OutputExt,
-        quirks::{workspace_overview_is_open, WORKSPACE_OVERVIEW_NAMESPACE},
+        quirks::{WORKSPACE_OVERVIEW_NAMESPACE, workspace_overview_is_open},
     },
     wayland::protocols::workspace::WorkspaceHandle,
 };

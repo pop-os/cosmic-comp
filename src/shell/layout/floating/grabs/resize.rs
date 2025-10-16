@@ -13,8 +13,9 @@ use crate::{
 };
 use smithay::{
     backend::input::ButtonState,
-    desktop::{space::SpaceElement, WindowSurface},
+    desktop::{WindowSurface, space::SpaceElement},
     input::{
+        Seat,
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -26,7 +27,6 @@ use smithay::{
             DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
             OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, UpEvent,
         },
-        Seat,
     },
     output::Output,
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},

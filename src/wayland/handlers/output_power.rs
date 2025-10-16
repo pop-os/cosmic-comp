@@ -7,7 +7,7 @@ use crate::{
     state::{BackendData, State},
     utils::prelude::OutputExt,
     wayland::protocols::output_power::{
-        delegate_output_power, OutputPowerHandler, OutputPowerState,
+        OutputPowerHandler, OutputPowerState, delegate_output_power,
     },
 };
 

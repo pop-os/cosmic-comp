@@ -7,7 +7,7 @@ use crate::{
     state::{BackendData, Common},
     utils::prelude::*,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::output::comp::OutputConfig;
 use smithay::{
     backend::{
@@ -20,17 +20,17 @@ use smithay::{
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
+            Bind, ImportDma,
             damage::{OutputDamageTracker, RenderOutputResult},
             glow::GlowRenderer,
-            Bind, ImportDma,
         },
-        vulkan::{version::Version, Instance, PhysicalDevice},
+        vulkan::{Instance, PhysicalDevice, version::Version},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
     desktop::layer_map_for_output,
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
-        calloop::{ping, EventLoop, LoopHandle},
+        calloop::{EventLoop, LoopHandle, ping},
         gbm::Device as GbmDevice,
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
@@ -41,7 +41,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
 
-use super::render::{init_shaders, ScreenFilterStorage};
+use super::render::{ScreenFilterStorage, init_shaders};
 
 #[derive(Debug)]
 enum Allocator {

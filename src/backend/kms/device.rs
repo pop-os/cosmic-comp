@@ -3,7 +3,7 @@
 use crate::{
     backend::{
         kms::render::gles::GbmGlowBackend,
-        render::{init_shaders, output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
+        render::{CLEAR_COLOR, CursorMode, GlMultiRenderer, init_shaders, output_elements},
     },
     config::{CompTransformDef, EdidProduct, ScreenFilter},
     shell::Shell,
@@ -17,17 +17,17 @@ use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
+            Format, Fourcc,
             format::FormatSet,
             gbm::{GbmAllocator, GbmDevice},
-            Format, Fourcc,
         },
         drm::{
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
             compositor::{FrameError, FrameFlags},
             exporter::gbm::GbmFramebufferExporter,
             output::{DrmOutputManager, LockedDrmOutputManager},
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
         },
-        egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
+        egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
         renderer::glow::GlowRenderer,
         session::Session,
     },
@@ -35,10 +35,10 @@ use smithay::{
     output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
-        drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+        drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
         gbm::BufferObjectFlags as GbmBufferFlags,
         rustix::fs::OFlags,
-        wayland_server::{protocol::wl_buffer::WlBuffer, DisplayHandle, Weak},
+        wayland_server::{DisplayHandle, Weak, protocol::wl_buffer::WlBuffer},
     },
     utils::{Clock, DevPath, DeviceFd, Monotonic, Point, Transform},
     wayland::drm_lease::{DrmLease, DrmLeaseState},
@@ -52,7 +52,7 @@ use std::{
     fmt,
     os::fd::OwnedFd,
     path::Path,
-    sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool, mpsc::Receiver},
     time::Duration,
 };
 

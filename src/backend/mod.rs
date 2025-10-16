@@ -2,7 +2,7 @@
 
 use crate::state::State;
 use crate::wayland::protocols::a11y::A11yHandler;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::NumlockState;
 use cosmic_config::CosmicConfigEntry;
 use cosmic_settings_daemon_config::greeter;

@@ -5,14 +5,14 @@ use crate::{
 
 use calloop::LoopHandle;
 use cosmic::{
+    Apply,
     iced::{
-        widget::{container, row},
         Alignment,
+        widget::{container, row},
     },
     iced_core::{Background, Border, Color, Length},
     theme,
     widget::{horizontal_space, icon::from_name, text},
-    Apply,
 };
 use smithay::utils::{Logical, Size};
 

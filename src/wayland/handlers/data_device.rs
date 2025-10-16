@@ -4,8 +4,8 @@ use crate::{state::State, utils::prelude::SeatExt};
 use smithay::{
     delegate_data_device,
     input::{
-        pointer::{CursorImageStatus, CursorImageSurfaceData},
         Seat,
+        pointer::{CursorImageStatus, CursorImageSurfaceData},
     },
     reexports::wayland_server::protocol::{wl_data_source::WlDataSource, wl_surface::WlSurface},
     utils::{IsAlive, Logical, Point},

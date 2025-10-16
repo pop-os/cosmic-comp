@@ -7,7 +7,7 @@ use calloop::{InsertError, LoopHandle, RegistrationToken};
 use cosmic_comp_config::output::comp::OutputState;
 use std::collections::HashMap;
 use tracing::{error, warn};
-use zbus::blocking::{fdo::DBusProxy, Connection};
+use zbus::blocking::{Connection, fdo::DBusProxy};
 
 #[cfg(feature = "systemd")]
 pub mod logind;

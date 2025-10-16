@@ -16,15 +16,16 @@ use smithay::{
     backend::{
         input::KeyState,
         renderer::{
-            element::{
-                memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement,
-                AsRenderElements,
-            },
             ImportAll, ImportMem, Renderer,
+            element::{
+                AsRenderElements, memory::MemoryRenderBufferRenderElement,
+                surface::WaylandSurfaceRenderElement,
+            },
         },
     },
-    desktop::{space::SpaceElement, WindowSurfaceType},
+    desktop::{WindowSurfaceType, space::SpaceElement},
     input::{
+        Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, CursorImageStatus, GestureHoldBeginEvent,
@@ -36,7 +37,6 @@ use smithay::{
             DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
             UpEvent,
         },
-        Seat,
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
@@ -49,8 +49,8 @@ use std::{
     fmt,
     hash::Hash,
     sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
 };
 use wayland_backend::server::ObjectId;

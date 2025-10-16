@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use layout::TilingExceptions;
 use std::{
     collections::HashMap,
-    sync::{atomic::Ordering, Mutex},
+    sync::{Mutex, atomic::Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -19,8 +19,8 @@ use crate::{
     },
 };
 use cosmic_comp_config::{
-    workspace::{PinnedWorkspace, WorkspaceLayout, WorkspaceMode},
     TileBehavior, ZoomConfig, ZoomMovement,
+    workspace::{PinnedWorkspace, WorkspaceLayout, WorkspaceMode},
 };
 use cosmic_config::ConfigSet;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
@@ -30,28 +30,27 @@ use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{input::TouchSlot, renderer::element::RenderElementStates},
     desktop::{
-        layer_map_for_output,
+        LayerSurface, PopupKind, WindowSurface, WindowSurfaceType, layer_map_for_output,
         space::SpaceElement,
         utils::{
-            surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-            take_presentation_feedback_surface_tree, OutputPresentationFeedback,
+            OutputPresentationFeedback, surface_presentation_feedback_flags_from_states,
+            surface_primary_scanout_output, take_presentation_feedback_surface_tree,
         },
-        LayerSurface, PopupKind, WindowSurface, WindowSurfaceType,
     },
     input::{
+        Seat,
         pointer::{
             CursorImageStatus, CursorImageSurfaceData, Focus, GrabStartData as PointerGrabStartData,
         },
-        Seat,
     },
     output::{Output, WeakOutput},
     reexports::{
         wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
-        wayland_server::{protocol::wl_surface::WlSurface, Client},
+        wayland_server::{Client, protocol::wl_surface::WlSurface},
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::{
-        compositor::{with_states, SurfaceAttributes},
+        compositor::{SurfaceAttributes, with_states},
         seat::WaylandFocus,
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
@@ -73,8 +72,8 @@ use crate::{
         },
         protocols::{
             toplevel_info::{
-                toplevel_enter_output, toplevel_enter_workspace, toplevel_leave_output,
-                toplevel_leave_workspace, ToplevelInfoState,
+                ToplevelInfoState, toplevel_enter_output, toplevel_enter_workspace,
+                toplevel_leave_output, toplevel_leave_workspace,
             },
             workspace::{
                 WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState, WorkspaceUpdateGuard,
@@ -97,14 +96,14 @@ use self::zoom::{OutputZoomState, ZoomState};
 
 use self::{
     element::{
-        resize_indicator::{resize_indicator, ResizeIndicator},
-        swap_indicator::{swap_indicator, SwapIndicator},
         CosmicWindow, MaximizedState,
+        resize_indicator::{ResizeIndicator, resize_indicator},
+        swap_indicator::{SwapIndicator, swap_indicator},
     },
     focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     grabs::{
-        tab_items, window_items, GrabStartData, Item, MenuGrab, MoveGrab, ReleaseMode, ResizeEdge,
-        ResizeGrab,
+        GrabStartData, Item, MenuGrab, MoveGrab, ReleaseMode, ResizeEdge, ResizeGrab, tab_items,
+        window_items,
     },
     layout::{
         floating::{FloatingLayout, ResizeState},
@@ -2030,11 +2029,7 @@ impl Shell {
                     Direction::Left => current_output_geo.loc.x - origin.x,
                     Direction::Right => origin.x - current_output_geo.loc.x,
                 };
-                if res > 0 {
-                    Some((o, res))
-                } else {
-                    None
-                }
+                if res > 0 { Some((o, res)) } else { None }
             })
             .min_by_key(|(_, res)| *res)
             .map(|(o, _)| o)
@@ -3766,41 +3761,25 @@ impl Shell {
                     .filter(|(_, other_geo)| other_geo.loc.y <= geometry.loc.y)
                     .min_by_key(|(_, other_geo)| {
                         let res = geometry.loc.y - other_geo.loc.y;
-                        if res.is_positive() {
-                            res
-                        } else {
-                            i32::MAX
-                        }
+                        if res.is_positive() { res } else { i32::MAX }
                     }),
                 FocusDirection::Down => elements
                     .filter(|(_, other_geo)| other_geo.loc.y > geometry.loc.y)
                     .max_by_key(|(_, other_geo)| {
                         let res = geometry.loc.y - other_geo.loc.y;
-                        if res.is_negative() {
-                            res
-                        } else {
-                            i32::MIN
-                        }
+                        if res.is_negative() { res } else { i32::MIN }
                     }),
                 FocusDirection::Left => elements
                     .filter(|(_, other_geo)| other_geo.loc.x <= geometry.loc.x)
                     .min_by_key(|(_, other_geo)| {
                         let res = geometry.loc.x - other_geo.loc.x;
-                        if res.is_positive() {
-                            res
-                        } else {
-                            i32::MAX
-                        }
+                        if res.is_positive() { res } else { i32::MAX }
                     }),
                 FocusDirection::Right => elements
                     .filter(|(_, other_geo)| other_geo.loc.x > geometry.loc.x)
                     .max_by_key(|(_, other_geo)| {
                         let res = geometry.loc.x - other_geo.loc.x;
-                        if res.is_negative() {
-                            res
-                        } else {
-                            i32::MIN
-                        }
+                        if res.is_negative() { res } else { i32::MIN }
                     }),
                 _ => return FocusResult::None,
             }

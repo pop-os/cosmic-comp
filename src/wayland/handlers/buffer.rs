@@ -2,7 +2,7 @@
 
 use crate::state::{BackendData, State};
 use smithay::{
-    reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource},
+    reexports::wayland_server::{Resource, protocol::wl_buffer::WlBuffer},
     wayland::buffer::BufferHandler,
 };
 use tracing::warn;

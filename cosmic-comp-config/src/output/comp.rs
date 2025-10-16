@@ -93,7 +93,9 @@ pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
                                     .find(|(_, info)| &info.connector == conn)
                                 {
                                     if config_clone[j].enabled != OutputState::Enabled {
-                                        warn!("Invalid Mirroring tag, overriding with `Enabled` instead");
+                                        warn!(
+                                            "Invalid Mirroring tag, overriding with `Enabled` instead"
+                                        );
                                         conf.enabled = OutputState::Enabled;
                                     }
                                 } else {

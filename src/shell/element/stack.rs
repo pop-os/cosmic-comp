@@ -1,6 +1,6 @@
 use super::{
-    window::{Focus, RESIZE_BORDER},
     CosmicSurface,
+    window::{Focus, RESIZE_BORDER},
 };
 use crate::{
     backend::render::cursor::CursorState,
@@ -17,11 +17,12 @@ use crate::{
 };
 use calloop::LoopHandle;
 use cosmic::{
-    iced::{id::Id, widget as iced_widget, Alignment},
-    iced_core::{border::Radius, Background, Border, Color, Length},
+    Apply, Element as CosmicElement, Theme,
+    iced::{Alignment, id::Id, widget as iced_widget},
+    iced_core::{Background, Border, Color, Length, border::Radius},
     iced_runtime::Task,
     iced_widget::scrollable::AbsoluteOffset,
-    theme, widget as cosmic_widget, Apply, Element as CosmicElement, Theme,
+    theme, widget as cosmic_widget,
 };
 use cosmic_settings_config::shortcuts;
 use shortcuts::action::{Direction, FocusDirection};
@@ -29,15 +30,16 @@ use smithay::{
     backend::{
         input::KeyState,
         renderer::{
-            element::{
-                memory::MemoryRenderBufferRenderElement, surface::WaylandSurfaceRenderElement,
-                AsRenderElements,
-            },
             ImportAll, ImportMem, Renderer,
+            element::{
+                AsRenderElements, memory::MemoryRenderBufferRenderElement,
+                surface::WaylandSurfaceRenderElement,
+            },
         },
     },
-    desktop::{space::SpaceElement, WindowSurfaceType},
+    desktop::{WindowSurfaceType, space::SpaceElement},
     input::{
+        Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -49,7 +51,6 @@ use smithay::{
             DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
             UpEvent,
         },
-        Seat,
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
@@ -62,8 +63,8 @@ use std::{
     fmt,
     hash::Hash,
     sync::{
-        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
         Arc, LazyLock, Mutex,
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
     },
 };
 
@@ -313,11 +314,7 @@ impl CosmicStack {
                         if let Ok(old) =
                             p.active
                                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                    if val < max - 1 {
-                                        Some(val + 1)
-                                    } else {
-                                        None
-                                    }
+                                    if val < max - 1 { Some(val + 1) } else { None }
                                 })
                         {
                             p.previous_keyboard.store(old, Ordering::SeqCst);

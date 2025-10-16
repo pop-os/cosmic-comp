@@ -15,7 +15,7 @@ use smithay::{
         seat::WaylandFocus,
         shell::{
             kde::decoration::{KdeDecorationHandler, KdeDecorationState},
-            xdg::{decoration::XdgDecorationHandler, ToplevelSurface},
+            xdg::{ToplevelSurface, decoration::XdgDecorationHandler},
         },
     },
 };
