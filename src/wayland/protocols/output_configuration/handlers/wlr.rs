@@ -276,10 +276,11 @@ where
                     .iter_mut()
                     .map(|(head, conf)| {
                         let output = match inner
-                        .instances
-                        .iter()
-                        .find_map(|instance| instance.heads.iter().find(|h| h.obj == *head))
-                        .map(|i| i.output.clone()) {
+                            .instances
+                            .iter()
+                            .find_map(|instance| instance.heads.iter().find(|h| h.obj == *head))
+                            .map(|i| i.output.clone())
+                        {
                             Some(o) => o,
                             None => {
                                 return Err(zwlr_output_configuration_head_v1::Error::InvalidMode);
@@ -323,10 +324,10 @@ where
                         .iter()
                         .any(|o| !inner.outputs.contains(o))
                     || final_conf.iter().any(|(o, c)| match c {
-                        OutputConfiguration::Enabled { mode, .. } => match mode {
-                            Some(ModeConfiguration::Mode(m)) => !o.modes().contains(m),
-                            _ => false,
-                        },
+                        OutputConfiguration::Enabled {
+                            mode: Some(ModeConfiguration::Mode(m)),
+                            ..
+                        } => !o.modes().contains(m),
                         _ => false,
                     })
                 {

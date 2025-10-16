@@ -388,7 +388,7 @@ impl Common {
                 }
                 EavesdroppingKeyboardMode::Combinations => {
                     // don't forward alpha-numeric keys, just because shift is held, but forward shift itself
-                    if !is_modifier && !(modifiers.alt || modifiers.ctrl || modifiers.logo) {
+                    if !(is_modifier || modifiers.alt || modifiers.ctrl || modifiers.logo) {
                         return;
                     }
                 }
@@ -771,7 +771,9 @@ impl XwmHandler for State {
             .map(|pending| pending.surface.clone())
         {
             if let std::collections::hash_map::Entry::Vacant(e) = shell
-                .pending_activations.entry(crate::shell::ActivationKey::X11(surface.window_id())) {
+                .pending_activations
+                .entry(crate::shell::ActivationKey::X11(surface.window_id()))
+            {
                 if let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id()) {
                     if let Some(context) = self
                         .common

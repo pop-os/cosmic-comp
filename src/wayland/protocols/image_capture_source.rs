@@ -288,9 +288,10 @@ where
         data_init: &mut DataInit<'_, D>,
     ) {
         if let ToplevelSourceRequest::CreateSource {
-                source,
-                toplevel_handle,
-            } = request {
+            source,
+            toplevel_handle,
+        } = request
+        {
             let data = match window_from_ext_handle(state, &toplevel_handle) {
                 Some(toplevel) => ImageCaptureSourceData::Toplevel(toplevel.clone()),
                 None => ImageCaptureSourceData::Destroyed,
@@ -316,7 +317,7 @@ where
         _state: &mut D,
         _client: &Client,
         _resource: &ExtImageCaptureSourceV1,
-        request: <ExtImageCaptureSourceV1 as Resource>::Request,
+        _request: <ExtImageCaptureSourceV1 as Resource>::Request,
         _data: &ImageCaptureSourceData,
         _dhandle: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,

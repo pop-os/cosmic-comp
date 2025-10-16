@@ -93,7 +93,7 @@ impl PartialEq<ToplevelSurface> for CosmicSurface {
 
 impl PartialEq<X11Surface> for CosmicSurface {
     fn eq(&self, other: &X11Surface) -> bool {
-        self.x11_surface().map_or(false, |s| s == other)
+        self.x11_surface() == Some(other)
     }
 }
 
@@ -278,8 +278,7 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 if enable {
-                    let previous_decoration_state =
-                        toplevel.current_state().decoration_mode;
+                    let previous_decoration_state = toplevel.current_state().decoration_mode;
                     if PreferredDecorationMode::is_unset(&self.0) {
                         PreferredDecorationMode::update(&self.0, previous_decoration_state);
                     }

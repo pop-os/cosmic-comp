@@ -591,7 +591,8 @@ impl WorkspaceSet {
         // add empty at the end, if necessary
         if self
             .workspaces
-            .last().is_none_or(|last| !last.is_empty() || last.pinned)
+            .last()
+            .is_none_or(|last| !last.is_empty() || last.pinned)
         {
             self.add_empty_workspace(state);
         }
@@ -606,7 +607,8 @@ impl WorkspaceSet {
                 let previous_is_empty = i > 0
                     && self
                         .workspaces
-                        .get(i - 1).is_some_and(|w| w.is_empty() && !w.pinned);
+                        .get(i - 1)
+                        .is_some_and(|w| w.is_empty() && !w.pinned);
                 let keep = if workspace.can_auto_remove(xdg_activation_state) {
                     // Keep empty workspace if it's active, or it's the last workspace,
                     // and the previous worspace is not both active and empty.
@@ -1605,32 +1607,21 @@ impl Shell {
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
-                    if let Some((_, workspace_delta)) = set.previously_active {
-                        match workspace_delta {
-                            WorkspaceDelta::Gesture(delta) => {
-                                if (velocity > 0.0 && velocity.abs() >= GESTURE_VELOCITY_THRESHOLD)
-                                    || (velocity.abs() < GESTURE_VELOCITY_THRESHOLD
-                                        && delta.abs() > GESTURE_POSITION_THRESHOLD)
-                                {
-                                    set.activate(
-                                        set.active,
-                                        WorkspaceDelta::new_gesture_end(
-                                            delta.abs(),
-                                            velocity.abs(),
-                                        ),
-                                        workspace_state,
-                                    )?;
-                                } else {
-                                    set.activate_previous(
-                                        WorkspaceDelta::new_gesture_end(
-                                            1.0 - delta.abs(),
-                                            velocity.abs(),
-                                        ),
-                                        workspace_state,
-                                    )?;
-                                }
-                            }
-                            _ => {} // Do nothing
+                    if let Some((_, WorkspaceDelta::Gesture(delta))) = set.previously_active {
+                        if (velocity > 0.0 && velocity.abs() >= GESTURE_VELOCITY_THRESHOLD)
+                            || (velocity.abs() < GESTURE_VELOCITY_THRESHOLD
+                                && delta.abs() > GESTURE_POSITION_THRESHOLD)
+                        {
+                            set.activate(
+                                set.active,
+                                WorkspaceDelta::new_gesture_end(delta.abs(), velocity.abs()),
+                                workspace_state,
+                            )?;
+                        } else {
+                            set.activate_previous(
+                                WorkspaceDelta::new_gesture_end(1.0 - delta.abs(), velocity.abs()),
+                                workspace_state,
+                            )?;
                         }
                     }
 
@@ -1645,32 +1636,21 @@ impl Shell {
             }
             WorkspaceMode::Global => {
                 for set in self.workspaces.sets.values_mut() {
-                    if let Some((_, workspace_delta)) = set.previously_active {
-                        match workspace_delta {
-                            WorkspaceDelta::Gesture(delta) => {
-                                if (velocity > 0.0 && velocity.abs() >= GESTURE_VELOCITY_THRESHOLD)
-                                    || (velocity.abs() < GESTURE_VELOCITY_THRESHOLD
-                                        && delta.abs() > GESTURE_POSITION_THRESHOLD)
-                                {
-                                    set.activate(
-                                        set.active,
-                                        WorkspaceDelta::new_gesture_end(
-                                            delta.abs(),
-                                            velocity.abs(),
-                                        ),
-                                        workspace_state,
-                                    )?;
-                                } else {
-                                    set.activate_previous(
-                                        WorkspaceDelta::new_gesture_end(
-                                            1.0 - delta.abs(),
-                                            velocity.abs(),
-                                        ),
-                                        workspace_state,
-                                    )?;
-                                }
-                            }
-                            _ => {} // Do nothing
+                    if let Some((_, WorkspaceDelta::Gesture(delta))) = set.previously_active {
+                        if (velocity > 0.0 && velocity.abs() >= GESTURE_VELOCITY_THRESHOLD)
+                            || (velocity.abs() < GESTURE_VELOCITY_THRESHOLD
+                                && delta.abs() > GESTURE_POSITION_THRESHOLD)
+                        {
+                            set.activate(
+                                set.active,
+                                WorkspaceDelta::new_gesture_end(delta.abs(), velocity.abs()),
+                                workspace_state,
+                            )?;
+                        } else {
+                            set.activate_previous(
+                                WorkspaceDelta::new_gesture_end(1.0 - delta.abs(), velocity.abs()),
+                                workspace_state,
+                            )?;
                         }
                     }
                 }
@@ -2141,8 +2121,7 @@ impl Shell {
                 } else {
                     (Duration::ZERO, self.overview_mode.active_trigger().cloned())
                 };
-            self.overview_mode =
-                OverviewMode::Ended(trigger, Instant::now() - reverse_duration);
+            self.overview_mode = OverviewMode::Ended(trigger, Instant::now() - reverse_duration);
         }
     }
 
@@ -2878,7 +2857,6 @@ impl Shell {
         }
     }
 
-    #[must_use]
     pub fn move_current(
         &mut self,
         seat: &Seat<State>,
@@ -3061,17 +3039,13 @@ impl Shell {
         }
         // update fullscreen state to restore to the new workspace
         if let WorkspaceRestoreData::Fullscreen(Some(FullscreenRestoreData {
-            previous_state,
+            previous_state:
+                FullscreenRestoreState::Tiling { workspace, .. }
+                | FullscreenRestoreState::Floating { workspace, .. },
             ..
         })) = &mut window_state
         {
-            match previous_state {
-                FullscreenRestoreState::Tiling { workspace, .. }
-                | FullscreenRestoreState::Floating { workspace, .. } => {
-                    *workspace = *to;
-                }
-                _ => {}
-            }
+            *workspace = *to;
         }
 
         for mapped in from_workspace
@@ -3531,7 +3505,11 @@ impl Shell {
                         .tiling_layer
                         .mapped()
                         .any(|(m, _)| m == &old_mapped)
-                } { ManagedLayer::Tiling } else { ManagedLayer::Floating };
+                } {
+                    ManagedLayer::Tiling
+                } else {
+                    ManagedLayer::Floating
+                };
 
                 // if this changed the width, the window was tiled in floating mode
                 if let Some(new_size) = new_size {
@@ -3834,11 +3812,7 @@ impl Shell {
     }
 
     #[must_use]
-    pub fn move_current_element<'a>(
-        &mut self,
-        direction: Direction,
-        seat: &Seat<State>,
-    ) -> MoveResult {
+    pub fn move_current_element(&mut self, direction: Direction, seat: &Seat<State>) -> MoveResult {
         let Some(output) = seat.focused_output() else {
             return MoveResult::None;
         };
@@ -4017,17 +3991,19 @@ impl Shell {
                     was_maximized: false,
                 },
             });
-        } else if let Some((workspace, window)) = self.workspaces.sets.values_mut().find_map(|set| {
-            set.workspaces.iter_mut().find_map(|workspace| {
-                let window = workspace
-                    .get_fullscreen()
-                    .cloned()
-                    .into_iter()
-                    .chain(workspace.mapped().map(|m| m.active_window()))
-                    .find(|s| s == surface);
-                window.map(|s| (workspace, s))
+        } else if let Some((workspace, window)) =
+            self.workspaces.sets.values_mut().find_map(|set| {
+                set.workspaces.iter_mut().find_map(|workspace| {
+                    let window = workspace
+                        .get_fullscreen()
+                        .cloned()
+                        .into_iter()
+                        .chain(workspace.mapped().map(|m| m.active_window()))
+                        .find(|s| s == surface);
+                    window.map(|s| (workspace, s))
+                })
             })
-        }) {
+        {
             let to = minimize_rectangle(workspace.output(), &window);
             if let Some(minimized) = workspace.minimize(surface, to) {
                 workspace.minimized_windows.push(minimized);
@@ -4333,9 +4309,7 @@ impl Shell {
         seat: &Seat<State>,
         loop_handle: &LoopHandle<'static, State>,
     ) -> Option<KeyboardFocusTarget> {
-        let Some(focused_output) = seat.focused_output() else {
-            return None;
-        };
+        let focused_output = seat.focused_output()?;
         let set = self.workspaces.sets.get_mut(&focused_output).unwrap();
         let workspace = &mut set.workspaces[set.active];
 
@@ -4507,9 +4481,7 @@ impl Shell {
     where
         CosmicSurface: PartialEq<S>,
     {
-        let Some(mapped) = self.element_for_surface(surface).cloned() else {
-            return None;
-        };
+        let mapped = self.element_for_surface(surface).cloned()?;
         let window;
 
         let old_fullscreen = if let Some((old_output, set)) = self

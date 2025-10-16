@@ -241,7 +241,9 @@ impl CosmicMapped {
     }
 
     pub fn focus_window(&self, window: &CosmicSurface) {
-        if let CosmicMappedInternal::Stack(stack) = &self.element { stack.set_active(window) }
+        if let CosmicMappedInternal::Stack(stack) = &self.element {
+            stack.set_active(window)
+        }
     }
 
     pub fn has_surface(&self, surface: &WlSurface, surface_type: WindowSurfaceType) -> bool {
@@ -480,17 +482,11 @@ impl CosmicMapped {
     }
 
     pub fn is_window(&self) -> bool {
-        match &self.element {
-            CosmicMappedInternal::Window(_) => true,
-            _ => false,
-        }
+        matches!(&self.element, CosmicMappedInternal::Window(_))
     }
 
     pub fn is_stack(&self) -> bool {
-        match &self.element {
-            CosmicMappedInternal::Stack(_) => true,
-            _ => false,
-        }
+        matches!(&self.element, CosmicMappedInternal::Stack(_))
     }
 
     pub fn stack_ref(&self) -> Option<&CosmicStack> {

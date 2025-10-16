@@ -58,7 +58,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
                 smithay::backend::renderer::damage::Error::OutputNoMode(_) => unreachable!(),
             })?;
         let mapping = renderer.copy_framebuffer(
-            &mut fb,
+            &fb,
             bbox.to_buffer(1, Transform::Normal, &bbox.size),
             format,
         )?;

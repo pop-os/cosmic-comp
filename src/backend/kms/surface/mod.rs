@@ -1027,10 +1027,7 @@ impl SurfaceThreadState {
             remove_frame_flags |= FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
         }
 
-        let mut vrr = match self.vrr_mode {
-            AdaptiveSync::Force => true,
-            _ => false,
-        };
+        let mut vrr = matches!(self.vrr_mode, AdaptiveSync::Force);
 
         if self.vrr_mode == AdaptiveSync::Enabled {
             vrr = has_active_fullscreen;
@@ -1754,7 +1751,7 @@ fn send_screencopy_result<'a>(
             .collect::<Vec<_>>();
 
         if let Some(tex) = pre_postprocess_data.texture.as_mut() {
-            let mut tex_fb = renderer
+            let tex_fb = renderer
                 .bind(tex)
                 .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
 
@@ -1762,7 +1759,7 @@ fn send_screencopy_result<'a>(
                 for rect in adjusted.iter().copied() {
                     // TODO: On Vulkan, may need to combine sync points instead of just using latest?
                     sync = renderer
-                        .blit(&mut tex_fb, fb, rect, rect, TextureFilter::Linear)
+                        .blit(&tex_fb, fb, rect, rect, TextureFilter::Linear)
                         .map_err(
                             RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering,
                         )?;

@@ -200,13 +200,11 @@ impl Shell {
         let workspace = target
             .wl_surface()
             .and_then(|surface| self.workspace_for_surface(&surface));
-        let workspace = if workspace.is_none() {
+        let workspace = if let Some(workspace) = workspace {
+            self.workspaces.space_for_handle_mut(&workspace.0).unwrap()
+        } else {
             //should this be the active output or the focused output?
             self.active_space_mut(&seat.focused_or_active_output())
-                .unwrap()
-        } else {
-            self.workspaces
-                .space_for_handle_mut(&workspace.unwrap().0)
                 .unwrap()
         };
 
@@ -329,7 +327,10 @@ fn update_focus_state(
 ) {
     // update keyboard focus
     if let Some(keyboard) = seat.get_keyboard() {
-        if should_update_cursor && state.common.config.cosmic_conf.cursor_follows_focus && target.is_some() {
+        if should_update_cursor
+            && state.common.config.cosmic_conf.cursor_follows_focus
+            && target.is_some()
+        {
             //need to borrow mutably for surface under
             let shell = state.common.shell.read();
             // get the top left corner of the target element
@@ -681,8 +682,8 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
         let output = seat.active_output();
         let position = pointer.current_location().as_global();
 
-        let mut shell = state.common.shell.write();
-        let under = State::surface_under(position, &output, &mut shell)
+        let shell = state.common.shell.write();
+        let under = State::surface_under(position, &output, &shell)
             .map(|(target, pos)| (target, pos.as_logical()));
         drop(shell);
 
@@ -707,7 +708,9 @@ fn exclusive_layer_surface_layer(shell: &Shell) -> Option<Layer> {
     for output in shell.outputs() {
         for layer_surface in layer_map_for_output(output).layers() {
             let data = layer_surface.cached_state();
-            if data.keyboard_interactivity == KeyboardInteractivity::Exclusive && data.layer as u32 >= layer.unwrap_or(Layer::Top) as u32 {
+            if data.keyboard_interactivity == KeyboardInteractivity::Exclusive
+                && data.layer as u32 >= layer.unwrap_or(Layer::Top) as u32
+            {
                 layer = Some(data.layer);
             }
         }
