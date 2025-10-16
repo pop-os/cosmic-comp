@@ -14,21 +14,21 @@ use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, format::FormatSet, Buffer},
-        drm::{output::DrmOutputRenderElements, DrmDeviceFd, DrmNode, NodeType, VrrSupport},
+        allocator::{Buffer, dmabuf::Dmabuf, format::FormatSet},
+        drm::{DrmDeviceFd, DrmNode, NodeType, VrrSupport, output::DrmOutputRenderElements},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{glow::GlowRenderer, multigpu::GpuManager},
-        session::{libseat::LibSeatSession, Event as SessionEvent, Session},
-        udev::{primary_gpu, UdevBackend, UdevEvent},
+        session::{Event as SessionEvent, Session, libseat::LibSeatSession},
+        udev::{UdevBackend, UdevEvent, primary_gpu},
     },
     output::Output,
     reexports::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
         drm::{
-            control::{connector::Interface, crtc, Device as _},
             Device as _,
+            control::{Device as _, connector::Interface, crtc},
         },
         input::{self, Libinput},
         wayland_server::{Client, DisplayHandle},
@@ -36,7 +36,7 @@ use smithay::{
     utils::{Clock, DevPath, Monotonic, Size},
     wayland::{
         dmabuf::DmabufGlobal,
-        drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState},
+        drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd},
         relative_pointer::RelativePointerManagerState,
     },
 };
@@ -46,7 +46,7 @@ use tracing::{debug, error, info, trace, warn};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool},
 };
 
 mod device;
@@ -58,7 +58,7 @@ use device::*;
 pub(crate) use surface::Surface;
 pub use surface::Timings;
 
-use super::render::{output_elements, CursorMode, CLEAR_COLOR};
+use super::render::{CLEAR_COLOR, CursorMode, output_elements};
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -551,8 +551,7 @@ impl KmsState {
                 Err(err) => {
                     trace!(
                         ?err,
-                        "Failed to import dmabuf on {:?}",
-                        device.inner.render_node
+                        "Failed to import dmabuf on {:?}", device.inner.render_node
                     );
                     last_err = err;
                 }

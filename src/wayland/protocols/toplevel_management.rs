@@ -4,9 +4,9 @@ use smithay::{
     input::{Seat, SeatHandler},
     output::Output,
     reexports::wayland_server::{
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
         backend::{ClientId, GlobalId},
         protocol::wl_surface::WlSurface,
-        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
     utils::{Logical, Rectangle},
 };
@@ -17,7 +17,7 @@ use cosmic_protocols::toplevel_management::v1::server::zcosmic_toplevel_manager_
 };
 
 use super::{
-    toplevel_info::{window_from_handle, ToplevelInfoHandler, ToplevelState, Window},
+    toplevel_info::{ToplevelInfoHandler, ToplevelState, Window, window_from_handle},
     workspace::WorkspaceHandle,
 };
 

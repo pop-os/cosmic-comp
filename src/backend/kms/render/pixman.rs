@@ -7,9 +7,9 @@ use std::{
 
 use smithay::backend::{
     allocator::{
+        Allocator,
         dmabuf::{AnyError, Dmabuf, DmabufAllocator},
         gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
-        Allocator,
     },
     drm::DrmNode,
     renderer::{

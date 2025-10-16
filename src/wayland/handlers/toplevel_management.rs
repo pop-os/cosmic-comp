@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    desktop::{layer_map_for_output, WindowSurfaceType},
-    input::{pointer::MotionEvent, Seat},
+    desktop::{WindowSurfaceType, layer_map_for_output},
+    input::{Seat, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::DisplayHandle,
-    utils::{Point, Rectangle, Size, SERIAL_COUNTER},
+    utils::{Point, Rectangle, SERIAL_COUNTER, Size},
     wayland::seat::WaylandFocus,
 };
 
 use crate::{
-    shell::{focus::target::KeyboardFocusTarget, CosmicSurface, Shell, WorkspaceDelta},
+    shell::{CosmicSurface, Shell, WorkspaceDelta, focus::target::KeyboardFocusTarget},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoHandler,
         toplevel_management::{
-            delegate_toplevel_management, toplevel_rectangle_for, ManagementWindow,
-            ToplevelManagementHandler, ToplevelManagementState,
+            ManagementWindow, ToplevelManagementHandler, ToplevelManagementState,
+            delegate_toplevel_management, toplevel_rectangle_for,
         },
         workspace::WorkspaceHandle,
     },

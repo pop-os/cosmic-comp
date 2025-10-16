@@ -3,9 +3,9 @@ use cosmic_protocols::corner_radius::v1::server::{
     cosmic_corner_radius_manager_v1, cosmic_corner_radius_toplevel_v1,
 };
 use smithay::utils::HookId;
+use smithay::wayland::compositor::Cacheable;
 use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::compositor::with_states;
-use smithay::wayland::compositor::Cacheable;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
 use smithay::{
     reexports::{

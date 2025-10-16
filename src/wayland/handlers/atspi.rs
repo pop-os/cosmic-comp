@@ -22,7 +22,7 @@ use xkbcommon::xkb;
 
 use crate::{
     state::State,
-    wayland::protocols::atspi::{delegate_atspi, AtspiHandler},
+    wayland::protocols::atspi::{AtspiHandler, delegate_atspi},
 };
 
 #[derive(PartialEq, Debug)]

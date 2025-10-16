@@ -9,21 +9,21 @@ use smithay::{
     backend::{
         input::KeyState,
         renderer::{
+            ImportAll, ImportMem, Renderer,
             element::{
+                Element, RenderElement, UnderlyingStorage,
                 memory::MemoryRenderBufferRenderElement,
                 utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
-                Element, RenderElement, UnderlyingStorage,
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
             utils::{DamageSet, OpaqueRegions},
-            ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, WindowSurfaceType},
+    desktop::{WindowSurfaceType, space::SpaceElement},
     input::{
-        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         Seat,
+        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
     },
     output::Output,
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
@@ -32,7 +32,7 @@ use smithay::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
     },
     wayland::seat::WaylandFocus,
-    xwayland::{xwm::X11Relatable, X11Surface},
+    xwayland::{X11Surface, xwm::X11Relatable},
 };
 use stack::CosmicStackInternal;
 use window::CosmicWindowInternal;
@@ -41,7 +41,7 @@ use std::{
     borrow::Cow,
     fmt,
     hash::Hash,
-    sync::{atomic::AtomicBool, Arc, Mutex, Weak},
+    sync::{Arc, Mutex, Weak, atomic::AtomicBool},
 };
 
 pub mod surface;
@@ -65,12 +65,12 @@ use smithay::desktop::WindowSurface;
 use tracing::debug;
 
 use super::{
+    ManagedLayer,
     focus::target::PointerFocusTarget,
     layout::{
         floating::{ResizeState, TiledCorners},
         tiling::NodeDesc,
     },
-    ManagedLayer,
 };
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 
@@ -821,10 +821,10 @@ impl CosmicMapped {
     pub fn key(&self) -> CosmicMappedKey {
         CosmicMappedKey(match &self.element {
             CosmicMappedInternal::Stack(stack) => {
-                CosmicMappedKeyInner::Stack(Arc::downgrade(&stack.0 .0))
+                CosmicMappedKeyInner::Stack(Arc::downgrade(&stack.0.0))
             }
             CosmicMappedInternal::Window(window) => {
-                CosmicMappedKeyInner::Window(Arc::downgrade(&window.0 .0))
+                CosmicMappedKeyInner::Window(Arc::downgrade(&window.0.0))
             }
             _ => unreachable!(),
         })

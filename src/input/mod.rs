@@ -3,18 +3,18 @@
 use crate::{
     backend::render::ElementFilter,
     config::{
+        Action, Config, PrivateAction,
         key_bindings::{
             cosmic_keystate_from_smithay, cosmic_modifiers_eq_smithay,
             cosmic_modifiers_from_smithay,
         },
-        Action, Config, PrivateAction,
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
+        LastModifierChange, SeatExt, Trigger,
         focus::{
-            render_input_order,
+            Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
-            Stage,
         },
         grabs::{ReleaseMode, ResizeEdge},
         layout::{
@@ -22,7 +22,6 @@ use crate::{
             tiling::{NodeDesc, SwapWindowGrab, TilingLayout},
         },
         zoom::ZoomState,
-        LastModifierChange, SeatExt, Trigger,
     },
     utils::{float::NextDown, prelude::*, quirks::workspace_overview_is_open},
     wayland::{
@@ -31,10 +30,10 @@ use crate::{
     },
 };
 use calloop::{
-    timer::{TimeoutAction, Timer},
     RegistrationToken,
+    timer::{TimeoutAction, Timer},
 };
-use cosmic_comp_config::{workspace::WorkspaceLayout, NumlockState};
+use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
 use smithay::{
@@ -45,8 +44,9 @@ use smithay::{
         SwitchState, SwitchToggleEvent, TabletToolButtonEvent, TabletToolEvent,
         TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
     },
-    desktop::{utils::under_from_surface_tree, PopupKeyboardGrab, WindowSurfaceType},
+    desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
+        Seat,
         keyboard::{FilterResult, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -55,16 +55,15 @@ use smithay::{
             PointerGrab, RelativeMotionEvent,
         },
         touch::{DownEvent, MotionEvent as TouchMotionEvent, UpEvent},
-        Seat,
     },
     output::Output,
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
     },
-    utils::{Point, Rectangle, Serial, SERIAL_COUNTER},
+    utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
-        pointer_constraints::{with_pointer_constraint, PointerConstraint},
+        pointer_constraints::{PointerConstraint, with_pointer_constraint},
         seat::WaylandFocus,
         tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },

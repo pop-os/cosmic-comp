@@ -9,14 +9,14 @@ use crate::{
 
 use calloop::LoopHandle;
 use cosmic::{
+    Apply,
     iced::{
-        widget::{column, container, horizontal_space, row, vertical_space},
         Alignment,
+        widget::{column, container, horizontal_space, row, vertical_space},
     },
     iced_core::{Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, text},
-    Apply,
 };
 use cosmic_settings_config::shortcuts::action::{Action, ResizeDirection};
 use smithay::utils::Size;

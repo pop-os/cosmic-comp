@@ -2,10 +2,10 @@ use std::{borrow::Cow, sync::Weak, time::Duration};
 
 use crate::{
     shell::{
+        CosmicSurface, SeatExt,
         element::{CosmicMapped, CosmicStack, CosmicWindow},
         layout::tiling::ResizeForkTarget,
         zoom::ZoomFocusTarget,
-        CosmicSurface, SeatExt,
     },
     utils::prelude::*,
     wayland::handlers::{screencopy::SessionHolder, xdg_shell::popup::get_popup_toplevel},
@@ -13,8 +13,9 @@ use crate::{
 use id_tree::NodeId;
 use smithay::{
     backend::input::KeyState,
-    desktop::{space::SpaceElement, LayerSurface, PopupKind, WindowSurface, WindowSurfaceType},
+    desktop::{LayerSurface, PopupKind, WindowSurface, WindowSurfaceType, space::SpaceElement},
     input::{
+        Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -26,14 +27,13 @@ use smithay::{
             DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
             UpEvent,
         },
-        Seat,
     },
     reexports::wayland_server::{
-        backend::ObjectId, protocol::wl_surface::WlSurface, Client, Resource,
+        Client, Resource, backend::ObjectId, protocol::wl_surface::WlSurface,
     },
     utils::{IsAlive, Logical, Point, Serial, Transform},
     wayland::{seat::WaylandFocus, session_lock::LockSurface},
-    xwayland::{xwm::XwmId, X11Surface},
+    xwayland::{X11Surface, xwm::XwmId},
 };
 
 #[derive(Debug, Clone, PartialEq)]

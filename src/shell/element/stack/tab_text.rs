@@ -1,15 +1,14 @@
 use std::hash::{Hash, Hasher};
 
 use cosmic::{
-    iced::{alignment, Point},
+    iced::{Point, alignment},
     iced_core::{
-        gradient,
+        Background, Border, Color, Degrees, Gradient, Length, Rectangle, Size, Text, gradient,
         layout::{Layout, Limits, Node},
         mouse::Cursor,
         renderer::{self, Renderer as IcedRenderer},
         text::{LineHeight, Paragraph, Renderer as TextRenderer, Shaping},
-        widget::{tree, Tree, Widget},
-        Background, Border, Color, Degrees, Gradient, Length, Rectangle, Size, Text,
+        widget::{Tree, Widget, tree},
     },
 };
 

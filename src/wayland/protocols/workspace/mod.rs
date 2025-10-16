@@ -9,8 +9,8 @@ use smithay::{
             ext_workspace_manager_v1::ExtWorkspaceManagerV1,
         },
         wayland_server::{
-            backend::{GlobalId, ObjectId},
             Client, Dispatch, DisplayHandle, GlobalDispatch, Resource,
+            backend::{GlobalId, ObjectId},
         },
     },
 };

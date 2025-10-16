@@ -4,18 +4,18 @@ use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude:
 use calloop::Interest;
 use smithay::{
     backend::renderer::{
-        element::{surface::KindEvaluation, Kind},
+        element::{Kind, surface::KindEvaluation},
         utils::{on_commit_buffer_handler, with_renderer_surface_state},
     },
     delegate_compositor,
-    desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
-    utils::{Clock, Logical, Monotonic, Size, Time, SERIAL_COUNTER},
+    desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
+    reexports::wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
+    utils::{Clock, Logical, Monotonic, SERIAL_COUNTER, Size, Time},
     wayland::{
         compositor::{
-            add_blocker, add_post_commit_hook, add_pre_commit_hook, with_states,
-            with_surface_tree_downward, BufferAssignment, CompositorClientState, CompositorHandler,
-            CompositorState, SurfaceAttributes, SurfaceData, TraversalAction,
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            SurfaceAttributes, SurfaceData, TraversalAction, add_blocker, add_post_commit_hook,
+            add_pre_commit_hook, with_states, with_surface_tree_downward,
         },
         dmabuf::get_dmabuf,
         drm_syncobj::DrmSyncobjCachedState,

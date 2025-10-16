@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use smithay::{
     backend::{
         allocator::format::FormatSet,
@@ -8,7 +8,7 @@ use smithay::{
     },
     reexports::{
         calloop::RegistrationToken,
-        wayland_server::{backend::GlobalId, Client, DisplayHandle},
+        wayland_server::{Client, DisplayHandle, backend::GlobalId},
     },
     wayland::{
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal},
@@ -18,7 +18,7 @@ use smithay::{
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use crate::state::{advertised_node_for_client, ClientState, State};
+use crate::state::{ClientState, State, advertised_node_for_client};
 
 #[derive(Debug)]
 pub struct Socket {

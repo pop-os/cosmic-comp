@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    State,
     backend::kms::Timings,
     shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget, PointerFocusToplevel},
-    State,
 };
 use egui::Color32;
 use smithay::{
@@ -16,7 +16,7 @@ use smithay::{
         },
     },
     desktop::WindowSurface,
-    input::{keyboard::xkb, Seat},
+    input::{Seat, keyboard::xkb},
     reexports::wayland_server::Resource,
     utils::{Logical, Rectangle, Time},
 };

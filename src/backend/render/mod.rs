@@ -15,20 +15,20 @@ use crate::{
     backend::{kms::render::gles::GbmGlowBackend, render::element::DamageElement},
     config::ScreenFilter,
     shell::{
+        CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
+        WorkspaceRenderElement,
         element::CosmicMappedKey,
-        focus::{render_input_order, target::WindowGroup, FocusTarget, Stage},
+        focus::{FocusTarget, Stage, render_input_order, target::WindowGroup},
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
         layout::tiling::ANIMATION_DURATION,
         zoom::ZoomState,
-        CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
-        WorkspaceRenderElement,
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
             data_device::get_dnd_icon,
-            screencopy::{render_session, FrameHolder, SessionData},
+            screencopy::{FrameHolder, SessionData, render_session},
         },
         protocols::workspace::WorkspaceHandle,
     },
@@ -38,29 +38,29 @@ use cosmic::Theme;
 use element::FromGlesError;
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, Fourcc},
+        allocator::{Fourcc, dmabuf::Dmabuf},
         drm::{DrmDeviceFd, DrmNode},
         renderer::{
+            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
+            TextureFilter,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
-                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+                Element, Id, Kind, RenderElement, WeakId,
+                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
                 texture::{TextureRenderBuffer, TextureRenderElement},
                 utils::{
-                    constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior,
-                    CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement,
+                    ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
+                    RelocateRenderElement, RescaleRenderElement, constrain_render_elements,
                 },
-                Element, Id, Kind, RenderElement, WeakId,
             },
             gles::{
-                element::{PixelShaderElement, TextureShaderElement},
                 GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
                 UniformName, UniformType,
+                element::{PixelShaderElement, TextureShaderElement},
             },
             glow::GlowRenderer,
             multigpu::{Error as MultiError, MultiFrame, MultiRenderer},
             sync::SyncPoint,
-            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
-            TextureFilter,
         },
     },
     input::Seat,
@@ -592,21 +592,23 @@ where
         let scale = output.current_scale().fractional_scale();
 
         if let Some((state, timings)) = _fps {
-            vec![fps_ui(
-                _gpu,
-                debug_active,
-                &seats,
-                renderer.glow_renderer_mut(),
-                state,
-                timings,
-                Rectangle::from_size(
-                    (output_geo.size.w.min(400), output_geo.size.h.min(800)).into(),
-                ),
-                scale,
-            )
-            .map_err(FromGlesError::from_gles_error)
-            .map_err(RenderError::Rendering)?
-            .into()]
+            vec![
+                fps_ui(
+                    _gpu,
+                    debug_active,
+                    &seats,
+                    renderer.glow_renderer_mut(),
+                    state,
+                    timings,
+                    Rectangle::from_size(
+                        (output_geo.size.w.min(400), output_geo.size.h.min(800)).into(),
+                    ),
+                    scale,
+                )
+                .map_err(FromGlesError::from_gles_error)
+                .map_err(RenderError::Rendering)?
+                .into(),
+            ]
         } else {
             Vec::new()
         }

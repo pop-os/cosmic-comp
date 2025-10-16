@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::reexports::{
-    calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction},
+    calloop::{Interest, LoopHandle, Mode, PostAction, generic::Generic},
     rustix,
 };
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use sendfd::RecvWithFd;
 use serde::{Deserialize, Serialize};
 use std::{

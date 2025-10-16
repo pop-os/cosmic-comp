@@ -4,7 +4,7 @@ use crate::{shell::focus::target::KeyboardFocusTarget, state::State};
 use smithay::{
     delegate_xwayland_keyboard_grab,
     input::Seat,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
+    reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     wayland::xwayland_keyboard_grab::{XWaylandKeyboardGrab, XWaylandKeyboardGrabHandler},
 };
 use std::sync::Mutex;

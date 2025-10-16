@@ -1,5 +1,5 @@
-use crate::shell::focus::target::KeyboardFocusTarget;
 use crate::shell::WorkspaceDelta;
+use crate::shell::focus::target::KeyboardFocusTarget;
 use crate::{shell::ActivationKey, state::ClientState, utils::prelude::*};
 use crate::{
     state::State,

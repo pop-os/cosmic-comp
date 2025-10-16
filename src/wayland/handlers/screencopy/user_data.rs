@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, sync::Mutex};
 use smithay::{
     backend::renderer::{damage::OutputDamageTracker, utils::CommitCounter},
     output::Output,
-    reexports::wayland_server::{protocol::wl_buffer::WlBuffer, Resource, Weak},
+    reexports::wayland_server::{Resource, Weak, protocol::wl_buffer::WlBuffer},
 };
 
 use crate::{

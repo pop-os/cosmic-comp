@@ -3,7 +3,7 @@
 use calloop::timer::{TimeoutAction, Timer};
 use smithay::{
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, Mode, PostAction},
+        calloop::{EventLoop, Interest, Mode, PostAction, generic::Generic},
         wayland_server::{Display, DisplayHandle},
     },
     wayland::socket::ListeningSocketSource,

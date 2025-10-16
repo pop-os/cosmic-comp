@@ -10,13 +10,13 @@ use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::renderer::{
-        element::{
-            utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
-            AsRenderElements, RenderElement,
-        },
         ImportAll, ImportMem, Renderer,
+        element::{
+            AsRenderElements, RenderElement,
+            utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+        },
     },
-    desktop::{layer_map_for_output, space::SpaceElement, PopupKind, Space, WindowSurfaceType},
+    desktop::{PopupKind, Space, WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
     output::Output,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Size},
@@ -24,20 +24,20 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::{element::AsGlowRenderer, IndicatorShader, Key, Usage},
+    backend::render::{IndicatorShader, Key, Usage, element::AsGlowRenderer},
     shell::{
+        CosmicSurface, Direction, ManagedLayer, MoveResult, ResizeMode,
         element::{
+            CosmicMapped, CosmicMappedRenderElement, CosmicWindow, MaximizedState,
             resize_indicator::ResizeIndicator,
             stack::{CosmicStackRenderElement, MoveResult as StackMoveResult, TAB_HEIGHT},
             window::CosmicWindowRenderElement,
-            CosmicMapped, CosmicMappedRenderElement, CosmicWindow, MaximizedState,
         },
         focus::{
-            target::{KeyboardFocusTarget, PointerFocusTarget},
             FocusStackMut,
+            target::{KeyboardFocusTarget, PointerFocusTarget},
         },
         grabs::{GrabStartData, ReleaseMode, ResizeEdge},
-        CosmicSurface, Direction, ManagedLayer, MoveResult, ResizeMode,
     },
     state::State,
     utils::{prelude::*, tween::EaseRectangle},

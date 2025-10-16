@@ -2,28 +2,28 @@ use crate::wayland::protocols::corner_radius::CacheableCorners;
 use std::{
     borrow::Cow,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Mutex,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
 use smithay::{
     backend::renderer::{
-        element::{
-            surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-            utils::select_dmabuf_feedback,
-            AsRenderElements, Kind, RenderElementStates,
-        },
         ImportAll, Renderer,
+        element::{
+            AsRenderElements, Kind, RenderElementStates,
+            surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            utils::select_dmabuf_feedback,
+        },
     },
     desktop::{
-        space::SpaceElement, utils::OutputPresentationFeedback, PopupManager, Window,
-        WindowSurface, WindowSurfaceType,
+        PopupManager, Window, WindowSurface, WindowSurfaceType, space::SpaceElement,
+        utils::OutputPresentationFeedback,
     },
     input::{
-        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         Seat,
+        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
     },
     output::Output,
     reexports::{
@@ -38,14 +38,14 @@ use smithay::{
         wayland_server::protocol::wl_surface::WlSurface,
     },
     utils::{
-        user_data::UserDataMap, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+        IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, user_data::UserDataMap,
     },
     wayland::{
-        compositor::{with_states, with_surface_tree_downward, SurfaceData, TraversalAction},
+        compositor::{SurfaceData, TraversalAction, with_states, with_surface_tree_downward},
         seat::WaylandFocus,
         shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData},
     },
-    xwayland::{xwm::X11Relatable, X11Surface},
+    xwayland::{X11Surface, xwm::X11Relatable},
 };
 use tracing::trace;
 

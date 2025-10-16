@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::utils::{user_data::UserDataMap, Rectangle};
+use smithay::utils::{Rectangle, user_data::UserDataMap};
 
 use crate::{
     shell::CosmicSurface,
     state::State,
     utils::prelude::Global,
     wayland::protocols::toplevel_info::{
-        delegate_toplevel_info, ToplevelInfoHandler, ToplevelInfoState, Window,
+        ToplevelInfoHandler, ToplevelInfoState, Window, delegate_toplevel_info,
     },
 };
 
