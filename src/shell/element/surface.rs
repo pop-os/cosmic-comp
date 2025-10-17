@@ -105,6 +105,9 @@ struct Minimized(AtomicBool);
 struct Sticky(AtomicBool);
 
 #[derive(Default)]
+struct Suspended(AtomicBool);
+
+#[derive(Default)]
 struct GlobalGeometry(Mutex<Option<Rectangle<i32, Global>>>);
 
 impl CosmicSurface {
@@ -470,6 +473,7 @@ impl CosmicSurface {
                 let _ = surface.set_mapped(true);
             }
         }
+        self.update_suspended();
     }
 
     pub fn is_sticky(&self) -> bool {
@@ -488,7 +492,16 @@ impl CosmicSurface {
             .store(sticky, Ordering::SeqCst);
     }
 
-    pub fn set_suspended(&self, suspended: bool) {
+    fn update_suspended(&self) {
+        let minimized = self.is_minimized();
+        let suspended = self
+            .0
+            .user_data()
+            .get_or_insert_threadsafe(Minimized::default)
+            .0
+            .load(Ordering::SeqCst);
+
+        let suspended = minimized || suspended;
         match self.0.underlying_surface() {
             WindowSurface::Wayland(window) => window.with_pending_state(|state| {
                 if suspended {
@@ -501,6 +514,15 @@ impl CosmicSurface {
                 let _ = surface.set_suspended(suspended);
             }
         }
+    }
+
+    pub fn set_suspended(&self, suspended: bool) {
+        self.0
+            .user_data()
+            .get_or_insert_threadsafe(Suspended::default)
+            .0
+            .store(suspended, Ordering::SeqCst);
+        self.update_suspended();
     }
 
     pub fn min_size_without_ssd(&self) -> Option<Size<i32, Logical>> {
