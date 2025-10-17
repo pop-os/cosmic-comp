@@ -4,7 +4,7 @@ use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex};
 
 use crate::{
     backend::render::cursor::CursorState,
-    config::{xkb_config_to_wl, Config},
+    config::{Config, xkb_config_to_wl},
     input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
 };
@@ -12,9 +12,9 @@ use smithay::{
     backend::input::{Device, DeviceCapability},
     desktop::utils::bbox_from_surface_tree,
     input::{
+        Seat, SeatState,
         keyboard::{LedState, XkbConfig},
         pointer::{CursorImageAttributes, CursorImageStatus},
-        Seat, SeatState,
     },
     output::Output,
     reexports::{input::Device as InputDevice, wayland_server::DisplayHandle},
@@ -35,6 +35,12 @@ crate::utils::id_gen!(next_seat_id, SEAT_ID, SEAT_IDS);
 pub struct Seats {
     seats: Vec<Seat<State>>,
     last_active: Option<Seat<State>>,
+}
+
+impl Default for Seats {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Seats {
@@ -131,7 +137,7 @@ impl Devices {
 
         let mut map = self.capabilities.borrow_mut();
         map.remove(&id)
-            .unwrap_or(Vec::new())
+            .unwrap_or_default()
             .into_iter()
             .filter(|c| map.values().flatten().all(|has| *c != *has))
             .collect()

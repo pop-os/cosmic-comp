@@ -1,19 +1,19 @@
 use calloop::LoopHandle;
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, format::get_transparent, Buffer, Fourcc},
+        allocator::{Buffer, Fourcc, dmabuf::Dmabuf, format::get_transparent},
         renderer::{
+            Bind, Blit, BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
             buffer_dimensions, buffer_type,
             damage::{Error as DTError, OutputDamageTracker, RenderOutputResult},
             element::{
+                AsRenderElements, RenderElement,
                 surface::WaylandSurfaceRenderElement,
                 utils::{Relocate, RelocateRenderElement},
-                AsRenderElements, RenderElement,
             },
             gles::{GlesError, GlesRenderbuffer},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, Blit, BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
         },
     },
     desktop::space::SpaceElement,
@@ -35,16 +35,16 @@ use tracing::warn;
 
 use crate::{
     backend::render::{
-        cursor,
+        CursorMode, ElementFilter, RendererRef, cursor,
         element::{AsGlowRenderer, CosmicElement, DamageElement, FromGlesError},
-        render_workspace, CursorMode, ElementFilter, RendererRef,
+        render_workspace,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{Common, KmsNodes, State},
     utils::prelude::{PointExt, PointGlobalExt, RectExt, RectLocalExt, SeatExt},
     wayland::{
         handlers::screencopy::{
-            constraints_for_output, constraints_for_toplevel, SessionData, SessionUserData,
+            SessionData, SessionUserData, constraints_for_output, constraints_for_toplevel,
         },
         protocols::{
             screencopy::{BufferConstraints, CursorSessionRef, FailureReason, Frame, SessionRef},
@@ -173,7 +173,7 @@ where
     Ok(Some(PendingImageCopyData {
         frame,
         damage: damage
-            .into_iter()
+            .iter()
             .map(|rect| {
                 let logical = rect.to_logical(1);
                 logical.to_buffer(1, transform.invert(), &buffer_size.to_logical(1, transform))
@@ -354,7 +354,7 @@ pub fn render_workspace_to_buffer(
                 &common.shell,
                 None,
                 common.clock.now(),
-                &output,
+                output,
                 None,
                 handle,
                 cursor_mode,
@@ -373,7 +373,7 @@ pub fn render_workspace_to_buffer(
                 &common.shell,
                 None,
                 common.clock.now(),
-                &output,
+                output,
                 None,
                 handle,
                 cursor_mode,
@@ -655,7 +655,7 @@ pub fn render_window_to_buffer(
                     .and_then(|wl_surface| {
                         with_renderer_surface_state(&wl_surface, |state| {
                             let buffer = state.buffer()?;
-                            let dmabuf = get_dmabuf(&*buffer).ok()?;
+                            let dmabuf = get_dmabuf(buffer).ok()?;
                             dmabuf.node()
                         })
                     })
@@ -783,7 +783,7 @@ pub fn render_cursor_to_buffer(
     {
         let mut elements = cursor::draw_cursor(
             renderer,
-            &seat,
+            seat,
             Point::from((0.0, 0.0)),
             1.0.into(),
             1.0,

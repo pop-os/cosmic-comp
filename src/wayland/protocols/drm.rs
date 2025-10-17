@@ -23,13 +23,13 @@ mod generated {
 
 use smithay::{
     backend::allocator::{
+        Fourcc, Modifier,
         dmabuf::{Dmabuf, DmabufFlags},
         format::FormatSet,
-        Fourcc, Modifier,
     },
     reexports::wayland_server::{
-        backend::GlobalId, protocol::wl_buffer::WlBuffer, Client, DataInit, Dispatch,
-        DisplayHandle, GlobalDispatch, New, Resource,
+        Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+        backend::GlobalId, protocol::wl_buffer::WlBuffer,
     },
     wayland::{
         buffer::BufferHandler,
@@ -87,7 +87,7 @@ where
     ) {
         let data = DrmInstanceData {
             formats: global_data.formats.clone(),
-            dmabuf_global: global_data.dmabuf_global.clone(),
+            dmabuf_global: global_data.dmabuf_global,
         };
         let drm_instance = data_init.init(resource, data);
 
@@ -266,7 +266,7 @@ impl<R: 'static> WlDrmState<R> {
             filter: Box::new(client_filter),
             formats,
             device_path,
-            dmabuf_global: dmabuf_global.clone(),
+            dmabuf_global: *dmabuf_global,
         };
 
         display.create_global::<D, wl_drm::WlDrm, _>(2, data)

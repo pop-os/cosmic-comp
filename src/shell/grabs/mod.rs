@@ -122,9 +122,9 @@ impl From<shortcuts::action::ResizeEdge> for ResizeEdge {
     }
 }
 
-impl Into<shortcuts::action::ResizeEdge> for ResizeEdge {
-    fn into(self) -> shortcuts::action::ResizeEdge {
-        match self {
+impl From<ResizeEdge> for shortcuts::action::ResizeEdge {
+    fn from(val: ResizeEdge) -> Self {
+        match val {
             ResizeEdge::BOTTOM => shortcuts::action::ResizeEdge::Bottom,
             ResizeEdge::BOTTOM_LEFT => shortcuts::action::ResizeEdge::BottomLeft,
             ResizeEdge::BOTTOM_RIGHT => shortcuts::action::ResizeEdge::BottomRight,

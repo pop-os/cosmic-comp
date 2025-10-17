@@ -8,9 +8,9 @@ use crate::{
     config::Config,
     fl,
     shell::{
+        CosmicSurface, PointGlobalExt, Shell,
         element::{CosmicMapped, CosmicWindow},
         grabs::ReleaseMode,
-        CosmicSurface, PointGlobalExt, Shell,
     },
     state::State,
     utils::{prelude::SeatExt, screenshot::screenshot_window},
@@ -52,8 +52,7 @@ fn next_workspace(
         .workspaces
         .spaces_for_output(&output)
         .skip_while(|space| space.handle != current_handle)
-        .skip(1)
-        .next()
+        .nth(1)
         .map(|space| (current_handle, space.handle))
 }
 
@@ -62,7 +61,7 @@ fn move_fullscreen_prev_workspace(state: &mut State, surface: &CosmicSurface) {
     let Some(wl_surface) = surface.wl_surface() else {
         return;
     };
-    let Some((from, to)) = prev_workspace(&shell, &*wl_surface) else {
+    let Some((from, to)) = prev_workspace(&shell, &wl_surface) else {
         return;
     };
 
@@ -88,7 +87,7 @@ fn move_fullscreen_next_workspace(state: &mut State, surface: &CosmicSurface) {
     let Some(wl_surface) = surface.wl_surface() else {
         return;
     };
-    let Some((from, to)) = next_workspace(&shell, &*wl_surface) else {
+    let Some((from, to)) = next_workspace(&shell, &wl_surface) else {
         return;
     };
 
@@ -115,7 +114,7 @@ fn move_element_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
     let Some(wl_surface) = window.wl_surface() else {
         return;
     };
-    let Some((from, to)) = prev_workspace(&shell, &*wl_surface) else {
+    let Some((from, to)) = prev_workspace(&shell, &wl_surface) else {
         return;
     };
 
@@ -141,7 +140,7 @@ fn move_element_next_workspace(state: &mut State, mapped: &CosmicMapped) {
     let Some(wl_surface) = window.wl_surface() else {
         return;
     };
-    let Some((from, to)) = next_workspace(&shell, &*wl_surface) else {
+    let Some((from, to)) = next_workspace(&shell, &wl_surface) else {
         return;
     };
 

@@ -3,7 +3,7 @@
 use crate::{
     backend::{
         kms::render::gles::GbmGlowBackend,
-        render::{init_shaders, output_elements, CursorMode, GlMultiRenderer, CLEAR_COLOR},
+        render::{CLEAR_COLOR, CursorMode, GlMultiRenderer, init_shaders, output_elements},
     },
     config::{CompTransformDef, EdidProduct, ScreenFilter},
     shell::Shell,
@@ -17,17 +17,17 @@ use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
+            Format, Fourcc,
             format::FormatSet,
             gbm::{GbmAllocator, GbmDevice},
-            Format, Fourcc,
         },
         drm::{
+            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
             compositor::{FrameError, FrameFlags},
             exporter::gbm::GbmFramebufferExporter,
             output::{DrmOutputManager, LockedDrmOutputManager},
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
         },
-        egl::{context::ContextPriority, EGLContext, EGLDevice, EGLDisplay},
+        egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
         renderer::glow::GlowRenderer,
         session::Session,
     },
@@ -35,10 +35,10 @@ use smithay::{
     output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
-        drm::control::{connector, crtc, Device as ControlDevice, ModeTypeFlags},
+        drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
         gbm::BufferObjectFlags as GbmBufferFlags,
         rustix::fs::OFlags,
-        wayland_server::{protocol::wl_buffer::WlBuffer, DisplayHandle, Weak},
+        wayland_server::{DisplayHandle, Weak, protocol::wl_buffer::WlBuffer},
     },
     utils::{Clock, DevPath, DeviceFd, Monotonic, Point, Transform},
     wayland::drm_lease::{DrmLease, DrmLeaseState},
@@ -52,7 +52,7 @@ use std::{
     fmt,
     os::fd::OwnedFd,
     path::Path,
-    sync::{atomic::AtomicBool, mpsc::Receiver, Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool, mpsc::Receiver},
     time::Duration,
 };
 
@@ -186,8 +186,7 @@ impl State {
             if let Ok(node) = DrmNode::from_dev_id(dev) {
                 let node = node
                     .node_with_type(NodeType::Render)
-                    .map(|res| res.ok())
-                    .flatten()
+                    .and_then(|res| res.ok())
                     .unwrap_or(node);
                 for ident in allowlist {
                     if ident.matches(&node) {
@@ -208,8 +207,7 @@ impl State {
             if let Ok(node) = DrmNode::from_dev_id(dev) {
                 let node = node
                     .node_with_type(NodeType::Render)
-                    .map(|res| res.ok())
-                    .flatten()
+                    .and_then(|res| res.ok())
                     .unwrap_or(node);
                 for ident in blocklist {
                     if ident.matches(&node) {
@@ -228,7 +226,7 @@ impl State {
                 .kms()
                 .session
                 .open(
-                    &path,
+                    path,
                     OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
                 )
                 .with_context(|| {
@@ -595,12 +593,12 @@ impl Device {
 
         let added = config
             .iter()
-            .filter(|(conn, maybe)| match (surfaces.get(&conn), maybe) {
+            .filter(|(conn, maybe)| match (surfaces.get(conn), maybe) {
                 (Some(current_crtc), Some(new_crtc)) => current_crtc != new_crtc,
                 // see `removed`
                 (Some(_), None) => true,
                 // if we already know about it, we don't consider it added
-                (None, _) => self.inner.outputs.get(conn).is_none(),
+                (None, _) => !self.inner.outputs.contains_key(conn),
             })
             .map(|(conn, crtc)| (*conn, *crtc))
             .collect::<Vec<_>>();
@@ -610,10 +608,10 @@ impl Device {
             .outputs
             .iter()
             .filter(|(conn, _)| match config.get(conn) {
-                Some(Some(c)) => surfaces.get(&conn).is_some_and(|crtc| c != crtc),
+                Some(Some(c)) => surfaces.get(conn).is_some_and(|crtc| c != crtc),
                 // if don't have a crtc, we need to drop the surface if it exists.
                 // so it needs to be in both `removed` AND `added`.
-                Some(None) => surfaces.get(&conn).is_some(),
+                Some(None) => surfaces.contains_key(conn),
                 _ => true,
             })
             .map(|(conn, _)| *conn)
@@ -630,7 +628,7 @@ impl Device {
     }
 }
 
-impl<'a> LockedDevice<'a> {
+impl LockedDevice<'_> {
     fn allow_frame_flags(
         &mut self,
         flag: bool,
@@ -660,7 +658,7 @@ impl<'a> LockedDevice<'a> {
                         renderer,
                         shell,
                         now,
-                        &output,
+                        output,
                         CursorMode::All,
                         None,
                     )
@@ -759,7 +757,7 @@ impl InnerDevice {
             .outputs
             .get(&conn)
             .cloned()
-            .map(|output| Ok(output))
+            .map(Ok)
             .unwrap_or_else(|| create_output_for_conn(drm, conn))
             .context("Failed to create `Output`")?;
 
@@ -895,7 +893,7 @@ impl InnerDevice {
     {
         for surface in self.surfaces.values_mut() {
             let known_nodes = surface.known_nodes().clone();
-            for gone_device in known_nodes.difference(&used_devices) {
+            for gone_device in known_nodes.difference(used_devices) {
                 surface.remove_node(*gone_device);
             }
             for new_device in used_devices.difference(&known_nodes) {
@@ -993,7 +991,7 @@ fn populate_modes(
         .iter()
         .find(|mode| mode.mode_type().contains(ModeTypeFlags::PREFERRED))
         .copied()
-        .or(conn_info.modes().get(0).copied())
+        .or(conn_info.modes().first().copied())
     else {
         anyhow::bail!("No mode found");
     };
@@ -1011,13 +1009,13 @@ fn populate_modes(
             size: (mode.size().0 as i32, mode.size().1 as i32).into(),
             refresh: refresh_rate as i32,
         };
-        modes.push(mode.clone());
+        modes.push(mode);
         output.add_mode(mode);
     }
     for mode in output
         .modes()
         .into_iter()
-        .filter(|mode| !modes.contains(&mode))
+        .filter(|mode| !modes.contains(mode))
     {
         output.delete_mode(mode);
     }

@@ -7,7 +7,7 @@ use crate::{
     state::{BackendData, State},
     utils::prelude::OutputExt,
     wayland::protocols::output_power::{
-        delegate_output_power, OutputPowerHandler, OutputPowerState,
+        OutputPowerHandler, OutputPowerState, delegate_output_power,
     },
 };
 
@@ -46,7 +46,7 @@ fn kms_surfaces_for_output<'a>(
     output: &'a Output,
 ) -> impl Iterator<Item = &'a mut Surface> + 'a {
     kms_surfaces(state).filter(move |surface| {
-        surface.output == *output || surface.output.mirroring().as_ref() == Some(&output)
+        surface.output == *output || surface.output.mirroring().as_ref() == Some(output)
     })
 }
 

@@ -2,28 +2,28 @@ use crate::wayland::protocols::corner_radius::CacheableCorners;
 use std::{
     borrow::Cow,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Mutex,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
 use smithay::{
     backend::renderer::{
-        element::{
-            surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-            utils::select_dmabuf_feedback,
-            AsRenderElements, Kind, RenderElementStates,
-        },
         ImportAll, Renderer,
+        element::{
+            AsRenderElements, Kind, RenderElementStates,
+            surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            utils::select_dmabuf_feedback,
+        },
     },
     desktop::{
-        space::SpaceElement, utils::OutputPresentationFeedback, PopupManager, Window,
-        WindowSurface, WindowSurfaceType,
+        PopupManager, Window, WindowSurface, WindowSurfaceType, space::SpaceElement,
+        utils::OutputPresentationFeedback,
     },
     input::{
-        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         Seat,
+        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
     },
     output::Output,
     reexports::{
@@ -38,14 +38,14 @@ use smithay::{
         wayland_server::protocol::wl_surface::WlSurface,
     },
     utils::{
-        user_data::UserDataMap, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+        IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, user_data::UserDataMap,
     },
     wayland::{
-        compositor::{with_states, with_surface_tree_downward, SurfaceData, TraversalAction},
+        compositor::{SurfaceData, TraversalAction, with_states, with_surface_tree_downward},
         seat::WaylandFocus,
         shell::xdg::{SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceData},
     },
-    xwayland::{xwm::X11Relatable, X11Surface},
+    xwayland::{X11Surface, xwm::X11Relatable},
 };
 use tracing::trace;
 
@@ -81,20 +81,19 @@ impl From<X11Surface> for CosmicSurface {
 
 impl PartialEq<WlSurface> for CosmicSurface {
     fn eq(&self, other: &WlSurface) -> bool {
-        self.wl_surface().map_or(false, |s| &*s == other)
+        self.wl_surface().is_some_and(|s| &*s == other)
     }
 }
 
 impl PartialEq<ToplevelSurface> for CosmicSurface {
     fn eq(&self, other: &ToplevelSurface) -> bool {
-        self.wl_surface()
-            .map_or(false, |s| &*s == other.wl_surface())
+        self.wl_surface().is_some_and(|s| &*s == other.wl_surface())
     }
 }
 
 impl PartialEq<X11Surface> for CosmicSurface {
     fn eq(&self, other: &X11Surface) -> bool {
-        self.x11_surface().map_or(false, |s| s == other)
+        self.x11_surface() == Some(other)
     }
 }
 
@@ -279,8 +278,7 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 if enable {
-                    let previous_decoration_state =
-                        toplevel.current_state().decoration_mode.clone();
+                    let previous_decoration_state = toplevel.current_state().decoration_mode;
                     if PreferredDecorationMode::is_unset(&self.0) {
                         PreferredDecorationMode::update(&self.0, previous_decoration_state);
                     }
@@ -639,10 +637,8 @@ impl CosmicSurface {
             return false;
         };
 
-        if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-            if *toplevel == *surface {
-                return true;
-            }
+        if surface_type.contains(WindowSurfaceType::TOPLEVEL) && *toplevel == *surface {
+            return true;
         }
 
         if surface_type.contains(WindowSurfaceType::SUBSURFACE) {

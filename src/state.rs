@@ -8,8 +8,8 @@ use crate::{
         x11::X11State,
     },
     config::{CompOutputConfig, Config, ScreenFilter},
-    input::{gestures::GestureState, PointerFocusState},
-    shell::{grabs::SeatMoveGrabState, CosmicSurface, SeatExt, Shell},
+    input::{PointerFocusState, gestures::GestureState},
+    shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
     wayland::{
         handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
@@ -34,41 +34,40 @@ use anyhow::Context;
 use calloop::RegistrationToken;
 use cosmic_comp_config::output::comp::{OutputConfig, OutputState};
 use i18n_embed::{
-    fluent::{fluent_language_loader, FluentLanguageLoader},
     DesktopLanguageRequester,
+    fluent::{FluentLanguageLoader, fluent_language_loader},
 };
 use rust_embed::RustEmbed;
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, Fourcc},
+        allocator::{Fourcc, dmabuf::Dmabuf},
         drm::DrmNode,
         renderer::{
-            element::{
-                default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
-                RenderElementState, RenderElementStates,
-            },
             ImportDma,
+            element::{
+                RenderElementState, RenderElementStates, default_primary_scanout_output_compare,
+                utils::select_dmabuf_feedback,
+            },
         },
     },
     desktop::{
-        layer_map_for_output,
+        PopupManager, layer_map_for_output,
         utils::{
             send_dmabuf_feedback_surface_tree, send_frames_surface_tree,
             surface_primary_scanout_output, update_surface_primary_scanout_output,
             with_surfaces_surface_tree,
         },
-        PopupManager,
     },
-    input::{pointer::CursorImageStatus, SeatState},
+    input::{SeatState, pointer::CursorImageStatus},
     output::{Output, Scale, WeakOutput},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
         wayland_protocols::xdg::shell::server::xdg_toplevel::WmCapabilities,
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode,
         wayland_server::{
+            Client, DisplayHandle, Resource,
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::{wl_shm, wl_surface::WlSurface},
-            Client, DisplayHandle, Resource,
         },
     },
     utils::{Clock, Monotonic, Point},
@@ -77,7 +76,7 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
-        fractional_scale::{with_fractional_scale, FractionalScaleManagerState},
+        fractional_scale::{FractionalScaleManagerState, with_fractional_scale},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
         input_method::InputMethodManagerState,
@@ -96,7 +95,7 @@ use smithay::{
         shell::{
             kde::decoration::KdeDecorationState,
             wlr_layer::WlrLayerShellState,
-            xdg::{decoration::XdgDecorationState, XdgShellState},
+            xdg::{XdgShellState, decoration::XdgDecorationState},
         },
         shm::ShmState,
         single_pixel_buffer::SinglePixelBufferState,
@@ -122,7 +121,7 @@ use std::{
     collections::HashSet,
     ffi::OsString,
     process::Child,
-    sync::{atomic::AtomicBool, Arc, LazyLock, Once},
+    sync::{Arc, LazyLock, Once, atomic::AtomicBool},
     time::{Duration, Instant},
 };
 
@@ -161,7 +160,7 @@ impl ClientData for ClientState {
 pub fn advertised_node_for_client(client: &Client) -> Option<DrmNode> {
     // Lets check the global drm-node the client got either through default-feedback or wl_drm
     if let Some(normal_client) = client.get_data::<ClientState>() {
-        return normal_client.advertised_drm_node.clone();
+        return normal_client.advertised_drm_node;
     }
     // last but not least all xwayland-surfaces should also share a single node
     if let Some(xwayland_client) = client.get_data::<XWaylandClientData>() {
@@ -336,9 +335,7 @@ impl BackendData {
     ) -> Result<Option<DrmNode>, anyhow::Error> {
         match self {
             BackendData::Kms(state) => {
-                return state
-                    .dmabuf_imported(client, global, dmabuf)
-                    .map(|node| Some(node));
+                return state.dmabuf_imported(client, global, dmabuf).map(Some);
             }
             BackendData::Winit(state) => {
                 state.backend.renderer().import_dmabuf(&dmabuf, None)?;
@@ -402,7 +399,7 @@ impl BackendData {
     }
 }
 
-impl<'a> LockedBackend<'a> {
+impl LockedBackend<'_> {
     pub fn all_outputs(&self) -> Vec<Output> {
         match self {
             LockedBackend::Kms(state) => state.all_outputs(),
@@ -515,11 +512,11 @@ impl<'a> LockedBackend<'a> {
             });
 
             match final_config.enabled {
-                OutputState::Enabled => shell_ref.workspaces.add_output(&output, workspace_state),
+                OutputState::Enabled => shell_ref.workspaces.add_output(output, workspace_state),
                 _ => {
                     let shell = &mut *shell_ref;
                     shell.workspaces.remove_output(
-                        &output,
+                        output,
                         shell.seats.iter(),
                         workspace_state,
                         xdg_activation_state,
@@ -527,7 +524,7 @@ impl<'a> LockedBackend<'a> {
                 }
             }
 
-            layer_map_for_output(&output).arrange();
+            layer_map_for_output(output).arrange();
         }
 
         // Update layout for changes in resolution, scale, orientation
@@ -575,13 +572,13 @@ impl From<DrmNode> for KmsNodes {
 pub fn client_has_no_security_context(client: &Client) -> bool {
     client
         .get_data::<ClientState>()
-        .map_or(true, |client_state| client_state.security_context.is_none())
+        .is_none_or(|client_state| client_state.security_context.is_none())
 }
 
 pub fn client_is_privileged(client: &Client) -> bool {
     client
         .get_data::<ClientState>()
-        .map_or(false, |client_state| client_state.privileged)
+        .is_some_and(|client_state| client_state.privileged)
 }
 
 fn enable_wayland_security() -> bool {
@@ -626,24 +623,24 @@ impl State {
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self>(dh);
         let wl_drm_state = WlDrmState::<Option<DrmNode>>::default();
-        let kde_decoration_state = KdeDecorationState::new::<Self>(&dh, Mode::Client);
-        let xdg_decoration_state = XdgDecorationState::new::<Self>(&dh);
+        let kde_decoration_state = KdeDecorationState::new::<Self>(dh, Mode::Client);
+        let xdg_decoration_state = XdgDecorationState::new::<Self>(dh);
         let session_lock_manager_state =
-            SessionLockManagerState::new::<Self, _>(&dh, client_is_privileged);
-        XWaylandKeyboardGrabState::new::<Self>(&dh);
-        let xwayland_shell_state = XWaylandShellState::new::<Self>(&dh);
-        PointerConstraintsState::new::<Self>(&dh);
-        PointerGesturesState::new::<Self>(&dh);
-        TabletManagerState::new::<Self>(&dh);
-        SecurityContextState::new::<Self, _>(&dh, client_has_no_security_context);
-        InputMethodManagerState::new::<Self, _>(&dh, client_is_privileged);
-        TextInputManagerState::new::<Self>(&dh);
-        VirtualKeyboardManagerState::new::<State, _>(&dh, client_is_privileged);
-        AlphaModifierState::new::<Self>(&dh);
-        SinglePixelBufferState::new::<Self>(&dh);
+            SessionLockManagerState::new::<Self, _>(dh, client_is_privileged);
+        XWaylandKeyboardGrabState::new::<Self>(dh);
+        let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
+        PointerConstraintsState::new::<Self>(dh);
+        PointerGesturesState::new::<Self>(dh);
+        TabletManagerState::new::<Self>(dh);
+        SecurityContextState::new::<Self, _>(dh, client_has_no_security_context);
+        InputMethodManagerState::new::<Self, _>(dh, client_is_privileged);
+        TextInputManagerState::new::<Self>(dh);
+        VirtualKeyboardManagerState::new::<State, _>(dh, client_is_privileged);
+        AlphaModifierState::new::<Self>(dh);
+        SinglePixelBufferState::new::<Self>(dh);
 
-        let idle_notifier_state = IdleNotifierState::<Self>::new(&dh, handle.clone());
-        let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(&dh);
+        let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
+        let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
         let idle_inhibiting_surfaces = HashSet::new();
 
         let data_control_state = crate::utils::env::bool_var("COSMIC_DATA_CONTROL_ENABLED")
@@ -839,30 +836,28 @@ impl State {
                         }
                     }
                 }
-            } else {
-                if let Some(_fd) = self.common.inhibit_lid_fd.take() {
-                    debug!("Removing inhibitor-lock on lid switch");
+            } else if let Some(_fd) = self.common.inhibit_lid_fd.take() {
+                debug!("Removing inhibitor-lock on lid switch");
 
-                    let backend = self.backend.lock();
-                    let output = backend
-                        .all_outputs()
-                        .iter()
-                        .find(|o| o.is_internal())
-                        .cloned();
-                    backend.enable_internal_output(&mut self.common.output_configuration_state);
-                    std::mem::drop(backend);
+                let backend = self.backend.lock();
+                let output = backend
+                    .all_outputs()
+                    .iter()
+                    .find(|o| o.is_internal())
+                    .cloned();
+                backend.enable_internal_output(&mut self.common.output_configuration_state);
+                std::mem::drop(backend);
 
-                    if let Err(err) = self.refresh_output_config() {
-                        warn!(?err, "Failed to re-enable internal connector");
-                        if let Some(output) = output {
-                            output.config_mut().enabled = OutputState::Disabled;
-                            if let Err(err) = self.refresh_output_config() {
-                                error!("Unrecoverable output configuration error: {}", err);
-                            }
+                if let Err(err) = self.refresh_output_config() {
+                    warn!(?err, "Failed to re-enable internal connector");
+                    if let Some(output) = output {
+                        output.config_mut().enabled = OutputState::Disabled;
+                        if let Err(err) = self.refresh_output_config() {
+                            error!("Unrecoverable output configuration error: {}", err);
                         }
                     }
-                    // drop _fd
                 }
+                // drop _fd
             }
         }
     }
@@ -992,10 +987,10 @@ impl Common {
             if let Some(lock_surface) = session_lock.surfaces.get(output) {
                 if let Some(feedback) =
                     advertised_node_for_surface(lock_surface.wl_surface(), &self.display_handle)
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                 {
                     send_dmabuf_feedback_surface_tree(
-                        &lock_surface.wl_surface(),
+                        lock_surface.wl_surface(),
                         output,
                         surface_primary_scanout_output,
                         |surface, _| {
@@ -1021,7 +1016,7 @@ impl Common {
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
                 if let Some(feedback) =
                     advertised_node_for_surface(&wl_surface, &self.display_handle)
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                 {
                     send_dmabuf_feedback_surface_tree(
                         &wl_surface,
@@ -1042,7 +1037,7 @@ impl Common {
             if let Some(icon) = get_dnd_icon(seat) {
                 if let Some(feedback) =
                     advertised_node_for_surface(&icon.surface, &self.display_handle)
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                 {
                     send_dmabuf_feedback_surface_tree(
                         &icon.surface,
@@ -1068,7 +1063,7 @@ impl Common {
                             .and_then(|wl_surface| {
                                 advertised_node_for_surface(&wl_surface, &self.display_handle)
                             })
-                            .and_then(|source| dmabuf_feedback(source))
+                            .and_then(&mut dmabuf_feedback)
                         {
                             window.send_dmabuf_feedback(
                                 output,
@@ -1096,7 +1091,7 @@ impl Common {
                         .and_then(|wl_surface| {
                             advertised_node_for_surface(&wl_surface, &self.display_handle)
                         })
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                     {
                         window.send_dmabuf_feedback(
                             output,
@@ -1115,7 +1110,7 @@ impl Common {
                     .and_then(|wl_surface| {
                         advertised_node_for_surface(&wl_surface, &self.display_handle)
                     })
-                    .and_then(|source| dmabuf_feedback(source))
+                    .and_then(&mut dmabuf_feedback)
                 {
                     window.send_dmabuf_feedback(
                         output,
@@ -1132,7 +1127,7 @@ impl Common {
                         .and_then(|wl_surface| {
                             advertised_node_for_surface(&wl_surface, &self.display_handle)
                         })
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                     {
                         window.send_dmabuf_feedback(
                             output,
@@ -1149,7 +1144,7 @@ impl Common {
             if let Some(wl_surface) = or.wl_surface() {
                 if let Some(feedback) =
                     advertised_node_for_surface(&wl_surface, &self.display_handle)
-                        .and_then(|source| dmabuf_feedback(source))
+                        .and_then(&mut dmabuf_feedback)
                 {
                     send_dmabuf_feedback_surface_tree(
                         &wl_surface,
@@ -1172,7 +1167,7 @@ impl Common {
         for layer_surface in map.layers() {
             if let Some(feedback) =
                 advertised_node_for_surface(layer_surface.wl_surface(), &self.display_handle)
-                    .and_then(|source| dmabuf_feedback(source))
+                    .and_then(&mut dmabuf_feedback)
             {
                 layer_surface.send_dmabuf_feedback(
                     output,

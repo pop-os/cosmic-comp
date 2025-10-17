@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
-    desktop::{layer_map_for_output, WindowSurfaceType},
-    input::{pointer::MotionEvent, Seat},
+    desktop::{WindowSurfaceType, layer_map_for_output},
+    input::{Seat, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::DisplayHandle,
-    utils::{Point, Rectangle, Size, SERIAL_COUNTER},
+    utils::{Point, Rectangle, SERIAL_COUNTER, Size},
     wayland::seat::WaylandFocus,
 };
 
 use crate::{
-    shell::{focus::target::KeyboardFocusTarget, CosmicSurface, Shell, WorkspaceDelta},
+    shell::{CosmicSurface, Shell, WorkspaceDelta, focus::target::KeyboardFocusTarget},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoHandler,
         toplevel_management::{
-            delegate_toplevel_management, toplevel_rectangle_for, ManagementWindow,
-            ToplevelManagementHandler, ToplevelManagementState,
+            ManagementWindow, ToplevelManagementHandler, ToplevelManagementState,
+            delegate_toplevel_management, toplevel_rectangle_for,
         },
         workspace::WorkspaceHandle,
     },
@@ -52,7 +52,7 @@ impl ToplevelManagementHandler for State {
             let (target, new_pos) = if let Some((idx, workspace)) = maybe {
                 let handle = workspace.handle;
                 let new_pos = shell.activate(
-                    &output,
+                    output,
                     idx,
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
@@ -112,7 +112,7 @@ impl ToplevelManagementHandler for State {
 
             if seat.active_output() != *output {
                 if let Some(new_pos) = new_pos {
-                    seat.set_active_output(&output);
+                    seat.set_active_output(output);
                     if let Some(ptr) = seat.get_pointer() {
                         let serial = SERIAL_COUNTER.next_serial();
                         ptr.motion(
@@ -150,7 +150,7 @@ impl ToplevelManagementHandler for State {
         let Some(surface) = window.wl_surface() else {
             return;
         };
-        let Some((from_workspace, _)) = shell.workspace_for_surface(&*surface) else {
+        let Some((from_workspace, _)) = shell.workspace_for_surface(&surface) else {
             return;
         };
 
@@ -182,7 +182,7 @@ impl ToplevelManagementHandler for State {
             .or_else(|| {
                 window
                     .wl_surface()
-                    .and_then(|surface| shell.visible_output_for_surface(&*surface).cloned())
+                    .and_then(|surface| shell.visible_output_for_surface(&surface).cloned())
             })
             .unwrap_or_else(|| seat.focused_or_active_output());
         if let Some(target) =

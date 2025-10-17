@@ -2,7 +2,7 @@
 
 use crate::state::State;
 use crate::wayland::protocols::a11y::A11yHandler;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::NumlockState;
 use cosmic_config::CosmicConfigEntry;
 use cosmic_settings_daemon_config::greeter;
@@ -155,7 +155,7 @@ pub fn init_backend_auto(
                     .startup_done
                     .store(true, std::sync::atomic::Ordering::SeqCst);
                 for output in state.common.shell.read().outputs() {
-                    state.backend.schedule_render(&output);
+                    state.backend.schedule_render(output);
                 }
             }
         }

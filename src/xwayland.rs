@@ -1,9 +1,9 @@
 use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 
 use crate::{
-    backend::render::cursor::{load_cursor_env, load_cursor_theme, Cursor},
+    backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
     shell::{
-        focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow, Shell,
+        CosmicSurface, PendingWindow, Shell, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
     },
     state::State,
     utils::prelude::*,
@@ -16,23 +16,24 @@ use smithay::{
         drm::DrmNode,
         input::{ButtonState, KeyState, Keycode},
         renderer::{
+            Bind, Frame, Offscreen, Renderer,
             element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
                 Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             },
             pixman::{PixmanError, PixmanRenderer},
             utils::draw_render_elements,
-            Bind, Frame, Offscreen, Renderer,
         },
     },
     desktop::space::SpaceElement,
     input::{keyboard::ModifiersState, pointer::CursorIcon},
     reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
     utils::{
-        Buffer as BufferCoords, Logical, Point, Rectangle, Serial, Size, Transform, SERIAL_COUNTER,
+        Buffer as BufferCoords, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform,
     },
     wayland::{
         selection::{
+            SelectionTarget,
             data_device::{
                 clear_data_device_selection, current_data_device_selection_userdata,
                 request_data_device_client_selection, set_data_device_selection,
@@ -41,13 +42,12 @@ use smithay::{
                 clear_primary_selection, current_primary_selection_userdata,
                 request_primary_client_selection, set_primary_selection,
             },
-            SelectionTarget,
         },
         xdg_activation::XdgActivationToken,
     },
     xwayland::{
-        xwm::{Reorder, XwmId},
         X11Surface, X11Wm, XWayland, XWaylandClientData, XWaylandEvent, XwmHandler,
+        xwm::{Reorder, XwmId},
     },
 };
 use tracing::{error, trace, warn};
@@ -143,7 +143,6 @@ impl State {
             Err(err) => {
                 error!(?err, "Failed to listen for Xwayland");
                 self.notify_ready();
-                return;
             }
         }
     }
@@ -188,7 +187,7 @@ fn scale_cursor(
         &[Rectangle::new((0, 0).into(), output_size)],
     )?;
     let sync = frame.finish()?;
-    while let Err(_) = sync.wait() {}
+    while sync.wait().is_err() {}
 
     let len = (buffer_size.w * buffer_size.h * 4) as usize;
     let mut data = Vec::with_capacity(len);
@@ -389,7 +388,7 @@ impl Common {
                 }
                 EavesdroppingKeyboardMode::Combinations => {
                     // don't forward alpha-numeric keys, just because shift is held, but forward shift itself
-                    if !is_modifier && !(modifiers.alt || modifiers.ctrl || modifiers.logo) {
+                    if !(is_modifier || modifiers.alt || modifiers.ctrl || modifiers.logo) {
                         return;
                     }
                 }
@@ -750,7 +749,7 @@ impl XwmHandler for State {
         {
             shell.pending_activations.insert(
                 crate::shell::ActivationKey::X11(window.window_id()),
-                context.clone(),
+                *context,
             );
         }
 
@@ -771,9 +770,9 @@ impl XwmHandler for State {
             .find(|pending| pending.surface.x11_surface() == Some(&surface))
             .map(|pending| pending.surface.clone())
         {
-            if !shell
+            if let std::collections::hash_map::Entry::Vacant(e) = shell
                 .pending_activations
-                .contains_key(&crate::shell::ActivationKey::X11(surface.window_id()))
+                .entry(crate::shell::ActivationKey::X11(surface.window_id()))
             {
                 if let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id()) {
                     if let Some(context) = self
@@ -782,10 +781,7 @@ impl XwmHandler for State {
                         .data_for_token(&XdgActivationToken::from(startup_id))
                         .and_then(|data| data.user_data.get::<ActivationContext>())
                     {
-                        shell.pending_activations.insert(
-                            crate::shell::ActivationKey::X11(surface.window_id()),
-                            context.clone(),
-                        );
+                        e.insert(*context);
                     }
                 }
             }
@@ -875,7 +871,7 @@ impl XwmHandler for State {
                     set.sticky_layer
                         .element_geometry(mapped)
                         .unwrap()
-                        .to_global(&output),
+                        .to_global(output),
                 )
             } else {
                 None
@@ -1100,14 +1096,12 @@ impl XwmHandler for State {
             if should_focus {
                 Shell::set_focus(self, Some(&target), &seat, None, true);
             }
-        } else {
-            if let Some(pending) = shell
-                .pending_windows
-                .iter_mut()
-                .find(|pending| pending.surface.x11_surface() == Some(&window))
-            {
-                pending.fullscreen.take();
-            }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.fullscreen.take();
         }
     }
 

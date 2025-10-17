@@ -7,7 +7,7 @@ use calloop::{InsertError, LoopHandle, RegistrationToken};
 use cosmic_comp_config::output::comp::OutputState;
 use std::collections::HashMap;
 use tracing::{error, warn};
-use zbus::blocking::{fdo::DBusProxy, Connection};
+use zbus::blocking::{Connection, fdo::DBusProxy};
 
 #[cfg(feature = "systemd")]
 pub mod logind;
@@ -49,8 +49,6 @@ pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>>
                                 }
                             }
                         }
-
-                        ()
                     }
                     calloop::channel::Event::Closed => (),
                 })
@@ -61,8 +59,8 @@ pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>>
             let result = std::thread::Builder::new()
                 .name("system76-power-hotplug".to_string())
                 .spawn(move || {
-                    if let Ok(mut msg_iter) = power_daemon.receive_hot_plug_detect() {
-                        while let Some(msg) = msg_iter.next() {
+                    if let Ok(msg_iter) = power_daemon.receive_hot_plug_detect() {
+                        for msg in msg_iter {
                             if tx.send(msg).is_err() {
                                 break;
                             }
@@ -104,7 +102,7 @@ pub fn ready(common: &Common) -> Result<()> {
                 .xwayland_state
                 .as_ref()
                 .map(|s| format!(":{}", s.display))
-                .unwrap_or(String::new()),
+                .unwrap_or_default(),
         ),
     ]))?;
 

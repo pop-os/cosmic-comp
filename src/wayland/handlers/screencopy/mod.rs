@@ -27,9 +27,8 @@ use crate::{
     wayland::protocols::{
         image_capture_source::ImageCaptureSourceData,
         screencopy::{
-            delegate_screencopy, BufferConstraints, CursorSession, CursorSessionRef,
-            DmabufConstraints, Frame, FrameRef, ScreencopyHandler, ScreencopyState, Session,
-            SessionRef,
+            BufferConstraints, CursorSession, CursorSessionRef, DmabufConstraints, Frame, FrameRef,
+            ScreencopyHandler, ScreencopyState, Session, SessionRef, delegate_screencopy,
         },
     },
 };
@@ -52,7 +51,7 @@ impl ScreencopyHandler for State {
                 .and_then(|output| constraints_for_output(&output, &mut self.backend)),
             ImageCaptureSourceData::Workspace(handle) => {
                 let shell = self.common.shell.read();
-                let output = shell.workspaces.space_for_handle(&handle)?.output();
+                let output = shell.workspaces.space_for_handle(handle)?.output();
                 constraints_for_output(output, &mut self.backend)
             }
             ImageCaptureSourceData::Toplevel(window) => {
@@ -339,7 +338,7 @@ fn constraints_for_output(output: &Output, backend: &mut BackendData) -> Option<
 
     let mut renderer = backend
         .offscreen_renderer(|kms| {
-            kms.target_node_for_output(&output)
+            kms.target_node_for_output(output)
                 .or(*kms.primary_node.read().unwrap())
         })
         .unwrap();
@@ -357,7 +356,7 @@ fn constraints_for_toplevel(
         .offscreen_renderer(|kms| {
             let dma_node = with_renderer_surface_state(&wl_surface, |state| {
                 let buffer = state.buffer()?;
-                let dmabuf = get_dmabuf(&*buffer).ok()?;
+                let dmabuf = get_dmabuf(buffer).ok()?;
                 dmabuf.node()
             })
             .flatten();

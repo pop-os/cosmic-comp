@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     shell::Devices,
+    shell::focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     state::State,
     utils::prelude::SeatExt,
 };
 use smithay::{
     delegate_cursor_shape, delegate_seat,
-    input::{keyboard::LedState, pointer::CursorImageStatus, SeatHandler, SeatState},
+    input::{SeatHandler, SeatState, keyboard::LedState, pointer::CursorImageStatus},
 };
 
 impl SeatHandler for State {

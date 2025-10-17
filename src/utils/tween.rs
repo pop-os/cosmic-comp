@@ -1,4 +1,4 @@
-use keyframe::{num_traits::Float, CanTween};
+use keyframe::{CanTween, num_traits::Float};
 use smithay::utils::{Coordinate, Point, Rectangle, Size};
 
 pub struct EasePoint<N: Coordinate, Kind>(pub Point<N, Kind>);

@@ -9,21 +9,21 @@ use smithay::{
     backend::{
         input::KeyState,
         renderer::{
+            ImportAll, ImportMem, Renderer,
             element::{
+                Element, RenderElement, UnderlyingStorage,
                 memory::MemoryRenderBufferRenderElement,
                 utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
-                Element, RenderElement, UnderlyingStorage,
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
             utils::{DamageSet, OpaqueRegions},
-            ImportAll, ImportMem, Renderer,
         },
     },
-    desktop::{space::SpaceElement, WindowSurfaceType},
+    desktop::{WindowSurfaceType, space::SpaceElement},
     input::{
-        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         Seat,
+        keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
     },
     output::Output,
     reexports::wayland_server::{backend::ObjectId, protocol::wl_surface::WlSurface},
@@ -32,7 +32,7 @@ use smithay::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
     },
     wayland::seat::WaylandFocus,
-    xwayland::{xwm::X11Relatable, X11Surface},
+    xwayland::{X11Surface, xwm::X11Relatable},
 };
 use stack::CosmicStackInternal;
 use window::CosmicWindowInternal;
@@ -41,7 +41,7 @@ use std::{
     borrow::Cow,
     fmt,
     hash::Hash,
-    sync::{atomic::AtomicBool, Arc, Mutex, Weak},
+    sync::{Arc, Mutex, Weak, atomic::AtomicBool},
 };
 
 pub mod surface;
@@ -65,12 +65,12 @@ use smithay::desktop::WindowSurface;
 use tracing::debug;
 
 use super::{
+    ManagedLayer,
     focus::target::PointerFocusTarget,
     layout::{
         floating::{ResizeState, TiledCorners},
         tiling::NodeDesc,
     },
-    ManagedLayer,
 };
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 
@@ -241,9 +241,8 @@ impl CosmicMapped {
     }
 
     pub fn focus_window(&self, window: &CosmicSurface) {
-        match &self.element {
-            CosmicMappedInternal::Stack(stack) => stack.set_active(window),
-            _ => {}
+        if let CosmicMappedInternal::Stack(stack) = &self.element {
+            stack.set_active(window)
         }
     }
 
@@ -446,7 +445,7 @@ impl CosmicMapped {
     pub fn set_bounds(&self, size: impl Into<Option<Size<i32, Logical>>>) {
         let size = size.into();
         for (surface, _) in self.windows() {
-            surface.set_bounds(size.clone())
+            surface.set_bounds(size)
         }
     }
 
@@ -483,17 +482,11 @@ impl CosmicMapped {
     }
 
     pub fn is_window(&self) -> bool {
-        match &self.element {
-            CosmicMappedInternal::Window(_) => true,
-            _ => false,
-        }
+        matches!(&self.element, CosmicMappedInternal::Window(_))
     }
 
     pub fn is_stack(&self) -> bool {
-        match &self.element {
-            CosmicMappedInternal::Stack(_) => true,
-            _ => false,
-        }
+        matches!(&self.element, CosmicMappedInternal::Stack(_))
     }
 
     pub fn stack_ref(&self) -> Option<&CosmicStack> {
@@ -508,24 +501,21 @@ impl CosmicMapped {
         (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
     ) {
-        match &self.element {
-            CosmicMappedInternal::Window(window) => {
-                let surface = window.surface();
-                let activated = surface.is_activated(true);
-                let handle = window.loop_handle();
+        if let CosmicMappedInternal::Window(window) = &self.element {
+            let surface = window.surface();
+            let activated = surface.is_activated(true);
+            let handle = window.loop_handle();
 
-                let stack = CosmicStack::new(std::iter::once(surface), handle, theme);
-                if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
-                    stack.set_geometry(geo.to_global(&output));
-                }
-                stack.output_enter(output, overlap);
-                stack.set_activate(activated);
-                stack.active().send_configure();
-                stack.refresh();
-
-                self.element = CosmicMappedInternal::Stack(stack);
+            let stack = CosmicStack::new(std::iter::once(surface), handle, theme);
+            if let Some(geo) = *self.last_geometry.lock().unwrap() {
+                stack.set_geometry(geo.to_global(output));
             }
-            _ => {}
+            stack.output_enter(output, overlap);
+            stack.set_activate(activated);
+            stack.active().send_configure();
+            stack.refresh();
+
+            self.element = CosmicMappedInternal::Stack(stack);
         }
     }
 
@@ -540,8 +530,8 @@ impl CosmicMapped {
         surface.set_tiled(false);
         let window = CosmicWindow::new(surface, handle, theme);
 
-        if let Some(geo) = self.last_geometry.lock().unwrap().clone() {
-            window.set_geometry(geo.to_global(&output));
+        if let Some(geo) = *self.last_geometry.lock().unwrap() {
+            window.set_geometry(geo.to_global(output));
         }
         window.output_enter(output, overlap);
         window.set_activate(self.is_activated(true));
@@ -831,10 +821,10 @@ impl CosmicMapped {
     pub fn key(&self) -> CosmicMappedKey {
         CosmicMappedKey(match &self.element {
             CosmicMappedInternal::Stack(stack) => {
-                CosmicMappedKeyInner::Stack(Arc::downgrade(&stack.0 .0))
+                CosmicMappedKeyInner::Stack(Arc::downgrade(&stack.0.0))
             }
             CosmicMappedInternal::Window(window) => {
-                CosmicMappedKeyInner::Window(Arc::downgrade(&window.0 .0))
+                CosmicMappedKeyInner::Window(Arc::downgrade(&window.0.0))
             }
             _ => unreachable!(),
         })
@@ -843,7 +833,7 @@ impl CosmicMapped {
     pub fn ssd_height(&self, pending: bool) -> Option<i32> {
         match &self.element {
             CosmicMappedInternal::Window(w) => (!w.surface().is_decorated(pending))
-                .then(|| crate::shell::element::window::SSD_HEIGHT),
+                .then_some(crate::shell::element::window::SSD_HEIGHT),
             CosmicMappedInternal::Stack(_) => Some(crate::shell::element::stack::TAB_HEIGHT),
             _ => unreachable!(),
         }

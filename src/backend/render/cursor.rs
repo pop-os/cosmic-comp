@@ -5,17 +5,17 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
-                Kind,
-            },
             ImportAll, ImportMem, Renderer,
+            element::{
+                Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            },
         },
     },
     input::{
-        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
         Seat,
+        pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
     },
     reexports::wayland_server::protocol::wl_surface,
     render_elements,
@@ -27,8 +27,8 @@ use smithay::{
 use std::{collections::HashMap, io::Read, sync::Mutex};
 use tracing::warn;
 use xcursor::{
-    parser::{parse_xcursor, Image},
     CursorTheme,
+    parser::{Image, parse_xcursor},
 };
 
 static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../../resources/cursor.rgba");
@@ -134,7 +134,7 @@ where
     R::TextureId: Clone + 'static,
 {
     let scale = scale.into();
-    let h = with_states(&surface, |states| {
+    let h = with_states(surface, |states| {
         states
             .data_map
             .get::<Mutex<CursorImageAttributes>>()
@@ -169,7 +169,7 @@ where
     R: Renderer + ImportAll,
     R::TextureId: Clone + 'static,
 {
-    if get_role(&surface) != Some("dnd_icon") {
+    if get_role(surface) != Some("dnd_icon") {
         warn!(
             ?surface,
             "Trying to display as a dnd icon a surface that does not have the DndIcon role."
@@ -287,10 +287,9 @@ where
         let actual_scale = (frame.size / state.size()).max(1);
 
         let pointer_images = &mut state.image_cache;
-        let maybe_image =
-            pointer_images
-                .iter()
-                .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None });
+        let maybe_image = pointer_images
+            .iter()
+            .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None });
         let pointer_image = match maybe_image {
             Some(image) => image,
             None => {
@@ -320,7 +319,7 @@ where
                 MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
                     location.to_physical(scale),
-                    &pointer_image,
+                    pointer_image,
                     None,
                     None,
                     None,

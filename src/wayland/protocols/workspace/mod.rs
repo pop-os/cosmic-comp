@@ -9,8 +9,8 @@ use smithay::{
             ext_workspace_manager_v1::ExtWorkspaceManagerV1,
         },
         wayland_server::{
-            backend::{GlobalId, ObjectId},
             Client, Dispatch, DisplayHandle, GlobalDispatch, Resource,
+            backend::{GlobalId, ObjectId},
         },
     },
 };
@@ -305,8 +305,8 @@ where
     fn done(&mut self) {
         let mut changed = false;
         for instance in &self.ext_instances {
-            for mut group in &mut self.groups {
-                if ext::send_group_to_client::<D>(&self.dh, instance, &mut group) {
+            for group in &mut self.groups {
+                if ext::send_group_to_client::<D>(&self.dh, instance, group) {
                     changed = true;
                 }
             }
@@ -338,7 +338,7 @@ where
     }
 }
 
-impl<'a, D> WorkspaceUpdateGuard<'a, D>
+impl<D> WorkspaceUpdateGuard<'_, D>
 where
     D: WorkspaceHandler,
 {
@@ -617,7 +617,7 @@ where
     }
 }
 
-impl<'a, D> Drop for WorkspaceUpdateGuard<'a, D>
+impl<D> Drop for WorkspaceUpdateGuard<'_, D>
 where
     D: WorkspaceHandler,
 {

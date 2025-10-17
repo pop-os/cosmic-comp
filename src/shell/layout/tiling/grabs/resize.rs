@@ -13,6 +13,7 @@ use id_tree::{NodeId, Tree};
 use smithay::{
     backend::input::ButtonState,
     input::{
+        Seat,
         pointer::{
             AxisFrame, ButtonEvent, CursorIcon, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -24,7 +25,6 @@ use smithay::{
             DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
             OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
         },
-        Seat,
     },
     output::WeakOutput,
     utils::{IsAlive, Logical, Point, Serial},
@@ -535,10 +535,10 @@ impl TouchGrab<State> for ResizeForkGrab {
         event: &TouchMotionEvent,
         seq: Serial,
     ) {
-        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
-            if self.update_location(data, event.location, false) {
-                handle.unset_grab(self, data);
-            }
+        if event.slot == <Self as TouchGrab<State>>::start_data(self).slot
+            && self.update_location(data, event.location, false)
+        {
+            handle.unset_grab(self, data);
         }
 
         handle.motion(data, None, event, seq);

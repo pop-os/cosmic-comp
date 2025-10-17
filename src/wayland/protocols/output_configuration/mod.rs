@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use calloop::{
-    timer::{TimeoutAction, Timer},
     LoopHandle,
+    timer::{TimeoutAction, Timer},
 };
 use cosmic_comp_config::output::comp::AdaptiveSync;
 use cosmic_protocols::output_management::v1::server::{
@@ -23,8 +23,8 @@ use smithay::{
             zwlr_output_mode_v1::ZwlrOutputModeV1,
         },
         wayland_server::{
-            backend::GlobalId, protocol::wl_output::WlOutput, Client, Dispatch, DisplayHandle,
-            GlobalDispatch, Resource, Weak,
+            Client, Dispatch, DisplayHandle, GlobalDispatch, Resource, Weak, backend::GlobalId,
+            protocol::wl_output::WlOutput,
         },
     },
     utils::{Logical, Physical, Point, Size, Transform},
@@ -38,7 +38,7 @@ pub fn head_is_enabled(output: &Output) -> bool {
     output
         .user_data()
         .get::<OutputState>()
-        .map_or(false, |inner| inner.lock().unwrap().enabled)
+        .is_some_and(|inner| inner.lock().unwrap().enabled)
 }
 
 #[derive(Debug)]
@@ -135,7 +135,7 @@ impl<'a> TryFrom<&'a mut PendingOutputConfigurationInner> for OutputConfiguratio
                 wlr_mode
                     .data::<Mode>()
                     .cloned()
-                    .ok_or_else(|| zwlr_output_configuration_head_v1::Error::InvalidMode)?,
+                    .ok_or(zwlr_output_configuration_head_v1::Error::InvalidMode)?,
             )),
             Some(ModeConfiguration::Custom { size, refresh }) => {
                 Some(ModeConfiguration::Custom { size, refresh })
@@ -283,7 +283,7 @@ where
             for instance in &mut self.instances {
                 let mut removed_heads = Vec::new();
                 for head in &mut instance.heads {
-                    if &head.output == &output {
+                    if head.output == output {
                         if head.obj.version() < zwlr_output_head_v1::REQ_RELEASE_SINCE {
                             removed_heads.push(head.obj.clone());
                         }
@@ -435,7 +435,7 @@ where
                     .map(|c| c == output_mode)
                     .unwrap_or(false)
             {
-                instance.obj.current_mode(&*mode);
+                instance.obj.current_mode(mode);
             }
         }
     }

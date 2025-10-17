@@ -2,11 +2,13 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     hash::{Hash, Hasher},
-    sync::{mpsc::Receiver, Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex, mpsc::Receiver},
 };
 
 use cosmic::{
+    Theme,
     iced::{
+        Limits, Point as IcedPoint, Size as IcedSize, Task,
         advanced::{graphics::text::font_system, widget::Tree},
         event::Event,
         futures::{FutureExt, StreamExt},
@@ -14,19 +16,17 @@ use cosmic::{
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
         touch::{Event as TouchEvent, Finger},
         window::Event as WindowEvent,
-        Limits, Point as IcedPoint, Size as IcedSize, Task,
     },
-    iced_core::{clipboard::Null as NullClipboard, id::Id, renderer::Style, Color, Length, Pixels},
+    iced_core::{Color, Length, Pixels, clipboard::Null as NullClipboard, id::Id, renderer::Style},
     iced_runtime::{
+        Action, Debug,
         program::{Program as IcedProgram, State},
         task::into_stream,
-        Action, Debug,
     },
-    Theme,
 };
 use iced_tiny_skia::{
-    graphics::{damage, Viewport},
     Layer,
+    graphics::{Viewport, damage},
 };
 
 use ordered_float::OrderedFloat;
@@ -35,15 +35,16 @@ use smithay::{
         allocator::Fourcc,
         input::{ButtonState, KeyState},
         renderer::{
-            element::{
-                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                AsRenderElements, Kind,
-            },
             ImportMem, Renderer,
+            element::{
+                AsRenderElements, Kind,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+            },
         },
     },
     desktop::space::{RenderZindex, SpaceElement},
     input::{
+        Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -55,11 +56,10 @@ use smithay::{
             DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
             UpEvent,
         },
-        Seat,
     },
     output::Output,
     reexports::calloop::RegistrationToken,
-    reexports::calloop::{self, futures::Scheduler, LoopHandle},
+    reexports::calloop::{self, LoopHandle, futures::Scheduler},
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
         Transform,
@@ -206,10 +206,10 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             additional_scale: self.additional_scale,
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
-            pending_realloc: self.pending_realloc.clone(),
-            size: self.size.clone(),
+            pending_realloc: self.pending_realloc,
+            size: self.size,
             last_seat: self.last_seat.clone(),
-            cursor_pos: self.cursor_pos.clone(),
+            cursor_pos: self.cursor_pos,
             touch_map: self.touch_map.clone(),
             theme: self.theme.clone(),
             renderer,
@@ -632,7 +632,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
         internal.touch_map.insert(id, position);
         internal.cursor_pos = Some(event_location);
         *internal.last_seat.lock().unwrap() = Some((seat.clone(), seq));
-        let _ = internal.update(false);
+        internal.update(false);
     }
 
     fn up(
@@ -649,7 +649,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
             internal
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
-            let _ = internal.update(false);
+            internal.update(false);
         }
     }
 
@@ -670,7 +670,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
             .queue_event(Event::Touch(TouchEvent::FingerMoved { id, position }));
         internal.touch_map.insert(id, position);
         internal.cursor_pos = Some(event_location);
-        let _ = internal.update(false);
+        internal.update(false);
     }
 
     fn frame(
@@ -693,7 +693,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
                 .state
                 .queue_event(Event::Touch(TouchEvent::FingerLost { id, position }));
         }
-        let _ = internal.update(false);
+        internal.update(false);
     }
 
     fn shape(
@@ -771,7 +771,7 @@ impl<P: Program + Send + 'static> KeyboardTarget<crate::state::State> for IcedEl
         internal
             .state
             .queue_event(Event::Keyboard(KeyboardEvent::ModifiersChanged(mods)));
-        let _ = internal.update(false);
+        internal.update(false);
     }
 }
 
@@ -804,7 +804,7 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
         } else {
             WindowEvent::Unfocused
         }));
-        let _ = internal.update(false);
+        internal.update(false);
     }
 
     fn output_enter(&self, output: &Output, _overlap: Rectangle<i32, Logical>) {
@@ -940,7 +940,7 @@ where
                         .and_then(|(last_primitives, last_color)| {
                             (last_color == &background_color).then(|| {
                                 damage::diff(
-                                    &last_primitives,
+                                    last_primitives,
                                     current_layers,
                                     |_| {
                                         vec![cosmic::iced::Rectangle::new(
@@ -1012,7 +1012,7 @@ where
             match MemoryRenderBufferRenderElement::from_buffer(
                 renderer,
                 location.to_f64(),
-                &buffer,
+                buffer,
                 Some(alpha),
                 Some(Rectangle::from_size(
                     size.to_f64()

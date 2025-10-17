@@ -14,21 +14,21 @@ use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, format::FormatSet, Buffer},
-        drm::{output::DrmOutputRenderElements, DrmDeviceFd, DrmNode, NodeType, VrrSupport},
+        allocator::{Buffer, dmabuf::Dmabuf, format::FormatSet},
+        drm::{DrmDeviceFd, DrmNode, NodeType, VrrSupport, output::DrmOutputRenderElements},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{glow::GlowRenderer, multigpu::GpuManager},
-        session::{libseat::LibSeatSession, Event as SessionEvent, Session},
-        udev::{primary_gpu, UdevBackend, UdevEvent},
+        session::{Event as SessionEvent, Session, libseat::LibSeatSession},
+        udev::{UdevBackend, UdevEvent, primary_gpu},
     },
     output::Output,
     reexports::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
         drm::{
-            control::{connector::Interface, crtc, Device as _},
             Device as _,
+            control::{Device as _, connector::Interface, crtc},
         },
         input::{self, Libinput},
         wayland_server::{Client, DisplayHandle},
@@ -36,7 +36,7 @@ use smithay::{
     utils::{Clock, DevPath, Monotonic, Size},
     wayland::{
         dmabuf::DmabufGlobal,
-        drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState},
+        drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd},
         relative_pointer::RelativePointerManagerState,
     },
 };
@@ -46,7 +46,7 @@ use tracing::{debug, error, info, trace, warn};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{Arc, RwLock, atomic::AtomicBool},
 };
 
 mod device;
@@ -58,7 +58,7 @@ use device::*;
 pub(crate) use surface::Surface;
 pub use surface::Timings;
 
-use super::render::{output_elements, CursorMode, CLEAR_COLOR};
+use super::render::{CLEAR_COLOR, CursorMode, output_elements};
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -135,7 +135,7 @@ pub fn init_backend(
     // manually add already present gpus
     let mut outputs = Vec::new();
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
-        match state.device_added(dev, path.into(), dh) {
+        match state.device_added(dev, path, dh) {
             Ok(added) => outputs.extend(added),
             Err(err) => warn!("Failed to add device {}: {:?}", path.display(), err),
         }
@@ -169,7 +169,7 @@ pub fn init_backend(
     }
 
     // start x11
-    let primary = state.backend.kms().primary_node.read().unwrap().clone();
+    let primary = *state.backend.kms().primary_node.read().unwrap();
     state.launch_xwayland(primary);
 
     Ok(())
@@ -209,7 +209,7 @@ fn init_libinput(
     .context("Failed to initialize libinput event source")?;
 
     // Create relative pointer global
-    RelativePointerManagerState::new::<State>(&dh);
+    RelativePointerManagerState::new::<State>(dh);
 
     Ok(libinput_context)
 }
@@ -239,7 +239,7 @@ fn determine_primary_gpu(
     // try to find builtin display
     for dev in drm_devices.values() {
         if dev.inner.surfaces.values().any(|s| {
-            if let Some(conn_info) = dev.drm.device().get_connector(s.connector, false).ok() {
+            if let Ok(conn_info) = dev.drm.device().get_connector(s.connector, false) {
                 let i = conn_info.interface();
                 i == Interface::EmbeddedDisplayPort || i == Interface::LVDS || i == Interface::DSI
             } else {
@@ -392,7 +392,7 @@ impl State {
                     }
                 } else {
                     let dh = state.common.display_handle.clone();
-                    match state.device_added(dev, path.into(), &dh) {
+                    match state.device_added(dev, path, &dh) {
                         Ok(outputs) => added.extend(outputs),
                         Err(err) => error!(?err, "Failed to add drm device {}.", path.display(),),
                     }
@@ -465,7 +465,7 @@ impl KmsState {
                         if let Some(state) = self.syncobj_state.as_mut() {
                             state.update_device(import_device);
                         } else {
-                            let syncobj_state = DrmSyncobjState::new::<State>(&dh, import_device);
+                            let syncobj_state = DrmSyncobjState::new::<State>(dh, import_device);
                             self.syncobj_state = Some(syncobj_state);
                         }
                         return Ok(());
@@ -551,8 +551,7 @@ impl KmsState {
                 Err(err) => {
                     trace!(
                         ?err,
-                        "Failed to import dmabuf on {:?}",
-                        device.inner.render_node
+                        "Failed to import dmabuf on {:?}", device.inner.render_node
                     );
                     last_err = err;
                 }
@@ -646,7 +645,7 @@ impl KmsState {
     }
 }
 
-impl<'a> KmsGuard<'a> {
+impl KmsGuard<'_> {
     pub fn schedule_render(&mut self, output: &Output) {
         for surface in self
             .drm_devices
@@ -755,7 +754,7 @@ impl<'a> KmsGuard<'a> {
                 .crtcs()
                 .iter()
                 .filter(|crtc| {
-                    !device.inner.surfaces.get(crtc).is_some()
+                    device.inner.surfaces.get(crtc).is_none()
                     // TODO: We can't do this. See https://github.com/Smithay/smithay/pull/1820
                     //.is_some_and(|surface| surface.output.is_enabled())
                 })
@@ -797,7 +796,9 @@ impl<'a> KmsGuard<'a> {
                             break 'outer;
                         }
                     }
+                }
 
+                if !new_pairings.contains_key(&conn) {
                     // test failed, we don't have a crtc for conn
                     anyhow::bail!("Missing crtc for {conn:?}, gpu doesn't have enough resources.");
                 }
@@ -915,7 +916,7 @@ impl<'a> KmsGuard<'a> {
                                     &mut renderer,
                                     &shell,
                                     now,
-                                    &output,
+                                    output,
                                     CursorMode::All,
                                     None,
                                 )
@@ -1024,7 +1025,7 @@ impl<'a> KmsGuard<'a> {
                                 &mut renderer,
                                 &shell,
                                 now,
-                                &output,
+                                output,
                                 CursorMode::All,
                                 None,
                             )
@@ -1068,7 +1069,7 @@ impl<'a> KmsGuard<'a> {
                         &mut renderer,
                         &shell,
                         now,
-                        &output,
+                        output,
                         CursorMode::All,
                         None,
                     )
@@ -1103,10 +1104,8 @@ impl<'a> KmsGuard<'a> {
                         None
                     };
 
-                if !test_only {
-                    if mirrored_output != surface.output.mirroring() {
-                        surface.set_mirroring(mirrored_output.clone());
-                    }
+                if !test_only && mirrored_output != surface.output.mirroring() {
+                    surface.set_mirroring(mirrored_output.clone());
                 }
             }
         }

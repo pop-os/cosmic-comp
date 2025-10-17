@@ -1,30 +1,31 @@
 use std::{
     fmt,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
 use calloop::LoopHandle;
 use cosmic::{
+    Apply as _, Task,
     iced::{Alignment, Background},
-    iced_core::{alignment::Horizontal, Border, Length, Rectangle as IcedRectangle},
-    iced_widget::{self, text::Style as TextStyle, Column, Row},
+    iced_core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
+    iced_widget::{self, Column, Row, text::Style as TextStyle},
     theme,
     widget::{button, divider, horizontal_space, icon::from_name, text},
-    Apply as _, Task,
 };
 use smithay::{
     backend::{
         input::{ButtonState, TouchSlot},
         renderer::{
-            element::{memory::MemoryRenderBufferRenderElement, AsRenderElements},
             ImportMem, Renderer,
+            element::{AsRenderElements, memory::MemoryRenderBufferRenderElement},
         },
     },
     desktop::space::SpaceElement,
     input::{
+        Seat,
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -36,14 +37,13 @@ use smithay::{
             DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
             TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
         },
-        Seat,
     },
     output::Output,
     utils::{Logical, Point, Rectangle, Serial, Size},
 };
 
 use crate::{
-    shell::{focus::target::PointerFocusTarget, SeatExt},
+    shell::{SeatExt, focus::target::PointerFocusTarget},
     state::State,
     utils::{
         iced::{IcedElement, Program},
@@ -381,7 +381,7 @@ impl Program for ContextMenu {
             .row_width
             .lock()
             .unwrap()
-            .map(|size| Length::Fixed(size))
+            .map(Length::Fixed)
             .unwrap_or(Length::Shrink);
         let mode = match width {
             Length::Shrink => Length::Shrink,
@@ -962,48 +962,35 @@ impl MenuAlignment {
                     AxisAlignment::Centered,
                 )
                 .into_iter()
-                .chain(
-                    for_alignment(
-                        position,
-                        size,
-                        AxisAlignment::Centered,
-                        AxisAlignment::Corner(0),
-                    )
-                    .into_iter(),
-                )
-                .chain(
-                    for_alignment(
-                        position,
-                        size,
-                        AxisAlignment::Corner(0),
-                        AxisAlignment::Centered,
-                    )
-                    .into_iter(),
-                )
-                .chain(
-                    for_alignment(
-                        position,
-                        size,
-                        AxisAlignment::Corner(0),
-                        AxisAlignment::Corner(0),
-                    )
-                    .into_iter(),
-                )
+                .chain(for_alignment(
+                    position,
+                    size,
+                    AxisAlignment::Centered,
+                    AxisAlignment::Corner(0),
+                ))
+                .chain(for_alignment(
+                    position,
+                    size,
+                    AxisAlignment::Corner(0),
+                    AxisAlignment::Centered,
+                ))
+                .chain(for_alignment(
+                    position,
+                    size,
+                    AxisAlignment::Corner(0),
+                    AxisAlignment::Corner(0),
+                ))
                 .collect(),
                 (AxisAlignment::PreferCentered, y) => {
                     for_alignment(position, size, AxisAlignment::Centered, y)
                         .into_iter()
-                        .chain(
-                            for_alignment(position, size, AxisAlignment::Corner(0), y).into_iter(),
-                        )
+                        .chain(for_alignment(position, size, AxisAlignment::Corner(0), y))
                         .collect()
                 }
                 (x, AxisAlignment::PreferCentered) => {
                     for_alignment(position, size, x, AxisAlignment::Centered)
                         .into_iter()
-                        .chain(
-                            for_alignment(position, size, x, AxisAlignment::Corner(0)).into_iter(),
-                        )
+                        .chain(for_alignment(position, size, x, AxisAlignment::Corner(0)))
                         .collect()
                 }
             }

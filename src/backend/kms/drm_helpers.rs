@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use libdisplay_info::{edid::DisplayDescriptorTag, info::Info};
 use smithay::{
     reexports::drm::control::{
+        AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType, ResourceHandle,
         atomic::AtomicModeReq,
         connector::{self, State as ConnectorState},
         crtc,
         dumbbuffer::DumbBuffer,
-        property, AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType,
-        ResourceHandle,
+        property,
     },
     utils::Transform,
 };
@@ -82,7 +82,7 @@ pub fn display_configuration(
             .flat_map(|conn| device.get_connector(*conn, false).ok())
             .filter(|conn| {
                 if let Some(enc) = conn.current_encoder() {
-                    if let Some(enc) = device.get_encoder(enc).ok() {
+                    if let Ok(enc) = device.get_encoder(enc) {
                         if let Some(crtc) = enc.crtc() {
                             return cleanup.contains(&crtc);
                         }

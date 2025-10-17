@@ -12,8 +12,8 @@ use smithay::{
             zwlr_output_mode_v1::{self, ZwlrOutputModeV1},
         },
         wayland_server::{
-            backend::ClientId, Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New,
-            Resource,
+            Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
+            backend::ClientId,
         },
     },
     utils::{Point, Size},
@@ -136,13 +136,10 @@ where
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            zwlr_output_head_v1::Request::Release => {
-                for instance in &mut state.output_configuration_state().instances {
-                    instance.heads.retain(|h| &h.obj != obj);
-                }
+        if let zwlr_output_head_v1::Request::Release = request {
+            for instance in &mut state.output_configuration_state().instances {
+                instance.heads.retain(|h| &h.obj != obj);
             }
-            _ => {}
         }
     }
 
@@ -173,16 +170,13 @@ where
         _dh: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            zwlr_output_mode_v1::Request::Release => {
-                let state = state.output_configuration_state();
-                for instance in &mut state.instances {
-                    for head in &mut instance.heads {
-                        head.modes.retain(|mode| mode != obj)
-                    }
+        if let zwlr_output_mode_v1::Request::Release = request {
+            let state = state.output_configuration_state();
+            for instance in &mut state.instances {
+                for head in &mut instance.heads {
+                    head.modes.retain(|mode| mode != obj)
                 }
             }
-            _ => {}
         }
     }
 }
@@ -281,13 +275,12 @@ where
                     .heads
                     .iter_mut()
                     .map(|(head, conf)| {
-                        let output = match {
-                            inner
-                                .instances
-                                .iter()
-                                .find_map(|instance| instance.heads.iter().find(|h| h.obj == *head))
-                                .map(|i| i.output.clone())
-                        } {
+                        let output = match inner
+                            .instances
+                            .iter()
+                            .find_map(|instance| instance.heads.iter().find(|h| h.obj == *head))
+                            .map(|i| i.output.clone())
+                        {
                             Some(o) => o,
                             None => {
                                 return Err(zwlr_output_configuration_head_v1::Error::InvalidMode);
@@ -331,10 +324,10 @@ where
                         .iter()
                         .any(|o| !inner.outputs.contains(o))
                     || final_conf.iter().any(|(o, c)| match c {
-                        OutputConfiguration::Enabled { mode, .. } => match mode {
-                            Some(ModeConfiguration::Mode(m)) => !o.modes().contains(m),
-                            _ => false,
-                        },
+                        OutputConfiguration::Enabled {
+                            mode: Some(ModeConfiguration::Mode(m)),
+                            ..
+                        } => !o.modes().contains(m),
                         _ => false,
                     })
                 {

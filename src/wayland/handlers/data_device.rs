@@ -4,8 +4,8 @@ use crate::{state::State, utils::prelude::SeatExt};
 use smithay::{
     delegate_data_device,
     input::{
-        pointer::{CursorImageStatus, CursorImageSurfaceData},
         Seat,
+        pointer::{CursorImageStatus, CursorImageSurfaceData},
     },
     reexports::wayland_server::protocol::{wl_data_source::WlDataSource, wl_surface::WlSurface},
     utils::{IsAlive, Logical, Point},
@@ -68,7 +68,7 @@ impl ClientDndGrabHandler for State {
         seat: Seat<Self>,
     ) {
         let user_data = seat.user_data();
-        user_data.insert_if_missing_threadsafe::<Mutex<Option<DnDIcon>>, _>(|| Default::default());
+        user_data.insert_if_missing_threadsafe::<Mutex<Option<DnDIcon>>, _>(Default::default);
 
         let offset = if let CursorImageStatus::Surface(ref surface) = seat.cursor_image_status() {
             compositor::with_states(surface, |states| {

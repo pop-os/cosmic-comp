@@ -7,23 +7,23 @@ use crate::{
     state::{BackendData, Common},
     utils::prelude::*,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::output::comp::{OutputConfig, TransformDef};
 use smithay::{
     backend::{
         drm::NodeType,
         egl::EGLDevice,
         renderer::{
+            ImportDma,
             damage::{OutputDamageTracker, RenderOutputResult},
             glow::GlowRenderer,
-            ImportDma,
         },
         winit::{self, WinitEvent, WinitGraphicsBackend, WinitVirtualDevice},
     },
     desktop::layer_map_for_output,
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
-        calloop::{ping, EventLoop},
+        calloop::{EventLoop, ping},
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
         winit::platform::pump_events::PumpStatus,
@@ -34,7 +34,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, time::Duration};
 use tracing::{error, info, warn};
 
-use super::render::{init_shaders, CursorMode, ScreenFilterStorage};
+use super::render::{CursorMode, ScreenFilterStorage, init_shaders};
 
 #[derive(Debug)]
 pub struct WinitState {
@@ -143,7 +143,7 @@ pub fn init_backend(
 
     init_egl_client_side(dh, state, &mut backend)?;
 
-    let name = format!("WINIT-0");
+    let name = "WINIT-0".to_string();
     let size = backend.window_size();
     let props = PhysicalProperties {
         size: (0, 0).into(),

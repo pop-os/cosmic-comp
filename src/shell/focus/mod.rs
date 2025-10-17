@@ -1,16 +1,16 @@
 use crate::{
-    shell::{element::CosmicMapped, CosmicSurface, MinimizedWindow, Shell},
+    shell::{CosmicSurface, MinimizedWindow, Shell, element::CosmicMapped},
     state::Common,
     utils::prelude::*,
     wayland::handlers::{xdg_shell::PopupGrabData, xwayland_keyboard_grab::XWaylandGrabSeatData},
 };
 use indexmap::IndexSet;
 use smithay::{
-    desktop::{layer_map_for_output, PopupUngrabStrategy},
-    input::{pointer::MotionEvent, Seat},
+    desktop::{PopupUngrabStrategy, layer_map_for_output},
+    input::{Seat, pointer::MotionEvent},
     output::Output,
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
-    utils::{IsAlive, Point, Serial, SERIAL_COUNTER},
+    reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
+    utils::{IsAlive, Point, SERIAL_COUNTER, Serial},
     wayland::{
         seat::WaylandFocus,
         selection::{data_device::set_data_device_focus, primary_selection::set_primary_focus},
@@ -21,10 +21,10 @@ use std::{borrow::Cow, mem, sync::Mutex};
 
 use tracing::{debug, trace};
 
-pub use self::order::{render_input_order, Stage};
+pub use self::order::{Stage, render_input_order};
 use self::target::{KeyboardFocusTarget, WindowGroup};
 
-use super::{grabs::SeatMoveGrabState, layout::floating::FloatingLayout, SeatExt};
+use super::{SeatExt, grabs::SeatMoveGrabState, layout::floating::FloatingLayout};
 
 mod order;
 pub mod target;
@@ -59,9 +59,9 @@ impl From<CosmicSurface> for FocusTarget {
     }
 }
 
-impl Into<KeyboardFocusTarget> for FocusTarget {
-    fn into(self) -> KeyboardFocusTarget {
-        match self {
+impl From<FocusTarget> for KeyboardFocusTarget {
+    fn from(val: FocusTarget) -> Self {
+        match val {
             FocusTarget::Window(mapped) => KeyboardFocusTarget::Element(mapped),
             FocusTarget::Fullscreen(surface) => KeyboardFocusTarget::Fullscreen(surface),
         }
@@ -94,7 +94,7 @@ impl FocusTarget {
 pub struct FocusStack<'a>(pub(super) Option<&'a IndexSet<FocusTarget>>);
 pub struct FocusStackMut<'a>(pub(super) &'a mut IndexSet<FocusTarget>);
 
-impl<'a> FocusStack<'a> {
+impl FocusStack<'_> {
     /// returns the last unminimized window in the focus stack that is still alive
     pub fn last(&self) -> Option<&FocusTarget> {
         self.0
@@ -109,7 +109,7 @@ impl<'a> FocusStack<'a> {
     }
 }
 
-impl<'a> FocusStackMut<'a> {
+impl FocusStackMut<'_> {
     pub fn append(&mut self, target: impl Into<FocusTarget>) {
         let target = target.into();
         self.0.retain(|w| w.alive());
@@ -200,13 +200,11 @@ impl Shell {
         let workspace = target
             .wl_surface()
             .and_then(|surface| self.workspace_for_surface(&surface));
-        let workspace = if workspace.is_none() {
+        let workspace = if let Some(workspace) = workspace {
+            self.workspaces.space_for_handle_mut(&workspace.0).unwrap()
+        } else {
             //should this be the active output or the focused output?
             self.active_space_mut(&seat.focused_or_active_output())
-                .unwrap()
-        } else {
-            self.workspaces
-                .space_for_handle_mut(&workspace.unwrap().0)
                 .unwrap()
         };
 
@@ -232,7 +230,7 @@ impl Shell {
         let focused_windows = self
             .seats
             .iter()
-            .map(|seat| {
+            .filter_map(|seat| {
                 if matches!(
                     seat.get_keyboard().unwrap().current_focus(),
                     Some(KeyboardFocusTarget::Group(_)) | Some(KeyboardFocusTarget::LockSurface(_))
@@ -248,7 +246,6 @@ impl Shell {
                     FocusTarget::Fullscreen(_) => None,
                 })
             })
-            .flatten()
             .collect::<Vec<_>>();
 
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
@@ -257,7 +254,7 @@ impl Shell {
                 raise_with_children(&mut set.sticky_layer, focused);
             }
             for window in set.sticky_layer.mapped() {
-                window.set_activated(focused_windows.contains(&window));
+                window.set_activated(focused_windows.contains(window));
                 window.configure();
             }
             for window in set
@@ -291,7 +288,7 @@ impl Shell {
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
             for window in workspace.mapped() {
-                window.set_activated(focused_windows.contains(&window));
+                window.set_activated(focused_windows.contains(window));
                 window.configure();
             }
             for m in workspace.minimized_windows.iter() {
@@ -330,38 +327,39 @@ fn update_focus_state(
 ) {
     // update keyboard focus
     if let Some(keyboard) = seat.get_keyboard() {
-        if should_update_cursor && state.common.config.cosmic_conf.cursor_follows_focus {
-            if target.is_some() {
-                //need to borrow mutably for surface under
-                let shell = state.common.shell.read();
-                // get the top left corner of the target element
-                let geometry = shell.focused_geometry(target.unwrap());
-                if let Some(geometry) = geometry {
-                    // get the center of the target element
-                    let window_center = Point::from((geometry.size.w / 2, geometry.size.h / 2));
-                    let new_pos = (geometry.loc + window_center).to_f64();
+        if should_update_cursor
+            && state.common.config.cosmic_conf.cursor_follows_focus
+            && target.is_some()
+        {
+            //need to borrow mutably for surface under
+            let shell = state.common.shell.read();
+            // get the top left corner of the target element
+            let geometry = shell.focused_geometry(target.unwrap());
+            if let Some(geometry) = geometry {
+                // get the center of the target element
+                let window_center = Point::from((geometry.size.w / 2, geometry.size.h / 2));
+                let new_pos = (geometry.loc + window_center).to_f64();
 
-                    // create a pointer target from the target element
-                    let output = shell
-                        .outputs()
-                        .find(|output| output.geometry().to_f64().contains(new_pos))
-                        .cloned()
-                        .unwrap_or(seat.active_output());
+                // create a pointer target from the target element
+                let output = shell
+                    .outputs()
+                    .find(|output| output.geometry().to_f64().contains(new_pos))
+                    .cloned()
+                    .unwrap_or(seat.active_output());
 
-                    let focus = State::surface_under(new_pos, &output, &*shell)
-                        .map(|(focus, loc)| (focus, loc.as_logical()));
-                    //drop here to avoid multiple borrows
-                    mem::drop(shell);
-                    seat.get_pointer().unwrap().motion(
-                        state,
-                        focus,
-                        &MotionEvent {
-                            location: new_pos.as_logical(),
-                            serial: SERIAL_COUNTER.next_serial(),
-                            time: 0,
-                        },
-                    );
-                }
+                let focus = State::surface_under(new_pos, &output, &shell)
+                    .map(|(focus, loc)| (focus, loc.as_logical()));
+                //drop here to avoid multiple borrows
+                mem::drop(shell);
+                seat.get_pointer().unwrap().motion(
+                    state,
+                    focus,
+                    &MotionEvent {
+                        location: new_pos.as_logical(),
+                        serial: SERIAL_COUNTER.next_serial(),
+                        time: 0,
+                    },
+                );
             }
         }
 
@@ -460,15 +458,15 @@ impl Common {
                 }
             }
 
-            update_pointer_focus(state, &seat);
+            update_pointer_focus(state, seat);
 
             let output = seat.focused_or_active_output();
             let mut shell = state.common.shell.write();
-            let last_known_focus = ActiveFocus::get(&seat);
+            let last_known_focus = ActiveFocus::get(seat);
 
             if let Some(target) = last_known_focus {
                 if target.alive() {
-                    if focus_target_is_valid(&mut *shell, &seat, &output, target) {
+                    if focus_target_is_valid(&mut shell, seat, &output, target) {
                         continue; // Focus is valid
                     } else {
                         trace!("Wrong Window, focus fixup");
@@ -504,7 +502,7 @@ impl Common {
                 }
             } else {
                 let workspace = shell.active_space(&output).unwrap();
-                let focus_stack = workspace.focus_stack.get(&seat);
+                let focus_stack = workspace.focus_stack.get(seat);
 
                 if focus_stack.last().is_none() {
                     continue; // Focus is valid
@@ -527,7 +525,7 @@ impl Common {
                 }
 
                 // update keyboard focus
-                let target = update_focus_target(&*shell, &seat, &output);
+                let target = update_focus_target(&shell, seat, &output);
                 std::mem::drop(shell);
                 //I can probably feature gate this condition
                 debug!("Restoring focus to {:?}", target.as_ref());
@@ -547,8 +545,8 @@ impl Common {
                     .as_ref()
                     .and_then(|t| t.wl_surface())
                     .and_then(|s| state.common.display_handle.get_client(s.id()).ok());
-                set_data_device_focus(&state.common.display_handle, &seat, client.clone());
-                set_primary_focus(&state.common.display_handle, &seat, client);
+                set_data_device_focus(&state.common.display_handle, seat, client.clone());
+                set_primary_focus(&state.common.display_handle, seat, client);
             }
         }
 
@@ -603,8 +601,8 @@ fn focus_target_is_valid(
                 .mapped()
                 .any(|m| m == &mapped);
 
-            let workspace = shell.active_space(&output).unwrap();
-            let focus_stack = workspace.focus_stack.get(&seat);
+            let workspace = shell.active_space(output).unwrap();
+            let focus_stack = workspace.focus_stack.get(seat);
             let is_in_focus_stack = focus_stack.last().map(|m| m == &mapped).unwrap_or(false);
             if is_sticky && !is_in_focus_stack {
                 shell.append_focus_stack(mapped, seat);
@@ -613,17 +611,17 @@ fn focus_target_is_valid(
             is_sticky || is_in_focus_stack
         }
         KeyboardFocusTarget::LayerSurface(layer) => {
-            layer_map_for_output(&output).layers().any(|l| l == &layer)
+            layer_map_for_output(output).layers().any(|l| l == &layer)
         }
         KeyboardFocusTarget::Group(WindowGroup { node, .. }) => shell
             .workspaces
-            .active(&output)
+            .active(output)
             .unwrap()
             .1
             .tiling_layer
             .has_node(&node),
         KeyboardFocusTarget::Fullscreen(window) => {
-            let workspace = shell.active_space(&output).unwrap();
+            let workspace = shell.active_space(output).unwrap();
             workspace.get_fullscreen().is_some_and(|w| w == &window)
         }
         KeyboardFocusTarget::Popup(_) => true,
@@ -654,15 +652,15 @@ fn update_focus_target(
             .map(KeyboardFocusTarget::from)
     } else {
         shell
-            .active_space(&output)
+            .active_space(output)
             .unwrap()
             .focus_stack
-            .get(&seat)
+            .get(seat)
             .last()
             .cloned()
             .map(Into::<KeyboardFocusTarget>::into)
             .or_else(|| {
-                let workspace = shell.active_space(&output).unwrap();
+                let workspace = shell.active_space(output).unwrap();
 
                 workspace
                     .mapped()
@@ -684,8 +682,8 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
         let output = seat.active_output();
         let position = pointer.current_location().as_global();
 
-        let mut shell = state.common.shell.write();
-        let under = State::surface_under(position, &output, &mut shell)
+        let shell = state.common.shell.write();
+        let under = State::surface_under(position, &output, &shell)
             .map(|(target, pos)| (target, pos.as_logical()));
         drop(shell);
 
@@ -710,10 +708,10 @@ fn exclusive_layer_surface_layer(shell: &Shell) -> Option<Layer> {
     for output in shell.outputs() {
         for layer_surface in layer_map_for_output(output).layers() {
             let data = layer_surface.cached_state();
-            if data.keyboard_interactivity == KeyboardInteractivity::Exclusive {
-                if data.layer as u32 >= layer.unwrap_or(Layer::Top) as u32 {
-                    layer = Some(data.layer);
-                }
+            if data.keyboard_interactivity == KeyboardInteractivity::Exclusive
+                && data.layer as u32 >= layer.unwrap_or(Layer::Top) as u32
+            {
+                layer = Some(data.layer);
             }
         }
     }

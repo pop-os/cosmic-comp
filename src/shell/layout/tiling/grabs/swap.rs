@@ -2,18 +2,18 @@ use cosmic_settings_config::shortcuts;
 use smithay::{
     backend::input::{KeyState, Keycode},
     input::{
+        Seat, SeatHandler,
         keyboard::{
             GrabStartData as KeyboardGrabStartData, KeyboardGrab, KeyboardInnerHandle,
             ModifiersState,
         },
-        Seat, SeatHandler,
     },
     utils::Serial,
 };
 
 use crate::{
     config::key_bindings::cosmic_modifiers_from_smithay,
-    shell::{layout::tiling::NodeDesc, Trigger},
+    shell::{Trigger, layout::tiling::NodeDesc},
     state::State,
 };
 
@@ -49,7 +49,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
             return;
         }
 
-        let syms = Vec::from(handle.keysym_handle(keycode).raw_syms());
+        let syms = handle.keysym_handle(keycode).raw_syms();
         let focus_bindings = &data
             .common
             .config

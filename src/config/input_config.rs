@@ -92,10 +92,8 @@ pub fn get_config<'a, T: 'a, F: Fn(&'a InputConfig) -> Option<T>>(
 ) -> Option<(T, bool)> {
     if let Some(setting) = device_config.and_then(&f) {
         Some((setting, false))
-    } else if let Some(setting) = f(default_config) {
-        Some((setting, true))
     } else {
-        None
+        f(default_config).map(|setting| (setting, true))
     }
 }
 

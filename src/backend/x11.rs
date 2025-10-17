@@ -7,7 +7,7 @@ use crate::{
     state::{BackendData, Common},
     utils::prelude::*,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::output::comp::OutputConfig;
 use smithay::{
     backend::{
@@ -20,17 +20,17 @@ use smithay::{
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::{Event, InputEvent},
         renderer::{
+            Bind, ImportDma,
             damage::{OutputDamageTracker, RenderOutputResult},
             glow::GlowRenderer,
-            Bind, ImportDma,
         },
-        vulkan::{version::Version, Instance, PhysicalDevice},
+        vulkan::{Instance, PhysicalDevice, version::Version},
         x11::{Window, WindowBuilder, X11Backend, X11Event, X11Handle, X11Input, X11Surface},
     },
     desktop::layer_map_for_output,
     output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
-        calloop::{ping, EventLoop, LoopHandle},
+        calloop::{EventLoop, LoopHandle, ping},
         gbm::Device as GbmDevice,
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
@@ -41,7 +41,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, os::unix::io::OwnedFd, time::Duration};
 use tracing::{debug, error, info, warn};
 
-use super::render::{init_shaders, ScreenFilterStorage};
+use super::render::{ScreenFilterStorage, init_shaders};
 
 #[derive(Debug)]
 enum Allocator {
@@ -512,29 +512,26 @@ where
 impl State {
     pub fn process_x11_event(&mut self, event: InputEvent<X11Input>) {
         // here we can handle special cases for x11 inputs, like mapping them to windows
-        match &event {
-            InputEvent::PointerMotionAbsolute { event } => {
-                if let Some(window) = event.window() {
-                    let output = self
-                        .backend
-                        .x11()
-                        .surfaces
-                        .iter()
-                        .find(|surface| &surface.window == window.as_ref())
-                        .map(|surface| surface.output.clone())
-                        .unwrap();
+        if let InputEvent::PointerMotionAbsolute { event } = &event {
+            if let Some(window) = event.window() {
+                let output = self
+                    .backend
+                    .x11()
+                    .surfaces
+                    .iter()
+                    .find(|surface| &surface.window == window.as_ref())
+                    .map(|surface| surface.output.clone())
+                    .unwrap();
 
-                    let device = event.device();
-                    for seat in self.common.shell.read().seats.iter() {
-                        let devices = seat.user_data().get::<Devices>().unwrap();
-                        if devices.has_device(&device) {
-                            seat.set_active_output(&output);
-                            break;
-                        }
+                let device = event.device();
+                for seat in self.common.shell.read().seats.iter() {
+                    let devices = seat.user_data().get::<Devices>().unwrap();
+                    if devices.has_device(&device) {
+                        seat.set_active_output(&output);
+                        break;
                     }
                 }
             }
-            _ => {}
         };
 
         self.process_input_event(event);

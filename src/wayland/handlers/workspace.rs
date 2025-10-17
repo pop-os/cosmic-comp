@@ -4,7 +4,7 @@ use crate::{
     shell::WorkspaceDelta,
     utils::prelude::*,
     wayland::protocols::workspace::{
-        delegate_workspace, Request, State as WState, WorkspaceHandler, WorkspaceState,
+        Request, State as WState, WorkspaceHandler, WorkspaceState, delegate_workspace,
     },
 };
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
@@ -46,10 +46,7 @@ impl WorkspaceHandler for State {
                     if let Some(workspace) = shell.workspaces.space_for_handle_mut(&workspace) {
                         let mut guard = self.common.workspace_state.update();
                         workspace.set_tiling(
-                            match state.into_result() {
-                                Ok(TilingState::FloatingOnly) => false,
-                                _ => true,
-                            },
+                            !matches!(state.into_result(), Ok(TilingState::FloatingOnly)),
                             &seat,
                             &mut guard,
                         );

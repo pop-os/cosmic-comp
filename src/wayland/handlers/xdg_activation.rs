@@ -1,5 +1,5 @@
-use crate::shell::focus::target::KeyboardFocusTarget;
 use crate::shell::WorkspaceDelta;
+use crate::shell::focus::target::KeyboardFocusTarget;
 use crate::{shell::ActivationKey, state::ClientState, utils::prelude::*};
 use crate::{
     state::State,
@@ -126,7 +126,7 @@ impl XdgActivationHandler for State {
 
                     let Some((element_output, element_workspace)) = shell
                         .space_for(&element)
-                        .map(|w| (w.output.clone(), w.handle.clone()))
+                        .map(|w| (w.output.clone(), w.handle))
                     else {
                         return;
                     };
@@ -227,7 +227,7 @@ impl XdgActivationHandler for State {
                 } else {
                     shell
                         .pending_activations
-                        .insert(ActivationKey::Wayland(surface), context.clone());
+                        .insert(ActivationKey::Wayland(surface), *context);
                 };
             }
         }

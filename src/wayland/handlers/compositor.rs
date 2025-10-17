@@ -4,18 +4,18 @@ use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude:
 use calloop::Interest;
 use smithay::{
     backend::renderer::{
-        element::{surface::KindEvaluation, Kind},
+        element::{Kind, surface::KindEvaluation},
         utils::{on_commit_buffer_handler, with_renderer_surface_state},
     },
     delegate_compositor,
-    desktop::{layer_map_for_output, LayerSurface, PopupKind, WindowSurfaceType},
-    reexports::wayland_server::{protocol::wl_surface::WlSurface, Client, Resource},
-    utils::{Clock, Logical, Monotonic, Size, Time, SERIAL_COUNTER},
+    desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
+    reexports::wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
+    utils::{Clock, Logical, Monotonic, SERIAL_COUNTER, Size, Time},
     wayland::{
         compositor::{
-            add_blocker, add_post_commit_hook, add_pre_commit_hook, with_states,
-            with_surface_tree_downward, BufferAssignment, CompositorClientState, CompositorHandler,
-            CompositorState, SurfaceAttributes, SurfaceData, TraversalAction,
+            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            SurfaceAttributes, SurfaceData, TraversalAction, add_blocker, add_post_commit_hook,
+            add_pre_commit_hook, with_states, with_surface_tree_downward,
         },
         dmabuf::get_dmabuf,
         drm_syncobj::DrmSyncobjCachedState,
@@ -122,7 +122,7 @@ pub fn frame_time_estimation(clock: &Clock<Monotonic>, states: &SurfaceData) -> 
     if let Some(ref last) = data.last_commit {
         // if the time since the last commit is already higher than our estimation,
         // there is no reason to not use that as a better "guess"
-        let diff = Time::elapsed(&last, clock.now());
+        let diff = Time::elapsed(last, clock.now());
         Some(diff.max(data.estimation))
     } else {
         Some(data.estimation)
@@ -275,7 +275,7 @@ impl CompositorHandler for State {
 
         // schedule a new render
         if let Some(output) = shell.visible_output_for_surface(surface) {
-            self.backend.schedule_render(&output);
+            self.backend.schedule_render(output);
         }
 
         if mapped {
@@ -349,7 +349,7 @@ impl CompositorHandler for State {
             if let Some(element) = shell.element_for_surface(surface).cloned() {
                 crate::shell::layout::floating::ResizeSurfaceGrab::apply_resize_to_location(
                     element.clone(),
-                    &mut *shell,
+                    &mut shell,
                 );
             }
         }
@@ -392,8 +392,8 @@ impl State {
                 } else {
                     None
                 };
-                if toplevel_ensure_initial_configure(&toplevel, initial_size)
-                    && with_renderer_surface_state(&surface, |state| state.buffer().is_some())
+                if toplevel_ensure_initial_configure(toplevel, initial_size)
+                    && with_renderer_surface_state(surface, |state| state.buffer().is_some())
                         .unwrap_or(false)
                 {
                     let window = pending.surface.clone();

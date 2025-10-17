@@ -7,9 +7,9 @@ use std::{
 
 use smithay::backend::{
     allocator::{
+        Allocator,
         dmabuf::{AnyError, Dmabuf, DmabufAllocator},
         gbm::{GbmAllocator, GbmBufferFlags, GbmDevice},
-        Allocator,
     },
     drm::DrmNode,
     renderer::{
@@ -39,6 +39,12 @@ impl fmt::Debug for GbmPixmanDevice {
             .field("allocator", &"...")
             .field("renderer", &self.renderer)
             .finish()
+    }
+}
+
+impl<A: AsFd + 'static> Default for GbmPixmanBackend<A> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

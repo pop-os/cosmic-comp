@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{focus::target::KeyboardFocusTarget, grabs::ReleaseMode, CosmicSurface, PendingWindow},
+    shell::{CosmicSurface, PendingWindow, focus::target::KeyboardFocusTarget, grabs::ReleaseMode},
     utils::prelude::*,
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::{
     delegate_xdg_shell,
     desktop::{
-        find_popup_root_surface, PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab,
-        PopupUngrabStrategy, WindowSurfaceType,
+        PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
+        WindowSurfaceType, find_popup_root_surface,
     },
-    input::{pointer::Focus, Seat},
+    input::{Seat, pointer::Focus},
     output::Output,
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel,
@@ -99,7 +99,7 @@ impl XdgShellHandler for State {
         });
 
         if let Some(root) = maybe_root {
-            let target = root.into();
+            let target = root;
             let ret = self.common.popups.grab_popup(target, kind, &seat, serial);
             match ret {
                 Ok(mut grab) => {
@@ -304,12 +304,12 @@ impl XdgShellHandler for State {
             if should_focus {
                 Shell::set_focus(self, Some(&target), &seat, None, true);
             }
-        } else {
-            if let Some(pending) = shell.pending_windows.iter_mut().find(|pending| {
-                pending.surface.wl_surface().as_deref() == Some(surface.wl_surface())
-            }) {
-                pending.fullscreen.take();
-            }
+        } else if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.wl_surface().as_deref() == Some(surface.wl_surface()))
+        {
+            pending.fullscreen.take();
         }
     }
 
@@ -337,12 +337,12 @@ impl XdgShellHandler for State {
         {
             let dh = self.common.display_handle.clone();
             for client in clients.values() {
-                client_compositor_state(&client).blocker_cleared(self, &dh);
+                client_compositor_state(client).blocker_cleared(self, &dh);
             }
         }
 
         if let Some(output) = output.as_ref() {
-            self.backend.schedule_render(&output);
+            self.backend.schedule_render(output);
         }
     }
 

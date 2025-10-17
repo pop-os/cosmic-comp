@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::Common;
-use libsystemd::daemon::{booted, notify, NotifyState};
+use libsystemd::daemon::{NotifyState, booted, notify};
 use std::process::Command;
 use tracing::{error, warn};
 
@@ -12,11 +12,11 @@ pub fn ready(common: &Common) {
             .env("WAYLAND_DISPLAY", &common.socket)
             .env(
                 "DISPLAY",
-                &common
+                common
                     .xwayland_state
                     .as_ref()
                     .map(|s| format!(":{}", s.display))
-                    .unwrap_or(String::new()),
+                    .unwrap_or_default(),
             )
             .status()
         {

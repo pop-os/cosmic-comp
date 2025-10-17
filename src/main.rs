@@ -3,7 +3,7 @@
 use calloop::timer::{TimeoutAction, Timer};
 use smithay::{
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, Mode, PostAction},
+        calloop::{EventLoop, Interest, Mode, PostAction, generic::Generic},
         wayland_server::{Display, DisplayHandle},
     },
     wayland::socket::ListeningSocketSource,
@@ -80,7 +80,12 @@ impl State {
                 command.envs(
                     session::get_env(&self.common).expect("WAYLAND_DISPLAY should be valid UTF-8"),
                 );
-                unsafe { command.pre_exec(|| Ok(utils::rlimit::restore_nofile_limit())) };
+                unsafe {
+                    command.pre_exec(|| {
+                        utils::rlimit::restore_nofile_limit();
+                        Ok(())
+                    })
+                };
 
                 info!("Running {:?}", exec);
                 command
@@ -172,7 +177,7 @@ fn main_inner() -> Result<(), Box<dyn Error>> {
         {
             let dh = state.common.display_handle.clone();
             for client in clients.values() {
-                client_compositor_state(&client).blocker_cleared(state, &dh);
+                client_compositor_state(client).blocker_cleared(state, &dh);
             }
         }
 

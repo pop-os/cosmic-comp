@@ -1,25 +1,24 @@
-use super::tab::{Tab, TabBackgroundTheme, TabMessage, TabRuleTheme, MIN_ACTIVE_TAB_WIDTH};
+use super::tab::{MIN_ACTIVE_TAB_WIDTH, Tab, TabBackgroundTheme, TabMessage, TabRuleTheme};
 use cosmic::{
-    iced::{id::Id, widget, Element},
+    Apply,
+    iced::{Element, id::Id, widget},
     iced_core::{
-        event,
+        Background, Border, Clipboard, Color, Length, Point, Rectangle, Renderer, Shell, Size,
+        Vector, event,
         layout::{Layout, Limits, Node},
         mouse, overlay, renderer,
         widget::{
+            Widget,
             operation::{
-                scrollable::{AbsoluteOffset, RelativeOffset},
                 Operation, Scrollable,
+                scrollable::{AbsoluteOffset, RelativeOffset},
             },
             tree::{self, Tree},
-            Widget,
         },
-        Background, Border, Clipboard, Color, Length, Point, Rectangle, Renderer, Shell, Size,
-        Vector,
     },
     iced_widget::container::draw_background,
     theme,
     widget::{container::Catalog, icon::from_name},
-    Apply,
 };
 use keyframe::{
     ease,
@@ -125,7 +124,7 @@ impl Offset {
 const SCROLL_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 const TAB_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 
-impl<'a, Message> Tabs<'a, Message>
+impl<Message> Tabs<'_, Message>
 where
     Message: TabMessage + 'static,
 {
@@ -308,7 +307,7 @@ impl State {
     }
 }
 
-impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for Tabs<'a, Message>
+impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for Tabs<'_, Message>
 where
     Message: TabMessage,
 {

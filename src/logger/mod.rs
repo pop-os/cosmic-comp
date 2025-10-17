@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use tracing::{debug, info, warn};
 use tracing_journald as journald;
-use tracing_subscriber::{filter::Directive, fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, filter::Directive, fmt, prelude::*};
 
 pub fn init_logger() -> Result<()> {
     let level = if cfg!(debug_assertions) {

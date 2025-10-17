@@ -8,8 +8,8 @@ use crate::{
     state::State,
     utils::prelude::OutputExt,
     wayland::protocols::output_configuration::{
-        delegate_output_configuration, ModeConfiguration, OutputConfiguration,
-        OutputConfigurationHandler, OutputConfigurationState,
+        ModeConfiguration, OutputConfiguration, OutputConfigurationHandler,
+        OutputConfigurationState, delegate_output_configuration,
     },
 };
 

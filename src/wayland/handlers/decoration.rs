@@ -15,7 +15,7 @@ use smithay::{
         seat::WaylandFocus,
         shell::{
             kde::decoration::{KdeDecorationHandler, KdeDecorationState},
-            xdg::{decoration::XdgDecorationHandler, ToplevelSurface},
+            xdg::{ToplevelSurface, decoration::XdgDecorationHandler},
         },
     },
 };
@@ -36,12 +36,11 @@ impl PreferredDecorationMode {
     pub fn mode(window: &Window) -> Option<XdgMode> {
         let user_data = window.user_data();
         user_data.insert_if_missing(|| PreferredDecorationMode(RefCell::new(None)));
-        user_data
+        *user_data
             .get::<PreferredDecorationMode>()
             .unwrap()
             .0
             .borrow()
-            .clone()
     }
 
     pub fn update(window: &Window, update: Option<XdgMode>) {
@@ -56,19 +55,10 @@ impl PreferredDecorationMode {
 }
 
 pub type KdeDecorationData = Mutex<KdeDecorationSurfaceState>;
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct KdeDecorationSurfaceState {
     pub mode: Option<KdeMode>,
     pub objs: Vec<OrgKdeKwinServerDecoration>,
-}
-
-impl Default for KdeDecorationSurfaceState {
-    fn default() -> Self {
-        KdeDecorationSurfaceState {
-            mode: None,
-            objs: Vec::new(),
-        }
-    }
 }
 
 impl XdgDecorationHandler for State {

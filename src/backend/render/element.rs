@@ -4,21 +4,21 @@ use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
 use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
 use smithay::{
     backend::renderer::{
+        ImportAll, ImportMem, Renderer,
         element::{
+            Element, Id, Kind, RenderElement, UnderlyingStorage,
             memory::MemoryRenderBufferRenderElement,
             surface::WaylandSurfaceRenderElement,
             utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
-            Element, Id, Kind, RenderElement, UnderlyingStorage,
         },
-        gles::{element::TextureShaderElement, GlesError},
+        gles::{GlesError, element::TextureShaderElement},
         glow::{GlowFrame, GlowRenderer},
         utils::{CommitCounter, DamageSet, OpaqueRegions},
-        ImportAll, ImportMem, Renderer,
     },
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale},
 };
 
-use super::{cursor::CursorRenderElement, GlMultiRenderer};
+use super::{GlMultiRenderer, cursor::CursorRenderElement};
 
 pub enum CosmicElement<R>
 where
@@ -348,7 +348,7 @@ impl AsGlowRenderer for GlowRenderer {
     }
 }
 
-impl<'a> AsGlowRenderer for GlMultiRenderer<'a> {
+impl AsGlowRenderer for GlMultiRenderer<'_> {
     fn glow_renderer(&self) -> &GlowRenderer {
         self.as_ref()
     }
@@ -403,7 +403,7 @@ impl Element for DamageElement {
         scale: Scale<f64>,
         _commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size).into()])
+        DamageSet::from_slice(&[Rectangle::from_size(self.geometry(scale).size)])
     }
 }
 

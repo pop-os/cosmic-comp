@@ -2,9 +2,10 @@
 
 use crate::{
     backend::render::{
+        CLEAR_COLOR, CursorMode, GlMultiError, GlMultiRenderer, PostprocessOutputConfig,
+        PostprocessShader, PostprocessState,
         element::{CosmicElement, DamageElement},
-        init_shaders, output_elements, CursorMode, GlMultiError, GlMultiRenderer,
-        PostprocessOutputConfig, PostprocessShader, PostprocessState, CLEAR_COLOR,
+        init_shaders, output_elements,
     },
     config::ScreenFilter,
     shell::Shell,
@@ -13,7 +14,7 @@ use crate::{
     wayland::{
         handlers::{
             compositor::recursive_frame_time_estimation,
-            screencopy::{submit_buffer, FrameHolder, PendingImageCopyData, SessionData},
+            screencopy::{FrameHolder, PendingImageCopyData, SessionData, submit_buffer},
         },
         protocols::screencopy::{
             FailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
@@ -27,11 +28,12 @@ use cosmic_comp_config::output::comp::AdaptiveSync;
 use smithay::{
     backend::{
         allocator::{
+            Fourcc,
             format::FormatSet,
             gbm::{GbmAllocator, GbmBuffer},
-            Fourcc,
         },
         drm::{
+            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
             compositor::{
                 BlitFrameResultError, FrameError, FrameFlags, PrimaryPlaneElement,
                 RenderFrameResult,
@@ -39,38 +41,36 @@ use smithay::{
             exporter::gbm::GbmFramebufferExporter,
             gbm::GbmFramebuffer,
             output::DrmOutput,
-            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
         },
         egl::EGLContext,
         renderer::{
-            buffer_dimensions, buffer_type,
+            Bind, Blit, BufferType, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
+            TextureFilter, buffer_dimensions, buffer_type,
             damage::Error as RenderError,
             element::{
+                Element, Kind, RenderElementStates,
                 texture::TextureRenderElement,
                 utils::{
-                    constrain_render_elements, ConstrainAlign, ConstrainScaleBehavior, Relocate,
-                    RelocateRenderElement,
+                    ConstrainAlign, ConstrainScaleBehavior, Relocate, RelocateRenderElement,
+                    constrain_render_elements,
                 },
-                Element, Kind, RenderElementStates,
             },
             gles::{
-                element::TextureShaderElement, GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform,
+                GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform, element::TextureShaderElement,
             },
             glow::GlowRenderer,
             multigpu::{ApiDevice, Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
-            Bind, Blit, BufferType, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
-            TextureFilter,
         },
     },
     desktop::utils::OutputPresentationFeedback,
     output::{Output, OutputNoMode},
     reexports::{
         calloop::{
-            channel::{channel, Event, Sender},
-            timer::{TimeoutAction, Timer},
             EventLoop, LoopHandle, RegistrationToken,
+            channel::{Event, Sender, channel},
+            timer::{TimeoutAction, Timer},
         },
         drm::control::{connector, crtc},
         wayland_protocols::wp::{
@@ -81,7 +81,7 @@ use smithay::{
     },
     utils::{Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
-        dmabuf::{get_dmabuf, DmabufFeedbackBuilder},
+        dmabuf::{DmabufFeedbackBuilder, get_dmabuf},
         presentation::Refresh,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -91,12 +91,12 @@ use tracing::{error, info, trace, warn};
 
 use std::{
     borrow::{Borrow, BorrowMut},
-    collections::{hash_map, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map},
     mem,
     sync::{
+        Arc, RwLock,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender},
-        Arc, RwLock,
     },
     thread::JoinHandle,
     time::Duration,
@@ -181,15 +181,14 @@ pub type GbmDrmOutput = DrmOutput<
     DrmDeviceFd,
 >;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum QueueState {
+    #[default]
     Idle,
     /// A redraw is queued.
     Queued(RegistrationToken),
     /// We submitted a frame to the KMS and waiting for it to be presented.
-    WaitingForVBlank {
-        redraw_needed: bool,
-    },
+    WaitingForVBlank { redraw_needed: bool },
     /// We did not submit anything to KMS and made a timer to fire at the estimated VBlank.
     WaitingForEstimatedVBlank(RegistrationToken),
     /// A redraw is queued on top of the above.
@@ -197,12 +196,6 @@ pub enum QueueState {
         estimated_vblank: RegistrationToken,
         queued_render: RegistrationToken,
     },
-}
-
-impl Default for QueueState {
-    fn default() -> Self {
-        QueueState::Idle
-    }
 }
 
 #[derive(Debug)]
@@ -760,7 +753,7 @@ impl SurfaceThreadState {
 
         let now = self.clock.now();
         let presentation_time = match metadata.as_ref().map(|data| &data.time) {
-            Some(DrmEventTime::Monotonic(tp)) => Some(tp.clone()),
+            Some(DrmEventTime::Monotonic(tp)) => Some(*tp),
             _ => None,
         };
         let sequence = metadata.as_ref().map(|data| data.sequence).unwrap_or(0);
@@ -944,7 +937,7 @@ impl SurfaceThreadState {
                     warn!(?name, "Failed to submit rendering: {:?}", err);
                     state.queue_redraw(true);
                 }
-                return TimeoutAction::Drop;
+                TimeoutAction::Drop
             })
             .expect("Failed to schedule render");
 
@@ -954,7 +947,7 @@ impl SurfaceThreadState {
             }
             QueueState::WaitingForEstimatedVBlank(estimated_vblank) => {
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
-                    estimated_vblank: estimated_vblank.clone(),
+                    estimated_vblank: *estimated_vblank,
                     queued_render: token,
                 };
             }
@@ -968,7 +961,7 @@ impl SurfaceThreadState {
             } if force => {
                 self.loop_handle.remove(*queued_render);
                 self.state = QueueState::WaitingForEstimatedVBlankAndQueued {
-                    estimated_vblank: estimated_vblank.clone(),
+                    estimated_vblank: *estimated_vblank,
                     queued_render: token,
                 };
             }
@@ -990,7 +983,7 @@ impl SurfaceThreadState {
                 .as_ref()
                 .unwrap_or(&self.target_node),
             &self.target_node,
-            &*self.shell.read(),
+            &self.shell.read(),
         );
 
         let mut renderer = if render_node != self.target_node {
@@ -1016,7 +1009,7 @@ impl SurfaceThreadState {
                     (
                         true,
                         fullscreen_surface.wl_surface().is_some_and(|surface| {
-                            recursive_frame_time_estimation(&self.clock, &*surface)
+                            recursive_frame_time_estimation(&self.clock, &surface)
                                 .is_some_and(|dur| dur <= _30_FPS)
                         }),
                         animations_going,
@@ -1034,10 +1027,7 @@ impl SurfaceThreadState {
             remove_frame_flags |= FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
         }
 
-        let mut vrr = match self.vrr_mode {
-            AdaptiveSync::Force => true,
-            _ => false,
-        };
+        let mut vrr = matches!(self.vrr_mode, AdaptiveSync::Force);
 
         if self.vrr_mode == AdaptiveSync::Enabled {
             vrr = has_active_fullscreen;
@@ -1079,7 +1069,7 @@ impl SurfaceThreadState {
         let source_output = self
             .mirroring
             .as_ref()
-            .or((!self.screen_filter.is_noop()).then(|| &self.output))
+            .or((!self.screen_filter.is_noop()).then_some(&self.output))
             .filter(|output| {
                 PostprocessOutputConfig::for_output_untransformed(output)
                     != PostprocessOutputConfig::for_output(&self.output)
@@ -1258,7 +1248,7 @@ impl SurfaceThreadState {
                 &mut renderer,
                 &self.output,
                 &pre_postprocess_data,
-                &postprocess_state,
+                postprocess_state,
                 &self.screen_filter,
             );
 
@@ -1507,7 +1497,7 @@ fn render_node_for_output(
         .flat_map(|w| w.wl_surface().and_then(|s| source_node_for_surface(&s)))
         .collect::<Vec<_>>();
 
-    if nodes.contains(&target_node) || nodes.is_empty() {
+    if nodes.contains(target_node) || nodes.is_empty() {
         *target_node
     } else {
         *primary_node
@@ -1575,7 +1565,7 @@ fn get_surface_dmabuf_feedback(
                 FormatSet::from_iter(
                     primary_plane_formats
                         .into_iter()
-                        .chain(overlay_plane_formats.into_iter()),
+                        .chain(overlay_plane_formats),
                 ),
             )
             .build()
@@ -1648,7 +1638,7 @@ fn take_screencopy_frames(
             } else {
                 damage_tracking.age_for_buffer(&buffer)
             };
-            let res = damage_tracking.dt.damage_output(age, &elements);
+            let res = damage_tracking.dt.damage_output(age, elements);
 
             if let Some(old_len) = old_len {
                 elements.truncate(old_len);
@@ -1708,7 +1698,7 @@ fn send_screencopy_result<'a>(
             .texture
             .as_ref()
             .is_some_and(|tex| tex.format() == Some(format))
-            && (session.draw_cursor() == false || pre_postprocess_data.cursor_texture.is_none())
+            && (!session.draw_cursor() || pre_postprocess_data.cursor_texture.is_none())
         {
             None
         } else {
@@ -1761,7 +1751,7 @@ fn send_screencopy_result<'a>(
             .collect::<Vec<_>>();
 
         if let Some(tex) = pre_postprocess_data.texture.as_mut() {
-            let mut tex_fb = renderer
+            let tex_fb = renderer
                 .bind(tex)
                 .map_err(RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering)?;
 
@@ -1769,7 +1759,7 @@ fn send_screencopy_result<'a>(
                 for rect in adjusted.iter().copied() {
                     // TODO: On Vulkan, may need to combine sync points instead of just using latest?
                     sync = renderer
-                        .blit(&mut tex_fb, fb, rect, rect, TextureFilter::Linear)
+                        .blit(&tex_fb, fb, rect, rect, TextureFilter::Linear)
                         .map_err(
                             RenderError::<<GlMultiRenderer as RendererSuper>::Error>::Rendering,
                         )?;

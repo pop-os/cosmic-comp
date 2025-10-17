@@ -219,15 +219,12 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            OutputSourceRequest::CreateSource { source, output } => {
-                let data = match Output::from_resource(&output) {
-                    Some(output) => ImageCaptureSourceData::Output(output.downgrade()),
-                    None => ImageCaptureSourceData::Destroyed,
-                };
-                data_init.init(source, data);
-            }
-            _ => {}
+        if let OutputSourceRequest::CreateSource { source, output } = request {
+            let data = match Output::from_resource(&output) {
+                Some(output) => ImageCaptureSourceData::Output(output.downgrade()),
+                None => ImageCaptureSourceData::Destroyed,
+            };
+            data_init.init(source, data);
         }
     }
 
@@ -256,15 +253,12 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            CosmicWorkspaceSourceRequest::CreateSource { source, output } => {
-                let data = match state.workspace_state().get_ext_workspace_handle(&output) {
-                    Some(workspace) => ImageCaptureSourceData::Workspace(workspace),
-                    None => ImageCaptureSourceData::Destroyed,
-                };
-                data_init.init(source, data);
-            }
-            _ => {}
+        if let CosmicWorkspaceSourceRequest::CreateSource { source, output } = request {
+            let data = match state.workspace_state().get_ext_workspace_handle(&output) {
+                Some(workspace) => ImageCaptureSourceData::Workspace(workspace),
+                None => ImageCaptureSourceData::Destroyed,
+            };
+            data_init.init(source, data);
         }
     }
 
@@ -293,18 +287,16 @@ where
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            ToplevelSourceRequest::CreateSource {
-                source,
-                toplevel_handle,
-            } => {
-                let data = match window_from_ext_handle(state, &toplevel_handle) {
-                    Some(toplevel) => ImageCaptureSourceData::Toplevel(toplevel.clone()),
-                    None => ImageCaptureSourceData::Destroyed,
-                };
-                data_init.init(source, data);
-            }
-            _ => {}
+        if let ToplevelSourceRequest::CreateSource {
+            source,
+            toplevel_handle,
+        } = request
+        {
+            let data = match window_from_ext_handle(state, &toplevel_handle) {
+                Some(toplevel) => ImageCaptureSourceData::Toplevel(toplevel.clone()),
+                None => ImageCaptureSourceData::Destroyed,
+            };
+            data_init.init(source, data);
         }
     }
 
@@ -325,14 +317,12 @@ where
         _state: &mut D,
         _client: &Client,
         _resource: &ExtImageCaptureSourceV1,
-        request: <ExtImageCaptureSourceV1 as Resource>::Request,
+        _request: <ExtImageCaptureSourceV1 as Resource>::Request,
         _data: &ImageCaptureSourceData,
         _dhandle: &DisplayHandle,
         _data_init: &mut DataInit<'_, D>,
     ) {
-        match request {
-            _ => {}
-        }
+        {}
     }
 
     fn destroyed(

@@ -1,20 +1,19 @@
 use cosmic::{
+    Apply,
     font::Font,
     iced::{
-        widget::{self, container::draw_background, rule::FillMode},
         Background,
+        widget::{self, container::draw_background, rule::FillMode},
     },
     iced_core::{
-        alignment, event,
+        Border, Clipboard, Color, Length, Rectangle, Shell, Size, alignment, event,
         layout::{Layout, Limits, Node},
         mouse, overlay, renderer,
-        widget::{operation::Operation, tree::Tree, Id, Widget},
-        Border, Clipboard, Color, Length, Rectangle, Shell, Size,
+        widget::{Id, Widget, operation::Operation, tree::Tree},
     },
     iced_widget::scrollable::AbsoluteOffset,
     theme,
-    widget::{icon::from_name, Icon},
-    Apply,
+    widget::{Icon, icon::from_name},
 };
 
 use super::tab_text::tab_text;
@@ -239,7 +238,7 @@ pub(super) struct TabInternal<'a, Message: TabMessage> {
     right_click_message: Option<Message>,
 }
 
-impl<'a, Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabInternal<'a, Message>
+impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabInternal<'_, Message>
 where
     Message: TabMessage,
 {

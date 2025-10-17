@@ -3,10 +3,10 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            damage::OutputDamageTracker,
-            element::{surface::WaylandSurfaceRenderElement, AsRenderElements},
-            gles::GlesRenderbuffer,
             ExportMem, ImportAll, Offscreen, Renderer,
+            damage::OutputDamageTracker,
+            element::{AsRenderElements, surface::WaylandSurfaceRenderElement},
+            gles::GlesRenderbuffer,
         },
     },
     desktop::utils::bbox_from_surface_tree,
@@ -18,7 +18,7 @@ use tracing::warn;
 use crate::{
     backend::render::RendererRef,
     shell::element::CosmicSurface,
-    state::{advertised_node_for_surface, State},
+    state::{State, advertised_node_for_surface},
 };
 
 pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
@@ -58,7 +58,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
                 smithay::backend::renderer::damage::Error::OutputNoMode(_) => unreachable!(),
             })?;
         let mapping = renderer.copy_framebuffer(
-            &mut fb,
+            &fb,
             bbox.to_buffer(1, Transform::Normal, &bbox.size),
             format,
         )?;
@@ -79,7 +79,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             ));
             let file = std::fs::File::create(path.join(name))?;
 
-            let ref mut writer = std::io::BufWriter::new(file);
+            let writer = &mut std::io::BufWriter::new(file);
             let mut encoder = png::Encoder::new(writer, bbox.size.w as u32, bbox.size.h as u32);
             encoder.set_color(png::ColorType::Rgba);
             encoder.set_depth(png::BitDepth::Eight);
@@ -93,7 +93,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             );
             encoder.set_source_chromaticities(source_chromaticities);
             let mut writer = encoder.write_header()?;
-            writer.write_image_data(&gl_data)?;
+            writer.write_image_data(gl_data)?;
         }
 
         Ok(())

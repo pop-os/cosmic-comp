@@ -11,13 +11,13 @@ use crate::{
 use anyhow::Context;
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
 use cosmic_settings_config::window_rules::ApplicationException;
-use cosmic_settings_config::{shortcuts, window_rules, Shortcuts};
+use cosmic_settings_config::{Shortcuts, shortcuts, window_rules};
 use serde::{Deserialize, Serialize};
 use smithay::utils::{Clock, Monotonic};
 use smithay::wayland::xdg_activation::XdgActivationState;
 pub use smithay::{
     backend::input::{self as smithay_input, KeyState},
-    input::keyboard::{keysyms as KeySyms, Keysym, ModifiersState},
+    input::keyboard::{Keysym, ModifiersState, keysyms as KeySyms},
     output::{Mode, Output},
     reexports::{
         calloop::LoopHandle,
@@ -26,7 +26,7 @@ pub use smithay::{
             TapButtonMap,
         },
     },
-    utils::{Logical, Physical, Point, Size, Transform, SERIAL_COUNTER},
+    utils::{Logical, Physical, Point, SERIAL_COUNTER, Size, Transform},
 };
 use std::{
     cell::{Ref, RefCell},
@@ -34,7 +34,7 @@ use std::{
     fs::OpenOptions,
     io::Write,
     path::PathBuf,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{Arc, atomic::AtomicBool},
 };
 use tracing::{error, warn};
 
@@ -45,13 +45,13 @@ mod types;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
-    output::comp::{
-        load_outputs, OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef,
-    },
-    workspace::WorkspaceConfig,
     CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
     XwaylandEavesdropping, ZoomConfig,
+    input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
+    output::comp::{
+        OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef, load_outputs,
+    },
+    workspace::WorkspaceConfig,
 };
 pub use key_bindings::{Action, PrivateAction};
 use types::WlXkbConfig;
@@ -86,7 +86,7 @@ pub struct NumlockStateConfig {
 
 pub struct CompOutputConfig<'a>(pub Ref<'a, OutputConfig>);
 
-impl<'a> CompOutputConfig<'a> {
+impl CompOutputConfig<'_> {
     pub fn mode_size(&self) -> Size<i32, Physical> {
         self.0.mode.0.into()
     }
@@ -153,7 +153,7 @@ pub struct ScreenFilter {
 
 impl ScreenFilter {
     pub fn is_noop(&self) -> bool {
-        self.inverted == false && self.color_filter.is_none()
+        !self.inverted && self.color_filter.is_none()
     }
 }
 
@@ -582,7 +582,7 @@ impl Config {
                 )
             })
             .collect::<Vec<(OutputInfo, OutputConfig)>>();
-        infos.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
+        infos.sort_by(|(a, _), (b, _)| a.cmp(b));
         let (infos, configs) = infos.into_iter().unzip();
         self.dynamic_conf
             .outputs_mut()
@@ -642,20 +642,20 @@ impl Config {
 
 pub struct PersistenceGuard<'a, T: Serialize>(Option<PathBuf>, &'a mut T);
 
-impl<'a, T: Serialize> std::ops::Deref for PersistenceGuard<'a, T> {
+impl<T: Serialize> std::ops::Deref for PersistenceGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &T {
-        &self.1
+        self.1
     }
 }
 
-impl<'a, T: Serialize> std::ops::DerefMut for PersistenceGuard<'a, T> {
+impl<T: Serialize> std::ops::DerefMut for PersistenceGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
-        &mut self.1
+        self.1
     }
 }
 
-impl<'a, T: Serialize> Drop for PersistenceGuard<'a, T> {
+impl<T: Serialize> Drop for PersistenceGuard<'_, T> {
     fn drop(&mut self) {
         if let Some(path) = self.0.as_ref() {
             let content = match ron::ser::to_string_pretty(&self.1, Default::default()) {
