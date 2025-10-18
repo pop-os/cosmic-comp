@@ -8,7 +8,7 @@ use crate::{
     },
     shell::{
         layout::{floating::FloatingLayout, tiling::TilingLayout},
-        OverviewMode, ANIMATION_DURATION,
+        OverviewMode, SeatMoveGrabState, ANIMATION_DURATION,
     },
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
@@ -1502,7 +1502,19 @@ impl Workspace {
             let layer_map = layer_map_for_output(&self.output);
             layer_map.non_exclusive_zone().as_local()
         };
-        let focused = self.focus_stack.get(last_active_seat).last().cloned();
+        let has_move_grab = last_active_seat
+            .user_data()
+            .get::<SeatMoveGrabState>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .is_some();
+        let focused = self
+            .focus_stack
+            .get(last_active_seat)
+            .last()
+            .filter(|_| !has_move_grab)
+            .cloned();
 
         let mut fullscreen_elements = if let Some(fullscreen) = self.fullscreen.as_ref() {
             let bbox = fullscreen.surface.bbox();
