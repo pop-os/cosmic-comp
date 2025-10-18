@@ -25,13 +25,14 @@ use keyframe::{
     ease,
     functions::{EaseInOutCubic, EaseOutCubic},
 };
+use smallvec::SmallVec;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     time::{Duration, Instant},
 };
 
 pub struct Tabs<'a, Message> {
-    elements: Vec<cosmic::Element<'a, Message>>,
+    elements: SmallVec<[cosmic::Element<'a, Message>; 16]>,
     id: Option<Id>,
     height: Length,
     width: Length,
@@ -58,6 +59,7 @@ struct TabAnimationState {
 #[derive(Debug, Clone)]
 pub struct State {
     offset_x: Offset,
+    scrolling: bool,
     scroll_animation: Option<ScrollAnimationState>,
     scroll_to: Option<usize>,
     last_state: Option<HashMap<Id, Rectangle>>,
@@ -99,6 +101,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             offset_x: Offset::Absolute(0.),
+            scrolling: false,
             scroll_animation: None,
             scroll_to: None,
             last_state: None,
@@ -130,19 +133,19 @@ where
     Message: TabMessage + 'static,
 {
     pub fn new(
-        tabs: impl ExactSizeIterator<Item = Tab<Message>>,
+        tabs: impl ExactSizeIterator<Item = Tab<'a, Message>>,
         active: usize,
         activated: bool,
         group_focused: bool,
     ) -> Self {
-        let tabs = tabs.into_iter().enumerate().map(|(i, tab)| {
+        let tabs = tabs.into_iter().enumerate().map(|(i, mut tab)| {
             let rule = if activated {
                 TabRuleTheme::ActiveActivated
             } else {
                 TabRuleTheme::ActiveDeactivated
             };
 
-            let tab = if i == active {
+            tab = if i == active {
                 tab.rule_style(rule)
                     .background_style(if activated {
                         TabBackgroundTheme::ActiveActivated
@@ -152,9 +155,9 @@ where
                     .font(cosmic::font::semibold())
                     .active()
             } else if i.checked_sub(1) == Some(active) {
-                tab.rule_style(rule).non_active()
+                tab.rule_style(rule)
             } else {
-                tab.non_active()
+                tab
             };
 
             Element::new(tab.internal(i))
@@ -192,7 +195,7 @@ where
             .class(theme::iced::Button::Text)
             .on_press(Message::scroll_further());
 
-        let mut elements = Vec::with_capacity(tabs.len() + 5);
+        let mut elements = SmallVec::with_capacity(tabs.len() + 5);
 
         elements.push(widget::vertical_rule(4).class(rule_style).into());
         elements.push(prev_button.into());
@@ -342,6 +345,8 @@ where
 
     #[allow(clippy::too_many_lines)]
     fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
+        let state = tree.state.downcast_mut::<State>();
+
         let limits = limits.width(self.width).height(self.height);
 
         // calculate the smallest possible size
@@ -367,16 +372,24 @@ where
                 height: a.height.max(b.height),
             });
         let size = limits.resolve(self.width, self.height, min_size);
-
-        if min_size.width <= size.width {
+        state.scrolling = min_size.width > size.width;
+        if !state.scrolling {
             // we don't need to scroll
+            nodes.clear();
+
+            // add placeholder nodes for the not rendered scroll-buttons/rules
+            let placeholder_node = Node::new(Size::new(0., 0.));
+            let placeholder_node_with_child =
+                Node::with_children(Size::new(0., 0.), vec![Node::new(Size::new(0., 0.))]);
+            nodes.push(placeholder_node.clone());
+            nodes.push(placeholder_node_with_child.clone());
 
             // can we make every tab equal weight and keep the active large enough?
-            let children = if (size.width / (self.elements.len() as f32 - 5.)).ceil() as i32
+            if (size.width / (self.elements.len() as f32 - 5.)).ceil() as i32
                 >= MIN_ACTIVE_TAB_WIDTH
             {
                 // just use a flex layout
-                cosmic::iced_core::layout::flex::resolve(
+                let node = cosmic::iced_core::layout::flex::resolve(
                     cosmic::iced_core::layout::flex::Axis::Horizontal,
                     renderer,
                     &limits,
@@ -387,16 +400,16 @@ where
                     cosmic::iced::Alignment::Center,
                     &self.elements[2..self.elements.len() - 2],
                     &mut tree.children[2..self.elements.len() - 2],
-                )
-                .children()
-                .to_vec()
+                );
+
+                nodes.extend_from_slice(node.children());
             } else {
                 // otherwise we need a more manual approach
                 let min_width = (size.width - MIN_ACTIVE_TAB_WIDTH as f32 - 4.)
                     / (self.elements.len() as f32 - 6.);
                 let mut offset = 0.;
 
-                let mut nodes = self.elements[2..self.elements.len() - 3]
+                let tab_nodes = self.elements[2..self.elements.len() - 3]
                     .iter()
                     .zip(tree.children[2..].iter_mut())
                     .map(|(tab, tab_tree)| {
@@ -411,76 +424,51 @@ where
                         node = node.move_to(Point::new(offset, 0.));
                         offset += node.bounds().width;
                         node
-                    })
-                    .collect::<Vec<_>>();
+                    });
+
+                nodes.extend(tab_nodes);
                 nodes.push({
                     let node = Node::new(Size::new(4., limits.max().height));
                     node.move_to(Point::new(offset, 0.))
                 });
-                nodes
             };
 
-            // and add placeholder nodes for the not rendered scroll-buttons/rules
-            Node::with_children(
-                size,
-                vec![
-                    Node::new(Size::new(0., 0.)),
-                    Node::with_children(Size::new(0., 0.), vec![Node::new(Size::new(0., 0.))]),
-                ]
-                .into_iter()
-                .chain(children)
-                .chain(vec![
-                    Node::with_children(Size::new(0., 0.), vec![Node::new(Size::new(0., 0.))]),
-                    Node::new(Size::new(0., 0.)),
-                ])
-                .collect::<Vec<_>>(),
-            )
+            // add placeholder nodes for the not rendered scroll-buttons/rules
+            nodes.push(placeholder_node_with_child);
+            nodes.push(placeholder_node);
         } else {
             // we scroll, so use the computed min size, but add scroll buttons.
             let mut offset = 30.;
             for node in &mut nodes {
-                *node = node.clone().move_to(Point::new(offset, 0.));
+                node.move_to_mut(Point::new(offset, 0.));
                 offset += node.bounds().width;
             }
             let last_position = Point::new(size.width - 34., 0.);
             nodes.remove(nodes.len() - 1);
 
-            Node::with_children(
-                size,
-                vec![Node::new(Size::new(4., size.height)), {
-                    let mut node = Node::with_children(
-                        Size::new(16., 16.),
-                        vec![Node::new(Size::new(16., 16.))],
-                    );
-                    node = node.move_to(Point::new(9., (size.height - 16.) / 2.));
-                    node
-                }]
-                .into_iter()
-                .chain(nodes)
-                .chain(vec![
-                    {
-                        let mut node = Node::new(Size::new(4., size.height));
-                        node = node.move_to(last_position);
-                        node
-                    },
-                    {
-                        let mut node = Node::with_children(
-                            Size::new(16., 16.),
-                            vec![Node::new(Size::new(16., 16.))],
-                        );
-                        node =
-                            node.move_to(last_position + Vector::new(9., (size.height - 16.) / 2.));
-                        node
-                    },
-                    {
-                        let mut node = Node::new(Size::new(4., size.height));
-                        node = node.move_to(last_position + Vector::new(30., 0.));
-                        node
-                    },
-                ])
-                .collect(),
-            )
+            // prepend nodes for the prev scroll button.
+            nodes.splice(
+                ..0,
+                vec![
+                    Node::new(Size::new(4., size.height)),
+                    Node::with_children(Size::new(16., 16.), vec![Node::new(Size::new(16., 16.))])
+                        .move_to(Point::new(9., (size.height - 16.) / 2.)),
+                ],
+            );
+
+            // append nodes from the next scroll button.
+            nodes.push(Node::new(Size::new(4., size.height)).move_to(last_position));
+            nodes.push(
+                Node::with_children(Size::new(16., 16.), vec![Node::new(Size::new(16., 16.))])
+                    .move_to(last_position + Vector::new(9., (size.height - 16.) / 2.)),
+            );
+
+            nodes.push(
+                Node::new(Size::new(4., size.height)).move_to(last_position + Vector::new(30., 0.)),
+            );
         }
+
+        Node::with_children(size, nodes)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -524,8 +512,7 @@ where
         );
         draw_background(renderer, &background_style, bounds);
 
-        let scrolling = content_bounds.width.floor() > bounds.width;
-        if scrolling {
+        if state.scrolling {
             bounds.width -= 64.;
             bounds.x += 30.;
         }
@@ -536,7 +523,7 @@ where
             ..bounds
         };
 
-        if scrolling {
+        if state.scrolling {
             // we have scroll buttons
             for ((scroll, state), layout) in self
                 .elements
@@ -562,7 +549,7 @@ where
                         / TAB_ANIMATION_DURATION.as_millis() as f32;
                     ease(EaseOutCubic, 0.0, 1.0, percentage)
                 } else {
-                    1.0
+                    1.0f32
                 };
 
                 for ((tab, wstate), layout) in self.elements[2..self.elements.len() - 3]
@@ -594,9 +581,9 @@ where
                                 height: layout.bounds().height,
                             });
                         Rectangle {
-                            x: previous.x + (next.x - previous.x) * percentage,
-                            y: previous.y + (next.y - previous.y) * percentage,
-                            width: previous.width + (next.width - previous.width) * percentage,
+                            x: percentage.mul_add(next.x - previous.x, previous.x),
+                            y: percentage.mul_add(next.y - previous.y, previous.y),
+                            width: percentage.mul_add(next.width - previous.width, previous.width),
                             height: next.height,
                         }
                     } else {
@@ -640,7 +627,7 @@ where
             viewport,
         );
 
-        if !scrolling && self.group_focused {
+        if !state.scrolling && self.group_focused {
             // HACK, overdraw our rule at the edges
             self.elements[0].as_widget().draw(
                 &tree.children[2].children[0],
@@ -662,7 +649,7 @@ where
             );
         }
 
-        if scrolling {
+        if state.scrolling {
             // we have scroll buttons
             for ((scroll, state), layout) in self.elements
                 [self.elements.len() - 2..self.elements.len()]
@@ -732,7 +719,6 @@ where
             width: a.width + b.bounds().width,
             height: b.bounds().height,
         });
-        let scrolling = content_bounds.width.floor() > bounds.width;
 
         let current_state = self.elements[2..self.elements.len() - 3]
             .iter()
@@ -781,7 +767,7 @@ where
         };
 
         if unknown_keys || changes.is_some() {
-            if !scrolling || !matches!(changes, Some(Difference::Focus)) {
+            if !state.scrolling || !matches!(changes, Some(Difference::Focus)) {
                 let start_time = Instant::now();
 
                 State::discard_expired_tab_animations(&mut state.tab_animations, start_time);
@@ -798,7 +784,7 @@ where
             *last_state = current_state;
         }
 
-        if scrolling {
+        if state.scrolling {
             bounds.x += 30.;
             bounds.width -= 64.;
         }
@@ -808,7 +794,7 @@ where
             state.scroll_to = Some(idx);
         }
         if let Some(idx) = state.scroll_to.take() {
-            if scrolling {
+            if state.scrolling {
                 let tab_bounds = layout.children().nth(idx + 2).unwrap().bounds();
                 let left_offset = tab_bounds.x - layout.bounds().x - 30.;
                 let right_offset = left_offset + tab_bounds.width + 4.;
@@ -850,7 +836,7 @@ where
         let mut internal_shell = Shell::new(&mut messages);
 
         let len = self.elements.len();
-        let result = if scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
+        let result = if state.scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
             self.elements[0..2]
                 .iter_mut()
                 .zip(&mut tree.children)
@@ -868,7 +854,7 @@ where
                     )
                 })
                 .fold(event::Status::Ignored, event::Status::merge)
-        } else if scrolling
+        } else if state.scrolling
             && cursor
                 .position()
                 .is_some_and(|pos| pos.x >= bounds.x + bounds.width)
@@ -945,9 +931,8 @@ where
             width: a.width + b.bounds().width,
             height: b.bounds().height,
         });
-        let scrolling = content_bounds.width.floor() > bounds.width;
 
-        if scrolling {
+        if state.scrolling {
             bounds.width -= 64.;
             bounds.x += 30.;
         }
@@ -958,7 +943,7 @@ where
             ..bounds
         };
 
-        if scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
+        if state.scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
             self.elements[0..2]
                 .iter()
                 .zip(&tree.children)
@@ -969,7 +954,7 @@ where
                         .mouse_interaction(state, layout, cursor, viewport, renderer)
                 })
                 .max()
-        } else if scrolling
+        } else if state.scrolling
             && cursor
                 .position()
                 .is_some_and(|pos| pos.x >= bounds.x + bounds.width)
