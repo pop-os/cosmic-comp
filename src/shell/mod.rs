@@ -34,7 +34,8 @@ use smithay::{
         space::SpaceElement,
         utils::{
             surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-            take_presentation_feedback_surface_tree, OutputPresentationFeedback,
+            take_presentation_feedback_surface_tree, with_surfaces_surface_tree,
+            OutputPresentationFeedback,
         },
         LayerSurface, PopupKind, WindowSurface, WindowSurfaceType,
     },
@@ -49,9 +50,11 @@ use smithay::{
         wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1,
         wayland_server::{protocol::wl_surface::WlSurface, Client},
     },
-    utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
+    utils::{IsAlive, Logical, Monotonic, Point, Rectangle, Serial, Size, Time},
     wayland::{
-        compositor::{with_states, SurfaceAttributes},
+        commit_timing::CommitTimerBarrierStateUserData,
+        compositor::{with_states, SurfaceAttributes, SurfaceData},
+        fifo::FifoBarrierCachedState,
         seat::WaylandFocus,
         session_lock::LockSurface,
         shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
@@ -1925,6 +1928,188 @@ impl Shell {
                         })
                 })
             })
+    }
+
+    pub fn signal_commit_timing(&self, output: &Output, until: Time<Monotonic>) {
+        let processor = |_surface: &WlSurface, states: &SurfaceData| {
+            if let Some(mut commit_timer_state) = states
+                .data_map
+                .get::<CommitTimerBarrierStateUserData>()
+                .map(|commit_timer| commit_timer.lock().unwrap())
+            {
+                commit_timer_state.signal_until(until);
+            }
+        };
+
+        if let Some(session_lock) = self.session_lock.as_ref() {
+            if let Some(lock_surface) = session_lock.surfaces.get(output) {
+                with_surfaces_surface_tree(lock_surface.wl_surface(), processor);
+            }
+        }
+
+        self.workspaces
+            .sets
+            .get(output)
+            .unwrap()
+            .sticky_layer
+            .mapped()
+            .for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    window.0.with_surfaces(processor);
+                }
+            });
+
+        for workspace in self.workspaces.spaces_for_output(output) {
+            if let Some(window) = workspace.get_fullscreen() {
+                window.0.with_surfaces(processor);
+            }
+            workspace.mapped().for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    window.0.with_surfaces(processor);
+                }
+            });
+            workspace.minimized_windows.iter().for_each(|m| {
+                for window in m.windows() {
+                    window.0.with_surfaces(processor);
+                }
+            });
+        }
+
+        let map = smithay::desktop::layer_map_for_output(output);
+        for layer_surface in map.layers() {
+            layer_surface.with_surfaces(processor);
+        }
+
+        self.override_redirect_windows.iter().for_each(|or| {
+            // Find output the override redirect window overlaps the most with
+            let or_geo = or.geometry().as_global();
+            let max_intersect_output = self
+                .outputs()
+                .filter_map(|o| Some((o, o.geometry().intersection(or_geo)?)))
+                .max_by_key(|(_, intersection)| intersection.size.w * intersection.size.h)
+                .map(|(o, _)| o);
+            if max_intersect_output == Some(output) {
+                if let Some(wl_surface) = or.wl_surface() {
+                    with_surfaces_surface_tree(&wl_surface, processor);
+                }
+            }
+        });
+
+        for seat in self
+            .seats
+            .iter()
+            .filter(|seat| &seat.active_output() == output)
+        {
+            let cursor_status = seat.cursor_image_status();
+
+            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+                with_surfaces_surface_tree(&wl_surface, processor);
+            }
+
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                    for (window, _) in grab_state.element().windows() {
+                        window.0.with_surfaces(processor);
+                    }
+                }
+            }
+
+            if let Some(icon) = get_dnd_icon(seat) {
+                with_surfaces_surface_tree(&icon.surface, processor);
+            }
+        }
+    }
+
+    pub fn signal_fifos(&self, output: &Output) {
+        fn processor(_surface: &WlSurface, states: &SurfaceData) {
+            let fifo_barrier = states
+                .cached_state
+                .get::<FifoBarrierCachedState>()
+                .current()
+                .barrier
+                .take();
+            if let Some(fifo_barrier) = fifo_barrier {
+                fifo_barrier.signal();
+            }
+        }
+
+        if let Some(session_lock) = self.session_lock.as_ref() {
+            if let Some(lock_surface) = session_lock.surfaces.get(output) {
+                with_surfaces_surface_tree(lock_surface.wl_surface(), processor);
+            }
+        }
+
+        self.workspaces
+            .sets
+            .get(output)
+            .unwrap()
+            .sticky_layer
+            .mapped()
+            .for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    window.0.with_surfaces(processor);
+                }
+            });
+
+        for workspace in self.workspaces.spaces_for_output(output) {
+            if let Some(window) = workspace.get_fullscreen() {
+                window.0.with_surfaces(processor);
+            }
+            workspace.mapped().for_each(|mapped| {
+                for (window, _) in mapped.windows() {
+                    window.0.with_surfaces(processor);
+                }
+            });
+            workspace.minimized_windows.iter().for_each(|m| {
+                for window in m.windows() {
+                    window.0.with_surfaces(processor);
+                }
+            });
+        }
+
+        let map = smithay::desktop::layer_map_for_output(output);
+        for layer_surface in map.layers() {
+            layer_surface.with_surfaces(processor);
+        }
+
+        self.override_redirect_windows.iter().for_each(|or| {
+            // Find output the override redirect window overlaps the most with
+            let or_geo = or.geometry().as_global();
+            let max_intersect_output = self
+                .outputs()
+                .filter_map(|o| Some((o, o.geometry().intersection(or_geo)?)))
+                .max_by_key(|(_, intersection)| intersection.size.w * intersection.size.h)
+                .map(|(o, _)| o);
+            if max_intersect_output == Some(output) {
+                if let Some(wl_surface) = or.wl_surface() {
+                    with_surfaces_surface_tree(&wl_surface, processor);
+                }
+            }
+        });
+
+        for seat in self
+            .seats
+            .iter()
+            .filter(|seat| &seat.active_output() == output)
+        {
+            let cursor_status = seat.cursor_image_status();
+
+            if let CursorImageStatus::Surface(wl_surface) = cursor_status {
+                with_surfaces_surface_tree(&wl_surface, processor);
+            }
+
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>() {
+                if let Some(grab_state) = move_grab.lock().unwrap().as_ref() {
+                    for (window, _) in grab_state.element().windows() {
+                        window.0.with_surfaces(processor);
+                    }
+                }
+            }
+
+            if let Some(icon) = get_dnd_icon(seat) {
+                with_surfaces_surface_tree(&icon.surface, processor);
+            }
+        }
     }
 
     pub fn workspace_for_surface(&self, surface: &WlSurface) -> Option<(WorkspaceHandle, Output)> {
