@@ -94,7 +94,11 @@ pub fn update_reactive_popups<'a>(
                         .unwrap()
                         .lock()
                         .unwrap();
-                    attributes.current.positioner.clone()
+                    attributes
+                        .last_acked
+                        .map_or_else(Default::default, |configure| {
+                            configure.state.positioner.clone()
+                        })
                 });
                 if positioner.reactive {
                     let anchor_point = loc + positioner.get_anchor_point().as_global();
