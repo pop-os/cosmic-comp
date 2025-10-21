@@ -1,5 +1,6 @@
 use crate::{
     backend::render::cursor::CursorState,
+    hooks::{Decorations, HOOKS},
     shell::{
         focus::target::PointerFocusTarget,
         grabs::{ReleaseMode, ResizeEdge},
@@ -554,11 +555,20 @@ impl Program for CosmicWindowInternal {
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
+        HOOKS.get().unwrap().window_decorations.view(self)
+    }
+}
+
+#[derive(Debug)]
+pub struct DefaultDecorations;
+
+impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
+    fn view(&self, win: &CosmicWindowInternal) -> cosmic::Element<'_, Message> {
         let mut header = cosmic::widget::header_bar()
-            .title(self.last_title.lock().unwrap().clone())
+            .title(win.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
             .on_close(Message::Close)
-            .focused(self.window.is_activated(false))
+            .focused(win.window.is_activated(false))
             .on_double_click(Message::Maximize)
             .on_right_click(Message::Menu)
             .is_ssd(true);
