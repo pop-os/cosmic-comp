@@ -57,7 +57,6 @@ use wayland_backend::server::ObjectId;
 
 use super::CosmicSurface;
 
-pub const SSD_HEIGHT: i32 = 36;
 pub const RESIZE_BORDER: i32 = 10;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -195,7 +194,7 @@ impl CosmicWindow {
                 pointer_entered: Arc::new(AtomicU8::new(0)),
                 last_title: Arc::new(Mutex::new(last_title)),
             },
-            (width, SSD_HEIGHT),
+            (width, theme.ssd_height),
             handle,
             theme,
         ))
@@ -205,7 +204,7 @@ impl CosmicWindow {
         self.0.with_program(|p| {
             let mut size = p.window.pending_size()?;
             if p.has_ssd(true) {
-                size.h += SSD_HEIGHT;
+                size.h += self.theme.ssd_height;
             }
             Some(size)
         })
@@ -213,7 +212,11 @@ impl CosmicWindow {
 
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
-            let ssd_height = if p.has_ssd(true) { SSD_HEIGHT } else { 0 };
+            let ssd_height = if p.has_ssd(true) {
+                self.theme.ssd_height
+            } else {
+                0
+            };
             let loc = (geo.loc.x, geo.loc.y + ssd_height);
             let size = (geo.size.w, std::cmp::max(geo.size.h - ssd_height, 0));
             p.window
@@ -230,7 +233,8 @@ impl CosmicWindow {
             }
         });
         if let Some(geo) = geo {
-            self.0.resize(Size::from((geo.size.w, SSD_HEIGHT)));
+            self.0
+                .resize(Size::from((geo.size.w, self.theme.ssd_height)));
         }
     }
 
@@ -252,7 +256,7 @@ impl CosmicWindow {
                 let geo = p.window.geometry();
 
                 let point_i32 = relative_pos.to_i32_round::<i32>();
-                let ssd_height = has_ssd.then_some(SSD_HEIGHT).unwrap_or(0);
+                let ssd_height = has_ssd.then_some(self.theme.ssd_height).unwrap_or(0);
 
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
@@ -267,7 +271,7 @@ impl CosmicWindow {
                     ));
                 }
 
-                if has_ssd && (point_i32.y - geo.loc.y < SSD_HEIGHT) {
+                if has_ssd && (point_i32.y - geo.loc.y < self.theme.ssd_height) {
                     window_ui = Some((
                         PointerFocusTarget::WindowUI(self.clone()),
                         Point::from((0., 0.)),
@@ -276,8 +280,8 @@ impl CosmicWindow {
             }
 
             if has_ssd {
-                relative_pos.y -= SSD_HEIGHT as f64;
-                offset.y += SSD_HEIGHT as f64;
+                relative_pos.y -= self.theme.ssd_height as f64;
+                offset.y += self.theme.ssd_height as f64;
             }
 
             window_ui.or_else(|| {
@@ -303,7 +307,7 @@ impl CosmicWindow {
     pub fn offset(&self) -> Point<i32, Logical> {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));
         if has_ssd {
-            Point::from((0, SSD_HEIGHT))
+            Point::from((0, self.theme.ssd_height))
         } else {
             Point::from((0, 0))
         }
@@ -328,7 +332,7 @@ impl CosmicWindow {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));
 
         let window_loc = if has_ssd {
-            location + Point::from((0, (SSD_HEIGHT as f64 * scale.y) as i32))
+            location + Point::from((0, (self.theme.ssd_height as f64 * scale.y) as i32))
         } else {
             location
         };
@@ -360,7 +364,7 @@ impl CosmicWindow {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));
 
         let window_loc = if has_ssd {
-            location + Point::from((0, (SSD_HEIGHT as f64 * scale.y) as i32))
+            location + Point::from((0, (self.theme.ssd_height as f64 * scale.y) as i32))
         } else {
             location
         };
@@ -404,7 +408,7 @@ impl CosmicWindow {
             .with_program(|p| p.window.min_size_without_ssd())
             .map(|size| {
                 if self.0.with_program(|p| !p.window.is_decorated(false)) {
-                    size + (0, SSD_HEIGHT).into()
+                    size + (0, self.theme.ssd_height).into()
                 } else {
                     size
                 }
@@ -415,7 +419,7 @@ impl CosmicWindow {
             .with_program(|p| p.window.max_size_without_ssd())
             .map(|size| {
                 if self.0.with_program(|p| !p.window.is_decorated(false)) {
-                    size + (0, SSD_HEIGHT).into()
+                    size + (0, self.theme.ssd_height).into()
                 } else {
                     size
                 }
@@ -520,7 +524,7 @@ impl Program for CosmicWindowInternal {
 
                                 let pointer = seat.get_pointer().unwrap();
                                 let mut cursor = pointer.current_location().to_i32_round();
-                                cursor.y -= SSD_HEIGHT;
+                                cursor.y -= self.theme.ssd_height;
 
                                 let res = shell.menu_request(
                                     &surface,
@@ -591,7 +595,7 @@ impl SpaceElement for CosmicWindow {
                 bbox.size += Size::from((RESIZE_BORDER * 2, RESIZE_BORDER * 2));
             }
             if has_ssd {
-                bbox.size.h += SSD_HEIGHT;
+                bbox.size.h += self.theme.ssd_height;
             }
 
             bbox
@@ -629,7 +633,7 @@ impl SpaceElement for CosmicWindow {
         self.0.with_program(|p| {
             let mut geo = SpaceElement::geometry(&p.window);
             if p.has_ssd(false) {
-                geo.size.h += SSD_HEIGHT;
+                geo.size.h += self.theme.ssd_height;
             }
             geo
         })
@@ -708,7 +712,7 @@ impl PointerTarget<State> for CosmicWindow {
             if has_ssd || p.is_tiled(false) {
                 let Some(next) = Focus::under(
                     &p.window,
-                    has_ssd.then_some(SSD_HEIGHT).unwrap_or(0),
+                    has_ssd.then_some(self.theme.ssd_height).unwrap_or(0),
                     event.location,
                 ) else {
                     return;
@@ -734,7 +738,7 @@ impl PointerTarget<State> for CosmicWindow {
             if has_ssd || p.is_tiled(false) {
                 let Some(next) = Focus::under(
                     &p.window,
-                    has_ssd.then_some(SSD_HEIGHT).unwrap_or(0),
+                    has_ssd.then_some(self.theme.ssd_height).unwrap_or(0),
                     event.location,
                 ) else {
                     return;
