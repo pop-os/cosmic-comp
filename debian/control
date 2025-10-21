@@ -29,7 +29,6 @@ Depends:
     ${shlibs:Depends},
     libegl1,
     libwayland-server0,
-    libdisplay-info1,
 Recommends:
     cosmic-session,
     libgl1-mesa-dri
