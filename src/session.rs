@@ -6,7 +6,6 @@ use smithay::reexports::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use sendfd::RecvWithFd;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -15,17 +14,15 @@ use std::{
         io::{AsFd, BorrowedFd, FromRawFd, RawFd},
         net::UnixStream,
     },
-    sync::Arc,
 };
 use tracing::{error, warn};
 
-use crate::state::{ClientState, Common, State};
+use crate::state::{Common, State};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "message")]
 pub enum Message {
     SetEnv { variables: HashMap<String, String> },
-    NewPrivilegedClient { count: usize },
 }
 
 struct StreamWrapper {
@@ -102,7 +99,7 @@ pub fn setup_socket(handle: LoopHandle<State>, common: &Common) -> Result<()> {
 
             handle.insert_source(
                 Generic::new(StreamWrapper::from(session_socket), Interest::READ, Mode::Level),
-                move |_, stream, state| {
+                move |_, stream, _state| {
                     // SAFETY: We don't drop the stream!
                     let stream = unsafe { stream.get_mut() };
 
@@ -133,32 +130,7 @@ pub fn setup_socket(handle: LoopHandle<State>, common: &Common) -> Result<()> {
                         stream.read_bytes = 0;
                         match std::str::from_utf8(&stream.buffer) {
                             Ok(message) => {
-                                match serde_json::from_str::<'_, Message>(message) {
-                                    Ok(Message::NewPrivilegedClient { count }) => {
-                                        let mut buffer = [0; 1];
-                                        let mut fds = vec![0; count];
-                                        match stream.stream.recv_with_fd(&mut buffer, &mut fds) {
-                                            Ok((_, received_count)) => {
-                                                assert_eq!(received_count, count);
-                                                for fd in fds.into_iter().take(received_count) {
-                                                    if fd == -1 {
-                                                        continue;
-                                                    }
-                                                    let stream = unsafe { UnixStream::from_raw_fd(fd) };
-                                                    let client_state = Arc::new(ClientState {
-                                                        privileged: true,
-                                                        ..state.new_client_state()
-                                                    });
-                                                    if let Err(err) = state.common.display_handle.insert_client(stream, client_state) {
-                                                        warn!(?err, "Failed to add privileged client to display");
-                                                    }
-                                                }
-                                            },
-                                            Err(err) => {
-                                                warn!(?err, "Failed to read file descriptors from session sock");
-                                            }
-                                        }
-                                    },
+                                match serde_json::from_str::<'_, Message>(&message) {
                                     Ok(Message::SetEnv { .. }) => warn!("Got SetEnv from session? What is this?"),
                                     _ => warn!("Unknown session socket message, are you using incompatible cosmic-session and cosmic-comp versions?"),
                                 };
