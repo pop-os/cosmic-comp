@@ -581,10 +581,6 @@ pub fn client_is_privileged(client: &Client) -> bool {
         .is_some_and(|client_state| client_state.privileged)
 }
 
-fn enable_wayland_security() -> bool {
-    crate::utils::env::bool_var("COSMIC_ENABLE_WAYLAND_SECURITY").unwrap_or(false)
-}
-
 impl State {
     pub fn new(
         dh: &DisplayHandle,
@@ -766,7 +762,7 @@ impl State {
                 BackendData::Kms(kms_state) => *kms_state.primary_node.read().unwrap(),
                 _ => None,
             },
-            privileged: !enable_wayland_security(),
+            privileged: true,
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
         }
