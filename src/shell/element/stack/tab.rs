@@ -1,23 +1,30 @@
+use std::hash::{Hash, Hasher};
+
 use cosmic::{
     font::Font,
     iced::{
         widget::{self, container::draw_background, rule::FillMode},
-        Background,
+        Background, Padding,
     },
     iced_core::{
         alignment, event,
         layout::{Layout, Limits, Node},
         mouse, overlay, renderer,
-        widget::{operation::Operation, tree::Tree, Id, Widget},
+        widget::{
+            operation::Operation,
+            tree::{self, Tree},
+            Id, Widget,
+        },
         Border, Clipboard, Color, Length, Rectangle, Shell, Size,
     },
     iced_widget::scrollable::AbsoluteOffset,
     theme,
-    widget::{icon::from_name, Icon},
+    widget::icon,
     Apply,
 };
 
 use super::tab_text::tab_text;
+use crate::shell::CosmicSurface;
 
 #[derive(Clone, Copy)]
 pub(super) enum TabRuleTheme {
@@ -53,46 +60,52 @@ impl From<TabRuleTheme> for theme::Rule {
 
 #[derive(Clone, Copy)]
 pub(super) enum TabBackgroundTheme {
+    /// Selected active stack
     ActiveActivated,
+    /// Selected inactive stack
     ActiveDeactivated,
+    /// Not selected
     Default,
 }
 
-impl From<TabBackgroundTheme> for theme::Container<'_> {
-    fn from(background_theme: TabBackgroundTheme) -> Self {
-        match background_theme {
-            TabBackgroundTheme::ActiveActivated => {
-                Self::custom(move |theme| widget::container::Style {
-                    icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(Background::Color(
-                        theme.cosmic().primary.component.selected.into(),
-                    )),
-                    border: Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                })
+impl TabBackgroundTheme {
+    pub fn into_container_theme(self, hovered: bool) -> theme::Container<'static> {
+        let (selected, active_stack) = match self {
+            Self::ActiveActivated => (true, true),
+            Self::ActiveDeactivated => (true, false),
+            Self::Default => (false, false),
+        };
+
+        theme::Container::custom(move |theme| {
+            let cosmic_theme = theme.cosmic();
+
+            let text_color = if selected && active_stack {
+                Some(Color::from(cosmic_theme.accent_text_color()))
+            } else {
+                None
+            };
+
+            widget::container::Style {
+                icon_color: text_color,
+                text_color,
+                background: Some(Background::Color(
+                    if hovered {
+                        cosmic_theme.primary.component.hover_state_color()
+                    } else if selected {
+                        cosmic_theme.primary.component.selected_state_color()
+                    } else {
+                        cosmic_theme.primary.component.base
+                    }
+                    .into(),
+                )),
+                border: Border {
+                    radius: 0.0.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
             }
-            TabBackgroundTheme::ActiveDeactivated => {
-                Self::custom(move |theme| widget::container::Style {
-                    icon_color: None,
-                    text_color: None,
-                    background: Some(Background::Color(
-                        theme.cosmic().primary.component.base.into(),
-                    )),
-                    border: Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                })
-            }
-            TabBackgroundTheme::Default => Self::Transparent,
-        }
+        })
     }
 }
 
@@ -105,10 +118,47 @@ pub trait TabMessage: Clone {
     fn scrolled() -> Self;
 }
 
-pub struct Tab<Message: TabMessage> {
-    id: Id,
-    app_icon: Icon,
-    title: String,
+#[derive(Debug, Clone)]
+pub struct Model {
+    pub id: Id,
+    pub app_icon: cosmic::widget::icon::Handle,
+    pub title: String,
+    pub title_hash: u64,
+}
+
+impl Model {
+    pub fn new(id: Id, appid: String, title: String) -> Self {
+        // Pre-emptively cache the hash of each title for more efficient diffing.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        title.hash(&mut hasher);
+
+        Self {
+            id,
+            app_icon: icon::from_name(appid).size(16).handle(),
+            title,
+            title_hash: hasher.finish(),
+        }
+    }
+}
+
+impl From<&CosmicSurface> for Model {
+    fn from(window: &CosmicSurface) -> Self {
+        let user_data = window.user_data();
+        user_data.insert_if_missing(Id::unique);
+        Self::new(
+            user_data.get::<Id>().unwrap().clone(),
+            window.app_id(),
+            window.title(),
+        )
+    }
+}
+
+struct LocalState {
+    hovered: bool,
+}
+
+pub struct Tab<'a, Message: TabMessage> {
+    model: &'a Model,
     font: Font,
     close_message: Option<Message>,
     press_message: Option<Message>,
@@ -118,12 +168,10 @@ pub struct Tab<Message: TabMessage> {
     active: bool,
 }
 
-impl<Message: TabMessage + 'static> Tab<Message> {
-    pub fn new(title: impl Into<String>, app_id: impl Into<String>, id: Id) -> Self {
+impl<'a, Message: TabMessage + 'static> Tab<'a, Message> {
+    pub fn new(model: &'a Model) -> Self {
         Tab {
-            id,
-            app_icon: from_name(app_id.into()).size(16).icon(),
-            title: title.into(),
+            model,
             font: cosmic::font::default(),
             close_message: None,
             press_message: None,
@@ -164,18 +212,13 @@ impl<Message: TabMessage + 'static> Tab<Message> {
         self
     }
 
-    pub(super) fn non_active(mut self) -> Self {
-        self.active = false;
-        self
-    }
-
     pub(super) fn active(mut self) -> Self {
         self.active = true;
         self
     }
 
-    pub(super) fn internal<'a>(self, idx: usize) -> TabInternal<'a, Message> {
-        let mut close_button = from_name("window-close-symbolic")
+    pub(super) fn internal(self, idx: usize) -> TabInternal<'a, Message> {
+        let mut close_button = icon::from_name("window-close-symbolic")
             .size(16)
             .prefer_svg(true)
             .icon()
@@ -186,16 +229,16 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             close_button = close_button.on_press(close_message);
         }
 
-        let items = vec![
+        let items = [
             widget::vertical_rule(4).class(self.rule_theme).into(),
-            self.app_icon
+            cosmic::widget::icon(self.model.app_icon.clone())
                 .clone()
                 .apply(widget::container)
                 .width(Length::Shrink)
-                .padding([2, 4])
+                .padding([2, 4, 2, 8])
                 .center_y(Length::Fill)
                 .into(),
-            tab_text(self.title, self.active)
+            tab_text(&self.model, self.active)
                 .font(self.font)
                 .font_size(14.0)
                 .height(Length::Fill)
@@ -204,17 +247,17 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             close_button
                 .apply(widget::container)
                 .width(Length::Shrink)
-                .padding([2, 4])
+                .padding([2, 12, 2, 4])
                 .center_y(Length::Fill)
                 .align_x(alignment::Horizontal::Right)
                 .into(),
         ];
 
         TabInternal {
-            id: self.id,
+            id: self.model.id.clone(),
             idx,
             active: self.active,
-            background: self.background_theme.into(),
+            background: self.background_theme,
             elements: items,
             press_message: self.press_message,
             right_click_message: self.right_click_message,
@@ -233,8 +276,8 @@ pub(super) struct TabInternal<'a, Message: TabMessage> {
     id: Id,
     idx: usize,
     active: bool,
-    background: theme::Container<'a>,
-    elements: Vec<cosmic::Element<'a, Message>>,
+    background: TabBackgroundTheme,
+    elements: [cosmic::Element<'a, Message>; 4],
     press_message: Option<Message>,
     right_click_message: Option<Message>,
 }
@@ -263,6 +306,10 @@ where
         Size::new(Length::Fill, Length::Fill)
     }
 
+    fn state(&self) -> tree::State {
+        tree::State::new(LocalState { hovered: false })
+    }
+
     fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
         let min_size = Size {
             height: TAB_HEIGHT as f32,
@@ -286,14 +333,15 @@ where
             .min_height(size.height)
             .width(size.width)
             .height(size.height);
+
         cosmic::iced_core::layout::flex::resolve(
             cosmic::iced_core::layout::flex::Axis::Horizontal,
             renderer,
             &limits,
             Length::Fill,
             Length::Fill,
-            0.into(),
-            8.,
+            Padding::ZERO,
+            0.,
             cosmic::iced::Alignment::Center,
             if size.width >= CLOSE_BREAKPOINT as f32 {
                 &self.elements
@@ -337,6 +385,9 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) -> event::Status {
+        let state = tree.state.downcast_mut::<LocalState>();
+        state.hovered = cursor.is_over(layout.bounds());
+
         let status = self
             .elements
             .iter_mut()
@@ -356,7 +407,7 @@ where
             })
             .fold(event::Status::Ignored, event::Status::merge);
 
-        if status == event::Status::Ignored && cursor.is_over(layout.bounds()) {
+        if status == event::Status::Ignored && state.hovered {
             if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
@@ -419,7 +470,10 @@ where
         viewport: &Rectangle,
     ) {
         use cosmic::widget::container::Catalog;
-        let style = theme.style(&self.background);
+        let state = tree.state.downcast_ref::<LocalState>();
+
+        let style = theme.style(&self.background.into_container_theme(state.hovered));
+        let text_color = style.text_color.unwrap_or(renderer_style.text_color);
 
         draw_background(renderer, &style, layout.bounds());
 
@@ -434,8 +488,8 @@ where
                 renderer,
                 theme,
                 &renderer::Style {
-                    icon_color: style.text_color.unwrap_or(renderer_style.text_color),
-                    text_color: style.text_color.unwrap_or(renderer_style.text_color),
+                    icon_color: text_color,
+                    text_color,
                     scale_factor: renderer_style.scale_factor,
                 },
                 layout,
