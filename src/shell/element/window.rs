@@ -262,14 +262,20 @@ impl CosmicWindow {
                         && point_i32.y - geo.loc.y < geo.size.h + ssd_height + RESIZE_BORDER)
                 {
                     window_ui = Some((
-                        PointerFocusTarget::WindowUI(self.clone()),
+                        PointerFocusTarget::WindowUI {
+                            window: self.clone(),
+                            is_border: true,
+                        },
                         Point::from((0., 0.)),
                     ));
                 }
 
                 if has_ssd && (point_i32.y - geo.loc.y < SSD_HEIGHT) {
                     window_ui = Some((
-                        PointerFocusTarget::WindowUI(self.clone()),
+                        PointerFocusTarget::WindowUI {
+                            window: self.clone(),
+                            is_border: false,
+                        },
                         Point::from((0., 0.)),
                     ));
                 }
