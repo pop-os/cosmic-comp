@@ -67,6 +67,13 @@ impl Shell {
                 } else {
                     unconstrain_xdg_popup(surface, window_loc, output.geometry());
                 }
+            } else if let Some(output) = self.workspaces.spaces().find_map(|w| {
+                w.fullscreen.as_ref().and_then(|f| {
+                    (f.surface.wl_surface().as_deref() == Some(&parent)).then_some(w.output())
+                })
+            }) {
+                let window_loc = output.geometry().loc;
+                unconstrain_xdg_popup(surface, window_loc, output.geometry());
             } else if let Some((output, layer_surface)) = self.outputs().find_map(|o| {
                 let map = layer_map_for_output(o);
                 map.layer_for_surface(&parent, WindowSurfaceType::ALL)
