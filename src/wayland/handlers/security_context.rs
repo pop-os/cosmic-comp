@@ -26,12 +26,6 @@ impl SecurityContextHandler for State {
                     .get_client_data(security_context.creator_client_id.clone())
                     .ok();
 
-                let privileged = client_data
-                    .as_ref()
-                    .and_then(|data| data.downcast_ref::<ClientState>())
-                    .map(|data| data.privileged)
-                    .unwrap_or(false);
-
                 let new_state = state.new_client_state();
 
                 let drm_node = client_data
@@ -50,9 +44,8 @@ impl SecurityContextHandler for State {
                     client_stream,
                     Arc::new(ClientState {
                         security_context: Some(security_context.clone()),
-                        privileged: privileged
-                            && security_context.sandbox_engine.as_deref()
-                                == Some("com.system76.CosmicPanel"),
+                        privileged: security_context.sandbox_engine.as_deref()
+                            == Some("com.system76.CosmicPanel"),
                         advertised_drm_node: drm_node,
                         ..new_state
                     }),
