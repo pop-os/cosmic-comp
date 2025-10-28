@@ -693,7 +693,7 @@ impl State {
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
         // TODO: Restrict to only specific client?
-        let atspi_state = AtspiState::new::<State, _>(dh, |_| true);
+        let atspi_state = AtspiState::new::<State, _>(dh, client_has_no_security_context);
 
         State {
             common: Common {
