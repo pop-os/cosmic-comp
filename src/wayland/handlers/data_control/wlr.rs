@@ -8,7 +8,7 @@ use smithay::{
 
 impl DataControlHandler for State {
     fn data_control_state(&mut self) -> &mut DataControlState {
-        &mut self.common.data_control_state
+        &mut self.common.wlr_data_control_state
     }
 }
 
