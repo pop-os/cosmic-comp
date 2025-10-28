@@ -88,8 +88,10 @@ use smithay::{
         seat::WaylandFocus,
         security_context::{SecurityContext, SecurityContextState},
         selection::{
-            data_device::DataDeviceState, primary_selection::PrimarySelectionState,
-            wlr_data_control::DataControlState,
+            data_device::DataDeviceState,
+            ext_data_control::DataControlState as ExtDataControlState,
+            primary_selection::PrimarySelectionState,
+            wlr_data_control::DataControlState as WlrDataControlState,
         },
         session_lock::SessionLockManagerState,
         shell::{
@@ -234,7 +236,8 @@ pub struct Common {
     pub output_power_state: OutputPowerState,
     pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
-    pub data_control_state: DataControlState,
+    pub ext_data_control_state: ExtDataControlState,
+    pub wlr_data_control_state: WlrDataControlState,
     pub image_capture_source_state: ImageCaptureSourceState,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
@@ -651,7 +654,12 @@ impl State {
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
         let idle_inhibiting_surfaces = HashSet::new();
 
-        let data_control_state = DataControlState::new::<Self, _>(
+        let ext_data_control_state = ExtDataControlState::new::<Self, _>(
+            dh,
+            Some(&primary_selection_state),
+            client_not_sandboxed,
+        );
+        let wlr_data_control_state = WlrDataControlState::new::<Self, _>(
             dh,
             Some(&primary_selection_state),
             client_not_sandboxed,
@@ -737,7 +745,8 @@ impl State {
                 overlap_notify_state,
                 presentation_state,
                 primary_selection_state,
-                data_control_state,
+                ext_data_control_state,
+                wlr_data_control_state,
                 viewporter_state,
                 wl_drm_state,
                 kde_decoration_state,
