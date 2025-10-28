@@ -44,8 +44,6 @@ impl SecurityContextHandler for State {
                     client_stream,
                     Arc::new(ClientState {
                         security_context: Some(security_context.clone()),
-                        privileged: security_context.sandbox_engine.as_deref()
-                            == Some("com.system76.CosmicPanel"),
                         advertised_drm_node: drm_node,
                         ..new_state
                     }),

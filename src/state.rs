@@ -146,10 +146,22 @@ macro_rules! fl {
 pub struct ClientState {
     pub compositor_client_state: CompositorClientState,
     pub advertised_drm_node: Option<DrmNode>,
-    pub privileged: bool,
     pub evls: LoopSignal,
     pub security_context: Option<SecurityContext>,
 }
+
+impl ClientState {
+    /// We treat a client as "sandboxed" if it has a security context for any sandbox engine
+    /// other than `com.system76.CosmicPanel`
+    pub fn not_sandboxed(&self) -> bool {
+        self.security_context
+            .as_ref()
+            .is_none_or(|security_context| {
+                security_context.sandbox_engine.as_deref() == Some("com.system76.CosmicPanel")
+            })
+    }
+}
+
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {
@@ -575,10 +587,10 @@ pub fn client_has_no_security_context(client: &Client) -> bool {
         .is_none_or(|client_state| client_state.security_context.is_none())
 }
 
-pub fn client_is_privileged(client: &Client) -> bool {
+fn client_not_sandboxed(client: &Client) -> bool {
     client
         .get_data::<ClientState>()
-        .is_some_and(|client_state| client_state.privileged)
+        .is_some_and(|client_state| client_state.not_sandboxed())
 }
 
 impl State {
@@ -604,15 +616,15 @@ impl State {
         let keyboard_shortcuts_inhibit_state = KeyboardShortcutsInhibitState::new::<Self>(dh);
         let output_state = OutputManagerState::new_with_xdg_output::<Self>(dh);
         let output_configuration_state =
-            OutputConfigurationState::new(dh, handle.clone(), client_is_privileged);
-        let output_power_state = OutputPowerState::new::<Self, _>(dh, client_is_privileged);
+            OutputConfigurationState::new(dh, handle.clone(), client_not_sandboxed);
+        let output_power_state = OutputPowerState::new::<Self, _>(dh, client_not_sandboxed);
         let overlap_notify_state =
             OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let image_capture_source_state =
-            ImageCaptureSourceState::new::<Self, _>(dh, client_is_privileged);
-        let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_is_privileged);
+            ImageCaptureSourceState::new::<Self, _>(dh, client_not_sandboxed);
+        let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_not_sandboxed);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
@@ -622,16 +634,16 @@ impl State {
         let kde_decoration_state = KdeDecorationState::new::<Self>(dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(dh);
         let session_lock_manager_state =
-            SessionLockManagerState::new::<Self, _>(dh, client_is_privileged);
+            SessionLockManagerState::new::<Self, _>(dh, client_not_sandboxed);
         XWaylandKeyboardGrabState::new::<Self>(dh);
         let xwayland_shell_state = XWaylandShellState::new::<Self>(dh);
         PointerConstraintsState::new::<Self>(dh);
         PointerGesturesState::new::<Self>(dh);
         TabletManagerState::new::<Self>(dh);
         SecurityContextState::new::<Self, _>(dh, client_has_no_security_context);
-        InputMethodManagerState::new::<Self, _>(dh, client_is_privileged);
+        InputMethodManagerState::new::<Self, _>(dh, client_not_sandboxed);
         TextInputManagerState::new::<Self>(dh);
-        VirtualKeyboardManagerState::new::<State, _>(dh, client_is_privileged);
+        VirtualKeyboardManagerState::new::<State, _>(dh, client_not_sandboxed);
         AlphaModifierState::new::<Self>(dh);
         SinglePixelBufferState::new::<Self>(dh);
 
@@ -648,7 +660,7 @@ impl State {
         let shell = Arc::new(parking_lot::RwLock::new(Shell::new(&config)));
 
         let layer_shell_state =
-            WlrLayerShellState::new_with_filter::<State, _>(dh, client_is_privileged);
+            WlrLayerShellState::new_with_filter::<State, _>(dh, client_not_sandboxed);
         let xdg_shell_state = XdgShellState::new_with_capabilities::<State>(
             dh,
             [
@@ -660,7 +672,7 @@ impl State {
         );
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
-        let toplevel_info_state = ToplevelInfoState::new(dh, client_is_privileged);
+        let toplevel_info_state = ToplevelInfoState::new(dh, client_not_sandboxed);
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
             vec![
@@ -670,15 +682,15 @@ impl State {
                 ManagementCapabilities::Minimize,
                 ManagementCapabilities::MoveToWorkspace,
             ],
-            client_is_privileged,
+            client_not_sandboxed,
         );
-        let workspace_state = WorkspaceState::new(dh, client_is_privileged);
+        let workspace_state = WorkspaceState::new(dh, client_not_sandboxed);
 
         if let Err(err) = crate::dbus::init(&handle) {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
 
-        let a11y_state = A11yState::new::<State, _>(dh, client_is_privileged);
+        let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
         // TODO: Restrict to only specific client?
         let atspi_state = AtspiState::new::<State, _>(dh, |_| true);
@@ -762,7 +774,6 @@ impl State {
                 BackendData::Kms(kms_state) => *kms_state.primary_node.read().unwrap(),
                 _ => None,
             },
-            privileged: true,
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
         }

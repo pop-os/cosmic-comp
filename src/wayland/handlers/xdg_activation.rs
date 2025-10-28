@@ -39,7 +39,7 @@ impl XdgActivationHandler for State {
             })
             .and_then(|data| {
                 data.downcast_ref::<ClientState>()
-                    .map(|data| data.privileged)
+                    .map(|data| data.not_sandboxed())
             })
             .unwrap_or(false)
         {
