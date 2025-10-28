@@ -234,7 +234,7 @@ pub struct Common {
     pub output_power_state: OutputPowerState,
     pub presentation_state: PresentationState,
     pub primary_selection_state: PrimarySelectionState,
-    pub data_control_state: Option<DataControlState>,
+    pub data_control_state: DataControlState,
     pub image_capture_source_state: ImageCaptureSourceState,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
@@ -651,11 +651,11 @@ impl State {
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
         let idle_inhibiting_surfaces = HashSet::new();
 
-        let data_control_state = crate::utils::env::bool_var("COSMIC_DATA_CONTROL_ENABLED")
-            .unwrap_or(false)
-            .then(|| {
-                DataControlState::new::<Self, _>(dh, Some(&primary_selection_state), |_| true)
-            });
+        let data_control_state = DataControlState::new::<Self, _>(
+            dh,
+            Some(&primary_selection_state),
+            client_not_sandboxed,
+        );
 
         let shell = Arc::new(parking_lot::RwLock::new(Shell::new(&config)));
 
