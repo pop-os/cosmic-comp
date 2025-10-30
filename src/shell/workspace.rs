@@ -583,10 +583,9 @@ impl Workspace {
             None
         };
 
-        self.focus_stack
-            .0
-            .values_mut()
-            .for_each(|set| set.retain(|m| m != mapped));
+        self.focus_stack.0.values_mut().for_each(|set| {
+            set.shift_remove(mapped);
+        });
 
         if let Some(pos) = self.minimized_windows.iter().position(|m| m == mapped) {
             let state = self.minimized_windows.remove(pos);
