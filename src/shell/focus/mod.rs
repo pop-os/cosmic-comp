@@ -17,7 +17,7 @@ use smithay::{
         shell::wlr_layer::{KeyboardInteractivity, Layer},
     },
 };
-use std::{borrow::Cow, mem, sync::Mutex};
+use std::{borrow::Cow, hash::Hash, mem, sync::Mutex};
 
 use tracing::{debug, trace};
 
@@ -44,6 +44,18 @@ impl PartialEq<CosmicMapped> for FocusTarget {
 impl PartialEq<CosmicSurface> for FocusTarget {
     fn eq(&self, other: &CosmicSurface) -> bool {
         matches!(self, FocusTarget::Fullscreen(surface) if surface == other)
+    }
+}
+
+impl indexmap::Equivalent<FocusTarget> for CosmicMapped {
+    fn equivalent(&self, key: &FocusTarget) -> bool {
+        key == self
+    }
+}
+
+impl indexmap::Equivalent<FocusTarget> for CosmicSurface {
+    fn equivalent(&self, key: &FocusTarget) -> bool {
+        key == self
     }
 }
 
@@ -119,9 +131,9 @@ impl FocusStackMut<'_> {
 
     pub fn remove<T>(&mut self, target: &T)
     where
-        FocusTarget: PartialEq<T>,
+        T: Hash + indexmap::Equivalent<FocusTarget>,
     {
-        self.0.retain(|w| w != target);
+        self.0.shift_remove(target);
     }
 
     pub fn last(&self) -> Option<&FocusTarget> {
