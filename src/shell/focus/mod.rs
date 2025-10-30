@@ -129,11 +129,11 @@ impl FocusStackMut<'_> {
         self.0.insert(target);
     }
 
-    pub fn remove<T>(&mut self, target: &T)
+    pub fn remove<T>(&mut self, target: &T) -> bool
     where
         T: Hash + indexmap::Equivalent<FocusTarget>,
     {
-        self.0.shift_remove(target);
+        self.0.shift_remove(target)
     }
 
     pub fn last(&self) -> Option<&FocusTarget> {

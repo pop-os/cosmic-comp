@@ -7,7 +7,7 @@ use crate::{
         element::{AsGlowRenderer, FromGlesError},
     },
     shell::{
-        ANIMATION_DURATION, OverviewMode,
+        ANIMATION_DURATION, OverviewMode, SeatMoveGrabState,
         layout::{floating::FloatingLayout, tiling::TilingLayout},
     },
     state::State,
@@ -455,17 +455,33 @@ impl Workspace {
     }
 
     pub fn refresh_focus_stack(&mut self) {
-        for stack in self.focus_stack.0.values_mut() {
+        for (seat, stack) in self.focus_stack.0.iter_mut() {
             let fullscreen = self
                 .fullscreen
                 .as_ref()
                 .filter(|f| f.alive())
                 .filter(|f| f.ended_at.is_none())
                 .map(|f| &f.surface);
+
+            // Move grab is treated as focused, so don't change focus to a
+            // window while grab exists.
+            let move_grab_state = seat
+                .user_data()
+                .get::<SeatMoveGrabState>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            let move_mapped = if let Some(move_grab_state) = &*move_grab_state {
+                Some(move_grab_state.element())
+            } else {
+                None
+            };
+
             let mapped = || {
                 self.floating_layer
                     .mapped()
                     .chain(self.tiling_layer.mapped().map(|(w, _)| w))
+                    .chain(move_mapped.iter())
             };
             stack.retain(|w| match w {
                 FocusTarget::Fullscreen(s) => fullscreen.is_some_and(|f| f == s),

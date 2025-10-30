@@ -3415,15 +3415,6 @@ impl Shell {
             return None;
         }
 
-        if !move_out_of_stack {
-            for workspace in self.workspaces.spaces_mut() {
-                for seat in self.seats.iter() {
-                    let mut stack = workspace.focus_stack.get_mut(seat);
-                    stack.remove(&old_mapped);
-                }
-            }
-        }
-
         let (window, _) = old_mapped
             .windows()
             .find(|(w, _)| w.wl_surface().as_deref() == Some(surface))
@@ -3440,6 +3431,20 @@ impl Shell {
         } else {
             old_mapped.clone()
         };
+
+        if move_out_of_stack {
+            // Update focus stack to set focus to the window being dragged out of
+            // the stack.
+            for workspace in self.workspaces.spaces_mut() {
+                for seat in self.seats.iter() {
+                    let mut stack = workspace.focus_stack.get_mut(seat);
+                    // XXX Not finding CosmicStack in focus stack?
+                    if stack.remove(&old_mapped) {
+                        stack.append(mapped.clone());
+                    }
+                }
+            }
+        }
 
         let trigger = match &start_data {
             GrabStartData::Pointer(start_data) => Trigger::Pointer(start_data.button),
