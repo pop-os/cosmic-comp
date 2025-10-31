@@ -1,4 +1,4 @@
-a11y-zoom-move-continuously = Ansicht bewegt kontinuierlich sich mit dem Cursor
+a11y-zoom-move-continuously = Ansicht bewegt sich kontinuierlich mit dem Cursor
 a11y-zoom-move-onedge = Ansicht bewegt sich an den Rändern
 a11y-zoom-move-centered = Ansicht hält Cursor zentriert
 a11y-zoom-settings = Bildschirmlupe-Einstellungen...
