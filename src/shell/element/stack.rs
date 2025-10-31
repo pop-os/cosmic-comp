@@ -64,7 +64,7 @@ use std::{
     fmt,
     hash::Hash,
     sync::{
-        Arc, LazyLock, Mutex,
+        LazyLock, Mutex,
         atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
     },
 };
@@ -91,21 +91,21 @@ impl fmt::Debug for CosmicStack {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CosmicStackInternal {
-    windows: Arc<Mutex<Vec<CosmicSurface>>>,
-    active: Arc<AtomicUsize>,
-    activated: Arc<AtomicBool>,
-    group_focused: Arc<AtomicBool>,
-    previous_index: Arc<Mutex<Option<(Serial, usize)>>>,
-    scroll_to_focus: Arc<AtomicBool>,
-    previous_keyboard: Arc<AtomicUsize>,
-    pointer_entered: Arc<AtomicU8>,
-    reenter: Arc<AtomicBool>,
-    potential_drag: Arc<Mutex<Option<usize>>>,
-    override_alive: Arc<AtomicBool>,
-    geometry: Arc<Mutex<Option<Rectangle<i32, Global>>>>,
-    mask: Arc<Mutex<Option<tiny_skia::Mask>>>,
+    windows: Mutex<Vec<CosmicSurface>>,
+    active: AtomicUsize,
+    activated: AtomicBool,
+    group_focused: AtomicBool,
+    previous_index: Mutex<Option<(Serial, usize)>>,
+    scroll_to_focus: AtomicBool,
+    previous_keyboard: AtomicUsize,
+    pointer_entered: AtomicU8,
+    reenter: AtomicBool,
+    potential_drag: Mutex<Option<usize>>,
+    override_alive: AtomicBool,
+    geometry: Mutex<Option<Rectangle<i32, Global>>>,
+    mask: Mutex<Option<tiny_skia::Mask>>,
 }
 
 impl CosmicStackInternal {
@@ -146,19 +146,19 @@ impl CosmicStack {
         let width = windows[0].geometry().size.w;
         CosmicStack(IcedElement::new(
             CosmicStackInternal {
-                windows: Arc::new(Mutex::new(windows)),
-                active: Arc::new(AtomicUsize::new(0)),
-                activated: Arc::new(AtomicBool::new(false)),
-                group_focused: Arc::new(AtomicBool::new(false)),
-                previous_index: Arc::new(Mutex::new(None)),
-                scroll_to_focus: Arc::new(AtomicBool::new(false)),
-                previous_keyboard: Arc::new(AtomicUsize::new(0)),
-                pointer_entered: Arc::new(AtomicU8::new(0)),
-                reenter: Arc::new(AtomicBool::new(false)),
-                potential_drag: Arc::new(Mutex::new(None)),
-                override_alive: Arc::new(AtomicBool::new(true)),
-                geometry: Arc::new(Mutex::new(None)),
-                mask: Arc::new(Mutex::new(None)),
+                windows: Mutex::new(windows),
+                active: AtomicUsize::new(0),
+                activated: AtomicBool::new(false),
+                group_focused: AtomicBool::new(false),
+                previous_index: Mutex::new(None),
+                scroll_to_focus: AtomicBool::new(false),
+                previous_keyboard: AtomicUsize::new(0),
+                pointer_entered: AtomicU8::new(0),
+                reenter: AtomicBool::new(false),
+                potential_drag: Mutex::new(None),
+                override_alive: AtomicBool::new(true),
+                geometry: Mutex::new(None),
+                mask: Mutex::new(None),
             },
             (width, TAB_HEIGHT),
             handle,

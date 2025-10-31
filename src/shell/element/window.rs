@@ -50,7 +50,7 @@ use std::{
     fmt,
     hash::Hash,
     sync::{
-        Arc, Mutex,
+        Mutex,
         atomic::{AtomicBool, AtomicU8, Ordering},
     },
 };
@@ -72,13 +72,12 @@ impl fmt::Debug for CosmicWindow {
     }
 }
 
-#[derive(Clone)]
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
-    activated: Arc<AtomicBool>,
+    activated: AtomicBool,
     /// TODO: This needs to be per seat
-    pointer_entered: Arc<AtomicU8>,
-    last_title: Arc<Mutex<String>>,
+    pointer_entered: AtomicU8,
+    last_title: Mutex<String>,
 }
 
 impl fmt::Debug for CosmicWindowInternal {
@@ -192,9 +191,9 @@ impl CosmicWindow {
         CosmicWindow(IcedElement::new(
             CosmicWindowInternal {
                 window,
-                activated: Arc::new(AtomicBool::new(false)),
-                pointer_entered: Arc::new(AtomicU8::new(0)),
-                last_title: Arc::new(Mutex::new(last_title)),
+                activated: AtomicBool::new(false),
+                pointer_entered: AtomicU8::new(0),
+                last_title: Mutex::new(last_title),
             },
             (width, SSD_HEIGHT),
             handle,
