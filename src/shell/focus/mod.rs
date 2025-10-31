@@ -363,6 +363,14 @@ fn update_focus_state(
             }
         }
 
+        if target.is_some_and(|t| {
+            matches!(
+                t,
+                KeyboardFocusTarget::LayerSurface(layer_surface) if layer_surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
+            )
+        }) {
+            keyboard.unset_grab(state);
+        }
         let serial = serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial());
         state
             .common
