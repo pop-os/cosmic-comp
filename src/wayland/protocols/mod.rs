@@ -5,6 +5,7 @@ pub mod atspi;
 pub mod corner_radius;
 pub mod drm;
 pub mod image_capture_source;
+pub mod keyboard_layout;
 pub mod output_configuration;
 pub mod output_power;
 pub mod overlap_notify;
