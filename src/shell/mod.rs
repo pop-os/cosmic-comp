@@ -3762,6 +3762,9 @@ impl Shell {
                     .max_by_key(|(_, other_geo)| {
                         let other_y_h = other_geo.loc.y + other_geo.size.h;
                         let delta = geometry.loc.y - other_y_h;
+                        if delta == 0 {
+                            return i32::MAX;
+                        }
                         if delta.is_positive() {
                             i32::MAX - delta
                         } else {
@@ -3773,6 +3776,9 @@ impl Shell {
                     .min_by_key(|(_, other_geo)| {
                         let current_y_h = geometry.loc.y + geometry.size.h;
                         let delta = current_y_h - other_geo.loc.y;
+                        if delta == 0 {
+                            return i32::MIN;
+                        }
                         if delta.is_negative() {
                             i32::MIN - delta
                         } else {
@@ -3784,6 +3790,9 @@ impl Shell {
                     .max_by_key(|(_, other_geo)| {
                         let other_x_w = other_geo.loc.x + other_geo.size.w;
                         let delta = geometry.loc.x - other_x_w;
+                        if delta == 0 {
+                            return i32::MAX;
+                        }
                         if delta.is_positive() {
                             i32::MAX - delta
                         } else {
@@ -3795,6 +3804,9 @@ impl Shell {
                     .min_by_key(|(_, other_geo)| {
                         let current_x_w = geometry.loc.x + geometry.size.w;
                         let delta = current_x_w - other_geo.loc.x;
+                        if delta == 0 {
+                            return i32::MIN;
+                        }
                         if delta.is_negative() {
                             i32::MIN - delta
                         } else {
