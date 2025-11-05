@@ -3759,27 +3759,47 @@ impl Shell {
             let next = match direction {
                 FocusDirection::Up => elements
                     .filter(|(_, other_geo)| other_geo.loc.y <= geometry.loc.y)
-                    .min_by_key(|(_, other_geo)| {
-                        let res = geometry.loc.y - other_geo.loc.y;
-                        if res.is_positive() { res } else { i32::MAX }
+                    .max_by_key(|(_, other_geo)| {
+                        let other_y_h = other_geo.loc.y + other_geo.size.h;
+                        let delta = geometry.loc.y - other_y_h;
+                        if delta.is_positive() {
+                            i32::MAX - delta
+                        } else {
+                            delta
+                        }
                     }),
                 FocusDirection::Down => elements
                     .filter(|(_, other_geo)| other_geo.loc.y > geometry.loc.y)
-                    .max_by_key(|(_, other_geo)| {
-                        let res = geometry.loc.y - other_geo.loc.y;
-                        if res.is_negative() { res } else { i32::MIN }
+                    .min_by_key(|(_, other_geo)| {
+                        let current_y_h = geometry.loc.y + geometry.size.h;
+                        let delta = current_y_h - other_geo.loc.y;
+                        if delta.is_negative() {
+                            i32::MIN - delta
+                        } else {
+                            delta
+                        }
                     }),
                 FocusDirection::Left => elements
                     .filter(|(_, other_geo)| other_geo.loc.x <= geometry.loc.x)
-                    .min_by_key(|(_, other_geo)| {
-                        let res = geometry.loc.x - other_geo.loc.x;
-                        if res.is_positive() { res } else { i32::MAX }
+                    .max_by_key(|(_, other_geo)| {
+                        let other_x_w = other_geo.loc.x + other_geo.size.w;
+                        let delta = geometry.loc.x - other_x_w;
+                        if delta.is_positive() {
+                            i32::MAX - delta
+                        } else {
+                            delta
+                        }
                     }),
                 FocusDirection::Right => elements
                     .filter(|(_, other_geo)| other_geo.loc.x > geometry.loc.x)
-                    .max_by_key(|(_, other_geo)| {
-                        let res = geometry.loc.x - other_geo.loc.x;
-                        if res.is_negative() { res } else { i32::MIN }
+                    .min_by_key(|(_, other_geo)| {
+                        let current_x_w = geometry.loc.x + geometry.size.w;
+                        let delta = current_x_w - other_geo.loc.x;
+                        if delta.is_negative() {
+                            i32::MIN - delta
+                        } else {
+                            delta
+                        }
                     }),
                 _ => return FocusResult::None,
             }
