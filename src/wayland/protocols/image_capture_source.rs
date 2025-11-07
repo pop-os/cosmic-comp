@@ -19,6 +19,7 @@ use smithay::reexports::wayland_protocols::ext::image_capture_source::v1::server
     ext_output_image_capture_source_manager_v1::{
         Request as OutputSourceRequest, ExtOutputImageCaptureSourceManagerV1,
     },
+    ext_workspace_image_capture_source_manager_v1::{Request as WorkspaceSourceRequest, ExtWorkspaceImageCaptureSourceManagerV1},
 };
 use smithay::{
     output::{Output, WeakOutput},
@@ -33,6 +34,7 @@ pub struct ImageCaptureSourceState {
     output_source_global: GlobalId,
     workspace_source_global: GlobalId,
     toplevel_source_global: GlobalId,
+    ext_workspace_source_global: GlobalId,
 }
 
 pub struct OutputImageCaptureSourceManagerGlobalData {
@@ -68,6 +70,10 @@ impl ImageCaptureSourceState {
                 ExtForeignToplevelImageCaptureSourceManagerV1,
                 ToplevelImageCaptureSourceManagerGlobalData,
             > + Dispatch<ExtForeignToplevelImageCaptureSourceManagerV1, ()>
+            + GlobalDispatch<
+                ExtWorkspaceImageCaptureSourceManagerV1,
+                WorkspaceImageCaptureSourceManagerGlobalData,
+            > + Dispatch<ExtWorkspaceImageCaptureSourceManagerV1, ()>
             + Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData>
             + WorkspaceHandler
             + 'static,
@@ -92,7 +98,14 @@ impl ImageCaptureSourceState {
                 .create_global::<D, ExtForeignToplevelImageCaptureSourceManagerV1, _>(
                     1,
                     ToplevelImageCaptureSourceManagerGlobalData {
-                        filter: Box::new(client_filter),
+                        filter: Box::new(client_filter.clone()),
+                    },
+                ),
+            ext_workspace_source_global: display
+                .create_global::<D, ExtWorkspaceImageCaptureSourceManagerV1, _>(
+                    1,
+                    WorkspaceImageCaptureSourceManagerGlobalData {
+                        filter: Box::new(client_filter.clone()),
                     },
                 ),
         }
@@ -108,6 +121,10 @@ impl ImageCaptureSourceState {
 
     pub fn toplevel_source_id(&self) -> &GlobalId {
         &self.toplevel_source_global
+    }
+
+    pub fn ext_workspace_source_id(&self) -> &GlobalId {
+        &self.ext_workspace_source_global
     }
 }
 
@@ -271,6 +288,72 @@ where
     }
 }
 
+impl<D>
+    GlobalDispatch<
+        ExtWorkspaceImageCaptureSourceManagerV1,
+        WorkspaceImageCaptureSourceManagerGlobalData,
+        D,
+    > for ImageCaptureSourceState
+where
+    D: GlobalDispatch<
+            ExtWorkspaceImageCaptureSourceManagerV1,
+            WorkspaceImageCaptureSourceManagerGlobalData,
+        > + Dispatch<ExtWorkspaceImageCaptureSourceManagerV1, ()>
+        + Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData>
+        + 'static,
+{
+    fn bind(
+        _state: &mut D,
+        _handle: &DisplayHandle,
+        _client: &Client,
+        resource: New<ExtWorkspaceImageCaptureSourceManagerV1>,
+        _global_data: &WorkspaceImageCaptureSourceManagerGlobalData,
+        data_init: &mut DataInit<'_, D>,
+    ) {
+        data_init.init(resource, ());
+    }
+
+    fn can_view(
+        client: Client,
+        global_data: &WorkspaceImageCaptureSourceManagerGlobalData,
+    ) -> bool {
+        (global_data.filter)(&client)
+    }
+}
+
+impl<D> Dispatch<ExtWorkspaceImageCaptureSourceManagerV1, (), D> for ImageCaptureSourceState
+where
+    D: Dispatch<ExtWorkspaceImageCaptureSourceManagerV1, ()>
+        + Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData>
+        + WorkspaceHandler
+        + 'static,
+{
+    fn request(
+        state: &mut D,
+        _client: &Client,
+        _resource: &ExtWorkspaceImageCaptureSourceManagerV1,
+        request: WorkspaceSourceRequest,
+        _data: &(),
+        _dhandle: &DisplayHandle,
+        data_init: &mut DataInit<'_, D>,
+    ) {
+        if let WorkspaceSourceRequest::CreateSource {
+            source,
+            workspace_handle,
+        } = request
+        {
+            let data = match state
+                .workspace_state()
+                .get_ext_workspace_handle(&workspace_handle)
+            {
+                Some(workspace) => ImageCaptureSourceData::Workspace(workspace),
+                None => ImageCaptureSourceData::Destroyed,
+            };
+            data_init.init(source, data);
+        }
+    }
+}
+
 impl<D> Dispatch<ExtForeignToplevelImageCaptureSourceManagerV1, (), D> for ImageCaptureSourceState
 where
     D: Dispatch<ExtForeignToplevelImageCaptureSourceManagerV1, ()>
@@ -354,6 +437,14 @@ macro_rules! delegate_image_capture_source {
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             smithay::reexports::wayland_protocols::ext::image_capture_source::v1::server::ext_foreign_toplevel_image_capture_source_manager_v1::ExtForeignToplevelImageCaptureSourceManagerV1: ()
         ] => $crate::wayland::protocols::image_capture_source::ImageCaptureSourceState);
+
+        smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            smithay::reexports::wayland_protocols::ext::image_capture_source::v1::server::ext_workspace_image_capture_source_manager_v1::ExtWorkspaceImageCaptureSourceManagerV1: $crate::wayland::protocols::image_capture_source::WorkspaceImageCaptureSourceManagerGlobalData
+        ] => $crate::wayland::protocols::image_capture_source::ImageCaptureSourceState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            smithay::reexports::wayland_protocols::ext::image_capture_source::v1::server::ext_workspace_image_capture_source_manager_v1::ExtWorkspaceImageCaptureSourceManagerV1: ()
+        ] => $crate::wayland::protocols::image_capture_source::ImageCaptureSourceState);
+
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             smithay::reexports::wayland_protocols::ext::image_capture_source::v1::server::ext_image_capture_source_v1::ExtImageCaptureSourceV1: $crate::wayland::protocols::image_capture_source::ImageCaptureSourceData
         ] => $crate::wayland::protocols::image_capture_source::ImageCaptureSourceState);

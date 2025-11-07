@@ -146,3 +146,12 @@ cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", b
 
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "eb45814" }
+wayland-protocols = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
+wayland-protocols-wlr = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
+wayland-backend = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
+wayland-server = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
+wayland-sys = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
+wayland-scanner = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
+wayland-client = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
+wayland-cursor = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
+wayland-egl = { git = "https://github.com/smithay/wayland-rs", branch = "workspace-capture" }
