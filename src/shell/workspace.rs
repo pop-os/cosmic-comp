@@ -908,19 +908,12 @@ impl Workspace {
                 let geometry = self.fullscreen_geometry().unwrap();
                 return fullscreen
                     .surface
-                    .0
-                    .surface_under(
+                    .focus_under(
                         (location - geometry.loc.to_f64()).as_logical(),
                         WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
                     )
-                    .map(|(surface, surface_offset)| {
-                        (
-                            PointerFocusTarget::WlSurface {
-                                surface,
-                                toplevel: Some(fullscreen.surface.clone().into()),
-                            },
-                            (geometry.loc + surface_offset.as_local()).to_f64(),
-                        )
+                    .map(|(target, surface_offset)| {
+                        (target, (geometry.loc.to_f64() + surface_offset.as_local()))
                     });
             }
 

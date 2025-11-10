@@ -523,18 +523,14 @@ impl CosmicStack {
 
             let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
             stack_ui.or_else(|| {
-                active_window
-                    .0
-                    .surface_under(relative_pos, surface_type)
-                    .map(|(surface, surface_offset)| {
+                active_window.focus_under(relative_pos, surface_type).map(
+                    |(target, surface_offset)| {
                         (
-                            PointerFocusTarget::WlSurface {
-                                surface,
-                                toplevel: Some(active_window.clone().into()),
-                            },
+                            target,
                             surface_offset.to_f64() + Point::from((0., TAB_HEIGHT as f64)),
                         )
-                    })
+                    },
+                )
             })
         })
     }

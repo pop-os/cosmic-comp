@@ -287,6 +287,12 @@ fn format_pointer_focus(focus: Option<PointerFocusTarget>) -> String {
             }
             _ => format!("Surface {}", surface.id().protocol_id()),
         },
+        Some(X11Surface { surface, toplevel }) => match toplevel {
+            Some(window) => {
+                format!("Window {} ({})", surface.window_id(), window.title())
+            }
+            _ => format!("X11Surface {}", surface.window_id()),
+        },
         Some(StackUI(stack)) => format!(
             "Stack SSD {} ({})",
             match stack.active().0.underlying_surface() {
