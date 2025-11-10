@@ -502,18 +502,34 @@ impl State {
                                 ptr.frame(self);
                                 return;
                             }
-                            if let PointerFocusTarget::WlSurface { surface, .. } = surface {
-                                if under_from_surface_tree(
-                                    surface,
-                                    position.as_logical() - surface_loc.to_f64(),
-                                    (0, 0),
-                                    WindowSurfaceType::ALL,
-                                )
-                                .is_none()
-                                {
-                                    ptr.frame(self);
-                                    return;
+                            match surface {
+                                PointerFocusTarget::WlSurface { surface, .. } => {
+                                    if under_from_surface_tree(
+                                        surface,
+                                        position.as_logical() - surface_loc.to_f64(),
+                                        (0, 0),
+                                        WindowSurfaceType::ALL,
+                                    )
+                                    .is_none()
+                                    {
+                                        ptr.frame(self);
+                                        return;
+                                    }
                                 }
+                                PointerFocusTarget::X11Surface { surface, .. } => {
+                                    if surface
+                                        .surface_under(
+                                            position.as_logical() - surface_loc.to_f64(),
+                                            (0, 0),
+                                            WindowSurfaceType::ALL,
+                                        )
+                                        .is_none()
+                                    {
+                                        ptr.frame(self);
+                                        return;
+                                    }
+                                }
+                                _ => {}
                             }
                             if let Some(region) = confine_region {
                                 if !region
@@ -2238,21 +2254,18 @@ impl State {
                         }
                     }
                     Stage::OverrideRedirect { surface, location } => {
-                        if let Some(surface) = surface.wl_surface() {
-                            if let Some((surface, surface_loc)) = under_from_surface_tree(
-                                &surface,
-                                global_pos.as_logical(),
-                                location.as_logical(),
-                                WindowSurfaceType::ALL,
-                            ) {
-                                return ControlFlow::Break(Ok(Some((
-                                    PointerFocusTarget::WlSurface {
-                                        surface,
-                                        toplevel: None,
-                                    },
-                                    surface_loc.as_global().to_f64(),
-                                ))));
-                            }
+                        if let Some((_, surface_loc)) = surface.surface_under(
+                            global_pos.as_logical(),
+                            location.as_logical(),
+                            WindowSurfaceType::ALL,
+                        ) {
+                            return ControlFlow::Break(Ok(Some((
+                                PointerFocusTarget::X11Surface {
+                                    surface: surface.clone(),
+                                    toplevel: None,
+                                },
+                                surface_loc.as_global().to_f64(),
+                            ))));
                         }
                     }
                     Stage::StickyPopups(floating_layer) => {
