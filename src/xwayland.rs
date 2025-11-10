@@ -114,6 +114,7 @@ impl State {
 
                     let wm = match X11Wm::start_wm(
                         data.common.event_loop_handle.clone(),
+                        &data.common.display_handle,
                         x11_socket,
                         client.clone(),
                     ) {
