@@ -3017,8 +3017,9 @@ impl Shell {
     ) -> Option<(KeyboardFocusTarget, Point<i32, Global>)> {
         let from_output = self.workspaces.space_for_handle(from)?.output.clone();
         let to_output = self.workspaces.space_for_handle(to)?.output.clone();
-
         let from_workspace = self.workspaces.space_for_handle_mut(from).unwrap(); // checked above
+
+        let is_minimized = window.is_minimized();
         let mut window_state = from_workspace.unmap_surface(window)?.1;
 
         toplevel_leave_workspace(window, from);
@@ -3041,6 +3042,42 @@ impl Shell {
         })) = &mut window_state
         {
             *workspace = *to;
+        }
+
+        if is_minimized {
+            let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
+            let minimized_window = match window_state {
+                WorkspaceRestoreData::Floating(Some(previous)) => {
+                    let window = CosmicMapped::from(CosmicWindow::new(
+                        window.clone(),
+                        evlh.clone(),
+                        self.theme.clone(),
+                    ));
+                    window.set_minimized(true);
+                    MinimizedWindow::Floating { window, previous }
+                }
+                WorkspaceRestoreData::Tiling(Some(previous)) => {
+                    let window = CosmicMapped::from(CosmicWindow::new(
+                        window.clone(),
+                        evlh.clone(),
+                        self.theme.clone(),
+                    ));
+                    window.set_minimized(true);
+                    MinimizedWindow::Tiling { window, previous }
+                }
+                WorkspaceRestoreData::Fullscreen(previous) => {
+                    window.set_minimized(true);
+                    MinimizedWindow::Fullscreen {
+                        surface: window.clone(),
+                        previous,
+                    }
+                }
+                _ => {
+                    unreachable!()
+                } // MinimizedWindow always has restore data
+            };
+            to_workspace.minimized_windows.push(minimized_window);
+            return None;
         }
 
         for mapped in from_workspace
