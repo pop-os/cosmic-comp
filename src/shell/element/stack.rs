@@ -465,7 +465,9 @@ impl CosmicStack {
         self.0.with_program(|p| {
             if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
                 let old = p.active.swap(val, Ordering::SeqCst);
-                p.previous_keyboard.store(old, Ordering::SeqCst);
+                if old != val {
+                    p.previous_keyboard.store(old, Ordering::SeqCst);
+                }
             }
         });
         self.0
