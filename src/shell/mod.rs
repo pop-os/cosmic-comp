@@ -3112,9 +3112,8 @@ impl Shell {
         let to_mapped = to_workspace.mapped().cloned().collect::<Vec<_>>();
 
         let focus_target: KeyboardFocusTarget =
-            if matches!(window_state, WorkspaceRestoreData::Floating(_))
-                || (matches!(window_state, WorkspaceRestoreData::Tiling(_))
-                    && !to_workspace.tiling_enabled)
+            if !matches!(window_state, WorkspaceRestoreData::Fullscreen(_))
+                && !to_workspace.tiling_enabled
             {
                 let mapped = CosmicMapped::from(CosmicWindow::new(
                     window.clone(),
@@ -3129,7 +3128,9 @@ impl Shell {
                 };
                 to_workspace.floating_layer.map(mapped.clone(), position);
                 mapped.into()
-            } else if matches!(window_state, WorkspaceRestoreData::Tiling(_)) {
+            } else if !matches!(window_state, WorkspaceRestoreData::Fullscreen(_))
+                && to_workspace.tiling_enabled
+            {
                 let mapped = CosmicMapped::from(CosmicWindow::new(
                     window.clone(),
                     evlh.clone(),
@@ -3219,8 +3220,7 @@ impl Shell {
         };
 
         let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
-        if matches!(window_state, WorkspaceRestoreData::Floating(_)) || !to_workspace.tiling_enabled
-        {
+        if !to_workspace.tiling_enabled {
             let position = match window_state {
                 WorkspaceRestoreData::Floating(Some(data)) => {
                     Some(data.position_relative(to_workspace.output.geometry().size.as_logical()))
@@ -3228,7 +3228,7 @@ impl Shell {
                 _ => None,
             };
             to_workspace.floating_layer.map(mapped.clone(), position);
-        } else if matches!(window_state, WorkspaceRestoreData::Tiling(_)) {
+        } else {
             for mapped in to_workspace
                 .mapped()
                 .filter(|m| m.maximized_state.lock().unwrap().is_some())
@@ -3244,8 +3244,6 @@ impl Shell {
                 focus_stack.as_ref().map(|x| x.iter()),
                 direction,
             );
-        } else {
-            unreachable!() // TODO: sticky
         }
 
         let focus_target = KeyboardFocusTarget::from(mapped.clone());
