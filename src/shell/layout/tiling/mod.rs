@@ -5554,10 +5554,9 @@ where
                     .as_ref()
                     .map(|swap_desc| {
                         (swap_desc.node == node_id
-                            || target_tree
-                                .ancestor_ids(&node_id)
-                                .unwrap()
-                                .any(|id| &swap_desc.node == id))
+                            || target_tree.ancestor_ids(&node_id).ok().is_none_or(
+                                |mut ancestors| ancestors.any(|id| &swap_desc.node == id),
+                            ))
                             && swap_desc.stack_window.is_none()
                     })
                     .unwrap_or(false)
