@@ -605,6 +605,7 @@ impl Workspace {
 
         if let Some(pos) = self.minimized_windows.iter().position(|m| m == mapped) {
             let state = self.minimized_windows.remove(pos);
+            mapped.set_minimized(false);
             return Some(match state {
                 MinimizedWindow::Floating { previous, .. } => {
                     WorkspaceRestoreData::Floating(Some(previous))
@@ -670,6 +671,7 @@ impl Workspace {
                 unreachable!()
             };
 
+            surface.set_minimized(false);
             return Some((surface, WorkspaceRestoreData::Fullscreen(previous)));
         }
 
