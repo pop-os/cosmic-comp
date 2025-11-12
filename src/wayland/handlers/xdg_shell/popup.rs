@@ -186,8 +186,7 @@ pub fn get_popup_toplevel(popup: &PopupSurface) -> Option<WlSurface> {
                 .parent
                 .as_ref()
                 .cloned()
-                .unwrap()
-        });
+        })?;
     }
     Some(parent)
 }
