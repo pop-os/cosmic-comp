@@ -3017,6 +3017,8 @@ impl Shell {
     ) -> Option<(KeyboardFocusTarget, Point<i32, Global>)> {
         let from_output = self.workspaces.space_for_handle(from)?.output.clone();
         let to_output = self.workspaces.space_for_handle(to)?.output.clone();
+        let to_is_tiling = self.workspaces.space_for_handle(to).unwrap().tiling_enabled;
+
         let from_workspace = self.workspaces.space_for_handle_mut(from).unwrap(); // checked above
 
         let is_minimized = window.is_minimized();
@@ -3035,13 +3037,25 @@ impl Shell {
         }
         // update fullscreen state to restore to the new workspace
         if let WorkspaceRestoreData::Fullscreen(Some(FullscreenRestoreData {
-            previous_state:
-                FullscreenRestoreState::Tiling { workspace, .. }
-                | FullscreenRestoreState::Floating { workspace, .. },
+            previous_state: previous,
             ..
         })) = &mut window_state
         {
-            *workspace = *to;
+            if to_is_tiling && !from_workspace.tiling_enabled {
+                *previous = FullscreenRestoreState::Tiling {
+                    workspace: *to,
+                    state: TilingRestoreData {
+                        state: None,
+                        was_maximized: previous.was_maximized(),
+                    },
+                };
+            } else {
+                if let FullscreenRestoreState::Tiling { workspace, .. }
+                | FullscreenRestoreState::Floating { workspace, .. } = previous
+                {
+                    *workspace = *to;
+                }
+            }
         }
 
         if is_minimized {
