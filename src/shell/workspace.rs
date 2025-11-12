@@ -253,6 +253,16 @@ pub enum FullscreenRestoreState {
     },
 }
 
+impl FullscreenRestoreState {
+    pub fn was_maximized(&self) -> bool {
+        match self {
+            FullscreenRestoreState::Floating { state, .. }
+            | FullscreenRestoreState::Sticky { state, .. } => state.was_maximized,
+            FullscreenRestoreState::Tiling { state, .. } => state.was_maximized,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum WorkspaceRestoreData {
     Fullscreen(Option<FullscreenRestoreData>),
