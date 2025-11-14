@@ -16,7 +16,6 @@ use crate::{
         handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
         protocols::{
             a11y::A11yState,
-            atspi::AtspiState,
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
             image_capture_source::ImageCaptureSourceState,
@@ -270,9 +269,6 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
-
-    pub atspi_state: AtspiState,
-    pub atspi_ei: crate::wayland::handlers::atspi::AtspiEiState,
 
     #[cfg(feature = "systemd")]
     pub inhibit_lid_fd: Option<OwnedFd>,
@@ -708,9 +704,6 @@ impl State {
 
         let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
 
-        // TODO: Restrict to only specific client?
-        let atspi_state = AtspiState::new::<State, _>(dh, client_has_no_security_context);
-
         State {
             common: Common {
                 config,
@@ -773,9 +766,6 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
-
-                atspi_state,
-                atspi_ei: Default::default(),
 
                 #[cfg(feature = "systemd")]
                 inhibit_lid_fd: None,
