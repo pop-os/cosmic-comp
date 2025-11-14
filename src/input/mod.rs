@@ -1593,9 +1593,6 @@ impl State {
         });
 
         self.common
-            .atspi_ei
-            .input(modifiers, &handle, event.state(), event.time() * 1000);
-        self.common
             .a11y_keyboard_monitor_state
             .key_event(modifiers, &handle, event.state());
 
@@ -1762,12 +1759,7 @@ impl State {
         }
 
         if event.state() == KeyState::Released {
-            let mut removed = self
-                .common
-                .atspi_ei
-                .active_virtual_mods
-                .remove(&event.key_code());
-            removed |= self
+            let removed = self
                 .common
                 .a11y_keyboard_monitor_state
                 .remove_active_virtual_mod(handle.modified_sym());
@@ -1797,27 +1789,20 @@ impl State {
                 );
             }
         } else if event.state() == KeyState::Pressed
-            && (self
+            && self
                 .common
-                .atspi_ei
-                .virtual_mods
-                .contains(&event.key_code())
-                || self
-                    .common
-                    .a11y_keyboard_monitor_state
-                    .has_virtual_mod(handle.modified_sym()))
+                .a11y_keyboard_monitor_state
+                .has_virtual_mod(handle.modified_sym())
         {
-            self.common
-                .atspi_ei
-                .active_virtual_mods
-                .insert(event.key_code());
             self.common
                 .a11y_keyboard_monitor_state
                 .add_active_virtual_mod(handle.modified_sym());
 
             tracing::debug!(
                 "active virtual mods: {:?}",
-                self.common.atspi_ei.active_virtual_mods
+                self.common
+                    .a11y_keyboard_monitor_state
+                    .active_virtual_mods()
             );
             seat.supressed_keys().add(&handle, None);
 
@@ -1848,12 +1833,7 @@ impl State {
             return FilterResult::Intercept(None);
         }
 
-        if self.common.atspi_ei.has_keyboard_grab()
-            || self.common.a11y_keyboard_monitor_state.has_keyboard_grab()
-            || self
-                .common
-                .atspi_ei
-                .has_key_grab(modifiers.serialized.layout_effective, event.key_code())
+        if self.common.a11y_keyboard_monitor_state.has_keyboard_grab()
             || self
                 .common
                 .a11y_keyboard_monitor_state
