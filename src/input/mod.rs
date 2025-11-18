@@ -1056,10 +1056,12 @@ impl State {
                         }
 
                         match gesture_state.action {
-                            Some(SwipeAction::NextWorkspace) | Some(SwipeAction::PrevWorkspace) => {
+                            Some(x @ SwipeAction::NextWorkspace)
+                            | Some(x @ SwipeAction::PrevWorkspace) => {
                                 self.common.shell.write().update_workspace_delta(
                                     &seat.active_output(),
                                     gesture_state.delta,
+                                    matches!(x, SwipeAction::NextWorkspace),
                                 )
                             }
                             _ => {}

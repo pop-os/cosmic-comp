@@ -146,21 +146,32 @@ fn render_input_order_internal<R: 'static>(
             };
             let has_fullscreen = workspace.fullscreen.is_some();
 
-            let percentage = match start {
-                WorkspaceDelta::Shortcut(st) => ease(
-                    EaseInOutCubic,
-                    0.0,
-                    1.0,
-                    Instant::now().duration_since(*st).as_millis() as f32
-                        / ANIMATION_DURATION.as_millis() as f32,
+            let (forward, percentage) = match start {
+                WorkspaceDelta::Shortcut(st) => (
+                    *previous_idx < current.1,
+                    ease(
+                        EaseInOutCubic,
+                        0.0,
+                        1.0,
+                        Instant::now().duration_since(*st).as_millis() as f32
+                            / ANIMATION_DURATION.as_millis() as f32,
+                    ),
                 ),
-                WorkspaceDelta::Gesture(prog) => *prog as f32,
-                WorkspaceDelta::GestureEnd(st, spring) => {
-                    (spring.value_at(Instant::now().duration_since(*st)) as f32).clamp(0.0, 1.0)
-                }
+                WorkspaceDelta::Gesture {
+                    percentage: prog,
+                    forward,
+                } => (*forward, *prog as f32),
+                WorkspaceDelta::GestureEnd {
+                    start,
+                    spring,
+                    forward,
+                } => (
+                    *forward,
+                    (spring.value_at(Instant::now().duration_since(*start)) as f32).clamp(0.0, 1.0),
+                ),
             };
 
-            let offset = Point::<i32, Logical>::from(match (layout, *previous_idx < current.1) {
+            let offset = Point::<i32, Logical>::from(match (layout, forward) {
                 (WorkspaceLayout::Vertical, true) => {
                     (0, (-output_size.h as f32 * percentage).round() as i32)
                 }
@@ -177,7 +188,7 @@ fn render_input_order_internal<R: 'static>(
 
             (
                 Some((previous, has_fullscreen, offset)),
-                Point::<i32, Logical>::from(match (layout, *previous_idx < current.1) {
+                Point::<i32, Logical>::from(match (layout, forward) {
                     (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
                     (WorkspaceLayout::Vertical, false) => (0, -(output_size.h - offset.y)),
                     (WorkspaceLayout::Horizontal, true) => (output_size.w + offset.x, 0),
