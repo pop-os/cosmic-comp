@@ -1,4 +1,6 @@
-use crate::wayland::protocols::corner_radius::CacheableCorners;
+use crate::{
+    shell::focus::target::PointerFocusTarget, wayland::protocols::corner_radius::CacheableCorners,
+};
 use std::{
     borrow::Cow,
     sync::{
@@ -617,6 +619,38 @@ impl CosmicSurface {
             PopupManager::popups_for_surface(&toplevel).any(|(p, _)| p.wl_surface() == surface)
         } else {
             false
+        }
+    }
+
+    pub fn focus_under(
+        &self,
+        relative_pos: Point<f64, Logical>,
+        surface_type: WindowSurfaceType,
+    ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
+        if let Some(xsurface) = self.x11_surface() {
+            xsurface
+                .surface_under(relative_pos, Point::default(), surface_type)
+                .map(|(_surface, surface_offset)| {
+                    (
+                        PointerFocusTarget::X11Surface {
+                            surface: xsurface.clone(),
+                            toplevel: Some(self.clone()),
+                        },
+                        surface_offset.to_f64(),
+                    )
+                })
+        } else {
+            self.0
+                .surface_under(relative_pos, surface_type)
+                .map(|(surface, surface_offset)| {
+                    (
+                        PointerFocusTarget::WlSurface {
+                            surface,
+                            toplevel: Some(self.clone().into()),
+                        },
+                        surface_offset.to_f64(),
+                    )
+                })
         }
     }
 
