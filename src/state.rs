@@ -19,6 +19,7 @@ use crate::{
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
             image_capture_source::ImageCaptureSourceState,
+            keyboard_layout::KeyboardLayoutState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
@@ -253,6 +254,7 @@ pub struct Common {
     pub xdg_decoration_state: XdgDecorationState,
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
+    pub keyboard_layout_state: KeyboardLayoutState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -649,6 +651,7 @@ impl State {
         VirtualKeyboardManagerState::new::<State, _>(dh, client_not_sandboxed);
         AlphaModifierState::new::<Self>(dh);
         SinglePixelBufferState::new::<Self>(dh);
+        let keyboard_layout_state = KeyboardLayoutState::new::<State, _>(&dh, client_not_sandboxed);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
@@ -763,6 +766,7 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+                keyboard_layout_state,
 
                 atspi_state,
                 atspi_ei: Default::default(),
