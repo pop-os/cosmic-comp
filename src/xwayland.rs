@@ -635,7 +635,11 @@ impl Common {
 
                 // update xorg dpi
                 if let Some(xwm) = xwayland.xwm.as_mut() {
-                    let dpi = new_scale * 96. * 1024.;
+                    let base = 96. * 1024.;
+                    let dpi = new_scale * base;
+                    let fractional = new_scale.fract();
+                    let integer = (new_scale - fractional).max(1.0);
+                    let unscaled_dpi = base * (1.0 + fractional / integer);
                     if let Err(err) = xwm.set_xsettings(
                         [
                             ("Xft/DPI".into(), (dpi.round() as i32).into()),
@@ -645,7 +649,7 @@ impl Common {
                             ),
                             (
                                 "Gdk/UnscaledDPI".into(),
-                                ((dpi / new_scale).round() as i32).into(),
+                                (unscaled_dpi.round() as i32).into(),
                             ),
                             (
                                 "Gdk/WindowScalingFactor".into(),
