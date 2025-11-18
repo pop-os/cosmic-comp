@@ -1108,18 +1108,21 @@ fn to_next_workspace(
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
 ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
-    let workspace = shell
-        .workspaces
-        .active_num(&current_output)
-        .1
-        .checked_add(1)
-        .ok_or(InvalidWorkspaceIndex)?;
+    let active = shell.workspaces.active_num(&current_output).1;
+    let mut workspace = active.checked_add(1).ok_or(InvalidWorkspaceIndex)?;
+
+    if workspace >= shell.workspaces.len(&current_output) {
+        workspace = 0;
+    }
+    if workspace == active {
+        return Err(InvalidWorkspaceIndex);
+    }
 
     shell.activate(
         &current_output,
         workspace,
         if gesture {
-            WorkspaceDelta::new_gesture()
+            WorkspaceDelta::new_gesture(true)
         } else {
             WorkspaceDelta::new_shortcut()
         },
@@ -1134,18 +1137,24 @@ fn to_previous_workspace(
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
 ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
-    let workspace = shell
-        .workspaces
-        .active_num(&current_output)
-        .1
-        .checked_sub(1)
-        .ok_or(InvalidWorkspaceIndex)?;
+    let active = shell.workspaces.active_num(&current_output).1;
+    let workspace = active.checked_sub(1).unwrap_or(
+        shell
+            .workspaces
+            .len(&current_output)
+            .checked_sub(1)
+            .ok_or(InvalidWorkspaceIndex)?,
+    );
+
+    if workspace == active {
+        return Err(InvalidWorkspaceIndex);
+    }
 
     shell.activate(
         &current_output,
         workspace,
         if gesture {
-            WorkspaceDelta::new_gesture()
+            WorkspaceDelta::new_gesture(false)
         } else {
             WorkspaceDelta::new_shortcut()
         },

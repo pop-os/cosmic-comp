@@ -301,28 +301,39 @@ pub struct SessionLock {
 #[derive(Debug, Clone, Copy)]
 pub enum WorkspaceDelta {
     Shortcut(Instant),
-    Gesture(f64),
-    GestureEnd(Instant, Spring),
+    Gesture {
+        percentage: f64,
+        forward: bool,
+    },
+    GestureEnd {
+        start: Instant,
+        spring: Spring,
+        forward: bool,
+    },
     // InvalidGesture(f64), TODO
     // InvalidGestureEnd(Instant, Spring), TODO
 }
 
 impl WorkspaceDelta {
-    pub fn new_gesture() -> Self {
-        WorkspaceDelta::Gesture(0.0)
+    pub fn new_gesture(forward: bool) -> Self {
+        WorkspaceDelta::Gesture {
+            percentage: 0.0,
+            forward,
+        }
     }
 
-    pub fn new_gesture_end(delta: f64, velocity: f64) -> Self {
+    pub fn new_gesture_end(delta: f64, velocity: f64, forward: bool) -> Self {
         let params: SpringParams = SpringParams::new(1.0, 1000.0, 0.0001);
-        WorkspaceDelta::GestureEnd(
-            Instant::now(),
-            Spring {
+        WorkspaceDelta::GestureEnd {
+            start: Instant::now(),
+            forward,
+            spring: Spring {
                 from: delta,
                 to: 1.0,
                 initial_velocity: velocity,
                 params,
             },
-        )
+        }
     }
 
     pub fn new_shortcut() -> Self {
@@ -332,7 +343,7 @@ impl WorkspaceDelta {
     pub fn is_animating(&self) -> bool {
         matches!(
             self,
-            WorkspaceDelta::Shortcut(_) | WorkspaceDelta::GestureEnd(_, _)
+            WorkspaceDelta::Shortcut(_) | WorkspaceDelta::GestureEnd { .. }
         )
     }
 }
@@ -497,8 +508,8 @@ impl WorkspaceSet {
         } else {
             // snap to workspace, when in between workspaces due to swipe gesture
             if let Some((p_idx, p_delta)) = self.previously_active {
-                if matches!(p_delta, WorkspaceDelta::Gesture(..))
-                    && matches!(workspace_delta, WorkspaceDelta::GestureEnd(..))
+                if matches!(p_delta, WorkspaceDelta::Gesture { .. })
+                    && matches!(workspace_delta, WorkspaceDelta::GestureEnd { .. })
                 {
                     self.previously_active = Some((p_idx, workspace_delta));
                 } else {
@@ -521,10 +532,16 @@ impl WorkspaceSet {
         Err(InvalidWorkspaceIndex)
     }
 
-    fn update_workspace_delta(&mut self, delta: f64) {
+    fn update_workspace_delta(&mut self, delta: f64, forward: bool) {
         let easing = delta.clamp(0.0, GESTURE_MAX_LENGTH).abs() / GESTURE_MAX_LENGTH;
         if let Some((idx, _)) = self.previously_active {
-            self.previously_active = Some((idx, WorkspaceDelta::Gesture(easing)));
+            self.previously_active = Some((
+                idx,
+                WorkspaceDelta::Gesture {
+                    percentage: easing,
+                    forward,
+                },
+            ));
         }
     }
 
@@ -550,8 +567,9 @@ impl WorkspaceSet {
                         self.previously_active = None;
                     }
                 }
-                WorkspaceDelta::GestureEnd(st, spring) => {
-                    if Instant::now().duration_since(st).as_millis() > spring.duration().as_millis()
+                WorkspaceDelta::GestureEnd { start, spring, .. } => {
+                    if Instant::now().duration_since(start).as_millis()
+                        > spring.duration().as_millis()
                     {
                         self.previously_active = None;
                     }
@@ -1576,16 +1594,16 @@ impl Shell {
         }
     }
 
-    pub fn update_workspace_delta(&mut self, output: &Output, delta: f64) {
+    pub fn update_workspace_delta(&mut self, output: &Output, delta: f64, forward: bool) {
         match &mut self.workspaces.mode {
             WorkspaceMode::OutputBound => {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
-                    set.update_workspace_delta(delta);
+                    set.update_workspace_delta(delta, forward);
                 }
             }
             WorkspaceMode::Global => {
                 for set in self.workspaces.sets.values_mut() {
-                    set.update_workspace_delta(delta);
+                    set.update_workspace_delta(delta, forward);
                 }
             }
         }
@@ -1606,19 +1624,34 @@ impl Shell {
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
-                    if let Some((_, WorkspaceDelta::Gesture(delta))) = set.previously_active {
+                    if let Some((
+                        _,
+                        WorkspaceDelta::Gesture {
+                            percentage: delta,
+                            forward,
+                        },
+                    )) = set.previously_active
+                    {
                         if (velocity > 0.0 && velocity.abs() >= GESTURE_VELOCITY_THRESHOLD)
                             || (velocity.abs() < GESTURE_VELOCITY_THRESHOLD
                                 && delta.abs() > GESTURE_POSITION_THRESHOLD)
                         {
                             set.activate(
                                 set.active,
-                                WorkspaceDelta::new_gesture_end(delta.abs(), velocity.abs()),
+                                WorkspaceDelta::new_gesture_end(
+                                    delta.abs(),
+                                    velocity.abs(),
+                                    forward,
+                                ),
                                 workspace_state,
                             )?;
                         } else {
                             set.activate_previous(
-                                WorkspaceDelta::new_gesture_end(1.0 - delta.abs(), velocity.abs()),
+                                WorkspaceDelta::new_gesture_end(
+                                    1.0 - delta.abs(),
+                                    velocity.abs(),
+                                    !forward,
+                                ),
                                 workspace_state,
                             )?;
                         }
@@ -1635,19 +1668,34 @@ impl Shell {
             }
             WorkspaceMode::Global => {
                 for set in self.workspaces.sets.values_mut() {
-                    if let Some((_, WorkspaceDelta::Gesture(delta))) = set.previously_active {
+                    if let Some((
+                        _,
+                        WorkspaceDelta::Gesture {
+                            percentage: delta,
+                            forward,
+                        },
+                    )) = set.previously_active
+                    {
                         if (velocity > 0.0 && velocity.abs() >= GESTURE_VELOCITY_THRESHOLD)
                             || (velocity.abs() < GESTURE_VELOCITY_THRESHOLD
                                 && delta.abs() > GESTURE_POSITION_THRESHOLD)
                         {
                             set.activate(
                                 set.active,
-                                WorkspaceDelta::new_gesture_end(delta.abs(), velocity.abs()),
+                                WorkspaceDelta::new_gesture_end(
+                                    delta.abs(),
+                                    velocity.abs(),
+                                    forward,
+                                ),
                                 workspace_state,
                             )?;
                         } else {
                             set.activate_previous(
-                                WorkspaceDelta::new_gesture_end(1.0 - delta.abs(), velocity.abs()),
+                                WorkspaceDelta::new_gesture_end(
+                                    1.0 - delta.abs(),
+                                    velocity.abs(),
+                                    !forward,
+                                ),
                                 workspace_state,
                             )?;
                         }
