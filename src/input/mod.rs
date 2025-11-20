@@ -1833,12 +1833,14 @@ impl State {
             return FilterResult::Intercept(None);
         }
 
-        if self.common.a11y_keyboard_monitor_state.has_keyboard_grab()
-            || self
-                .common
-                .a11y_keyboard_monitor_state
-                .has_key_grab(modifiers, handle.modified_sym())
+        if event.state() == KeyState::Pressed
+            && (self.common.a11y_keyboard_monitor_state.has_keyboard_grab()
+                || self
+                    .common
+                    .a11y_keyboard_monitor_state
+                    .has_key_grab(modifiers, handle.modified_sym()))
         {
+            seat.supressed_keys().add(&handle, None);
             return FilterResult::Intercept(None);
         }
 
