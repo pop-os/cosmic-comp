@@ -23,6 +23,6 @@ window-menu-sticky = نافذة ثابتة
 window-menu-close = إغلاق
 window-menu-close-all = إغلاق جميع النوافذ
 window-menu-resize-edge-top = الأعلى
-window-menu-resize-edge-left = اليسار
+window-menu-resize-edge-left = الشمال
 window-menu-resize-edge-right = اليمين
 window-menu-resize-edge-bottom = الأسفل
