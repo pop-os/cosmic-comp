@@ -6,9 +6,19 @@ use smithay::{desktop::layer_map_for_output, output::Output};
 // TODO: Avoid special case, or add protocol to expose required behavior
 pub const WORKSPACE_OVERVIEW_NAMESPACE: &str = "cosmic-workspace-overview";
 
+/// Layer shell namespace used by `cosmic-applibrary`
+pub const APP_LIBRARY_NAMESPACE: &str = "app-library";
+
 /// Check if a workspace overview shell surface is open on the output
 pub fn workspace_overview_is_open(output: &Output) -> bool {
     layer_map_for_output(output)
         .layers()
         .any(|s| s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
+}
+
+/// Check if an app library shell surface is open on the output
+pub fn app_library_is_open(output: &Output) -> bool {
+    layer_map_for_output(output)
+        .layers()
+        .any(|s| s.namespace() == APP_LIBRARY_NAMESPACE)
 }
