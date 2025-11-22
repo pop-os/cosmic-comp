@@ -82,11 +82,12 @@ zbus = "5.12.0"
 profiling = { version = "1.0" }
 rustix = { version = "1.1.2", features = ["process"] }
 rand = "0.9.2"
-reis = { version = "0.5", features = ["calloop"] }
 # CLI arguments
 clap_lex = "0.7"
 parking_lot = "0.12.5"
 logind-zbus = { version = "5.3.2", optional = true }
+futures-executor = { version = "0.3.31", features = ["thread-pool"] }
+futures-util = "0.3.31"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
