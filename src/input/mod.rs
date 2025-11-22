@@ -1840,6 +1840,8 @@ impl State {
                     .a11y_keyboard_monitor_state
                     .has_key_grab(modifiers, handle.modified_sym()))
         {
+            let modifiers_queue = seat.modifiers_shortcut_queue();
+            modifiers_queue.clear();
             seat.supressed_keys().add(&handle, None);
             return FilterResult::Intercept(None);
         }
