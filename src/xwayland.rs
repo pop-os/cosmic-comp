@@ -1110,6 +1110,18 @@ impl XwmHandler for State {
         }
     }
 
+    fn active_window_request(
+        &mut self,
+        _xwm: XwmId,
+        window: X11Surface,
+        _timestamp: u32,
+        _currently_active_window: Option<X11Surface>,
+    ) {
+        if let Some(surface) = window.wl_surface() {
+            self.activate_surface(&surface, None);
+        }
+    }
+
     fn send_selection(
         &mut self,
         _xwm: XwmId,
