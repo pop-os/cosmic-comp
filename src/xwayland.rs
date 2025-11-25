@@ -3,7 +3,8 @@ use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
 use crate::{
     backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
     shell::{
-        CosmicSurface, PendingWindow, Shell, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
+        CosmicSurface, PendingWindow, Shell, WorkspaceDelta, focus::target::KeyboardFocusTarget,
+        grabs::ReleaseMode,
     },
     state::State,
     utils::prelude::*,
@@ -1107,6 +1108,128 @@ impl XwmHandler for State {
             .find(|pending| pending.surface.x11_surface() == Some(&window))
         {
             pending.fullscreen.take();
+        }
+    }
+
+    fn active_window_request(
+        &mut self,
+        _xwm: XwmId,
+        window: X11Surface,
+        _timestamp: u32,
+        _currently_active_window: Option<X11Surface>,
+    ) {
+        let Some(surface) = window.wl_surface() else {
+            return;
+        };
+
+        let mut shell = self.common.shell.write();
+
+        let seat = shell.seats.last_active().clone();
+        let current_output = seat.active_output();
+
+        if let Some(element) = shell.element_for_surface(&surface).cloned() {
+            if element.is_minimized() {
+                shell.unminimize_request(&surface, &seat, &self.common.event_loop_handle);
+            }
+
+            let Some((element_output, element_workspace)) = shell
+                .space_for(&element)
+                .map(|w| (w.output.clone(), w.handle))
+            else {
+                return;
+            };
+            let in_current_workspace =
+                element_workspace == shell.active_space(&current_output).unwrap().handle;
+
+            if !in_current_workspace {
+                let Some(idx) = shell
+                    .workspaces
+                    .idx_for_handle(&element_output, &element_workspace)
+                else {
+                    warn!("Couldn't determine idx for elements workspace?");
+                    return;
+                };
+
+                if let Err(err) = shell.activate(
+                    &element_output,
+                    idx,
+                    WorkspaceDelta::new_shortcut(),
+                    &mut self.common.workspace_state.update(),
+                ) {
+                    warn!("Failed to activate the workspace: {err:?}");
+                }
+            }
+
+            let current_workspace = shell.active_space_mut(&current_output).unwrap();
+            current_workspace
+                .floating_layer
+                .space
+                .raise_element(&element, true);
+            if element.is_stack() {
+                if let Some((window, _)) = element.windows().find(|(window, _)| {
+                    let mut found = false;
+                    window.with_surfaces(|wl_surface, _| {
+                        if wl_surface == &surface {
+                            found = true;
+                        }
+                    });
+                    found
+                }) {
+                    element.set_active(&window);
+                } else {
+                    warn!("Failed to find activated window in the stack");
+                    return;
+                }
+            }
+
+            if seat.get_keyboard().unwrap().current_focus() != Some(element.clone().into())
+                && current_workspace.is_tiled(&surface)
+            {
+                for mapped in current_workspace
+                    .mapped()
+                    .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                {
+                    current_workspace.unmaximize_request(&mapped);
+                }
+            }
+
+            std::mem::drop(shell);
+            Shell::set_focus(
+                self,
+                Some(&KeyboardFocusTarget::Element(element.clone())),
+                &seat,
+                None,
+                false,
+            );
+        } else if let Some((workspace, _)) = shell.workspace_for_surface(&surface) {
+            let current_workspace = shell.active_space(&current_output).unwrap();
+            if workspace == current_workspace.handle {
+                let Some(target) = shell
+                    .workspaces
+                    .space_for_handle(&workspace)
+                    .unwrap()
+                    .get_fullscreen()
+                    .cloned()
+                    .map(KeyboardFocusTarget::Fullscreen)
+                else {
+                    return;
+                };
+
+                std::mem::drop(shell);
+                Shell::set_focus(self, Some(&target), &seat, None, false);
+            } else {
+                if let Some(surface) = shell
+                    .workspaces
+                    .space_for_handle(&workspace)
+                    .and_then(|w| w.get_fullscreen())
+                    .cloned()
+                {
+                    shell.append_focus_stack(surface, &seat)
+                }
+            }
         }
     }
 
