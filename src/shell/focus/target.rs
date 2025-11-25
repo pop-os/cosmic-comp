@@ -1,4 +1,8 @@
-use std::{borrow::Cow, sync::Weak, time::Duration};
+use std::{
+    borrow::Cow,
+    sync::{Arc, Weak},
+    time::Duration,
+};
 
 use crate::{
     shell::{
@@ -16,6 +20,7 @@ use smithay::{
     desktop::{LayerSurface, PopupKind, WindowSurface, WindowSurfaceType, space::SpaceElement},
     input::{
         Seat,
+        dnd::{DndFocus, OfferData, Source},
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -29,11 +34,14 @@ use smithay::{
         },
     },
     reexports::wayland_server::{
-        Client, Resource, backend::ObjectId, protocol::wl_surface::WlSurface,
+        Client, DisplayHandle, Resource, backend::ObjectId, protocol::wl_surface::WlSurface,
     },
     utils::{IsAlive, Logical, Point, Serial, Transform},
-    wayland::{seat::WaylandFocus, session_lock::LockSurface},
-    xwayland::{X11Surface, xwm::XwmId},
+    wayland::{seat::WaylandFocus, selection::data_device::WlOfferData, session_lock::LockSurface},
+    xwayland::{
+        X11Surface,
+        xwm::{XwmId, XwmOfferData},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +49,10 @@ pub enum PointerFocusTarget {
     WlSurface {
         surface: WlSurface,
         toplevel: Option<PointerFocusToplevel>,
+    },
+    X11Surface {
+        surface: X11Surface,
+        toplevel: Option<CosmicSurface>,
     },
     StackUI(CosmicStack),
     WindowUI(CosmicWindow),
@@ -82,16 +94,32 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
         match target {
             KeyboardFocusTarget::Element(elem) => {
                 let window = elem.active_window();
-                let surface = window.wl_surface().unwrap();
-                PointerFocusTarget::WlSurface {
-                    surface: surface.into_owned(),
-                    toplevel: Some(window.into()),
+
+                if let Some(xsurface) = window.x11_surface() {
+                    PointerFocusTarget::X11Surface {
+                        surface: xsurface.clone(),
+                        toplevel: Some(window),
+                    }
+                } else {
+                    PointerFocusTarget::WlSurface {
+                        surface: window.wl_surface().unwrap().into_owned(),
+                        toplevel: Some(window.into()),
+                    }
                 }
             }
-            KeyboardFocusTarget::Fullscreen(elem) => PointerFocusTarget::WlSurface {
-                surface: elem.wl_surface().unwrap().into_owned(),
-                toplevel: Some(elem.into()),
-            },
+            KeyboardFocusTarget::Fullscreen(elem) => {
+                if let Some(xsurface) = elem.x11_surface() {
+                    PointerFocusTarget::X11Surface {
+                        surface: xsurface.clone(),
+                        toplevel: Some(elem),
+                    }
+                } else {
+                    PointerFocusTarget::WlSurface {
+                        surface: elem.wl_surface().unwrap().into_owned(),
+                        toplevel: Some(elem.into()),
+                    }
+                }
+            }
             KeyboardFocusTarget::LayerSurface(layer) => PointerFocusTarget::WlSurface {
                 surface: layer.wl_surface().clone(),
                 toplevel: None,
@@ -113,6 +141,7 @@ impl PointerFocusTarget {
     fn inner_pointer_target(&self) -> &dyn PointerTarget<State> {
         match self {
             PointerFocusTarget::WlSurface { surface, .. } => surface,
+            PointerFocusTarget::X11Surface { surface, .. } => surface,
             PointerFocusTarget::StackUI(u) => u,
             PointerFocusTarget::WindowUI(u) => u,
             PointerFocusTarget::ResizeFork(f) => f,
@@ -123,6 +152,7 @@ impl PointerFocusTarget {
     fn inner_touch_target(&self) -> &dyn TouchTarget<State> {
         match self {
             PointerFocusTarget::WlSurface { surface, .. } => surface,
+            PointerFocusTarget::X11Surface { surface, .. } => surface,
             PointerFocusTarget::StackUI(u) => u,
             PointerFocusTarget::WindowUI(u) => u,
             PointerFocusTarget::ResizeFork(f) => f,
@@ -148,9 +178,9 @@ impl PointerFocusTarget {
                     )
                 }),
             WindowSurface::X11(x11_surface) => Some((
-                Self::WlSurface {
-                    surface: x11_surface.wl_surface()?,
-                    toplevel: Some(surface.clone().into()),
+                Self::X11Surface {
+                    surface: x11_surface.clone(),
+                    toplevel: Some(surface.clone()),
                 },
                 Point::default(),
             )),
@@ -173,6 +203,10 @@ impl PointerFocusTarget {
                         .find(|(w, _)| w.wl_surface().map(|s2| s == *s2).unwrap_or(false))
                         .map(|(s, _)| s)
                 }),
+            PointerFocusTarget::X11Surface {
+                toplevel: Some(surface),
+                ..
+            } => Some(surface.clone()),
             PointerFocusTarget::StackUI(stack) => Some(stack.active()),
             PointerFocusTarget::WindowUI(window) => Some(window.surface()),
             _ => None,
@@ -184,6 +218,9 @@ impl PointerFocusTarget {
             PointerFocusTarget::WlSurface { surface, .. } => {
                 surface.client().is_some_and(|c| c == *client)
             }
+            PointerFocusTarget::X11Surface { surface, .. } => surface
+                .wl_surface()
+                .is_some_and(|s| s.client().is_some_and(|c| c == *client)),
             _ => false,
         }
     }
@@ -263,6 +300,7 @@ impl IsAlive for PointerFocusTarget {
         match self {
             // XXX? does this change anything
             PointerFocusTarget::WlSurface { surface, .. } => surface.alive(),
+            PointerFocusTarget::X11Surface { surface, .. } => surface.alive(),
             PointerFocusTarget::StackUI(e) => e.alive(),
             PointerFocusTarget::WindowUI(e) => e.alive(),
             PointerFocusTarget::ResizeFork(f) => f.alive(),
@@ -459,6 +497,146 @@ impl TouchTarget<State> for PointerFocusTarget {
     }
 }
 
+pub enum CosmicOfferData<S: Source> {
+    Wl(WlOfferData<S>),
+    X11(XwmOfferData<S>),
+}
+
+impl<S: Source> OfferData for CosmicOfferData<S> {
+    fn disable(&self) {
+        match self {
+            CosmicOfferData::Wl(data) => data.disable(),
+            CosmicOfferData::X11(data) => data.disable(),
+        }
+    }
+
+    fn drop(&self) {
+        match self {
+            CosmicOfferData::Wl(data) => data.drop(),
+            CosmicOfferData::X11(data) => data.drop(),
+        }
+    }
+
+    fn validated(&self) -> bool {
+        match self {
+            CosmicOfferData::Wl(data) => data.validated(),
+            CosmicOfferData::X11(data) => data.validated(),
+        }
+    }
+}
+
+impl DndFocus<State> for PointerFocusTarget {
+    type OfferData<S>
+        = CosmicOfferData<S>
+    where
+        S: Source;
+
+    fn enter<S: Source>(
+        &self,
+        data: &mut State,
+        dh: &DisplayHandle,
+        source: Arc<S>,
+        seat: &Seat<State>,
+        location: Point<f64, Logical>,
+        serial: &Serial,
+    ) -> Option<CosmicOfferData<S>> {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                DndFocus::enter(surface, data, dh, source, seat, location, serial)
+                    .map(CosmicOfferData::Wl)
+            }
+            PointerFocusTarget::X11Surface { surface, .. } => {
+                DndFocus::enter(surface, data, dh, source, seat, location, serial)
+                    .map(CosmicOfferData::X11)
+            }
+            _ => None,
+        }
+    }
+
+    fn motion<S: Source>(
+        &self,
+        data: &mut State,
+        offer: Option<&mut CosmicOfferData<S>>,
+        seat: &Seat<State>,
+        location: Point<f64, Logical>,
+        time: u32,
+    ) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                let offer = match offer {
+                    Some(CosmicOfferData::Wl(offer)) => Some(offer),
+                    None => None,
+                    _ => return,
+                };
+                DndFocus::motion(surface, data, offer, seat, location, time)
+            }
+            PointerFocusTarget::X11Surface { surface, .. } => {
+                let offer = match offer {
+                    Some(CosmicOfferData::X11(offer)) => Some(offer),
+                    None => None,
+                    _ => return,
+                };
+                DndFocus::motion(surface, data, offer, seat, location, time)
+            }
+            _ => {}
+        }
+    }
+
+    fn leave<S: Source>(
+        &self,
+        data: &mut State,
+        offer: Option<&mut CosmicOfferData<S>>,
+        seat: &Seat<State>,
+    ) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                let offer = match offer {
+                    Some(CosmicOfferData::Wl(offer)) => Some(offer),
+                    None => None,
+                    _ => return,
+                };
+                DndFocus::leave(surface, data, offer, seat)
+            }
+            PointerFocusTarget::X11Surface { surface, .. } => {
+                let offer = match offer {
+                    Some(CosmicOfferData::X11(offer)) => Some(offer),
+                    None => None,
+                    _ => return,
+                };
+                DndFocus::leave(surface, data, offer, seat)
+            }
+            _ => {}
+        }
+    }
+
+    fn drop<S: Source>(
+        &self,
+        data: &mut State,
+        offer: Option<&mut CosmicOfferData<S>>,
+        seat: &Seat<State>,
+    ) {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => {
+                let offer = match offer {
+                    Some(CosmicOfferData::Wl(offer)) => Some(offer),
+                    None => None,
+                    _ => return,
+                };
+                DndFocus::drop(surface, data, offer, seat)
+            }
+            PointerFocusTarget::X11Surface { surface, .. } => {
+                let offer = match offer {
+                    Some(CosmicOfferData::X11(offer)) => Some(offer),
+                    None => None,
+                    _ => return,
+                };
+                DndFocus::drop(surface, data, offer, seat)
+            }
+            _ => {}
+        }
+    }
+}
+
 impl KeyboardTarget<State> for KeyboardFocusTarget {
     fn enter(
         &self,
@@ -550,6 +728,7 @@ impl WaylandFocus for PointerFocusTarget {
     fn wl_surface(&self) -> Option<Cow<'_, WlSurface>> {
         Some(match self {
             PointerFocusTarget::WlSurface { surface, .. } => Cow::Borrowed(surface),
+            PointerFocusTarget::X11Surface { surface, .. } => Cow::Owned(surface.wl_surface()?),
             PointerFocusTarget::ResizeFork(_)
             | PointerFocusTarget::StackUI(_)
             | PointerFocusTarget::WindowUI(_)
@@ -561,15 +740,16 @@ impl WaylandFocus for PointerFocusTarget {
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
         match self {
             PointerFocusTarget::WlSurface { surface, .. } => surface.id().same_client_as(object_id),
+            PointerFocusTarget::X11Surface { surface, .. } => surface
+                .wl_surface()
+                .is_some_and(|s| s.id().same_client_as(object_id)),
             PointerFocusTarget::StackUI(stack) => stack
                 .active()
                 .wl_surface()
-                .map(|s| s.id().same_client_as(object_id))
-                .unwrap_or(false),
+                .is_some_and(|s| s.id().same_client_as(object_id)),
             PointerFocusTarget::WindowUI(window) => window
                 .wl_surface()
-                .map(|s| s.id().same_client_as(object_id))
-                .unwrap_or(false),
+                .is_some_and(|s| s.id().same_client_as(object_id)),
             PointerFocusTarget::ResizeFork(_) | PointerFocusTarget::ZoomUI(_) => false,
         }
     }
