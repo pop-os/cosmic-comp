@@ -29,7 +29,7 @@ use super::{SeatExt, grabs::SeatMoveGrabState, layout::floating::FloatingLayout}
 mod order;
 pub mod target;
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FocusTarget {
     Window(CosmicMapped),
     Fullscreen(CosmicSurface),
@@ -56,6 +56,15 @@ impl indexmap::Equivalent<FocusTarget> for CosmicMapped {
 impl indexmap::Equivalent<FocusTarget> for CosmicSurface {
     fn equivalent(&self, key: &FocusTarget) -> bool {
         key == self
+    }
+}
+
+impl Hash for FocusTarget {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            FocusTarget::Window(window) => window.hash(state),
+            FocusTarget::Fullscreen(surface) => surface.hash(state),
+        }
     }
 }
 
