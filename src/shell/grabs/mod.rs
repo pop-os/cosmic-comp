@@ -1,6 +1,8 @@
+use calloop::LoopHandle;
 use cosmic_settings_config::shortcuts;
 use smithay::{
     input::{
+        Seat,
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -13,12 +15,20 @@ use smithay::{
             OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, UpEvent,
         },
     },
-    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
+    output::Output,
+    reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::protocol::wl_surface::WlSurface,
+    },
     utils::{Logical, Point, Serial},
     xwayland::xwm,
 };
 
-use crate::state::State;
+use crate::{
+    shell::{CosmicMapped, ManagedLayer},
+    state::State,
+    utils::prelude::Global,
+};
 
 use super::{
     focus::target::PointerFocusTarget,
@@ -59,6 +69,13 @@ impl GrabStartData {
             Self::Pointer(pointer) => pointer.location = location,
         }
     }
+
+    pub fn distance(&self, cursor_location: Point<f64, Logical>) -> f64 {
+        let old = self.location();
+        let new = cursor_location;
+
+        ((new.x - old.x).powi(2) + (new.y - old.y).powi(2)).sqrt()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,7 +87,8 @@ pub enum ReleaseMode {
 mod menu;
 pub use self::menu::*;
 mod moving;
-pub use self::moving::*;
+pub use self::moving::SeatMoveGrabState;
+mod delay;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -455,6 +473,348 @@ impl TouchGrab<State> for ResizeGrab {
         match self {
             ResizeGrab::Floating(grab) => TouchGrab::unset(grab, data),
             ResizeGrab::Tiling(grab) => TouchGrab::unset(grab, data),
+        }
+    }
+}
+
+pub enum MoveGrab {
+    Move(moving::MoveGrab),
+    Delayed(delay::DelayGrab<MoveGrab>),
+}
+
+impl MoveGrab {
+    pub fn new(
+        start_data: GrabStartData,
+        window: CosmicMapped,
+        seat: &Seat<State>,
+        initial_window_location: Point<i32, Global>,
+        cursor_output: Output,
+        indicator_thickness: u8,
+        edge_snap_threshold: f64,
+        previous_layer: ManagedLayer,
+        release: ReleaseMode,
+        evlh: LoopHandle<'static, State>,
+    ) -> MoveGrab {
+        MoveGrab::Move(moving::MoveGrab::new(
+            start_data,
+            window,
+            seat,
+            initial_window_location,
+            cursor_output,
+            indicator_thickness,
+            edge_snap_threshold,
+            previous_layer,
+            release,
+            evlh,
+        ))
+    }
+
+    pub fn delayed(
+        start_data: GrabStartData,
+        surface: &WlSurface,
+        seat: &Seat<State>,
+        serial: Option<Serial>,
+        release: ReleaseMode,
+        move_out_of_stack: bool,
+    ) -> MoveGrab {
+        let surface = surface.clone();
+        let seat_clone = seat.clone();
+
+        MoveGrab::Delayed(delay::DelayGrab::new(
+            move |data| {
+                data.common.shell.write().move_request(
+                    &surface,
+                    &seat_clone,
+                    serial,
+                    release,
+                    move_out_of_stack,
+                    &data.common.config,
+                    &data.common.event_loop_handle,
+                    false,
+                )
+            },
+            seat.clone(),
+            serial,
+            start_data,
+        ))
+    }
+
+    pub fn is_tiling_grab(&self) -> bool {
+        match self {
+            MoveGrab::Move(m) => m.is_tiling_grab(),
+            _ => false,
+        }
+    }
+
+    pub fn is_touch_grab(&self) -> bool {
+        match self {
+            MoveGrab::Move(m) => m.is_touch_grab(),
+            MoveGrab::Delayed(d) => d.is_touch_grab(),
+        }
+    }
+}
+impl PointerGrab<State> for MoveGrab {
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => PointerGrab::motion(grab, data, handle, focus, event),
+            MoveGrab::Delayed(grab) => PointerGrab::motion(grab, data, handle, focus, event),
+        }
+    }
+
+    fn relative_motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &RelativeMotionEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.relative_motion(data, handle, focus, event),
+            MoveGrab::Delayed(grab) => grab.relative_motion(data, handle, focus, event),
+        }
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &ButtonEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.button(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.button(data, handle, event),
+        }
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        details: AxisFrame,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.axis(data, handle, details),
+            MoveGrab::Delayed(grab) => grab.axis(data, handle, details),
+        }
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
+        match self {
+            MoveGrab::Move(grab) => PointerGrab::frame(grab, data, handle),
+            MoveGrab::Delayed(grab) => PointerGrab::frame(grab, data, handle),
+        }
+    }
+
+    fn gesture_swipe_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeBeginEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.gesture_swipe_begin(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.gesture_swipe_begin(data, handle, event),
+        }
+    }
+
+    fn gesture_swipe_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeUpdateEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.gesture_swipe_update(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.gesture_swipe_update(data, handle, event),
+        }
+    }
+
+    fn gesture_swipe_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureSwipeEndEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.gesture_swipe_end(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.gesture_swipe_end(data, handle, event),
+        }
+    }
+
+    fn gesture_pinch_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchBeginEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.gesture_pinch_begin(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.gesture_pinch_begin(data, handle, event),
+        }
+    }
+
+    fn gesture_pinch_update(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchUpdateEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.gesture_pinch_update(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.gesture_pinch_update(data, handle, event),
+        }
+    }
+
+    fn gesture_pinch_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GesturePinchEndEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.gesture_pinch_end(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.gesture_pinch_end(data, handle, event),
+        }
+    }
+
+    fn gesture_hold_begin(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldBeginEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.gesture_hold_begin(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.gesture_hold_begin(data, handle, event),
+        }
+    }
+
+    fn gesture_hold_end(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &GestureHoldEndEvent,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => grab.gesture_hold_end(data, handle, event),
+            MoveGrab::Delayed(grab) => grab.gesture_hold_end(data, handle, event),
+        }
+    }
+
+    fn start_data(&self) -> &PointerGrabStartData<State> {
+        match self {
+            MoveGrab::Move(grab) => PointerGrab::start_data(grab),
+            MoveGrab::Delayed(grab) => PointerGrab::start_data(grab),
+        }
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        match self {
+            MoveGrab::Move(grab) => PointerGrab::unset(grab, data),
+            MoveGrab::Delayed(grab) => PointerGrab::unset(grab, data),
+        }
+    }
+}
+
+impl TouchGrab<State> for MoveGrab {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &DownEvent,
+        seq: Serial,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+            MoveGrab::Delayed(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+        }
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &UpEvent,
+        seq: Serial,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::up(grab, data, handle, event, seq),
+            MoveGrab::Delayed(grab) => TouchGrab::up(grab, data, handle, event, seq),
+        }
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
+        event: &TouchMotionEvent,
+        seq: Serial,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+            MoveGrab::Delayed(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+        }
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::frame(grab, data, handle, seq),
+            MoveGrab::Delayed(grab) => TouchGrab::frame(grab, data, handle, seq),
+        }
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::cancel(grab, data, handle, seq),
+            MoveGrab::Delayed(grab) => TouchGrab::cancel(grab, data, handle, seq),
+        }
+    }
+
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &ShapeEvent,
+        seq: Serial,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+            MoveGrab::Delayed(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+        }
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &OrientationEvent,
+        seq: Serial,
+    ) {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+            MoveGrab::Delayed(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+        }
+    }
+
+    fn start_data(&self) -> &TouchGrabStartData<State> {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::start_data(grab),
+            MoveGrab::Delayed(grab) => TouchGrab::start_data(grab),
+        }
+    }
+
+    fn unset(&mut self, data: &mut State) {
+        match self {
+            MoveGrab::Move(grab) => TouchGrab::unset(grab, data),
+            MoveGrab::Delayed(grab) => TouchGrab::unset(grab, data),
         }
     }
 }
