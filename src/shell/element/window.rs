@@ -281,17 +281,9 @@ impl CosmicWindow {
             }
 
             window_ui.or_else(|| {
-                p.window.0.surface_under(relative_pos, surface_type).map(
-                    |(surface, surface_offset)| {
-                        (
-                            PointerFocusTarget::WlSurface {
-                                surface,
-                                toplevel: Some(p.window.clone().into()),
-                            },
-                            (offset + surface_offset.to_f64()),
-                        )
-                    },
-                )
+                p.window
+                    .focus_under(relative_pos, surface_type)
+                    .map(|(target, surface_offset)| (target, offset + surface_offset))
             })
         })
     }
