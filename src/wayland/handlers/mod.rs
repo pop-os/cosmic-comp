@@ -46,5 +46,6 @@ pub mod workspace;
 pub mod xdg_activation;
 pub mod xdg_foreign;
 pub mod xdg_shell;
+pub mod xdg_system_bell;
 pub mod xwayland_keyboard_grab;
 pub mod xwayland_shell;
