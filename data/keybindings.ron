@@ -122,4 +122,5 @@
     (modifiers: [], key: "XF86AudioNext"): System(PlayNext),
     (modifiers: [], key: "XF86PowerOff"): System(PowerOff),
     (modifiers: [], key: "XF86TouchpadToggle"): System(TouchpadToggle),
+    (modifiers: [Super, Ctrl], key: "XF86TouchpadToggle"): System(TouchpadToggle),
 }
