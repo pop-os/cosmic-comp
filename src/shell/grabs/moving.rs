@@ -786,6 +786,7 @@ impl Drop for MoveGrab {
         let previous = self.previous;
         let window = self.window.clone();
         let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
+        let cursor_output = self.cursor_output.clone();
 
         let _ = self.evlh.0.insert_idle(move |state| {
             let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) =
@@ -889,6 +890,14 @@ impl Drop for MoveGrab {
                         }
                     }
                 } else {
+                    let mut shell = state.common.shell.write();
+                    shell
+                        .workspaces
+                        .active_mut(&cursor_output)
+                        .unwrap()
+                        .tiling_layer
+                        .cleanup_drag();
+                    shell.set_overview_mode(None, state.common.event_loop_handle.clone());
                     None
                 }
             } else {
