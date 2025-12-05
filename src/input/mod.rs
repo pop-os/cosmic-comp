@@ -926,8 +926,12 @@ impl State {
                             .or_else(|| event.amount(Axis::Vertical))
                             .map(|val| val * scroll_factor)
                         {
-                            let change = -((percentage * self.common.config.cosmic_conf.accessibility_zoom.increment as f64) / 100.);
-                            self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
+                            let change = -((percentage
+                                * self.common.config.cosmic_conf.accessibility_zoom.increment
+                                    as f64)
+                                / 100.);
+                                
+                             self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
                         }
                     } else {
                         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());

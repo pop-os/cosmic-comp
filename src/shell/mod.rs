@@ -2327,7 +2327,7 @@ impl Shell {
         self.update_focal_point(
             seat,
             seat.get_pointer().unwrap().current_location().as_global(),
-            zoom_config.view_moves
+            zoom_config.view_moves,
         );
     }
 
