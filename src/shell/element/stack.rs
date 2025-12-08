@@ -25,6 +25,7 @@ use cosmic::{
     iced_widget::scrollable::AbsoluteOffset,
     theme, widget as cosmic_widget,
 };
+use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts;
 use shortcuts::action::{Direction, FocusDirection};
 use smithay::{
@@ -106,6 +107,7 @@ pub struct CosmicStackInternal {
     override_alive: AtomicBool,
     geometry: Mutex<Option<Rectangle<i32, Global>>>,
     mask: Mutex<Option<tiny_skia::Mask>>,
+    appearance_conf: Mutex<AppearanceConfig>,
 }
 
 impl CosmicStackInternal {
@@ -133,6 +135,7 @@ impl CosmicStack {
         windows: impl Iterator<Item = I>,
         handle: LoopHandle<'static, crate::state::State>,
         theme: cosmic::Theme,
+        appearance: AppearanceConfig,
     ) -> CosmicStack {
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
@@ -159,6 +162,7 @@ impl CosmicStack {
                 override_alive: AtomicBool::new(true),
                 geometry: Mutex::new(None),
                 mask: Mutex::new(None),
+                appearance_conf: Mutex::new(appearance),
             },
             (width, TAB_HEIGHT),
             handle,
@@ -679,6 +683,21 @@ impl CosmicStack {
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
         self.0.set_theme(theme);
+    }
+
+    pub fn update_appearance_conf(&self, appearance: &AppearanceConfig) {
+        if self.0.with_program(|p| {
+            let mut conf = p.appearance_conf.lock().unwrap();
+            if &*conf != appearance {
+                *conf = *appearance;
+                true
+            } else {
+                false
+            }
+        }) {
+            self.0.force_redraw();
+            self.0.force_update();
+        }
     }
 
     pub(crate) fn force_redraw(&self) {
