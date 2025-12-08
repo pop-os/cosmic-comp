@@ -162,6 +162,7 @@ impl PartialEq for CosmicMappedKey {
         }
     }
 }
+impl Eq for CosmicMappedKey {}
 
 impl PartialEq for CosmicMapped {
     fn eq(&self, other: &Self) -> bool {
@@ -311,13 +312,10 @@ impl CosmicMapped {
     }
 
     pub fn set_tiled(&self, tiled: bool) {
-        if let Some(window) = match &self.element {
-            // we use the tiled state of stack windows anyway to get rid of decorations
-            CosmicMappedInternal::Stack(_) => None,
-            CosmicMappedInternal::Window(w) => Some(w.surface()),
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.set_tiled(tiled),
+            CosmicMappedInternal::Window(w) => w.set_tiled(tiled),
             _ => unreachable!(),
-        } {
-            window.set_tiled(tiled)
         }
     }
 
@@ -594,6 +592,34 @@ impl CosmicMapped {
         .collect()
     }
 
+    pub fn shadow_render_element<R, C>(
+        &self,
+        renderer: &mut R,
+        location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        scale: smithay::utils::Scale<f64>,
+        alpha: f32,
+    ) -> Option<C>
+    where
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R::TextureId: Send + Clone + 'static,
+        CosmicMappedRenderElement<R>: RenderElement<R>,
+        C: From<CosmicMappedRenderElement<R>>,
+    {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s
+                .shadow_render_element::<R, CosmicMappedRenderElement<R>>(
+                    renderer, location, scale, alpha,
+                )
+                .map(Into::into),
+            CosmicMappedInternal::Window(w) => w
+                .shadow_render_element::<R, CosmicMappedRenderElement<R>>(
+                    renderer, location, scale, alpha,
+                )
+                .map(Into::into),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn render_elements<R, C>(
         &self,
         renderer: &mut R,
@@ -852,9 +878,7 @@ impl CosmicMapped {
 
     pub fn corner_radius(&self, geometry_size: Size<i32, Logical>, default_radius: u8) -> [u8; 4] {
         match &self.element {
-            CosmicMappedInternal::Window(w) => w
-                .corner_radius(geometry_size)
-                .unwrap_or([default_radius; 4]),
+            CosmicMappedInternal::Window(w) => w.corner_radius(geometry_size, default_radius),
             CosmicMappedInternal::Stack(s) => s.corner_radius(geometry_size, default_radius),
             _ => unreachable!(),
         }
@@ -1018,7 +1042,7 @@ impl From<CosmicStack> for CosmicMapped {
 
 pub enum CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
     R::TextureId: 'static,
 {
     Stack(self::stack::CosmicStackRenderElement<R>),
@@ -1053,7 +1077,7 @@ where
 
 impl<R> Element for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
     R::TextureId: 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
