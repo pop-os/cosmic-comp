@@ -1499,6 +1499,14 @@ impl FloatingLayout {
                 .unwrap_or_else(|| (self.space.element_geometry(elem).unwrap().as_local(), alpha));
 
             let render_location = geometry.loc - elem.geometry().loc.as_local();
+            let shadow_element = elem.shadow_render_element(
+                renderer,
+                render_location
+                    .as_logical()
+                    .to_physical_precise_round(output_scale),
+                output_scale.into(),
+                alpha,
+            );
             let mut window_elements = elem.render_elements(
                 renderer,
                 render_location
@@ -1620,6 +1628,7 @@ impl FloatingLayout {
             }
 
             elements.extend(window_elements);
+            elements.extend(shadow_element.into_iter());
         }
 
         elements
