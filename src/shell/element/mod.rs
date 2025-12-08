@@ -4,6 +4,7 @@ use crate::{
     utils::{iced::IcedElementInternal, prelude::*},
 };
 use calloop::LoopHandle;
+use cosmic_comp_config::AppearanceConfig;
 use id_tree::NodeId;
 use smithay::{
     backend::{
@@ -500,13 +501,14 @@ impl CosmicMapped {
         &mut self,
         (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
+        appearance: AppearanceConfig,
     ) {
         if let CosmicMappedInternal::Window(window) = &self.element {
             let surface = window.surface();
             let activated = surface.is_activated(true);
             let handle = window.loop_handle();
 
-            let stack = CosmicStack::new(std::iter::once(surface), handle, theme);
+            let stack = CosmicStack::new(std::iter::once(surface), handle, theme, appearance);
             if let Some(geo) = *self.last_geometry.lock().unwrap() {
                 stack.set_geometry(geo.to_global(output));
             }
@@ -524,11 +526,12 @@ impl CosmicMapped {
         surface: CosmicSurface,
         (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
+        appearance: AppearanceConfig,
     ) {
         let handle = self.loop_handle();
         surface.try_force_undecorated(false);
         surface.set_tiled(false);
-        let window = CosmicWindow::new(surface, handle, theme);
+        let window = CosmicWindow::new(surface, handle, theme, appearance);
 
         if let Some(geo) = *self.last_geometry.lock().unwrap() {
             window.set_geometry(geo.to_global(output));
@@ -806,6 +809,14 @@ impl CosmicMapped {
         match &self.element {
             CosmicMappedInternal::Window(w) => w.set_theme(theme),
             CosmicMappedInternal::Stack(s) => s.set_theme(theme),
+            CosmicMappedInternal::_GenericCatcher(_) => {}
+        }
+    }
+
+    pub(crate) fn update_appearance_conf(&self, appearance: &AppearanceConfig) {
+        match &self.element {
+            CosmicMappedInternal::Window(w) => w.update_appearance_conf(appearance),
+            CosmicMappedInternal::Stack(s) => s.update_appearance_conf(appearance),
             CosmicMappedInternal::_GenericCatcher(_) => {}
         }
     }

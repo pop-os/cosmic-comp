@@ -45,7 +45,7 @@ mod types;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
+    AppearanceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
     XwaylandEavesdropping, ZoomConfig,
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
     output::comp::{
@@ -920,6 +920,16 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.accessibility_zoom {
                     state.common.config.cosmic_conf.accessibility_zoom = new;
                     state.common.update_config();
+                }
+            }
+            "appearance_settings" => {
+                let new = get_config::<AppearanceConfig>(&config, "appearance_settings");
+                if new != state.common.config.cosmic_conf.appearance_settings {
+                    state.common.config.cosmic_conf.appearance_settings = new;
+                    state.common.update_config();
+                    for output in state.common.shell.read().outputs() {
+                        state.backend.schedule_render(output);
+                    }
                 }
             }
             _ => {}
