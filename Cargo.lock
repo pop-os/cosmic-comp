@@ -844,6 +844,7 @@ dependencies = [
  "anyhow",
  "bitflags 2.9.4",
  "calloop 0.14.3",
+ "cgmath",
  "clap_lex",
  "cosmic-comp-config",
  "cosmic-config",
