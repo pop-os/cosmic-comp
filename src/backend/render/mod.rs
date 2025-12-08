@@ -136,6 +136,7 @@ pub enum Usage {
     FocusIndicator,
     PotentialGroupIndicator,
     SnappingIndicator,
+    Border,
 }
 
 #[derive(Clone)]
