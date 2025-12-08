@@ -13,6 +13,7 @@ use crate::{
 };
 use calloop::LoopHandle;
 use cosmic::iced::{Color, Task};
+use cosmic_comp_config::AppearanceConfig;
 use smithay::{
     backend::{
         input::KeyState,
@@ -72,23 +73,14 @@ impl fmt::Debug for CosmicWindow {
     }
 }
 
+#[derive(Debug)]
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
     activated: AtomicBool,
     /// TODO: This needs to be per seat
     pointer_entered: AtomicU8,
     last_title: Mutex<String>,
-}
-
-impl fmt::Debug for CosmicWindowInternal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CosmicWindowInternal")
-            .field("window", &self.window)
-            .field("activated", &self.activated.load(Ordering::SeqCst))
-            .field("pointer_entered", &self.pointer_entered)
-            // skip seat to avoid loop
-            .finish()
-    }
+    appearance_conf: Mutex<AppearanceConfig>,
 }
 
 #[repr(u8)]
@@ -184,6 +176,7 @@ impl CosmicWindow {
         window: impl Into<CosmicSurface>,
         handle: LoopHandle<'static, crate::state::State>,
         theme: cosmic::Theme,
+        appearance: AppearanceConfig,
     ) -> CosmicWindow {
         let window = window.into();
         let width = window.geometry().size.w;
@@ -194,6 +187,7 @@ impl CosmicWindow {
                 activated: AtomicBool::new(false),
                 pointer_entered: AtomicU8::new(0),
                 last_title: Mutex::new(last_title),
+                appearance_conf: Mutex::new(appearance),
             },
             (width, SSD_HEIGHT),
             handle,
@@ -385,6 +379,22 @@ impl CosmicWindow {
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
         self.0.set_theme(theme);
+    }
+
+    pub fn update_appearance_conf(&self, appearance: &AppearanceConfig) {
+        self.0.with_program(|p| {
+            let mut conf = p.appearance_conf.lock().unwrap();
+            if &*conf != appearance {
+                *conf = *appearance;
+                if appearance.clip_floating_windows {
+                    p.window.set_tiled(true);
+                } else {
+                    if !p.tiled.load(Ordering::Acquire) {
+                        p.window.set_tiled(false);
+                    }
+                }
+            }
+        })
     }
 
     pub(crate) fn force_redraw(&self) {

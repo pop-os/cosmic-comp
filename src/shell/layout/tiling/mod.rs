@@ -38,6 +38,7 @@ use crate::{
     },
 };
 
+use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts::action::{FocusDirection, ResizeDirection};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use keyframe::{
@@ -134,6 +135,7 @@ pub struct TilingLayout {
     swapping_stack_surface_id: Id,
     last_overview_hover: Option<(Option<Instant>, TargetZone)>,
     pub theme: cosmic::Theme,
+    pub appearance: AppearanceConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -345,7 +347,11 @@ pub struct RestoreTilingState {
 }
 
 impl TilingLayout {
-    pub fn new(theme: cosmic::Theme, output: &Output) -> TilingLayout {
+    pub fn new(
+        theme: cosmic::Theme,
+        appearance: AppearanceConfig,
+        output: &Output,
+    ) -> TilingLayout {
         TilingLayout {
             queue: TreeQueue {
                 trees: {
@@ -360,6 +366,7 @@ impl TilingLayout {
             swapping_stack_surface_id: Id::new(),
             last_overview_hover: None,
             theme,
+            appearance,
         }
     }
 
@@ -664,9 +671,13 @@ impl TilingLayout {
                     let _ = this.unmap(this_mapped, None);
                 }
 
-                let mapped: CosmicMapped =
-                    CosmicWindow::new(stack_surface, this_stack.loop_handle(), this.theme.clone())
-                        .into();
+                let mapped: CosmicMapped = CosmicWindow::new(
+                    stack_surface,
+                    this_stack.loop_handle(),
+                    this.theme.clone(),
+                    this.appearance,
+                )
+                .into();
                 if this.output != other.output {
                     mapped.output_leave(&this.output);
                     mapped.output_enter(&other.output, mapped.bbox());
@@ -1071,6 +1082,7 @@ impl TilingLayout {
                     this_surface.clone(),
                     this_stack.loop_handle(),
                     this.theme.clone(),
+                    this.appearance,
                 )
                 .into();
                 mapped.set_tiled(true);
@@ -1156,6 +1168,7 @@ impl TilingLayout {
                     other_surface.clone(),
                     other_stack.loop_handle(),
                     this.theme.clone(),
+                    this.appearance,
                 )
                 .into();
                 mapped.set_tiled(true);
@@ -1504,8 +1517,13 @@ impl TilingLayout {
             match window.handle_move(direction) {
                 StackMoveResult::Handled => return MoveResult::Done,
                 StackMoveResult::MoveOut(surface, loop_handle) => {
-                    let mapped: CosmicMapped =
-                        CosmicWindow::new(surface, loop_handle, self.theme.clone()).into();
+                    let mapped: CosmicMapped = CosmicWindow::new(
+                        surface,
+                        loop_handle,
+                        self.theme.clone(),
+                        self.appearance,
+                    )
+                    .into();
                     mapped.output_enter(&self.output, mapped.bbox());
                     let orientation = match direction {
                         Direction::Left | Direction::Right => Orientation::Vertical,
@@ -2126,7 +2144,11 @@ impl TilingLayout {
             // if it is just a window
             match tree.get_mut(&node_id).unwrap().data_mut() {
                 Data::Mapped { mapped, .. } => {
-                    mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone());
+                    mapped.convert_to_stack(
+                        (&self.output, mapped.bbox()),
+                        self.theme.clone(),
+                        self.appearance,
+                    );
                     focus_stack.append(mapped.clone());
                     KeyboardFocusTarget::Element(mapped.clone())
                 }
@@ -2147,6 +2169,7 @@ impl TilingLayout {
                         first,
                         (&self.output, mapped.bbox()),
                         self.theme.clone(),
+                        self.appearance,
                     );
                     new_elements.push(mapped.clone());
                     handle
@@ -2164,6 +2187,7 @@ impl TilingLayout {
                     other,
                     handle.clone(),
                     self.theme.clone(),
+                    self.appearance,
                 ));
                 window.output_enter(&self.output, window.bbox());
 
@@ -2261,7 +2285,12 @@ impl TilingLayout {
                         return None;
                     }
                     let handle = handle.unwrap();
-                    let stack = CosmicStack::new(surfaces.into_iter(), handle, self.theme.clone());
+                    let stack = CosmicStack::new(
+                        surfaces.into_iter(),
+                        handle,
+                        self.theme.clone(),
+                        self.appearance,
+                    );
 
                     for child in tree
                         .children_ids(&last_active)
@@ -2732,7 +2761,11 @@ impl TilingLayout {
             Some(TargetZone::WindowStack(window_id, _)) if tree.get(window_id).is_ok() => {
                 match tree.get_mut(window_id).unwrap().data_mut() {
                     Data::Mapped { mapped, .. } => {
-                        mapped.convert_to_stack((&self.output, mapped.bbox()), self.theme.clone());
+                        mapped.convert_to_stack(
+                            (&self.output, mapped.bbox()),
+                            self.theme.clone(),
+                            self.appearance,
+                        );
                         let Some(stack) = mapped.stack_ref() else {
                             unreachable!()
                         };
