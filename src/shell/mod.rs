@@ -19,7 +19,7 @@ use crate::{
     },
 };
 use cosmic_comp_config::{
-    TileBehavior, ZoomConfig, ZoomMovement,
+    AppearanceConfig, TileBehavior, ZoomConfig, ZoomMovement,
     workspace::{PinnedWorkspace, WorkspaceLayout, WorkspaceMode},
 };
 use cosmic_config::ConfigSet;
@@ -286,6 +286,7 @@ pub struct Shell {
     )>,
     resize_indicator: Option<ResizeIndicator>,
     zoom_state: Option<ZoomState>,
+    appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
 
     #[cfg(feature = "debug")]
@@ -356,6 +357,7 @@ pub struct WorkspaceSet {
     tiling_enabled: bool,
     output: Output,
     theme: cosmic::Theme,
+    appearance: AppearanceConfig,
     pub sticky_layer: FloatingLayout,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub workspaces: Vec<Workspace>,
@@ -368,6 +370,7 @@ fn create_workspace(
     active: bool,
     tiling: bool,
     theme: cosmic::Theme,
+    appearance: AppearanceConfig,
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
@@ -391,7 +394,13 @@ fn create_workspace(
             | WorkspaceCapabilities::Pin
             | WorkspaceCapabilities::Move,
     );
-    Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
+    Workspace::new(
+        workspace_handle,
+        output.clone(),
+        tiling,
+        theme.clone(),
+        appearance,
+    )
 }
 
 fn create_workspace_from_pinned(
@@ -401,6 +410,7 @@ fn create_workspace_from_pinned(
     group_handle: &WorkspaceGroupHandle,
     active: bool,
     theme: cosmic::Theme,
+    appearance: AppearanceConfig,
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
@@ -424,7 +434,13 @@ fn create_workspace_from_pinned(
             | WorkspaceCapabilities::Pin
             | WorkspaceCapabilities::Move,
     );
-    Workspace::from_pinned(pinned, workspace_handle, output.clone(), theme.clone())
+    Workspace::from_pinned(
+        pinned,
+        workspace_handle,
+        output.clone(),
+        theme.clone(),
+        appearance,
+    )
 }
 
 /* We will probably need this again at some point
@@ -458,21 +474,23 @@ impl WorkspaceSet {
         state: &mut WorkspaceUpdateGuard<'_, State>,
         output: &Output,
         tiling_enabled: bool,
-        theme: cosmic::Theme,
+        theme: &cosmic::Theme,
+        appearance: AppearanceConfig,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
-        let sticky_layer = FloatingLayout::new(theme.clone(), output);
+        let sticky_layer = FloatingLayout::new(theme.clone(), appearance.clone(), output);
 
         WorkspaceSet {
             previously_active: None,
             active: 0,
             group: group_handle,
             tiling_enabled,
-            theme,
+            theme: theme.clone(),
             sticky_layer,
             minimized_windows: Vec::new(),
             workspaces: Vec::new(),
             output: output.clone(),
+            appearance,
         }
     }
 
@@ -590,6 +608,7 @@ impl WorkspaceSet {
             false,
             self.tiling_enabled,
             self.theme.clone(),
+            self.appearance,
         );
         workspace_set_idx(
             state,
@@ -718,6 +737,7 @@ pub struct Workspaces {
     autotile: bool,
     autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
+    appearance: AppearanceConfig,
     // Persisted workspace to add on first `output_add`
     persisted_workspaces: Vec<PinnedWorkspace>,
 }
@@ -732,6 +752,7 @@ impl Workspaces {
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
+            appearance: config.cosmic_conf.appearance_settings.clone(),
             persisted_workspaces: config.cosmic_conf.pinned_workspaces.clone(),
         }
     }
@@ -753,7 +774,13 @@ impl Workspaces {
                 set
             })
             .unwrap_or_else(|| {
-                WorkspaceSet::new(workspace_state, output, self.autotile, self.theme.clone())
+                WorkspaceSet::new(
+                    workspace_state,
+                    output,
+                    self.autotile,
+                    &self.theme,
+                    self.appearance,
+                )
             });
         workspace_state.add_group_output(&set.group, output);
 
@@ -766,6 +793,7 @@ impl Workspaces {
                 &set.group,
                 false,
                 self.theme.clone(),
+                self.appearance,
             );
             set.workspaces.push(workspace);
         }
@@ -1043,6 +1071,16 @@ impl Workspaces {
         let old_mode = self.mode;
         self.mode = config.cosmic_conf.workspaces.workspace_mode;
         self.layout = config.cosmic_conf.workspaces.workspace_layout;
+        self.appearance = config.cosmic_conf.appearance_settings;
+
+        for set in self.sets.values_mut() {
+            set.appearance = self.appearance;
+            set.sticky_layer.appearance = self.appearance;
+            for workspace in set.workspaces.iter_mut() {
+                workspace.floating_layer.appearance = self.appearance;
+                workspace.tiling_layer.appearance = self.appearance;
+            }
+        }
 
         if self.sets.len() <= 1 {
             return;
@@ -1089,6 +1127,7 @@ impl Workspaces {
                                     false,
                                     config.cosmic_conf.autotile,
                                     self.theme.clone(),
+                                    self.appearance,
                                 ),
                             );
                         }
@@ -1422,6 +1461,7 @@ impl Common {
         let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
         shell_ref.active_hint = self.config.cosmic_conf.active_hint;
+        shell_ref.appearance_conf = self.config.cosmic_conf.appearance_settings.clone();
         if let Some(zoom_state) = shell_ref.zoom_state.as_mut() {
             zoom_state.increment = self.config.cosmic_conf.accessibility_zoom.increment;
             zoom_state.movement = self.config.cosmic_conf.accessibility_zoom.view_moves;
@@ -1441,6 +1481,10 @@ impl Common {
             &mut workspace_state,
             &self.xdg_activation_state,
         );
+
+        for mapped in shell_ref.mapped() {
+            mapped.update_appearance_conf(&self.config.cosmic_conf.appearance_settings);
+        }
     }
 
     #[profiling::function]
@@ -1550,6 +1594,7 @@ impl Shell {
             resize_mode: ResizeMode::None,
             resize_state: None,
             resize_indicator: None,
+            appearance_conf: config.cosmic_conf.appearance_settings.clone(),
             zoom_state: None,
             tiling_exceptions,
 
@@ -2252,6 +2297,10 @@ impl Shell {
         }
     }
 
+    pub fn appearance_config(&self) -> AppearanceConfig {
+        self.appearance_conf.clone()
+    }
+
     pub fn trigger_zoom(
         &mut self,
         seat: &Seat<State>,
@@ -2454,6 +2503,7 @@ impl Shell {
             surface,
             loop_handle.clone(),
             self.theme.clone(),
+            self.appearance_conf,
         ));
 
         if let Some(FullscreenRestoreState::Sticky { output, state, .. }) = &state {
@@ -2730,6 +2780,7 @@ impl Shell {
             window.clone(),
             loop_handle.clone(),
             self.theme.clone(),
+            self.appearance_conf,
         ));
         #[cfg(feature = "debug")]
         {
@@ -3115,6 +3166,7 @@ impl Shell {
                         window.clone(),
                         evlh.clone(),
                         self.theme.clone(),
+                        self.appearance_conf,
                     ));
                     window.set_minimized(true);
                     MinimizedWindow::Floating { window, previous }
@@ -3124,6 +3176,7 @@ impl Shell {
                         window.clone(),
                         evlh.clone(),
                         self.theme.clone(),
+                        self.appearance_conf,
                     ));
                     window.set_minimized(true);
                     MinimizedWindow::Tiling { window, previous }
@@ -3182,6 +3235,7 @@ impl Shell {
                     window.clone(),
                     evlh.clone(),
                     self.theme.clone(),
+                    self.appearance_conf,
                 ));
                 let position = match window_state {
                     WorkspaceRestoreData::Floating(Some(data)) => Some(
@@ -3198,6 +3252,7 @@ impl Shell {
                     window.clone(),
                     evlh.clone(),
                     self.theme.clone(),
+                    self.appearance_conf,
                 ));
                 for mapped in to_workspace
                     .mapped()
@@ -3535,8 +3590,13 @@ impl Shell {
             .unwrap();
 
         let mapped = if move_out_of_stack {
-            let new_mapped: CosmicMapped =
-                CosmicWindow::new(window.clone(), evlh.clone(), self.theme.clone()).into();
+            let new_mapped: CosmicMapped = CosmicWindow::new(
+                window.clone(),
+                evlh.clone(),
+                self.theme.clone(),
+                self.appearance_conf,
+            )
+            .into();
             if old_mapped.is_maximized(false) {
                 new_mapped.set_maximized(false);
             }
