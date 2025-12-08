@@ -49,6 +49,13 @@ pub enum NumlockState {
     LastBoot,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub struct AppearanceConfig {
+    pub clip_floating_windows: bool,
+    pub clip_tiled_windows: bool,
+    pub shadow_tiled_windows: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, CosmicConfigEntry)]
 #[version = 1]
 pub struct CosmicCompConfig {
@@ -81,6 +88,7 @@ pub struct CosmicCompConfig {
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
     pub accessibility_zoom: ZoomConfig,
+    pub appearance_settings: AppearanceConfig,
 }
 
 impl Default for CosmicCompConfig {
@@ -116,6 +124,7 @@ impl Default for CosmicCompConfig {
             xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
+            appearance_settings: AppearanceConfig::default(),
         }
     }
 }
