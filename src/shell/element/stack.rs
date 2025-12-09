@@ -676,6 +676,10 @@ impl CosmicStack {
             let appearance = p.appearance_conf.lock().unwrap();
             let tiled = p.tiled.load(Ordering::Acquire);
 
+            if windows[active].is_maximized(false) {
+                return None;
+            }
+
             let round = appearance.clip_tiled_windows || !tiled;
             if tiled && !appearance.shadow_tiled_windows {
                 return None;
@@ -735,16 +739,15 @@ impl CosmicStack {
             &self.0, renderer, stack_loc, scale, alpha,
         );
 
-        if !self.0.with_program(|p| p.tiled.load(Ordering::Acquire)) {}
-
         elements.extend(self.0.with_program(|p| {
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
             let theme = p.theme.lock().unwrap();
             let appearance = p.appearance_conf.lock().unwrap();
             let tiled = p.tiled.load(Ordering::Acquire);
+            let maximized = windows[active].is_maximized(false);
 
-            let round = appearance.clip_tiled_windows || !tiled;
+            let round = (appearance.clip_tiled_windows || !tiled) && !maximized;
             let radii = round.then(|| {
                 theme
                     .cosmic()
@@ -928,7 +931,9 @@ impl CosmicStack {
             let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
             let is_tiled = p.tiled.load(Ordering::Acquire);
             let appearance = p.appearance_conf.lock().unwrap();
-            let round = appearance.clip_tiled_windows || !is_tiled;
+            let maximized = active_window.is_maximized(false);
+
+            let round = (appearance.clip_tiled_windows || !is_tiled) && !maximized;
             let radii = p
                 .theme
                 .lock()
