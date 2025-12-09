@@ -49,11 +49,21 @@ pub enum NumlockState {
     LastBoot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AppearanceConfig {
     pub clip_floating_windows: bool,
     pub clip_tiled_windows: bool,
     pub shadow_tiled_windows: bool,
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        AppearanceConfig {
+            clip_floating_windows: true,
+            clip_tiled_windows: false,
+            shadow_tiled_windows: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, CosmicConfigEntry)]
