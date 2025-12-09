@@ -366,6 +366,10 @@ impl CosmicWindow {
             let activated = p.window.is_activated(false);
             let appearance = p.appearance_conf.lock().unwrap();
 
+            if p.window.is_maximized(false) {
+                return None;
+            }
+
             let clip = (!is_tiled && appearance.clip_floating_windows)
                 || (is_tiled && appearance.clip_tiled_windows);
             let should_draw_shadow = if is_tiled {
@@ -432,10 +436,11 @@ impl CosmicWindow {
         R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
-        let (has_ssd, is_tiled, mut radii, appearance) = self.0.with_program(|p| {
+        let (has_ssd, is_tiled, is_maximized, mut radii, appearance) = self.0.with_program(|p| {
             (
                 p.has_ssd(false),
                 p.is_tiled(),
+                p.window.is_maximized(false),
                 p.theme
                     .lock()
                     .unwrap()
@@ -446,8 +451,9 @@ impl CosmicWindow {
                 *p.appearance_conf.lock().unwrap(),
             )
         });
-        let clip = (!is_tiled && appearance.clip_floating_windows)
-            || (is_tiled && appearance.clip_tiled_windows);
+        let clip = ((!is_tiled && appearance.clip_floating_windows)
+            || (is_tiled && appearance.clip_tiled_windows))
+            && !is_maximized;
         if has_ssd && !clip {
             // bottom corners
             radii[1] = 0;
@@ -602,8 +608,9 @@ impl CosmicWindow {
             let is_tiled = p.is_tiled();
             let appearance = p.appearance_conf.lock().unwrap();
 
-            let round = (!is_tiled && appearance.clip_floating_windows)
-                || (is_tiled && appearance.clip_tiled_windows);
+            let round = ((!is_tiled && appearance.clip_floating_windows)
+                || (is_tiled && appearance.clip_tiled_windows))
+                && !p.window.is_maximized(false);
             let radii = p
                 .theme
                 .lock()
