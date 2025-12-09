@@ -1075,9 +1075,7 @@ impl TilingLayout {
                 .into();
                 mapped.set_tiled(true);
                 mapped.refresh();
-                if this.output != other_output {
-                    mapped.output_enter(&other_output, mapped.bbox());
-                }
+                mapped.output_enter(&other_output, mapped.bbox());
 
                 *mapped.tiling_node_id.lock().unwrap() = Some(other_desc.node.clone());
                 other_tree
@@ -1162,9 +1160,7 @@ impl TilingLayout {
                 .into();
                 mapped.set_tiled(true);
                 mapped.refresh();
-                if this.output != other_output {
-                    mapped.output_enter(&this.output, mapped.bbox());
-                }
+                mapped.output_enter(&this.output, mapped.bbox());
 
                 *mapped.tiling_node_id.lock().unwrap() = Some(this_desc.node.clone());
                 this_tree
