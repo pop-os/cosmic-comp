@@ -25,7 +25,12 @@ pub struct CosmicOutputBackend {
 impl OutputBackend for CosmicOutputBackend {
     type BufferHandle = ();
 
-    async fn create_output(&self, _width: u32, _height: u32) -> Result<(), CompError> {
+    async fn create_output(
+        &self,
+        _id: u32,
+        _width: u32,
+        _height: u32,
+    ) -> Result<(), CompError> {
         // TODO: 选择/创建供 cosink 使用的输出，并校验分辨率。
         Ok(())
     }
@@ -49,4 +54,3 @@ impl OutputBackend for CosmicOutputBackend {
         Err(CompError::Internal("CosmicOutputBackend::end_frame not implemented yet"))
     }
 }
-

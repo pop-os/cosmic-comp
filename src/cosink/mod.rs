@@ -68,8 +68,10 @@ where
     /// - 调用 `CompCore::handle_hostd_frame(frame)`；
     /// - 根据返回结果更新内部状态与统计信息；
     /// - 在出现错误时记录日志并更新 `last_error`。
-    pub async fn handle_hostd_frame(&mut self, _frame: Frame) {
-        // TODO: 调用 CompCore::handle_hostd_frame 并处理错误。
+    pub async fn handle_hostd_frame(&mut self, frame: Frame) {
+        if let Err(err) = self.comp_core.handle_hostd_frame(frame).await {
+            self.last_error = Some(err.to_string());
+        }
     }
 
     /// 注入输入事件到 CompCore。
@@ -77,8 +79,10 @@ where
     /// 实际实现应：
     /// - 将事件转发给 `CompCore::on_input_event(event)`；
     /// - 在错误时记录日志并更新 `last_error`，但不得 panic。
-    pub fn on_input_event(&mut self, _event: InputEvent) {
-        // TODO: 调用 CompCore::on_input_event 并处理错误。
+    pub async fn on_input_event(&mut self, event: InputEvent) {
+        if let Err(err) = self.comp_core.on_input_event(event).await {
+            self.last_error = Some(err.to_string());
+        }
     }
 }
 
@@ -148,6 +152,13 @@ where
     B: OutputBackend,
     C: HostdChannel,
 {
-    // 占位实现：默认不启用 cosink。
-    Ok(None)
+    if !_config.enabled {
+        return Ok(None);
+    }
+    let core = CompCore::new(_backend, NoInputBackend, _channel);
+    Ok(Some(CosinkState {
+        comp_core: core,
+        config: _config.clone(),
+        last_error: None,
+    }))
 }
