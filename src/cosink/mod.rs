@@ -12,7 +12,7 @@
 //! - 组合 `CosmicOutputBackend` 与 `CosmicHostdChannel` 实现 DS-201 的 OutputBackend/HostdChannel 适配层；
 //! - 为输入管线提供 `handle_input` 入口，将 cosmic-comp 输入事件映射为 `InputEvent` 并注入 `CompCore`。
 //!
-//! **验收标准**: doc/plan/PHASE2.md#P2.5
+//! **验收标准**: doc/plan/PHASE-02.md#P2.5
 
 pub mod backend;
 pub mod hostd_channel;
@@ -151,4 +151,3 @@ where
     // 占位实现：默认不启用 cosink。
     Ok(None)
 }
-
