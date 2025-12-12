@@ -757,14 +757,20 @@ impl XwmHandler for State {
                 *context,
             );
         }
-
-        let surface = CosmicSurface::from(window);
-        shell.pending_windows.push(PendingWindow {
-            surface,
-            seat,
-            fullscreen: None,
-            maximized: false,
-        });
+        if shell
+            .pending_windows
+            .iter()
+            .find(|w| w.surface == window)
+            .is_none()
+        {
+            let surface = CosmicSurface::from(window);
+            shell.pending_windows.push(PendingWindow {
+                surface,
+                seat,
+                fullscreen: None,
+                maximized: false,
+            })
+        }
     }
 
     fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
