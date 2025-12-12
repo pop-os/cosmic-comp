@@ -97,10 +97,10 @@ where
             Uniform::new(
                 "corner_radius",
                 [
-                    radius[0] as f32,
-                    radius[1] as f32,
-                    radius[2] as f32,
                     radius[3] as f32,
+                    radius[1] as f32,
+                    radius[0] as f32,
+                    radius[2] as f32,
                 ],
             ),
             Uniform::new(
@@ -142,10 +142,10 @@ where
         geo: Rectangle<f64, Logical>,
         radius: [u8; 4],
     ) -> [Rectangle<f64, Logical>; 4] {
-        let top_left = radius[0] as f64;
+        let top_left = radius[3] as f64;
         let top_right = radius[1] as f64;
-        let bottom_right = radius[2] as f64;
-        let bottom_left = radius[3] as f64;
+        let bottom_right = radius[0] as f64;
+        let bottom_left = radius[2] as f64;
 
         [
             Rectangle::new(geo.loc, Size::from((top_left, top_left))),
