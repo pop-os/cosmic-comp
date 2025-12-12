@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{state::State, utils::prelude::OutputExt};
+use crate::{state::State, utils::prelude::{Local, OutputExt}};
 use smithay::{
-    delegate_pointer_constraints,
-    input::pointer::PointerHandle,
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Point},
-    wayland::{
+    delegate_pointer_constraints, input::pointer::PointerHandle, reexports::wayland_server::protocol::wl_surface::WlSurface, utils::{Rectangle, Logical, Point}, wayland::{
         pointer_constraints::{PointerConstraintsHandler, with_pointer_constraint},
         seat::WaylandFocus,
-    },
+    }
 };
 
 impl PointerConstraintsHandler for State {
@@ -34,69 +30,92 @@ impl PointerConstraintsHandler for State {
         if with_pointer_constraint(surface, pointer, |constraint| {
             constraint.is_some_and(|c| c.is_active())
         }) {
+            // loop over all workspace sets
             for (out, set) in &self.common.shell.read().workspaces.sets {
-                for workspace in &set.workspaces {
-                    // get the right window position based on if the window is fullscreen
-                    // this isn't the global position, rather the position inside the workspace
-                    let origin = if let Some(fullscreen) = workspace.get_fullscreen() {
-                        if fullscreen.wl_surface().as_deref() == Some(surface) {
-                            workspace
-                                .fullscreen_geometry()
-                                .and_then(|geometry| {
-                                    let pos = geometry
-                                        .loc
-                                        .to_f64();
+                let mut geometry: Option<Rectangle<i32, Local>> = None;
+                let mut header: Option<Point<i32, Logical>> = None;
+                
+                // scan sticky windows
+                if geometry == None {
+                    geometry = set
+                        .sticky_layer
+                        .mapped()
+                        .find(|w| {
+                            w.wl_surface().as_deref() == Some(surface)
+                        })
+                        .and_then(|w| {
+                            header = Some(w.active_window_offset());
+                            set.sticky_layer.element_geometry(w)
+                        });
+                }
 
-                                    Some((pos.x, pos.y))
-                                })
-                            }
-                            else {
-                                None
+                for workspace in &set.workspaces {
+                    // check the fullscreen window
+                    if geometry == None {
+                        if let Some(fullscreen) = workspace.get_fullscreen() {
+                            if fullscreen.wl_surface().as_deref() == Some(surface) {
+                                geometry = workspace.fullscreen_geometry();
                             }
                         }
-                        else {
-                            workspace
-                                .mapped()
-                                .find(|window| {
-                                    window.wl_surface().as_deref() == Some(surface)
-                                })
-                                .and_then(|window| {
-                                    workspace
-                                        .element_geometry(window)
-                                        .and_then(|rect| {
-                                            // windows can have variable window decoration height
-                                            let header_offset = window
-                                                .active_window_offset()
-                                                .to_f64();
-
-                                            let position = rect
-                                                .loc
-                                                .to_f64();
-
-                                            Some((
-                                                header_offset.x + position.x,
-                                                header_offset.y + position.y
-                                            ))
-                                        })
-                                })
-                    };
-                    
-                    // the window isn't on this workspace, don't set the position
-                    if origin.is_none() {
-                        continue;
                     }
-
-                    // the offset from the output (monitor position)
-                    let workspace_origin = out
-                        .geometry()
-                        .loc
-                        .to_f64();
-
-                    pointer.set_location(Point::new(
-                        workspace_origin.x + origin.unwrap().0 + location.x,
-                        workspace_origin.y + origin.unwrap().1 + location.y
-                    ));
+    
+                    // scan 'normal' windows
+                    if geometry == None {
+                        geometry = workspace
+                            .mapped()
+                            .find(|w| {
+                                w.wl_surface().as_deref() == Some(surface)
+                            })
+                            .and_then(|w| {
+                                header = Some(w.active_window_offset());
+                                workspace.element_geometry(w)
+                            });
+                    }
                 }
+
+                // the window wasn't found, it's not on this set
+                if geometry.is_none() {
+                    continue;
+                }
+    
+                let window_size = geometry
+                    .unwrap()
+                    .size
+                    .to_f64();
+    
+                // prevent locations outside the window boundaries
+                if
+                    location.x < 0.0 ||
+                    location.y < 0.0 ||
+                    location.x > window_size.w ||
+                    location.y > window_size.h
+                {
+                    continue;
+                }
+
+                let header_offset = header
+                    .and_then(|h| {
+                        Some(h.to_f64())
+                    })
+                    .unwrap_or_default();
+
+                let origin = geometry
+                    .unwrap()
+                    .loc
+                    .to_f64();
+    
+                // the offset from the output (monitor position)
+                let workspace_origin = out
+                    .geometry()
+                    .loc
+                    .to_f64();
+    
+                pointer.set_location(Point::new(
+                    workspace_origin.x + origin.x + header_offset.x + location.x,
+                    workspace_origin.y + origin.y + header_offset.y + location.y
+                ));
+    
+                break;
             }
         }
     }
