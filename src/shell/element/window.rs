@@ -391,12 +391,12 @@ impl CosmicWindow {
                 .map(|x| x.round() as u8);
             if has_ssd && !clip {
                 // bottom corners
-                radii[1] = 0;
-                radii[3] = 0;
+                radii[0] = 0;
+                radii[2] = 0;
                 if is_tiled {
                     // top corners
-                    radii[0] = 0;
-                    radii[2] = 0;
+                    radii[1] = 0;
+                    radii[3] = 0;
                 }
             }
 
@@ -456,12 +456,12 @@ impl CosmicWindow {
             && !is_maximized;
         if has_ssd && !clip {
             // bottom corners
-            radii[1] = 0;
-            radii[3] = 0;
+            radii[0] = 0;
+            radii[2] = 0;
             if is_tiled {
                 // top corners
-                radii[0] = 0;
-                radii[2] = 0;
+                radii[1] = 0;
+                radii[3] = 0;
             }
         }
 
@@ -513,8 +513,8 @@ impl CosmicWindow {
                 .into_iter()
                 .map(|elem| {
                     if has_ssd {
-                        radii[0] = 0;
-                        radii[2] = 0;
+                        radii[1] = 0;
+                        radii[3] = 0;
                     }
                     if radii.iter().any(|x| *x != 0)
                         && clip
