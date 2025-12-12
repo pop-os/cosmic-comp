@@ -120,6 +120,26 @@ impl State {
                     &mut self.common.workspace_state.update(),
                 );
             }
+            SwipeAction::ToggleWorkspaceOverview => {
+                if let Some(command) = self
+                    .common
+                    .config
+                    .system_actions
+                    .get(&shortcuts::action::System::WorkspaceOverview)
+                {
+                    self.spawn_command(command.clone());
+                }
+            }
+            SwipeAction::ToggleAppLibrary => {
+                if let Some(command) = self
+                    .common
+                    .config
+                    .system_actions
+                    .get(&shortcuts::action::System::AppLibrary)
+                {
+                    self.spawn_command(command.clone());
+                }
+            }
         }
     }
 
