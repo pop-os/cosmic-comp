@@ -709,11 +709,38 @@ impl State {
 
                 let mut pass_event = !seat.supressed_buttons().remove(button);
                 if event.state() == ButtonState::Pressed {
-                    // change the keyboard focus unless the pointer is grabbed
-                    // We test for any matching surface type here but always use the root
-                    // (in case of a window the toplevel) surface for the focus.
-                    // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
-                    if !seat.get_pointer().unwrap().is_grabbed() {
+                    let kill_mode = self.common.shell.read().kill_mode();
+                    if matches!(kill_mode, crate::shell::KillMode::Active(_)) {
+                        let output = seat.active_output();
+                        let global_position =
+                            seat.get_pointer().unwrap().current_location().as_global();
+                        let under = {
+                            let shell = self.common.shell.read();
+                            State::element_under(global_position, &output, &shell, &seat)
+                        };
+                        
+                        if let Some(target) = under {
+                            if let Some(surface) = target.active_window() {
+                                // Kill the window
+                                self.common.shell.read().kill_window(&surface, self);
+                            }
+                        }
+                        
+                        // Exit kill mode
+                        self.common.shell.write().set_kill_mode(None);
+                        use smithay::input::pointer::CursorImageStatus;
+                        seat.set_cursor_image_status(CursorImageStatus::default_named());
+                        
+                        // Don't pass the event to the application
+                        pass_event = false;
+                        seat.supressed_buttons().add(button);
+                    } else {
+                        // Normal button handling
+                        // change the keyboard focus unless the pointer is grabbed
+                        // We test for any matching surface type here but always use the root
+                        // (in case of a window the toplevel) surface for the focus.
+                        // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
+                        if !seat.get_pointer().unwrap().is_grabbed() {
                         let output = seat.active_output();
 
                         let global_position =
@@ -853,6 +880,7 @@ impl State {
                             Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
                         }
                     }
+                    }  // Close the else block for kill mode
                 } else {
                     let mut shell = self.common.shell.write();
                     if let Some(Trigger::Pointer(action_button)) =

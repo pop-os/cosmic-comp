@@ -187,6 +187,12 @@ pub enum ResizeMode {
     Ended(Instant, ResizeDirection),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum KillMode {
+    None,
+    Active(shortcuts::Binding),
+}
+
 impl ResizeMode {
     pub fn alpha(&self) -> Option<f32> {
         match self {
@@ -276,6 +282,7 @@ pub struct Shell {
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
+    kill_mode: KillMode,
     resize_state: Option<(
         KeyboardFocusTarget,
         ResizeDirection,
@@ -1548,6 +1555,7 @@ impl Shell {
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
+            kill_mode: KillMode::None,
             resize_state: None,
             resize_indicator: None,
             zoom_state: None,
@@ -1845,6 +1853,28 @@ impl Shell {
                 }
             }
         }
+    }
+
+    /// Force kill the focused keyboard focus target and its process
+    pub fn kill_focused(&self, focus_target: &KeyboardFocusTarget, state: &State) {
+        match focus_target {
+            KeyboardFocusTarget::Group(_group) => {
+                //TODO: decide if we want kill actions to apply to groups
+            }
+            KeyboardFocusTarget::Fullscreen(surface) => {
+                surface.kill(state);
+            }
+            x => {
+                if let Some(mapped) = self.focused_element(x) {
+                    mapped.send_kill(state);
+                }
+            }
+        }
+    }
+
+    /// Force kill a specific window by its surface
+    pub fn kill_window(&self, surface: &CosmicSurface, state: &State) {
+        surface.kill(state);
     }
 
     pub fn refresh_active_space(&mut self, output: &Output) {
@@ -2185,6 +2215,18 @@ impl Shell {
         }
 
         (self.overview_mode.clone(), self.swap_indicator.clone())
+    }
+
+    pub fn set_kill_mode(&mut self, enabled: Option<shortcuts::Binding>) {
+        if let Some(pattern) = enabled {
+            self.kill_mode = KillMode::Active(pattern);
+        } else {
+            self.kill_mode = KillMode::None;
+        }
+    }
+
+    pub fn kill_mode(&self) -> KillMode {
+        self.kill_mode.clone()
     }
 
     pub fn set_resize_mode(

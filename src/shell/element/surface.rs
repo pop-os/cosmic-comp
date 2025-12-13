@@ -29,6 +29,10 @@ use smithay::{
     },
     output::Output,
     reexports::{
+        x11rb::{
+            self,
+            protocol::xproto::{AtomEnum, ConnectionExt},
+        },
         wayland_protocols::{
             wp::presentation_time::server::wp_presentation_feedback::Kind as PresentationKind,
             xdg::{
@@ -37,7 +41,7 @@ use smithay::{
             },
         },
         wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::Mode as KdeMode,
-        wayland_server::protocol::wl_surface::WlSurface,
+        wayland_server::{protocol::wl_surface::WlSurface, Resource},
     },
     utils::{
         IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, user_data::UserDataMap,
@@ -582,6 +586,55 @@ impl CosmicSurface {
             WindowSurface::Wayland(toplevel) => toplevel.send_close(),
             WindowSurface::X11(surface) => {
                 let _ = surface.close();
+            }
+        }
+    }
+
+    pub fn kill(&self, state: &crate::state::State) {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                // Get the Wayland client and forcefully kill its process
+                let surface = toplevel.wl_surface();
+                if let Ok(client) = state.common.display_handle.get_client(surface.id()) {
+                    if let Ok(creds) = client.get_credentials(&state.common.display_handle) {
+                        let pid = creds.pid;
+                        // Send SIGKILL to forcefully terminate the process
+                        unsafe {
+                            libc::kill(pid, libc::SIGKILL);
+                        }
+                    }
+                }
+            }
+            WindowSurface::X11(surface) => {
+                // XWayland support: For X11 windows, try to get the PID and kill it
+                if let Some(xwayland_state) = &state.common.xwayland_state {
+                    let display = xwayland_state.display;
+                    let display_str = format!(":{}", display);
+
+                    if let Ok((conn, _)) = x11rb::connect(Some(&display_str)) {
+                        let window_id = surface.window_id();
+                        if let Ok(atom_reply) = conn.intern_atom(false, b"_NET_WM_PID") {
+                            if let Ok(atom) = atom_reply.reply() {
+                                if let Ok(prop_reply) = conn.get_property(
+                                    false,
+                                    window_id,
+                                    atom.atom,
+                                    AtomEnum::CARDINAL,
+                                    0,
+                                    1,
+                                ) {
+                                    if let Ok(prop) = prop_reply.reply() {
+                                        if let Some(val) = prop.value32().and_then(|mut v| v.next()) {
+                                            unsafe {
+                                                libc::kill(val as i32, libc::SIGKILL);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

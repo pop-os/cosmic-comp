@@ -73,6 +73,7 @@ impl State {
                         &self.common.config,
                         self.common.event_loop_handle.clone(),
                     );
+                    shell.set_kill_mode(None);
                 }
                 let pointer = seat.get_pointer().unwrap();
                 let keyboard = seat.get_keyboard().unwrap();
@@ -82,6 +83,8 @@ impl State {
                 if keyboard.is_grabbed() {
                     keyboard.unset_grab(self);
                 }
+                use smithay::input::pointer::CursorImageStatus;
+                seat.set_cursor_image_status(CursorImageStatus::default_named());
             }
 
             Action::Private(PrivateAction::Resizing(direction, edge, state)) => {
@@ -159,6 +162,17 @@ impl State {
                 if let Some(focus_target) = seat.get_keyboard().unwrap().current_focus() {
                     self.common.shell.read().close_focused(&focus_target);
                 }
+            }
+
+            Action::Kill => {
+                // Enter kill mode - change cursor and wait for user to click on a window
+                let mut shell = self.common.shell.write();
+                shell.set_kill_mode(Some(pattern.clone()));
+                // Set cursor to crosshair to indicate kill mode
+                use smithay::input::pointer::CursorImageStatus;
+                seat.set_cursor_image_status(CursorImageStatus::Named(
+                    smithay::input::pointer::CursorIcon::Crosshair,
+                ));
             }
 
             Action::Workspace(key_num) => {

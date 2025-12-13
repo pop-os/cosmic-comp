@@ -481,6 +481,16 @@ impl CosmicMapped {
         window.close();
     }
 
+    pub fn send_kill(&self, state: &crate::state::State) {
+        let window = match &self.element {
+            CosmicMappedInternal::Stack(s) => s.active(),
+            CosmicMappedInternal::Window(w) => w.surface(),
+            _ => unreachable!(),
+        };
+
+        window.kill(state);
+    }
+
     pub fn is_window(&self) -> bool {
         matches!(&self.element, CosmicMappedInternal::Window(_))
     }
