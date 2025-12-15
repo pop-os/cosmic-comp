@@ -181,6 +181,10 @@ impl CosmicWindowInternal {
     pub fn is_tiled(&self) -> bool {
         self.tiled.load(Ordering::Acquire)
     }
+
+    fn has_tiled_state(&self) -> bool {
+        self.window.is_tiled(false).unwrap_or(false)
+    }
 }
 
 impl CosmicWindow {
@@ -260,7 +264,9 @@ impl CosmicWindow {
             let mut offset = Point::from((0., 0.));
             let mut window_ui = None;
             let has_ssd = p.has_ssd(false);
-            if (has_ssd || p.is_tiled()) && surface_type.contains(WindowSurfaceType::TOPLEVEL) {
+            if (has_ssd || p.has_tiled_state())
+                && surface_type.contains(WindowSurfaceType::TOPLEVEL)
+            {
                 let geo = p.window.geometry();
 
                 let point_i32 = relative_pos.to_i32_round::<i32>();
@@ -820,7 +826,7 @@ impl SpaceElement for CosmicWindow {
             let mut bbox = SpaceElement::bbox(&p.window);
             let has_ssd = p.has_ssd(false);
 
-            if has_ssd || p.is_tiled() {
+            if has_ssd || p.has_tiled_state() {
                 bbox.loc -= Point::from((RESIZE_BORDER, RESIZE_BORDER));
                 bbox.size += Size::from((RESIZE_BORDER * 2, RESIZE_BORDER * 2));
             }
@@ -939,7 +945,7 @@ impl PointerTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             let has_ssd = p.has_ssd(false);
-            if has_ssd || p.is_tiled() {
+            if has_ssd || p.has_tiled_state() {
                 let Some(next) = Focus::under(
                     &p.window,
                     if has_ssd { SSD_HEIGHT } else { 0 },
@@ -965,7 +971,7 @@ impl PointerTarget<State> for CosmicWindow {
         let mut event = event.clone();
         self.0.with_program(|p| {
             let has_ssd = p.has_ssd(false);
-            if has_ssd || p.is_tiled() {
+            if has_ssd || p.has_tiled_state() {
                 let Some(next) = Focus::under(
                     &p.window,
                     if has_ssd { SSD_HEIGHT } else { 0 },
