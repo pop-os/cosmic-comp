@@ -484,7 +484,7 @@ impl CosmicWindow {
             geo.size.h += SSD_HEIGHT as f64;
         }
 
-        if has_ssd || clip {
+        if (has_ssd || clip) && !is_maximized {
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Window(Arc::downgrade(&self.0.0)));
 
