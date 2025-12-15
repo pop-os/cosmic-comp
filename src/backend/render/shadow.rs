@@ -57,10 +57,11 @@ impl ShadowShader {
         let ceil = |logical: f64| (logical * scale).ceil() / scale;
 
         let mut geo = geo.to_f64();
-        geo.loc.x = ceil(geo.loc.x);
-        geo.loc.y = ceil(geo.loc.y);
-        geo.size.w = ceil(geo.size.w);
-        geo.size.h = ceil(geo.size.h);
+        let fractional_pixel = scale.ceil() / scale;
+        geo.loc.x = geo.loc.x + fractional_pixel;
+        geo.loc.y = geo.loc.y + fractional_pixel;
+        geo.size.w = geo.size.w - fractional_pixel * 2.;
+        geo.size.h = geo.size.h - fractional_pixel * 2.;
 
         let user_data = Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
             .egl_context()
