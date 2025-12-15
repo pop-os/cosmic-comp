@@ -24,8 +24,8 @@ void main() {
     vec4 mix_color;
 
     float distance = rounded_box(location - center, (size / 2.0) - (thickness / 2.0), radius);
-    float smoothedAlpha = 1.0 - smoothstep(0.0, 1.0, abs(distance) - (thickness / 2.0));
-    
+    float smoothedAlpha = 1.0 - smoothstep(-0.5, 0.5, abs(distance) - (thickness / 2.0));
+
     mix_color = mix(vec4(0.0, 0.0, 0.0, 0.0), vec4(color, alpha), smoothedAlpha);
     
 #if defined(DEBUG_FLAGS)

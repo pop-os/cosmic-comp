@@ -208,7 +208,7 @@ impl IndicatorShader {
         alpha: f32,
         active_window_hint: [f32; 3],
     ) -> PixelShaderElement {
-        let t = (thickness as i32) / 2;
+        let t = thickness as i32;
         element_geo.loc -= (t, t).into();
         element_geo.size += (t * 2, t * 2).into();
 
