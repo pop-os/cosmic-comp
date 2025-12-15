@@ -614,19 +614,24 @@ impl CosmicWindow {
             let is_tiled = p.is_tiled();
             let appearance = p.appearance_conf.lock().unwrap();
 
-            let round = ((!is_tiled && appearance.clip_floating_windows)
+            let clip = ((!is_tiled && appearance.clip_floating_windows)
                 || (is_tiled && appearance.clip_tiled_windows))
                 && !p.window.is_maximized(false);
-            let radii = p
-                .theme
-                .lock()
-                .unwrap()
-                .cosmic()
-                .radius_s()
-                .map(|x| if x < 4.0 { x } else { x + 4.0 })
-                .map(|x| x.round() as u8);
+            let round =
+                (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
+            let radii = round
+                .then(|| {
+                    p.theme
+                        .lock()
+                        .unwrap()
+                        .cosmic()
+                        .radius_s()
+                        .map(|x| if x < 4.0 { x } else { x + 4.0 })
+                        .map(|x| x.round() as u8)
+                })
+                .unwrap_or([0; 4]);
 
-            match (has_ssd, round) {
+            match (has_ssd, clip) {
                 (has_ssd, true) => {
                     let mut corners = p.window.corner_radius(geometry_size).unwrap_or(radii);
 
@@ -794,6 +799,9 @@ pub struct DefaultDecorations;
 
 impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
     fn view(&self, win: &CosmicWindowInternal) -> cosmic::Element<'_, Message> {
+        let sharp_corners = win.window.is_maximized(false)
+            || (win.is_tiled() && !win.appearance_conf.lock().unwrap().clip_tiled_windows);
+
         let mut header = cosmic::widget::header_bar()
             .title(win.last_title.lock().unwrap().clone())
             .on_drag(Message::DragStart)
@@ -801,7 +809,8 @@ impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
             .focused(win.window.is_activated(false))
             .on_double_click(Message::Maximize)
             .on_right_click(Message::Menu)
-            .is_ssd(true);
+            .is_ssd(true)
+            .sharp_corners(sharp_corners);
 
         if cosmic::config::show_minimize() {
             header = header.on_minimize(Message::Minimize)
