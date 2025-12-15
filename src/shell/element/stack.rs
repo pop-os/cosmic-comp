@@ -763,7 +763,7 @@ impl CosmicStack {
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.0.0)));
 
-            let border = {
+            let border = (!maximized).then(|| {
                 let (r, g, b, a) = theme.cosmic().bg_divider().into_components();
                 CosmicStackRenderElement::Border(IndicatorShader::element(
                     renderer,
@@ -774,9 +774,9 @@ impl CosmicStack {
                     a * alpha,
                     [r, g, b],
                 ))
-            };
+            });
 
-            std::iter::once(border).chain(
+            border.into_iter().chain(
                 windows[active]
                     .render_elements::<R, WaylandSurfaceRenderElement<R>>(
                         renderer,
