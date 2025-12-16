@@ -26,6 +26,7 @@ pub struct ShadowParameters {
     scale: f64,
     alpha: f32,
     radius: [u8; 4],
+    dark_mode: bool,
 }
 type ShadowCache = RefCell<HashMap<CosmicMappedKey, (ShadowParameters, PixelShaderElement)>>;
 
@@ -47,12 +48,14 @@ impl ShadowShader {
         radius: [u8; 4],
         alpha: f32,
         scale: f64,
+        dark_mode: bool,
     ) -> PixelShaderElement {
         let params = ShadowParameters {
             geo,
             scale,
             alpha,
             radius,
+            dark_mode,
         };
         let ceil = |logical: f64| (logical * scale).ceil() / scale;
 
@@ -81,7 +84,7 @@ impl ShadowShader {
             let softness = 25.;
             let spread = 5.;
             let offset = [0., 5.];
-            let color = [0., 0., 0., 0.35];
+            let color = [0., 0., 0., if dark_mode { 0.45 } else { 0.35 }];
             let radius = radius.map(|r| ceil(r as f64));
             let radius = [
                 radius[3], // top_left
