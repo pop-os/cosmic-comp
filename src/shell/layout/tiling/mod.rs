@@ -4935,6 +4935,10 @@ where
         }
     }
 
+    if root.is_none() {
+        elements.clear();
+    }
+
     (geometries, elements)
 }
 
@@ -5418,7 +5422,7 @@ where
                         geo.loc += (outer_gap, outer_gap).into();
                         geo.size -= (outer_gap * 2, outer_gap * 2).into();
 
-                        group_backdrop = Some(BackdropShader::element(
+                        let backdrop = BackdropShader::element(
                             renderer,
                             match data {
                                 Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
@@ -5428,7 +5432,13 @@ where
                             radius[0] as f32,
                             0.4,
                             group_color,
-                        ));
+                        );
+
+                        if focused.as_ref() == Some(&node_id) {
+                            group_backdrop = Some(backdrop);
+                        } else {
+                            indicators.push(backdrop.into());
+                        }
                     }
                     if !swap_desc
                         .as_ref()
@@ -5436,24 +5446,26 @@ where
                         .unwrap_or(false)
                         || focused.as_ref() == Some(&node_id)
                     {
-                        indicators.push(IndicatorShader::focus_element(
-                            renderer,
-                            match data {
-                                Data::Mapped { mapped, .. } => {
-                                    Key::Window(Usage::FocusIndicator, mapped.clone().key())
-                                }
-                                Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
-                                _ => unreachable!(),
-                            },
-                            geo,
-                            if data.is_group() {
-                                4
-                            } else {
-                                indicator_thickness
-                            },
-                            radius,
-                            alpha,
-                            [window_hint.red, window_hint.green, window_hint.blue],
+                        indicators.push(CosmicMappedRenderElement::FocusIndicator(
+                            IndicatorShader::focus_element(
+                                renderer,
+                                match data {
+                                    Data::Mapped { mapped, .. } => {
+                                        Key::Window(Usage::FocusIndicator, mapped.clone().key())
+                                    }
+                                    Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
+                                    _ => unreachable!(),
+                                },
+                                geo,
+                                if data.is_group() {
+                                    4
+                                } else {
+                                    indicator_thickness
+                                },
+                                radius,
+                                alpha,
+                                [window_hint.red, window_hint.green, window_hint.blue],
+                            ),
                         ));
                     }
 
