@@ -1515,6 +1515,7 @@ impl FloatingLayout {
                         .as_logical()
                         .to_physical_precise_round(output_scale),
                     output_scale.into(),
+                    1.,
                     alpha,
                 ),
             );
