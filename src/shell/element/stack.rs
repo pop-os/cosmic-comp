@@ -711,6 +711,7 @@ impl CosmicStack {
                     radii,
                     if activated { alpha } else { alpha * 0.75 },
                     output_scale.x,
+                    theme.cosmic().is_dark,
                 ))
                 .into(),
             )
