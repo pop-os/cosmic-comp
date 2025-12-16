@@ -372,6 +372,7 @@ impl CosmicWindow {
             let is_tiled = p.is_tiled();
             let activated = p.window.is_activated(false);
             let appearance = p.appearance_conf.lock().unwrap();
+            let theme = p.theme.lock().unwrap();
 
             if p.window.is_maximized(false) {
                 return None;
@@ -388,10 +389,7 @@ impl CosmicWindow {
             if !should_draw_shadow {
                 return None;
             }
-            let mut radii = p
-                .theme
-                .lock()
-                .unwrap()
+            let mut radii = theme
                 .cosmic()
                 .radius_s()
                 .map(|x| if x < 4.0 { x } else { x + 4.0 })
@@ -425,6 +423,7 @@ impl CosmicWindow {
                     radii,
                     if activated { alpha } else { alpha * 0.75 },
                     output_scale.x,
+                    theme.cosmic().is_dark,
                 ))
                 .into(),
             )
