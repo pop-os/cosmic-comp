@@ -847,7 +847,8 @@ impl TilingLayout {
         if this.output == other_output
             && this_desc.handle == other_desc.handle
             && this_desc.node == other_desc.node
-            && this_desc.stack_window.is_some() != other_desc.stack_window.is_some()
+            && (this_desc.stack_window == other_desc.stack_window
+                || this_desc.stack_window.is_some() != other_desc.stack_window.is_some())
         {
             return None;
         }
