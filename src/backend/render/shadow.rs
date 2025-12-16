@@ -78,10 +78,10 @@ impl ShadowShader {
         {
             let shader = Self::get(renderer);
 
-            let softness = 30.;
+            let softness = 25.;
             let spread = 5.;
             let offset = [0., 5.];
-            let color = [0., 0., 0., 0.45];
+            let color = [0., 0., 0., 0.35];
             let radius = radius.map(|r| ceil(r as f64));
             let radius = [
                 radius[3], // top_left
