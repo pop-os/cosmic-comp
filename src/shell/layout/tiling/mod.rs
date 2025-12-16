@@ -5315,22 +5315,26 @@ where
         .and_then(|desc| desc.stack_window.clone())
     {
         let window_geo = window.geometry();
+        let origin = {
+            let mut geo = focused_geo;
+            geo.loc.x += STACK_TAB_HEIGHT;
+            geo.size.h -= STACK_TAB_HEIGHT;
+            geo
+        };
+        let target = swap_geometry(window_geo.size, focused_geo);
         let swap_geo = ease(
             Linear,
-            EaseRectangle({
-                let mut geo = focused_geo;
-                geo.loc.x += STACK_TAB_HEIGHT;
-                geo.size.h -= STACK_TAB_HEIGHT;
-                geo
-            }),
-            EaseRectangle(swap_geometry(window_geo.size, focused_geo)),
+            EaseRectangle(origin),
+            EaseRectangle(target),
             transition.unwrap_or(1.0),
         )
         .unwrap();
+        let scale = swap_geo.size.to_f64() / origin.size.to_f64();
 
-        let radius = window
-            .corner_radius(swap_geo.size.as_logical())
-            .unwrap_or([indicator_thickness; 4]);
+        let radius = theme
+            .radius_s()
+            .map(|x| if x < 4.0 { x } else { x + 4.0 })
+            .map(|val| (val * scale.x.min(scale.y) as f32).round() as u8);
         swap_elements.push(CosmicMappedRenderElement::FocusIndicator(
             IndicatorShader::focus_element(
                 renderer,
@@ -5389,6 +5393,24 @@ where
                 if indicator_thickness > 0 || data.is_group() {
                     let mut geo = geo;
 
+                    let scale = geo.size.to_f64() / original_geo.size.to_f64();
+                    let radius = match data {
+                        Data::Mapped { mapped, .. }
+                            if swap_desc
+                                .as_ref()
+                                .map(|desc| &desc.node)
+                                .is_none_or(|n| n != &node_id) =>
+                        {
+                            mapped
+                                .corner_radius(geo.size.as_logical(), indicator_thickness)
+                                .map(|val| (val as f64 * scale.x.min(scale.y)).round() as u8)
+                        }
+                        _ => theme
+                            .radius_s()
+                            .map(|x| if x < 4.0 { x } else { x + 4.0 })
+                            .map(|val| (val * scale.x.min(scale.y) as f32).round() as u8),
+                    };
+
                     if data.is_group() {
                         let outer_gap: i32 = (if is_overview { GAP_KEYBOARD } else { 4 } as f32
                             * percentage)
@@ -5403,17 +5425,11 @@ where
                                 _ => unreachable!(),
                             },
                             geo,
-                            8.,
+                            radius[0] as f32,
                             0.4,
                             group_color,
                         ));
                     }
-                    let radius = match data {
-                        Data::Mapped { mapped, .. } => {
-                            mapped.corner_radius(geo.size.as_logical(), indicator_thickness)
-                        }
-                        _ => [1; 4],
-                    };
                     if !swap_desc
                         .as_ref()
                         .map(|desc| desc.stack_window.is_some())
