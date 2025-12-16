@@ -596,7 +596,8 @@ impl CosmicMapped {
         &self,
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
-        scale: smithay::utils::Scale<f64>,
+        output_scale: smithay::utils::Scale<f64>,
+        scale: f64,
         alpha: f32,
     ) -> Option<C>
     where
@@ -608,12 +609,20 @@ impl CosmicMapped {
         match &self.element {
             CosmicMappedInternal::Stack(s) => s
                 .shadow_render_element::<R, CosmicMappedRenderElement<R>>(
-                    renderer, location, scale, alpha,
+                    renderer,
+                    location,
+                    output_scale,
+                    scale,
+                    alpha,
                 )
                 .map(Into::into),
             CosmicMappedInternal::Window(w) => w
                 .shadow_render_element::<R, CosmicMappedRenderElement<R>>(
-                    renderer, location, scale, alpha,
+                    renderer,
+                    location,
+                    output_scale,
+                    scale,
+                    alpha,
                 )
                 .map(Into::into),
             _ => unreachable!(),
