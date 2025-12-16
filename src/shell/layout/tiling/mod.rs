@@ -4035,7 +4035,6 @@ impl TilingLayout {
         let draw_groups = overview.0.alpha();
 
         let mut elements = Vec::default();
-        let mut shadow_elements = Vec::default();
 
         let is_overview = !matches!(overview.0, OverviewMode::None);
         let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
@@ -4078,7 +4077,6 @@ impl TilingLayout {
                 percentage,
                 indicator_thickness,
                 swap_desc.is_some(),
-                &mut shadow_elements,
                 theme,
             ));
 
@@ -4132,7 +4130,6 @@ impl TilingLayout {
             overview,
             resize_indicator,
             swap_desc.clone(),
-            &mut shadow_elements,
             &self.swapping_stack_surface_id,
             &self.backdrop_id,
             theme,
@@ -4142,8 +4139,6 @@ impl TilingLayout {
         if let Some(group_elements) = group_elements {
             elements.extend(group_elements);
         }
-
-        elements.extend(shadow_elements);
 
         Ok(elements)
     }
@@ -4993,7 +4988,6 @@ fn render_old_tree_windows<R>(
     percentage: f32,
     indicator_thickness: u8,
     is_swap_mode: bool,
-    shadow_elements: &mut Vec<CosmicMappedRenderElement<R>>,
     theme: &cosmic::theme::CosmicTheme,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
@@ -5005,6 +4999,7 @@ where
 {
     let window_hint = crate::theme::active_window_hint(theme);
     let mut elements = Vec::default();
+    let mut shadow_elements = Vec::default();
 
     render_old_tree(
         reference_tree,
@@ -5014,17 +5009,14 @@ where
         percentage,
         is_swap_mode,
         |mapped, elem_geometry, geo, alpha, is_minimizing| {
-            shadow_elements.extend(
-                mapped
-                    .shadow_render_element(
-                        renderer,
-                        geo.loc.as_logical().to_physical_precise_round(output_scale)
-                            - elem_geometry.loc,
-                        Scale::from(output_scale),
-                        alpha,
-                    )
-                    .into_iter(),
-            );
+            shadow_elements.extend(mapped.shadow_render_element(
+                renderer,
+                geo.loc.as_logical().to_physical_precise_round(output_scale) - elem_geometry.loc,
+                Scale::from(output_scale),
+                1.,
+                alpha,
+            ));
+
             let window_elements = mapped.render_elements::<R, CosmicMappedRenderElement<R>>(
                 renderer,
                 geo.loc.as_logical().to_physical_precise_round(output_scale) - elem_geometry.loc,
@@ -5079,7 +5071,10 @@ where
         },
     );
 
-    elements
+    shadow_elements
+        .into_iter()
+        .chain(elements.into_iter())
+        .collect()
 }
 
 fn render_old_tree(
@@ -5237,7 +5232,6 @@ fn render_new_tree_windows<R>(
     overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
     mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
     swap_desc: Option<NodeDesc>,
-    shadow_elements: &mut Vec<CosmicMappedRenderElement<R>>,
     swapping_stack_surface_id: &Id,
     backdrop_id: &Id,
     theme: &cosmic::theme::CosmicTheme,
@@ -5289,6 +5283,7 @@ where
     let mut indicators = Vec::new();
     let mut resize_elements = None;
     let mut swap_elements = Vec::new();
+    let mut shadow_elements = Vec::new();
 
     let output_geo = output.geometry();
     let output_scale = output.current_scale().fractional_scale();
@@ -5387,7 +5382,7 @@ where
         percentage,
         swap_tree,
         swap_desc.as_ref(),
-        |node_id, data, geo, _original_geo, alpha, animating| {
+        |node_id, data, geo, original_geo, alpha, animating| {
             if swap_desc.as_ref().map(|desc| &desc.node) == Some(&node_id)
                 || focused.as_ref() == Some(&node_id)
             {
@@ -5524,16 +5519,14 @@ where
             if let Data::Mapped { mapped, .. } = data {
                 let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
 
-                shadow_elements.extend(
-                    mapped
-                        .shadow_render_element(
-                            renderer,
-                            geo.loc.as_logical().to_physical_precise_round(output_scale)
-                                - elem_geometry.loc,
-                            Scale::from(output_scale),
-                            alpha,
-                        )
-                        .into_iter(),
+                let scale = geo.size.to_f64() / original_geo.size.to_f64();
+                let shadow_element = mapped.shadow_render_element(
+                    renderer,
+                    geo.loc.as_logical().to_physical_precise_round(output_scale)
+                        - elem_geometry.loc,
+                    Scale::from(output_scale),
+                    scale.x.min(scale.y),
+                    alpha,
                 );
                 let mut elements = mapped.render_elements::<R, CosmicMappedRenderElement<R>>(
                     renderer,
@@ -5639,11 +5632,15 @@ where
                     })
                     .unwrap_or(false)
                 {
+                    swap_elements.extend(shadow_element);
                     swap_elements.extend(elements);
-                } else if animating {
-                    animating_window_elements.extend(elements);
                 } else {
-                    window_elements.extend(elements);
+                    shadow_elements.extend(shadow_element);
+                    if animating {
+                        animating_window_elements.extend(elements);
+                    } else {
+                        window_elements.extend(elements);
+                    }
                 }
             }
         },
@@ -5656,6 +5653,7 @@ where
         .chain(indicators.into_iter().map(Into::into))
         .chain(window_elements)
         .chain(animating_window_elements)
+        .chain(shadow_elements)
         .chain(group_backdrop.into_iter().map(Into::into))
         .collect()
 }

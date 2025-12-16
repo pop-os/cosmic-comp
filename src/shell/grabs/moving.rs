@@ -209,6 +209,7 @@ impl MoveGrabState {
             renderer,
             (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
             output_scale,
+            scale,
             alpha,
         );
 
