@@ -660,7 +660,8 @@ impl CosmicStack {
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
-        scale: Scale<f64>,
+        output_scale: Scale<f64>,
+        scale: f64,
         alpha: f32,
     ) -> Option<C>
     where
@@ -690,13 +691,14 @@ impl CosmicStack {
                         .cosmic()
                         .radius_s()
                         .map(|x| if x < 4.0 { x } else { x + 4.0 })
-                        .map(|x| x.round() as u8)
+                        .map(|x| (x * scale as f32).round() as u8)
                 })
                 .unwrap_or([0, 0, 0, 0]);
 
             let mut geo = SpaceElement::geometry(&windows[active]).to_f64();
-            geo.loc += location.to_f64().to_logical(scale);
             geo.size.h += TAB_HEIGHT as f64;
+            geo = geo.upscale(scale);
+            geo.loc += location.to_f64().to_logical(output_scale);
 
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.0.0)));
@@ -708,7 +710,7 @@ impl CosmicStack {
                     geo.to_i32_round().as_local(),
                     radii,
                     if activated { alpha } else { alpha * 0.75 },
-                    scale.x,
+                    output_scale.x,
                 ))
                 .into(),
             )
