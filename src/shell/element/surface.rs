@@ -175,6 +175,13 @@ impl CosmicSurface {
         }
     }
 
+    pub fn has_pending_changes(&self) -> bool {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => toplevel.has_pending_changes(),
+            WindowSurface::X11(_surface) => false,
+        }
+    }
+
     pub fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {
         *self
             .0
