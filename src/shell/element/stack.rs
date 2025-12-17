@@ -730,6 +730,13 @@ impl CosmicStack {
         R::TextureId: Send + Clone + 'static,
         C: From<CosmicStackRenderElement<R>>,
     {
+        if !self
+            .0
+            .with_program(|p| p.override_alive.load(Ordering::Acquire))
+        {
+            return Vec::new();
+        }
+
         let geometry = self
             .0
             .with_program(|p| p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry())

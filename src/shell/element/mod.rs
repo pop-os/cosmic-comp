@@ -606,6 +606,10 @@ impl CosmicMapped {
         CosmicMappedRenderElement<R>: RenderElement<R>,
         C: From<CosmicMappedRenderElement<R>>,
     {
+        if !self.element.alive() {
+            return None;
+        }
+
         match &self.element {
             CosmicMappedInternal::Stack(s) => s
                 .shadow_render_element::<R, CosmicMappedRenderElement<R>>(
