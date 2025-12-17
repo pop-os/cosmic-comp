@@ -509,7 +509,7 @@ impl CosmicWindow {
             elements.push(elem);
         }
 
-        elements.extend(self.0.with_program(|p| {
+        let window_elements = self.0.with_program(|p| {
             p.window
                 .render_elements::<R, WaylandSurfaceRenderElement<R>>(
                     renderer,
@@ -518,23 +518,26 @@ impl CosmicWindow {
                     alpha,
                     scanout_override,
                 )
-                .into_iter()
-                .map(|elem| {
-                    if has_ssd {
-                        radii[1] = 0;
-                        radii[3] = 0;
-                    }
-                    if radii.iter().any(|x| *x != 0)
-                        && clip
-                        && ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radii)
-                    {
-                        CosmicWindowRenderElement::Clipped(ClippedSurfaceRenderElement::new(
-                            renderer, elem, scale, geo, radii,
-                        ))
-                    } else {
-                        CosmicWindowRenderElement::Window(elem)
-                    }
-                })
+        });
+        if window_elements.is_empty() {
+            return Vec::new();
+        }
+
+        elements.extend(window_elements.into_iter().map(|elem| {
+            if has_ssd {
+                radii[1] = 0;
+                radii[3] = 0;
+            }
+            if radii.iter().any(|x| *x != 0)
+                && clip
+                && ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radii)
+            {
+                CosmicWindowRenderElement::Clipped(ClippedSurfaceRenderElement::new(
+                    renderer, elem, scale, geo, radii,
+                ))
+            } else {
+                CosmicWindowRenderElement::Window(elem)
+            }
         }));
 
         if has_ssd {
