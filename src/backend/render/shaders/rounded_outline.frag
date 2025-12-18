@@ -1,4 +1,4 @@
-precision mediump float;
+precision highp float;
 uniform float alpha;
 #if defined(DEBUG_FLAGS)
 uniform float tint;
