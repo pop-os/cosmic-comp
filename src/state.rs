@@ -114,6 +114,7 @@ use smithay::{
     xwayland::XWaylandClientData,
 };
 use time::UtcOffset;
+use tracing::warn;
 
 #[cfg(feature = "systemd")]
 use std::os::fd::OwnedFd;
@@ -149,9 +150,12 @@ macro_rules! fl {
 pub struct ClientState {
     pub compositor_client_state: CompositorClientState,
     pub advertised_drm_node: Option<DrmNode>,
+    pub evlh: LoopHandle<'static, State>,
     pub evls: LoopSignal,
     pub security_context: Option<SecurityContext>,
 }
+unsafe impl Send for ClientState {}
+unsafe impl Sync for ClientState {}
 
 impl ClientState {
     /// We treat a client as "sandboxed" if it has a security context for any sandbox engine
@@ -167,7 +171,23 @@ impl ClientState {
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {
+    fn disconnected(&self, client_id: ClientId, _reason: DisconnectReason) {
+        self.evlh.insert_idle(move |state| {
+            if let BackendData::Kms(kms_state) = &mut state.backend {
+                for device in kms_state.drm_devices.values_mut() {
+                    if device.inner.active_clients.remove(&client_id)
+                        && !device
+                            .inner
+                            .in_use(kms_state.primary_node.read().unwrap().as_ref())
+                    {
+                        if let Err(err) = kms_state.refresh_used_devices() {
+                            warn!(?err, "Failed to init devices.");
+                        };
+                        break;
+                    }
+                }
+            }
+        });
         self.evls.wakeup();
     }
 }
@@ -783,6 +803,7 @@ impl State {
                 BackendData::Kms(kms_state) => *kms_state.primary_node.read().unwrap(),
                 _ => None,
             },
+            evlh: self.common.event_loop_handle.clone(),
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
         }
