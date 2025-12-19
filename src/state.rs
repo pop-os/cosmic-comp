@@ -313,8 +313,8 @@ pub enum LockedBackend<'a> {
 #[derive(Debug, Clone)]
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
-    pub scanout_feedback: DmabufFeedback,
-    pub primary_scanout_feedback: DmabufFeedback,
+    pub overlay_scanout_feedback: Option<DmabufFeedback>,
+    pub primary_scanout_feedback: Option<DmabufFeedback>,
 }
 
 #[derive(Debug)]
@@ -1035,7 +1035,10 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.primary_scanout_feedback,
+                                feedback
+                                    .primary_scanout_feedback
+                                    .as_ref()
+                                    .unwrap_or(&feedback.render_feedback),
                             )
                         },
                     )
@@ -1064,7 +1067,10 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.scanout_feedback,
+                                feedback
+                                    .overlay_scanout_feedback
+                                    .as_ref()
+                                    .unwrap_or(&feedback.render_feedback),
                             )
                         },
                     );
@@ -1085,7 +1091,10 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.scanout_feedback,
+                                feedback
+                                    .overlay_scanout_feedback
+                                    .as_ref()
+                                    .unwrap_or(&feedback.render_feedback),
                             )
                         },
                     );
@@ -1192,7 +1201,10 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.scanout_feedback,
+                                feedback
+                                    .overlay_scanout_feedback
+                                    .as_ref()
+                                    .unwrap_or(&feedback.render_feedback),
                             )
                         },
                     )
@@ -1214,7 +1226,10 @@ impl Common {
                             surface,
                             render_element_states,
                             &feedback.render_feedback,
-                            &feedback.scanout_feedback,
+                            feedback
+                                .overlay_scanout_feedback
+                                .as_ref()
+                                .unwrap_or(&feedback.render_feedback),
                         )
                     },
                 );

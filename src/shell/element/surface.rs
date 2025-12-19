@@ -688,9 +688,15 @@ impl CosmicSurface {
                     render_element_states,
                     &feedback.render_feedback,
                     if is_fullscreen {
-                        &feedback.primary_scanout_feedback
+                        feedback
+                            .primary_scanout_feedback
+                            .as_ref()
+                            .unwrap_or(&feedback.render_feedback)
                     } else {
-                        &feedback.scanout_feedback
+                        feedback
+                            .overlay_scanout_feedback
+                            .as_ref()
+                            .unwrap_or(&feedback.render_feedback)
                     },
                 )
             })
