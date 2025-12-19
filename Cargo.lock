@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "cosmic-comp"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bitflags 2.9.4",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "cosmic-comp-config"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "cosmic-config",
  "cosmic-randr-shell",
