@@ -440,6 +440,7 @@ impl Surface {
     ) {
         self.primary_plane_formats = primary_plane_formats;
         self.overlay_plane_formats = overlay_plane_formats;
+        self.feedback.clear();
         self.active.store(true, Ordering::SeqCst);
 
         let _ = self
