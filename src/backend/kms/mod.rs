@@ -852,35 +852,36 @@ impl KmsGuard<'_> {
 
                 if !test_only {
                     if !surface.is_active() {
+                        let mut planes = drm
+                            .device()
+                            .planes(crtc)
+                            .with_context(|| "Failed to enumerate planes")?;
+
+                        let driver = drm.device().get_driver().ok();
+
+                        // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
+                        if driver.as_ref().is_some_and(|driver| {
+                            driver
+                                .name()
+                                .to_string_lossy()
+                                .to_lowercase()
+                                .contains("nvidia")
+                        }) {
+                            planes.overlay = vec![];
+                        }
+                        // QUIRK: Cursor planes on evdi sometimes don't disappear correctly.
+                        // TODO: Debug and figure out, as they can be a nice improvement.
+                        if driver.as_ref().is_some_and(|driver| {
+                            driver
+                                .name()
+                                .to_string_lossy()
+                                .to_lowercase()
+                                .contains("evdi")
+                        }) {
+                            planes.cursor = vec![];
+                        }
+
                         let compositor: GbmDrmOutput = {
-                            let mut planes = drm
-                                .device()
-                                .planes(crtc)
-                                .with_context(|| "Failed to enumerate planes")?;
-                            let driver = drm.device().get_driver().ok();
-
-                            // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
-                            if driver.as_ref().is_some_and(|driver| {
-                                driver
-                                    .name()
-                                    .to_string_lossy()
-                                    .to_lowercase()
-                                    .contains("nvidia")
-                            }) {
-                                planes.overlay = vec![];
-                            }
-                            // QUIRK: Cursor planes on evdi sometimes don't disappear correctly.
-                            // TODO: Debug and figure out, as they can be a nice improvement.
-                            if driver.as_ref().is_some_and(|driver| {
-                                driver
-                                    .name()
-                                    .to_string_lossy()
-                                    .to_lowercase()
-                                    .contains("evdi")
-                            }) {
-                                planes.cursor = vec![];
-                            }
-
                             let mut renderer = self
                                 .api
                                 .single_renderer(&device.inner.render_node)
@@ -908,7 +909,7 @@ impl KmsGuard<'_> {
                                     *mode,
                                     &[conn],
                                     &surface.output,
-                                    Some(planes),
+                                    Some(planes.clone()),
                                     &mut renderer,
                                     &elements,
                                 )
@@ -943,16 +944,17 @@ impl KmsGuard<'_> {
                                     .unwrap(),
                             )
                             .ok();
+
+                        let primary_formats = compositor_ref.surface().plane_info().formats.clone();
+                        let overlay_formats = planes
+                            .overlay
+                            .iter()
+                            .flat_map(|p| p.formats.iter().cloned())
+                            .collect::<FormatSet>();
                         surface.resume(
                             compositor,
-                            compositor_ref.surface().plane_info().formats.clone(),
-                            compositor_ref
-                                .surface()
-                                .planes()
-                                .overlay
-                                .iter()
-                                .flat_map(|p| p.formats.iter().cloned())
-                                .collect::<FormatSet>(),
+                            primary_formats,
+                            Some(overlay_formats).filter(|f| !f.indexset().is_empty()),
                         );
 
                         surface.output.set_adaptive_sync_support(vrr_support);
