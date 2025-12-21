@@ -765,7 +765,18 @@ impl Program for ZoomProgram {
                                                     .accessibility_zoom
                                                     .increment = val;
                                                 state.common.update_config();
-                                                // TODO: Write config
+                                                if let Err(err) =
+                                                    state.common.config.cosmic_helper.set(
+                                                        "accessibility_zoom",
+                                                        state
+                                                            .common
+                                                            .config
+                                                            .cosmic_conf
+                                                            .accessibility_zoom,
+                                                    )
+                                                {
+                                                    error!(?err, "Failed to update zoom config");
+                                                }
                                             });
                                         })
                                     }),
