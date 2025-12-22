@@ -3400,6 +3400,7 @@ impl TilingLayout {
                 Option::<&mut GlowRenderer>::None,
                 non_exclusive_zone,
                 None,
+                self.output.current_scale().fractional_scale(),
                 1.0,
                 overview.alpha().unwrap(),
                 &self.backdrop_id,
@@ -4054,6 +4055,7 @@ impl TilingLayout {
                     non_exclusive_zone,
                     seat, // TODO: Would be better to be an old focus,
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
+                    output_scale,
                     1.0 - transition,
                     transition,
                     &self.backdrop_id,
@@ -4091,6 +4093,7 @@ impl TilingLayout {
                 &mut *renderer,
                 non_exclusive_zone,
                 seat,
+                output_scale,
                 transition,
                 transition,
                 &self.backdrop_id,
@@ -4203,6 +4206,7 @@ impl TilingLayout {
                     non_exclusive_zone,
                     seat, // TODO: Would be better to be an old focus,
                     // but for that we have to associate focus with a tree (and animate focus changes properly)
+                    output_scale,
                     1.0 - transition,
                     transition,
                     &self.backdrop_id,
@@ -4238,6 +4242,7 @@ impl TilingLayout {
                 &mut *renderer,
                 non_exclusive_zone,
                 seat,
+                output_scale,
                 transition,
                 transition,
                 &self.backdrop_id,
@@ -4312,6 +4317,7 @@ fn geometries_for_groupview<'a, R>(
     renderer: impl Into<Option<&'a mut R>>,
     non_exclusive_zone: Rectangle<i32, Local>,
     seat: Option<&Seat<State>>,
+    scale: f64,
     alpha: f32,
     transition: f32,
     backdrop_id: &Id,
@@ -4512,6 +4518,7 @@ where
                                     4,
                                     [if render_active_child { 16 } else { 8 }; 4],
                                     alpha * if render_potential_group { 0.40 } else { 1.0 },
+                                    scale,
                                     group_color,
                                 )
                                 .into(),
@@ -4529,6 +4536,7 @@ where
                                     4,
                                     [8; 4],
                                     alpha * 0.40,
+                                    scale,
                                     group_color,
                                 )
                                 .into(),
@@ -4592,6 +4600,7 @@ where
                                         4,
                                         [8; 4],
                                         alpha * 0.15,
+                                        scale,
                                         group_color,
                                     )
                                     .into(),
@@ -4828,6 +4837,7 @@ where
                                     4,
                                     [8; 4],
                                     alpha * 0.40,
+                                    scale,
                                     group_color,
                                 )
                                 .into(),
@@ -5068,6 +5078,7 @@ where
                         indicator_thickness,
                         radius,
                         alpha,
+                        output_scale,
                         [window_hint.red, window_hint.green, window_hint.blue],
                     ),
                 ));
@@ -5347,6 +5358,7 @@ where
                 4,
                 radius,
                 transition.unwrap_or(1.0),
+                output_scale,
                 [window_hint.red, window_hint.green, window_hint.blue],
             ),
         ));
@@ -5464,6 +5476,7 @@ where
                                 },
                                 radius,
                                 alpha,
+                                output_scale,
                                 [window_hint.red, window_hint.green, window_hint.blue],
                             ),
                         ));

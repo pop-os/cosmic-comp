@@ -1622,6 +1622,7 @@ impl FloatingLayout {
                         indicator_thickness,
                         radius,
                         alpha,
+                        output_scale,
                         [
                             active_window_hint.red,
                             active_window_hint.green,
