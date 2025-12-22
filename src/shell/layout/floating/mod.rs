@@ -1504,6 +1504,7 @@ impl FloatingLayout {
                 render_location
                     .as_logical()
                     .to_physical_precise_round(output_scale),
+                None,
                 output_scale.into(),
                 alpha,
                 None,
@@ -1514,6 +1515,7 @@ impl FloatingLayout {
                     render_location
                         .as_logical()
                         .to_physical_precise_round(output_scale),
+                    None,
                     output_scale.into(),
                     1.,
                     alpha,

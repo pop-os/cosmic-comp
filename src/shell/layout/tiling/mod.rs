@@ -5026,6 +5026,7 @@ where
             shadow_elements.extend(mapped.shadow_render_element(
                 renderer,
                 geo.loc.as_logical().to_physical_precise_round(output_scale) - elem_geometry.loc,
+                Some(geo.size.as_logical()),
                 Scale::from(output_scale),
                 1.,
                 alpha,
@@ -5034,6 +5035,7 @@ where
             let window_elements = mapped.render_elements::<R, CosmicMappedRenderElement<R>>(
                 renderer,
                 geo.loc.as_logical().to_physical_precise_round(output_scale) - elem_geometry.loc,
+                Some(geo.size.as_logical()),
                 Scale::from(output_scale),
                 alpha,
                 None,
@@ -5565,6 +5567,7 @@ where
                     renderer,
                     geo.loc.as_logical().to_physical_precise_round(output_scale)
                         - elem_geometry.loc,
+                    Some(geo.size.as_logical()),
                     Scale::from(output_scale),
                     scale.x.min(scale.y),
                     alpha,
@@ -5574,6 +5577,7 @@ where
                     //original_location,
                     geo.loc.as_logical().to_physical_precise_round(output_scale)
                         - elem_geometry.loc,
+                    Some(geo.size.as_logical()),
                     Scale::from(output_scale),
                     alpha,
                     None,
