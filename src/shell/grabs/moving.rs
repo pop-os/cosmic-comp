@@ -194,6 +194,7 @@ impl MoveGrabState {
                 renderer,
                 (render_location - self.window.geometry().loc)
                     .to_physical_precise_round(output_scale),
+                None,
                 output_scale,
                 alpha,
                 Some(false),
@@ -210,6 +211,7 @@ impl MoveGrabState {
         let shadow_element = self.window.shadow_render_element(
             renderer,
             (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
             output_scale,
             scale,
             alpha,
