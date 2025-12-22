@@ -358,6 +358,7 @@ impl CosmicWindow {
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
+        max_size: Option<Size<i32, Logical>>,
         output_scale: Scale<f64>,
         scale: f64,
         alpha: f32,
@@ -411,6 +412,9 @@ impl CosmicWindow {
             }
             geo = geo.upscale(scale);
             geo.loc += location.to_f64().to_logical(output_scale);
+            if let Some(max_size) = max_size {
+                geo.size = geo.size.clamp(Size::default(), max_size.to_f64());
+            }
 
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Window(Arc::downgrade(&self.0.0)));
@@ -434,6 +438,7 @@ impl CosmicWindow {
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
+        max_size: Option<Size<i32, Logical>>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
@@ -489,6 +494,9 @@ impl CosmicWindow {
         geo.loc += location.to_f64().to_logical(scale);
         if has_ssd {
             geo.size.h += SSD_HEIGHT as f64;
+        }
+        if let Some(max_size) = max_size {
+            geo.size = geo.size.clamp(Size::default(), max_size.to_f64());
         }
 
         if (has_ssd || clip) && !is_maximized {
