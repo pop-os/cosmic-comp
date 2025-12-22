@@ -596,6 +596,7 @@ impl CosmicMapped {
         &self,
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        max_size: Option<smithay::utils::Size<i32, smithay::utils::Logical>>,
         output_scale: smithay::utils::Scale<f64>,
         scale: f64,
         alpha: f32,
@@ -615,6 +616,7 @@ impl CosmicMapped {
                 .shadow_render_element::<R, CosmicMappedRenderElement<R>>(
                     renderer,
                     location,
+                    max_size,
                     output_scale,
                     scale,
                     alpha,
@@ -624,6 +626,7 @@ impl CosmicMapped {
                 .shadow_render_element::<R, CosmicMappedRenderElement<R>>(
                     renderer,
                     location,
+                    max_size,
                     output_scale,
                     scale,
                     alpha,
@@ -637,6 +640,7 @@ impl CosmicMapped {
         &self,
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
+        max_size: Option<smithay::utils::Size<i32, smithay::utils::Logical>>,
         scale: smithay::utils::Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
@@ -826,6 +830,7 @@ impl CosmicMapped {
             CosmicMappedInternal::Stack(s) => s.render_elements::<R, CosmicMappedRenderElement<R>>(
                 renderer,
                 location,
+                max_size,
                 scale,
                 alpha,
                 scanout_override,
@@ -834,6 +839,7 @@ impl CosmicMapped {
                 .render_elements::<R, CosmicMappedRenderElement<R>>(
                     renderer,
                     location,
+                    max_size,
                     scale,
                     alpha,
                     scanout_override,
