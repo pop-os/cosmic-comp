@@ -182,9 +182,10 @@ impl From<Id> for Key {
 #[derive(PartialEq)]
 struct IndicatorSettings {
     thickness: u8,
-    radius: [u8; 4],
+    outer_radius: [u8; 4],
     alpha: f32,
     color: [f32; 3],
+    scale: f64,
 }
 type IndicatorCache = RefCell<HashMap<Key, (IndicatorSettings, PixelShaderElement)>>;
 
@@ -204,21 +205,24 @@ impl IndicatorShader {
         key: impl Into<Key>,
         mut element_geo: Rectangle<i32, Local>,
         thickness: u8,
-        radius: [u8; 4],
+        inner_radius: [u8; 4],
         alpha: f32,
+        scale: f64,
         active_window_hint: [f32; 3],
     ) -> PixelShaderElement {
         let t = thickness as i32;
         element_geo.loc -= (t, t).into();
         element_geo.size += (t * 2, t * 2).into();
+        let outer_radius = inner_radius.map(|r| r + thickness);
 
         IndicatorShader::element(
             renderer,
             key,
             element_geo,
             thickness,
-            radius,
+            outer_radius,
             alpha,
+            scale,
             active_window_hint,
         )
     }
@@ -228,14 +232,16 @@ impl IndicatorShader {
         key: impl Into<Key>,
         geo: Rectangle<i32, Local>,
         thickness: u8,
-        radius: [u8; 4],
+        outer_radius: [u8; 4],
         alpha: f32,
+        scale: f64,
         color: [f32; 3],
     ) -> PixelShaderElement {
         let settings = IndicatorSettings {
             thickness,
-            radius,
+            outer_radius,
             alpha,
+            scale,
             color,
         };
 
@@ -257,7 +263,7 @@ impl IndicatorShader {
             .filter(|(old_settings, _)| &settings == old_settings)
             .is_none()
         {
-            let thickness: f32 = thickness as f32;
+            let thickness: f32 = ((thickness as f64 * scale).ceil() / scale) as f32;
             let shader = Self::get(renderer);
 
             let elem = PixelShaderElement::new(
@@ -274,12 +280,13 @@ impl IndicatorShader {
                     Uniform::new(
                         "radius",
                         [
-                            radius[0] as f32 + thickness / 2.,
-                            radius[1] as f32 + thickness / 2.,
-                            radius[2] as f32 + thickness / 2.,
-                            radius[3] as f32 + thickness / 2.,
+                            outer_radius[0] as f32,
+                            outer_radius[1] as f32,
+                            outer_radius[2] as f32,
+                            outer_radius[3] as f32,
                         ],
                     ),
+                    Uniform::new("scale", scale as f32),
                 ],
                 Kind::Unspecified,
             );
@@ -392,6 +399,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
         &[
             UniformName::new("color", UniformType::_3f),
             UniformName::new("thickness", UniformType::_1f),
+            UniformName::new("scale", UniformType::_1f),
             UniformName::new("radius", UniformType::_4f),
         ],
     )?;
