@@ -782,6 +782,7 @@ impl CosmicStack {
                     1,
                     radii.unwrap_or([0, 0, 0, 0]),
                     a * alpha,
+                    scale.x,
                     [r, g, b],
                 ))
             });
