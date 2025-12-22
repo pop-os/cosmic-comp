@@ -503,6 +503,7 @@ impl CosmicWindow {
                 1,
                 radii,
                 a * alpha,
+                scale.x,
                 [r, g, b],
             ));
             elements.push(elem);

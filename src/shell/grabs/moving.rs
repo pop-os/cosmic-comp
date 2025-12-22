@@ -131,6 +131,7 @@ impl MoveGrabState {
                     self.indicator_thickness,
                     radius,
                     alpha,
+                    output_scale.x,
                     [
                         active_window_hint.red,
                         active_window_hint.green,
@@ -167,6 +168,7 @@ impl MoveGrabState {
                             theme.radius_s()[3] as u8,
                         ],
                         1.0,
+                        output_scale.x,
                         [
                             active_window_hint.red,
                             active_window_hint.green,
