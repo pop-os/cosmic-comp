@@ -108,8 +108,18 @@ impl XdgShellHandler for State {
                             && !(keyboard.has_grab(serial)
                                 || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
                         {
-                            grab.ungrab(PopupUngrabStrategy::All);
-                            return;
+                            // If the keyboard is grabbed by the input method, we should still allow the popup grab
+                            // to proceed. The input method grab is likely for the virtual keyboard or similar
+                            // and shouldn't prevent application menus from opening.
+                            let is_ime_grab = keyboard.grab().is_some_and(|g| {
+                                g.as_any()
+                                    .is::<smithay::wayland::input_method::InputMethodKeyboardGrab>()
+                            });
+
+                            if !is_ime_grab {
+                                grab.ungrab(PopupUngrabStrategy::All);
+                                return;
+                            }
                         }
                         Shell::set_focus(
                             self,
