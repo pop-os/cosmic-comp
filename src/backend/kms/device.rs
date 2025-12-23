@@ -243,7 +243,7 @@ impl State {
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
-        let (render_node, render_formats, is_software) = {
+        let (render_node, render_formats, texture_formats, is_software) = {
             let egl = init_egl(&gbm)?;
 
             let render_node = egl
@@ -253,8 +253,16 @@ impl State {
                 .and_then(std::convert::identity)
                 .unwrap_or(drm_node);
             let render_formats = egl.context.dmabuf_render_formats().clone();
+            // Texture formats include NV12 and other formats that can be sampled
+            // but not rendered to (external_only in EGL). This is what clients need.
+            let texture_formats = egl.display.dmabuf_texture_formats().clone();
 
-            (render_node, render_formats, egl.device.is_software())
+            (
+                render_node,
+                render_formats,
+                texture_formats,
+                egl.device.is_software(),
+            )
         };
 
         let token = self
@@ -278,7 +286,7 @@ impl State {
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
         let socket = match (!is_software)
-            .then(|| self.create_socket(dh, render_node, render_formats.clone()))
+            .then(|| self.create_socket(dh, render_node, texture_formats.clone()))
             .transpose()
         {
             Ok(socket) => socket,
