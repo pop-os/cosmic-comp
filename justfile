@@ -61,6 +61,15 @@ build-vendored *args: vendor-extract (build-release '--frozen --offline' args)
 check *args:
     cargo clippy --all-features {{args}} -- -W clippy::pedantic
 
+# Run the full COSMIC shell in a nested window (requires cosmic-session and shell components installed)
+mock:
+    cargo build --release
+    {{cargo-target-dir}}/release/cosmic-comp cosmic-session {{cargo-target-dir}}/release/cosmic-comp
+
+# Run with debug logs
+run *args:
+    env RUST_LOG=cosmic_comp=debug RUST_BACKTRACE=full cargo run --release {{args}}
+
 # Installs files
 install:
     install -Dm0755 {{bin-src}} {{bin-dst}}

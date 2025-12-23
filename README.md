@@ -13,6 +13,11 @@ This project uses [just](https://github.com/casey/just) as a command runner.
 - `just build-vendored` - Compile release profile with vendored dependencies
     - Requires vendoring first, which can be done with `just vendor`
 
+#### Testing & Development
+- `just mock` - Run the full COSMIC shell in a nested winit window. This starts the locally built cosmic-comp, which spawns cosmic-session, which in turn starts the shell components (panel, background, notifications, etc.). Requires cosmic-session and shell components to be installed.
+- `just run` - Run with debug logs (`RUST_LOG=cosmic_comp=debug` and `RUST_BACKTRACE=full`)
+- `just run <app>` - Run cosmic-comp with a specific app in kiosk mode (e.g., `just run cosmic-term`)
+
 #### Code Quality
 - `just check` - Run clippy linter with pedantic warnings
 
