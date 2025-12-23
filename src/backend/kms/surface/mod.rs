@@ -118,7 +118,7 @@ pub struct Surface {
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,
-    pub(super) feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
+    pub feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
     pub(super) primary_plane_formats: FormatSet,
     overlay_plane_formats: Option<FormatSet>,
 
