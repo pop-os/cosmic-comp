@@ -129,8 +129,8 @@ impl ResizeSurfaceGrab {
                 
                 // Clamp right edge
                 if final_right > work_area.loc.x + work_area.size.w {
-                     let diff = final_right - (work_area.loc.x + work_area.size.w);
-                     new_window_width -= diff;
+                    let diff = final_right - (work_area.loc.x + work_area.size.w);
+                    new_window_width -= diff;
                 }
 
                 if (self.initial_window_location.x + self.initial_window_size.w + dx as i32
@@ -182,8 +182,8 @@ impl ResizeSurfaceGrab {
 
                 // Clamp bottom edge
                 if final_bottom > work_area.loc.y + work_area.size.h {
-                     let diff = final_bottom - (work_area.loc.y + work_area.size.h);
-                     new_window_height -= diff;
+                    let diff = final_bottom - (work_area.loc.y + work_area.size.h);
+                    new_window_height -= diff;
                 }
 
                 if (self.initial_window_location.y + self.initial_window_size.h + dy as i32
