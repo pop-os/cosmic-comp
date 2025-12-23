@@ -335,9 +335,16 @@ where
         let toplevel_handle = self
             .foreign_toplevel_list
             .new_toplevel::<D>(toplevel.title(), toplevel.app_id());
-        toplevel
-            .user_data()
-            .insert_if_missing(move || ToplevelStateInner::from_foreign(toplevel_handle));
+
+        if let Some(toplevel_state) = toplevel.user_data().get::<ToplevelState>() {
+            let mut toplevel_state = toplevel_state.lock().unwrap();
+            toplevel_state.foreign_handle = Some(toplevel_handle);
+        } else {
+            toplevel
+                .user_data()
+                .insert_if_missing(move || ToplevelStateInner::from_foreign(toplevel_handle));
+        }
+
         for instance in &self.instances {
             send_toplevel_to_client::<D, W>(&self.dh, workspace_state, instance, toplevel);
         }
