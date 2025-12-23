@@ -1,5 +1,8 @@
 use crate::{
-    shell::focus::target::PointerFocusTarget, wayland::protocols::corner_radius::CacheableCorners,
+    shell::focus::target::PointerFocusTarget,
+    wayland::{
+        handlers::compositor::frame_time_filter_fn, protocols::corner_radius::CacheableCorners,
+    },
 };
 use std::{
     borrow::Cow,
@@ -682,17 +685,16 @@ impl CosmicSurface {
         let is_fullscreen = self.is_fullscreen(false);
 
         self.0
-            .send_dmabuf_feedback(output, primary_scan_out_output, |surface, _| {
-                select_dmabuf_feedback(
-                    surface,
-                    render_element_states,
-                    &feedback.render_feedback,
-                    if is_fullscreen {
-                        &feedback.primary_scanout_feedback
-                    } else {
+            .send_dmabuf_feedback(output, primary_scan_out_output, |_, data| {
+                if is_fullscreen {
+                    &feedback.primary_scanout_feedback
+                } else {
+                    if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
                         &feedback.scanout_feedback
-                    },
-                )
+                    } else {
+                        &feedback.render_feedback
+                    }
+                }
             })
     }
 
