@@ -118,7 +118,7 @@ pub struct Surface {
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,
-    pub(super) feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
+    pub feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
     pub(super) primary_plane_formats: FormatSet,
     overlay_plane_formats: FormatSet,
 
@@ -440,6 +440,7 @@ impl Surface {
     ) {
         self.primary_plane_formats = primary_plane_formats;
         self.overlay_plane_formats = overlay_plane_formats;
+        self.feedback.clear();
         self.active.store(true, Ordering::SeqCst);
 
         let _ = self
@@ -1527,47 +1528,58 @@ fn get_surface_dmabuf_feedback(
     render_node: DrmNode,
     target_node: DrmNode,
     render_formats: FormatSet,
-    target_formats: FormatSet,
+    _target_formats: FormatSet,
     primary_plane_formats: FormatSet,
     overlay_plane_formats: FormatSet,
 ) -> SurfaceDmabufFeedback {
-    let combined_formats = render_formats
-        .intersection(&target_formats)
-        .copied()
-        .collect::<FormatSet>();
-
     // We limit the scan-out trache to formats we can also render from
     // so that there is always a fallback render path available in case
     // the supplied buffer can not be scanned out directly
+
     let primary_plane_formats = primary_plane_formats
-        .intersection(&combined_formats)
-        .copied()
+        .intersection(&render_formats)
+        .cloned()
         .collect::<FormatSet>();
     let overlay_plane_formats = overlay_plane_formats
-        .intersection(&combined_formats)
-        .copied()
+        .intersection(&render_formats)
+        .cloned()
         .collect::<FormatSet>();
-
     let builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
+
     /*
-    // iris doesn't handle nvidia buffers very well (it hangs).
-    // so only do this in the future with v6 and clients telling us the gpu
+    // Sadly no implementation would pick this up as a preferred render tranche,
+    // where the combined formats would increase our chances of doing a dmabuf copy.
+    // .. So we should probably not advertise this on the off-chance it actually triggers bugs.
+    //
+
+    let combined_formats = render_formats.intersection(&target_formats).cloned().collect::<FormatSet>();
     if target_node != render_node.dev_id() && !combined_formats.is_empty() {
         builder = builder.add_preference_tranche(
-            target_node,
+            render_node.dev_id(),
+            None,
+            combined_formats,
+        );
+    };
+
+    // We also can't advertise scan out tranches for the actual display device,
+    // as e.g. the nvidia driver might then send us dmabufs, that makes e.g. the iris hangs on import...
+    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
+        builder = builder.add_preference_tranche(
+            target_node.dev_id(),
             Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
             combined_formats,
         );
     };
+
+    // So no fun combinations, we gotta wait for dmabuf-v6
     */
 
     let render_feedback = builder.clone().build().unwrap();
-    // we would want to do this in other cases as well, but same thing as above applies
     let primary_scanout_feedback = if target_node == render_node {
         builder
             .clone()
             .add_preference_tranche(
-                target_node.dev_id(),
+                render_node.dev_id(),
                 Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
                 primary_plane_formats.clone(),
             )
@@ -1579,7 +1591,7 @@ fn get_surface_dmabuf_feedback(
     let scanout_feedback = if target_node == render_node {
         builder
             .add_preference_tranche(
-                target_node.dev_id(),
+                render_node.dev_id(),
                 Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
                 FormatSet::from_iter(
                     primary_plane_formats
