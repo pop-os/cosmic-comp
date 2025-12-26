@@ -3,8 +3,8 @@ authors = ["Victoria Brekenfeld"]
 edition = "2024"
 license = "GPL-3.0-only"
 name = "cosmic-comp"
-version = "0.1.0"
-rust-version = "1.85"
+version = "1.0.0"
+rust-version = "1.90"
 
 [workspace]
 members = ["cosmic-comp-config"]
