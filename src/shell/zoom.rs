@@ -34,7 +34,6 @@ use tracing::error;
 use crate::{
     state::State,
     utils::{
-        float::NextDown,
         iced::{IcedElement, Program},
         prelude::*,
         tween::EasePoint,
@@ -93,11 +92,11 @@ impl OutputZoomState {
                         .to_global(output);
                     focal_point.x = focal_point.x.clamp(
                         output_geometry.loc.x,
-                        (output_geometry.loc.x + output_geometry.size.w).next_lower(), // FIXME: Replace with f64::next_down when stable
+                        (output_geometry.loc.x + output_geometry.size.w).next_down(),
                     );
                     focal_point.y = focal_point.y.clamp(
                         output_geometry.loc.y,
-                        (output_geometry.loc.y + output_geometry.size.h).next_lower(), // FIXME: Replace with f64::next_down when stable
+                        (output_geometry.loc.y + output_geometry.size.h).next_down(),
                     );
                     focal_point.to_local(output)
                 }
@@ -309,11 +308,11 @@ impl ZoomState {
                             .upscale(output_state_ref.level);
                     diff.x = diff.x.clamp(
                         output_geometry.loc.x as f64,
-                        ((output_geometry.loc.x + output_geometry.size.w) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                        ((output_geometry.loc.x + output_geometry.size.w) as f64).next_down(),
                     );
                     diff.y = diff.y.clamp(
                         output_geometry.loc.y as f64,
-                        ((output_geometry.loc.y + output_geometry.size.h) as f64).next_lower(), // FIXME: Replace with f64::next_down when stable
+                        ((output_geometry.loc.y + output_geometry.size.h) as f64).next_down(),
                     );
                     diff -= output_state_ref.focal_point.to_global(output);
 
@@ -766,7 +765,18 @@ impl Program for ZoomProgram {
                                                     .accessibility_zoom
                                                     .increment = val;
                                                 state.common.update_config();
-                                                // TODO: Write config
+                                                if let Err(err) =
+                                                    state.common.config.cosmic_helper.set(
+                                                        "accessibility_zoom",
+                                                        state
+                                                            .common
+                                                            .config
+                                                            .cosmic_conf
+                                                            .accessibility_zoom,
+                                                    )
+                                                {
+                                                    error!(?err, "Failed to update zoom config");
+                                                }
                                             });
                                         })
                                     }),
