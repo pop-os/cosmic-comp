@@ -11,11 +11,11 @@ use crate::{
     dbus::a11y_keyboard_monitor::A11yKeyboardMonitorState,
     input::{PointerFocusState, gestures::GestureState},
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
-    utils::prelude::OutputExt,
+    utils::prelude::{OutputExt, ToAnyhow},
     wayland::{
         handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
         protocols::{
-            a11y::A11yState,
+            a11y::{A11yHandler, A11yState},
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
             image_capture_source::ImageCaptureSourceState,
@@ -30,9 +30,10 @@ use crate::{
     },
     xwayland::XWaylandState,
 };
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use calloop::RegistrationToken;
-use cosmic_comp_config::output::comp::{OutputConfig, OutputState};
+use cosmic_comp_config::{NumlockState, output::comp::{OutputConfig, OutputState}};
+use cosmic_settings_daemon_config::greeter;
 use futures_executor::ThreadPool;
 use i18n_embed::{
     DesktopLanguageRequester,
@@ -331,7 +332,131 @@ impl BackendData {
         }
     }
 
+    pub fn finish_startup(&mut self, output: Output) -> anyhow::Result<()> {
+        if self
+            .common
+            .startup_done
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(());
+        }
+
+        let initial_seat = crate::shell::create_seat(
+            &self.common.display_handle,
+            &mut self.common.seat_state,
+            &output,
+            &self.common.config,
+            "seat-0".into(),
+        );
+
+        let keyboard = initial_seat
+            .get_keyboard()
+            .ok_or_else(|| anyhow!("`shell::create_seat` did not setup keyboard"))?;
+
+        self.common
+            .shell
+            .write()
+            .seats
+            .add_seat(initial_seat.clone());
+
+        let greeter_state = match greeter::GreeterAccessibilityState::config() {
+            Ok(helper) => match greeter::GreeterAccessibilityState::get_entry(&helper) {
+                Ok(s) => s,
+                Err((errs, s)) => {
+                    for err in errs {
+                        tracing::error!("Error loading greeter state: {err:?}");
+                    }
+                    s
+                }
+            },
+            Err(_) => {
+                tracing::info!("`cosmic-greeter` state not found.");
+                greeter::GreeterAccessibilityState::default()
+            }
+        };
+
+        if let Some(magnifier) = greeter_state.magnifier {
+            let mut zoom = self
+                .common
+                .config
+                .cosmic_conf
+                .accessibility_zoom
+                .clone();
+
+            zoom.start_on_login = magnifier;
+            if let Err(err) = self
+                .common
+                .config
+                .cosmic_conf
+                .set_accessibility_zoom(&self.common.config.cosmic_helper, zoom)
+            {
+                tracing::error!("Failed to set screen filter: {err:?}");
+            }
+        }
+
+        if let Some(inverted) = greeter_state.invert_colors {
+            if inverted != self.a11y_state().screen_inverted() {
+                self.request_screen_invert(inverted);
+            }
+        }
+
+        if self
+            .common
+            .config
+            .cosmic_conf
+            .accessibility_zoom
+            .start_on_login
+        {
+            self.common.shell.write().trigger_zoom(
+                &initial_seat,
+                None,
+                1.0 + (self.common.config.cosmic_conf.accessibility_zoom.increment as f64
+                    / 100.),
+                &self.common.config.cosmic_conf.accessibility_zoom,
+                true,
+                &self.common.event_loop_handle,
+            );
+        }
+
+        let desired_numlock = self
+            .common
+            .config
+            .cosmic_conf
+            .keyboard_config
+            .numlock_state;
+        // Restore numlock state based on config.
+        let toggle_numlock = match desired_numlock {
+            NumlockState::BootOff => keyboard.modifier_state().num_lock,
+            NumlockState::BootOn => !keyboard.modifier_state().num_lock,
+            NumlockState::LastBoot => {
+                keyboard.modifier_state().num_lock
+                    != self.common.config.dynamic_conf.numlock().last_state
+            }
+        };
+
+        // If we're enabling numlock...
+        if toggle_numlock {
+            /// Linux scancode for numlock key.
+            const NUMLOCK_SCANCODE: u32 = 69;
+            crate::config::change_modifier_state(&keyboard, NUMLOCK_SCANCODE, self);
+        }
+        {
+            {
+                self.common
+                    .startup_done
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                if let BackendData::Kms(state) = &mut self.backend {
+                     for output in self.common.shell.read().outputs() {
+                        state.schedule_render(output);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn schedule_render(&mut self, output: &Output) {
+
         match self {
             BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.

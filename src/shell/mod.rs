@@ -3498,20 +3498,23 @@ impl Shell {
         let mut start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
 
-        if client_initiated
-            && start_data.distance(seat.get_pointer().unwrap().current_location()) < 1.
-        {
-            return Some((
-                MoveGrab::delayed(
-                    start_data,
-                    surface,
-                    seat,
-                    serial,
-                    release,
-                    move_out_of_stack,
-                ),
-                Focus::Keep,
-            ));
+        if client_initiated {
+            let current_location = seat.get_pointer().unwrap().current_location();
+            if start_data.distance(current_location) < 1. {
+                return Some((
+                    MoveGrab::delayed(
+                        start_data,
+                        surface,
+                        seat,
+                        serial,
+                        release,
+                        move_out_of_stack,
+                    ),
+                    Focus::Keep,
+                ));
+            } else if let GrabStartData::Pointer(_) = start_data {
+                start_data.set_location(current_location);
+            }
         }
 
         let maybe_fullscreen_workspace = self

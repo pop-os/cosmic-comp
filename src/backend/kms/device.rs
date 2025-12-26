@@ -387,6 +387,18 @@ impl State {
             .add_heads(wl_outputs.iter());
 
         self.backend.kms().refresh_used_devices()?;
+
+        if !self
+            .common
+            .startup_done
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            if let Some(output) = wl_outputs.iter().next().cloned() {
+                if let Err(err) = self.finish_startup(output) {
+                    tracing::error!("Failed to finish startup: {err:?}");
+                }
+            }
+        }
         Ok(wl_outputs)
     }
 
