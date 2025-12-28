@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=Cosmic
 Commment=This session logs you into Cosmic
+Commment[sv]=Denna session loggar in dig till Cosmic
 Exec=/usr/bin/cosmic-service
 Type=Application
 DesktopNames=pop:COSMIC
