@@ -3074,11 +3074,21 @@ impl TilingLayout {
                                 }
                             }
                         },
-                        Data::Mapped { mapped, .. } => {
+                        Data::Mapped {
+                            mapped,
+                            last_geometry,
+                            ..
+                        } => {
                             if !(mapped.is_fullscreen(true) || mapped.is_maximized(true)) {
                                 mapped.set_tiled(true);
-                                let internal_geometry = geo.to_global(output);
-                                mapped.set_geometry(internal_geometry);
+                                if let Some(max_width) = max_window_width {
+                                    if last_geometry.size.w > max_width as i32 {
+                                        let old_w = last_geometry.size.w;
+                                        last_geometry.size.w = max_width as i32;
+                                        last_geometry.loc.x += (old_w - max_width as i32) / 2;
+                                    }
+                                }
+                                mapped.set_geometry(last_geometry.to_global(output));
                                 if let Some(serial) = mapped.configure() {
                                     configures.push((mapped.active_window(), serial));
                                 }

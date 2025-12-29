@@ -80,6 +80,8 @@ pub struct CosmicCompConfig {
     pub xwayland_eavesdropping: XwaylandEavesdropping,
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
+    /// Maximum window width for tiled windows
+    pub max_window_width: Option<u32>,
     pub accessibility_zoom: ZoomConfig,
 }
 
@@ -115,6 +117,7 @@ impl Default for CosmicCompConfig {
             descale_xwayland: XwaylandDescaling::Fractional,
             xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
+            max_window_width: None,
             accessibility_zoom: ZoomConfig::default(),
         }
     }
