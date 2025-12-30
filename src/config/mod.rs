@@ -36,7 +36,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, atomic::AtomicBool},
 };
-use tracing::{debug, error, warn};
+use tracing::{error, warn};
 
 mod input_config;
 pub mod key_bindings;
@@ -185,7 +185,6 @@ impl Config {
                 }
                 c
             });
-        debug!("Loaded config: {:?}", cosmic_comp_config);
 
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
