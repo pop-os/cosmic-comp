@@ -922,6 +922,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.update_config();
                 }
             }
+            "max_window_width" => {
+                let new = get_config::<Option<u32>>(&config, "max_window_width");
+                if new != state.common.config.cosmic_conf.max_window_width {
+                    state.common.config.cosmic_conf.max_window_width = new;
+                    state.common.update_config();
+                }
+            }
             _ => {}
         }
     }

@@ -5,6 +5,7 @@ use crate::{
         ACTIVE_GROUP_COLOR, BackdropShader, GROUP_COLOR, IndicatorShader, Key, Usage,
         element::AsGlowRenderer,
     },
+    config::Config,
     shell::{
         CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
         ResizeMode, Trigger,
@@ -3081,6 +3082,7 @@ impl TilingLayout {
                         } => {
                             if !(mapped.is_fullscreen(true) || mapped.is_maximized(true)) {
                                 mapped.set_tiled(true);
+                                let max_window_width = Some(2400);
                                 if let Some(max_width) = max_window_width {
                                     if last_geometry.size.w > max_width as i32 {
                                         let old_w = last_geometry.size.w;
