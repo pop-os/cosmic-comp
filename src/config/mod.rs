@@ -36,7 +36,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, atomic::AtomicBool},
 };
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 mod input_config;
 pub mod key_bindings;
@@ -185,6 +185,7 @@ impl Config {
                 }
                 c
             });
+        debug!("Loaded config: {:?}", cosmic_comp_config);
 
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
@@ -923,7 +924,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
             }
             "max_window_width" => {
-                let new = get_config::<Option<u32>>(&config, "max_window_width");
+                let new = get_config::<u32>(&config, "max_window_width");
                 if new != state.common.config.cosmic_conf.max_window_width {
                     state.common.config.cosmic_conf.max_window_width = new;
                     state.common.update_config();
