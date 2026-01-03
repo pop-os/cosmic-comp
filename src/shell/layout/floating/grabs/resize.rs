@@ -64,11 +64,13 @@ pub struct ResizeSurfaceGrab {
     initial_window_size: Size<i32, Logical>,
     last_window_size: Size<i32, Logical>,
     release: ReleaseMode,
+    // neighbor window for fused edge resizing
+    neighbor: Option<(CosmicMapped, Point<i32, Local>, Size<i32, Logical>)>,
 }
 
 impl ResizeSurfaceGrab {
     // Returns `true` if grab should be unset
-    fn update_location(&mut self, location: Point<f64, Global>) -> bool {
+    fn update_location(&mut self, location: Point<f64, Global>, state: &mut State) -> bool {
         // It is impossible to get `min_size` and `max_size` of dead toplevel, so we return early.
         if !self.window.alive() {
             self.seat
@@ -167,6 +169,61 @@ impl ResizeSurfaceGrab {
             self.window.configure();
         }
 
+        // resize neighbor window to fill gap (fused edge behavior)
+        if let Some((ref neighbor, neighbor_initial_loc, neighbor_initial_size)) = self.neighbor {
+            if neighbor.alive() {
+                let size_delta_w = new_window_width - self.initial_window_size.w;
+                let size_delta_h = new_window_height - self.initial_window_size.h;
+
+                let (neighbor_loc, neighbor_size) = if self.edges.intersects(ResizeEdge::RIGHT) {
+                    // main window's right edge moved, neighbor's left edge follows
+                    let new_x = neighbor_initial_loc.x + size_delta_w;
+                    let new_w = (neighbor_initial_size.w - size_delta_w).max(360);
+                    (
+                        Point::from((new_x, neighbor_initial_loc.y)),
+                        Size::from((new_w, neighbor_initial_size.h)),
+                    )
+                } else if self.edges.intersects(ResizeEdge::LEFT) {
+                    // main window's left edge moved, neighbor's right edge follows
+                    // neighbor keeps position, width adjusts (right edge moves)
+                    let new_w = (neighbor_initial_size.w - size_delta_w).max(360);
+                    (neighbor_initial_loc, Size::from((new_w, neighbor_initial_size.h)))
+                } else if self.edges.intersects(ResizeEdge::BOTTOM) {
+                    // main window's bottom edge moved, neighbor's top edge follows
+                    let new_y = neighbor_initial_loc.y + size_delta_h;
+                    let new_h = (neighbor_initial_size.h - size_delta_h).max(240);
+                    (
+                        Point::from((neighbor_initial_loc.x, new_y)),
+                        Size::from((neighbor_initial_size.w, new_h)),
+                    )
+                } else if self.edges.intersects(ResizeEdge::TOP) {
+                    // main window's top edge moved, neighbor's bottom edge follows
+                    let new_h = (neighbor_initial_size.h - size_delta_h).max(240);
+                    (neighbor_initial_loc, Size::from((neighbor_initial_size.w, new_h)))
+                } else {
+                    (neighbor_initial_loc, neighbor_initial_size)
+                };
+
+                neighbor.set_resizing(true);
+                neighbor.set_geometry(Rectangle::new(
+                    neighbor_loc.to_global(&self.output),
+                    neighbor_size.as_global(),
+                ));
+                if neighbor.latest_size_committed() {
+                    neighbor.configure();
+                }
+
+                // update neighbor position in the compositor's space
+                let mut shell = state.common.shell.write();
+                if let Some(workspace) = shell.space_for_mut(neighbor) {
+                    workspace
+                        .floating_layer
+                        .space
+                        .map_element(neighbor.clone(), neighbor_loc.as_logical(), false);
+                }
+            }
+        }
+
         false
     }
 
@@ -189,7 +246,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         // While the grab is active, no client has pointer focus
         handle.motion(data, None, event);
 
-        if self.update_location(event.location.as_global()) {
+        if self.update_location(event.location.as_global(), data) {
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
@@ -358,7 +415,7 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot
-            && self.update_location(event.location.as_global())
+            && self.update_location(event.location.as_global(), data)
         {
             handle.unset_grab(self, data);
         }
@@ -425,6 +482,7 @@ impl ResizeSurfaceGrab {
         initial_window_size: Size<i32, Logical>,
         seat: &Seat<State>,
         release: ReleaseMode,
+        neighbor: Option<(CosmicMapped, Point<i32, Local>, Size<i32, Logical>)>,
     ) -> ResizeSurfaceGrab {
         let resize_state = ResizeState::Resizing(ResizeData {
             edges,
@@ -465,6 +523,7 @@ impl ResizeSurfaceGrab {
             last_window_size: initial_window_size,
             release,
             edge_snap_threshold,
+            neighbor,
         }
     }
 
