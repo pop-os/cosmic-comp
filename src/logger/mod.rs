@@ -30,11 +30,20 @@ pub fn init_logger() -> Result<()> {
     let fmt_layer = fmt::layer().compact();
 
     match journald::layer() {
-        Ok(journald_layer) => tracing_subscriber::registry()
-            .with(fmt_layer)
-            .with(journald_layer)
-            .with(filter)
-            .init(),
+        Ok(journald_layer) => {
+            if std::env::var_os("COSMIC_SESSION_SOCK").is_some() {
+                tracing_subscriber::registry()
+                    .with(journald_layer)
+                    .with(filter)
+                    .init()
+            } else {
+                tracing_subscriber::registry()
+                    .with(fmt_layer)
+                    .with(journald_layer)
+                    .with(filter)
+                    .init()
+            }
+        }
         Err(err) => {
             tracing_subscriber::registry()
                 .with(fmt_layer)
