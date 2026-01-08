@@ -91,6 +91,7 @@
     (modifiers: [Super], key: "r"): Resizing(Outwards),
     (modifiers: [Super, Shift], key: "r"): Resizing(Inwards),
 
+    (modifiers: [Super, Alt], key: "s"): System(ScreenReader),
     (modifiers: [Super], key: "equal"): ZoomIn,
     (modifiers: [Super], key: "minus"): ZoomOut,
     (modifiers: [Super], key: "period"): ZoomIn,
