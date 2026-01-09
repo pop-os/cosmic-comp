@@ -10,3 +10,4 @@ pub mod quirks;
 pub mod rlimit;
 pub mod screenshot;
 pub mod tween;
+pub mod global;
