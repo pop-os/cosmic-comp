@@ -338,7 +338,12 @@ impl ResizeForkGrab {
                             _ => true,
                         });
                 if should_configure {
-                    let blocker = TilingLayout::update_positions(&output, &mut tree, gaps);
+                    let blocker = TilingLayout::update_positions(
+                        &output,
+                        &mut tree,
+                        gaps,
+                        tiling_layer.max_window_width,
+                    );
                     tiling_layer.queue.push_tree(tree, None, blocker);
                 }
             } else {
