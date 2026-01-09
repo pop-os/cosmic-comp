@@ -873,7 +873,11 @@ impl XwmHandler for State {
             shell.override_redirect_windows.retain(|or| or != &window);
         } else {
             let seat = shell.seats.last_active().clone();
-            shell.unmap_surface(&window, &seat, &mut self.common.toplevel_info_state);
+            if let Some(pending) =
+                shell.unmap_surface(&window, &seat, &mut self.common.toplevel_info_state)
+            {
+                shell.pending_windows.push(pending);
+            }
         }
 
         let outputs = if let Some(wl_surface) = window.wl_surface() {
