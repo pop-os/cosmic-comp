@@ -275,7 +275,7 @@ pub struct Common {
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub shm_state: ShmState,
     pub cursor_shape_manager_state: CursorShapeManagerState,
-    pub wl_drm_state: WlDrmState<Option<DrmNode>>,
+    pub wl_drm_state: Option<WlDrmState<Option<DrmNode>>>,
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
@@ -325,7 +325,7 @@ pub enum LockedBackend<'a> {
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
     pub overlay_scanout_feedback: Option<DmabufFeedback>,
-    pub primary_scanout_feedback: Option<DmabufFeedback>,
+    pub primary_scanout_feedback: DmabufFeedback,
 }
 
 #[derive(Debug)]
@@ -670,7 +670,7 @@ impl State {
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self>(dh);
-        let wl_drm_state = WlDrmState::<Option<DrmNode>>::default();
+        let wl_drm_state = None;
         let kde_decoration_state = KdeDecorationState::new::<Self>(dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(dh);
         let session_lock_manager_state =
@@ -1061,10 +1061,7 @@ impl Common {
                         surface,
                         render_element_states,
                         &feedback.render_feedback,
-                        feedback
-                            .primary_scanout_feedback
-                            .as_ref()
-                            .unwrap_or(&feedback.render_feedback),
+                        &feedback.primary_scanout_feedback,
                     )
                 },
             )
