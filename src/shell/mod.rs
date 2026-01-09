@@ -2890,12 +2890,20 @@ impl Shell {
 
             if let Some(surface) = surface {
                 toplevel_info.remove_toplevel(&surface);
-                self.pending_windows.push(PendingWindow {
-                    surface,
-                    seat: seat.clone(),
-                    fullscreen: None,
-                    maximized: false,
-                });
+
+                if self
+                    .pending_windows
+                    .iter()
+                    .find(|w| &w.surface == &surface)
+                    .is_none()
+                {
+                    self.pending_windows.push(PendingWindow {
+                        surface,
+                        seat: seat.clone(),
+                        fullscreen: None,
+                        maximized: false,
+                    })
+                }
                 return;
             }
         }
