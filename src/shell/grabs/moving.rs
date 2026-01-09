@@ -131,6 +131,7 @@ impl MoveGrabState {
                     self.indicator_thickness,
                     radius,
                     alpha,
+                    output_scale.x,
                     [
                         active_window_hint.red,
                         active_window_hint.green,
@@ -167,6 +168,7 @@ impl MoveGrabState {
                             theme.radius_s()[3] as u8,
                         ],
                         1.0,
+                        output_scale.x,
                         [
                             active_window_hint.red,
                             active_window_hint.green,
@@ -192,6 +194,7 @@ impl MoveGrabState {
                 renderer,
                 (render_location - self.window.geometry().loc)
                     .to_physical_precise_round(output_scale),
+                None,
                 output_scale,
                 alpha,
                 Some(false),
@@ -205,6 +208,14 @@ impl MoveGrabState {
                 output_scale,
                 alpha,
             );
+        let shadow_element = self.window.shadow_render_element(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
+            output_scale,
+            scale,
+            alpha,
+        );
 
         self.stacking_indicator
             .iter()
@@ -218,31 +229,36 @@ impl MoveGrabState {
             })
             .chain(p_elements)
             .chain(focus_element)
-            .chain(w_elements.into_iter().map(|elem| match elem {
-                CosmicMappedRenderElement::Stack(stack) => {
-                    CosmicMappedRenderElement::GrabbedStack(
-                        RescaleRenderElement::from_element(
-                            stack,
-                            render_location.to_physical_precise_round(
-                                output.current_scale().fractional_scale(),
-                            ),
-                            scale,
-                        ),
-                    )
-                }
-                CosmicMappedRenderElement::Window(window) => {
-                    CosmicMappedRenderElement::GrabbedWindow(
-                        RescaleRenderElement::from_element(
-                            window,
-                            render_location.to_physical_precise_round(
-                                output.current_scale().fractional_scale(),
-                            ),
-                            scale,
-                        ),
-                    )
-                }
-                x => x,
-            }))
+            .chain(
+                w_elements
+                    .into_iter()
+                    .chain(shadow_element)
+                    .map(|elem| match elem {
+                        CosmicMappedRenderElement::Stack(stack) => {
+                            CosmicMappedRenderElement::GrabbedStack(
+                                RescaleRenderElement::from_element(
+                                    stack,
+                                    render_location.to_physical_precise_round(
+                                        output.current_scale().fractional_scale(),
+                                    ),
+                                    scale,
+                                ),
+                            )
+                        }
+                        CosmicMappedRenderElement::Window(window) => {
+                            CosmicMappedRenderElement::GrabbedWindow(
+                                RescaleRenderElement::from_element(
+                                    window,
+                                    render_location.to_physical_precise_round(
+                                        output.current_scale().fractional_scale(),
+                                    ),
+                                    scale,
+                                ),
+                            )
+                        }
+                        x => x,
+                    }),
+            )
             .chain(snapping_indicator)
             .map(I::from)
             .collect()
