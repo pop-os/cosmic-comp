@@ -579,7 +579,7 @@ impl LockedBackend<'_> {
 
         loop_handle.insert_idle(move |state| {
             state.update_inhibitor_locks();
-            state.common.update_xwayland_scale();
+            state.common.update_xwayland_settings();
             state.common.update_xwayland_primary_output();
         });
 

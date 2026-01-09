@@ -4711,10 +4711,6 @@ impl Shell {
         xdg_activation_state: &XdgActivationState,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
-        if cosmic::icon_theme::default() != toolkit.icon_theme {
-            cosmic::icon_theme::set_default(toolkit.icon_theme.clone());
-        }
-
         let mut container = cosmic::config::COSMIC_TK.write().unwrap();
         if *container != toolkit {
             *container = toolkit;
