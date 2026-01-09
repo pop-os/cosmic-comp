@@ -384,13 +384,27 @@ fn update_focus_state(
             }
         }
 
-        if target.is_some_and(|t| {
+        if target.is_none() || target.is_some_and(|t| {
             matches!(
                 t,
+                KeyboardFocusTarget::LockSurface(_) |
                 KeyboardFocusTarget::LayerSurface(layer_surface) if layer_surface.cached_state().keyboard_interactivity == KeyboardInteractivity::Exclusive
             )
         }) {
             keyboard.unset_grab(state);
+            if let Some(pointer) = seat.get_pointer() {
+                pointer.unset_grab(state);
+            }
+            // Also dismiss popups if we haven't already
+            if let Some(mut popup_grab) = seat
+                .user_data()
+                .get::<PopupGrabData>()
+                .and_then(|x| x.take())
+            {
+                if !popup_grab.has_ended() {
+                    popup_grab.ungrab(PopupUngrabStrategy::All);
+                }
+            }
         }
         let serial = serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial());
         state
