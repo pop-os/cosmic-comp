@@ -128,6 +128,8 @@ pub enum Usage {
     FocusIndicator,
     PotentialGroupIndicator,
     SnappingIndicator,
+    FusedEdgeSeam,
+    ProximityGlow,
 }
 
 #[derive(Clone)]
@@ -282,6 +284,16 @@ impl IndicatorShader {
             elem.resize(geo.as_logical(), None);
         }
         elem.clone()
+    }
+
+    pub fn seam_element<R: AsGlowRenderer>(
+        renderer: &R,
+        key: impl Into<Key>,
+        geo: Rectangle<i32, Local>,
+        alpha: f32,
+        color: [f32; 3],
+    ) -> PixelShaderElement {
+        Self::element(renderer, key, geo, 2, [0, 0, 0, 0], alpha, color)
     }
 }
 
