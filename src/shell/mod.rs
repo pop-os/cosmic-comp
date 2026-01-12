@@ -2832,7 +2832,8 @@ impl Shell {
         surface: &S,
         seat: &Seat<State>,
         toplevel_info: &mut ToplevelInfoState<State, CosmicSurface>,
-    ) where
+    ) -> Option<PendingWindow>
+    where
         CosmicSurface: PartialEq<S>,
     {
         for set in self.workspaces.sets.values_mut() {
@@ -2890,15 +2891,16 @@ impl Shell {
 
             if let Some(surface) = surface {
                 toplevel_info.remove_toplevel(&surface);
-                self.pending_windows.push(PendingWindow {
+                return Some(PendingWindow {
                     surface,
                     seat: seat.clone(),
                     fullscreen: None,
                     maximized: false,
                 });
-                return;
             }
         }
+
+        None
     }
 
     pub fn move_current(
@@ -4714,10 +4716,6 @@ impl Shell {
         xdg_activation_state: &XdgActivationState,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
-        if cosmic::icon_theme::default() != toolkit.icon_theme {
-            cosmic::icon_theme::set_default(toolkit.icon_theme.clone());
-        }
-
         let mut container = cosmic::config::COSMIC_TK.write().unwrap();
         if *container != toolkit {
             *container = toolkit;

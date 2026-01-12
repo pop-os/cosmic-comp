@@ -1,7 +1,7 @@
 a11y-zoom-move-continuously = A nézet folyamatosan követi a mutatót
 a11y-zoom-move-onedge = A nézet csak akkor mozog, ha a mutató a szélen van
 a11y-zoom-move-centered = A nézet úgy mozog, hogy a mutató középen maradjon
-a11y-zoom-settings = Nagyító beállításai...
+a11y-zoom-settings = Nagyító beállításai…
 grow-window = Növelés
 shrink-window = Zsugorítás
 swap-windows = Ablakok felcserélése

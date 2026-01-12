@@ -321,7 +321,7 @@ impl XdgShellHandler for State {
             let output = shell
                 .visible_output_for_surface(surface.wl_surface())
                 .cloned();
-            shell.unmap_surface(
+            let _ = shell.unmap_surface(
                 surface.wl_surface(),
                 &seat,
                 &mut self.common.toplevel_info_state,
