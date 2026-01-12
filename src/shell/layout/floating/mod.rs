@@ -893,6 +893,11 @@ impl FloatingLayout {
             let size = mapped.geometry().size;
             mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
+            // find adjacent snapped window for fused edge resizing
+            let neighbor = self
+                .find_adjacent_snapped(mapped, edges)
+                .map(|(neighbor, geo)| (neighbor, geo.loc, geo.size.as_logical()));
+
             Some(grabs::ResizeSurfaceGrab::new(
                 start_data,
                 mapped.clone(),
@@ -903,6 +908,7 @@ impl FloatingLayout {
                 size,
                 seat,
                 release,
+                neighbor,
             ))
         } else {
             None
@@ -1607,11 +1613,169 @@ impl FloatingLayout {
             elements.extend(window_elements);
         }
 
+        // render seam lines between adjacent snapped windows
+        let seam_color = [0.0, 0.0, 0.0]; // hard black
+        let snapped_windows: Vec<_> = self
+            .space
+            .elements()
+            .filter(|w| w.floating_tiled.lock().unwrap().is_some())
+            .collect();
+
+        let mut rendered_pairs = std::collections::HashSet::new();
+        for window in &snapped_windows {
+            if let Some(window_geo) = self.space.element_geometry(*window) {
+                let window_geo = window_geo.as_local();
+
+                for other in &snapped_windows {
+                    if *other == *window {
+                        continue;
+                    }
+
+                    let w_ptr = *window as *const _ as usize;
+                    let o_ptr = *other as *const _ as usize;
+                    let pair_key = if w_ptr < o_ptr {
+                        (w_ptr, o_ptr)
+                    } else {
+                        (o_ptr, w_ptr)
+                    };
+
+                    if rendered_pairs.contains(&pair_key) {
+                        continue;
+                    }
+
+                    if let Some(other_geo) = self.space.element_geometry(*other) {
+                        let other_geo = other_geo.as_local();
+                        let (_, inner_gap) = self.gaps();
+                        let tolerance = inner_gap + 4;
+
+                        // check if horizontally adjacent (window's right touches other's left)
+                        let h_dist = (other_geo.loc.x - (window_geo.loc.x + window_geo.size.w)).abs();
+                        let v_overlap = window_geo.loc.y < other_geo.loc.y + other_geo.size.h
+                            && window_geo.loc.y + window_geo.size.h > other_geo.loc.y;
+
+                        if h_dist <= tolerance && v_overlap {
+                            rendered_pairs.insert(pair_key);
+                            let seam_x = window_geo.loc.x + window_geo.size.w + (h_dist / 2) - 2;
+                            let seam_y = window_geo.loc.y.max(other_geo.loc.y);
+                            let seam_h = (window_geo.loc.y + window_geo.size.h)
+                                .min(other_geo.loc.y + other_geo.size.h)
+                                - seam_y;
+
+                            let seam_geo = Rectangle::new(
+                                Point::from((seam_x, seam_y)),
+                                Size::from((4, seam_h)),
+                            );
+
+                            let seam_elem = IndicatorShader::seam_element(
+                                renderer,
+                                Key::Window(Usage::FusedEdgeSeam, window.key()),
+                                seam_geo,
+                                alpha * 0.8,
+                                seam_color,
+                            );
+                            elements.push(seam_elem.into());
+                        }
+
+                        // check if vertically adjacent (window's bottom touches other's top)
+                        let v_dist = (other_geo.loc.y - (window_geo.loc.y + window_geo.size.h)).abs();
+                        let h_overlap = window_geo.loc.x < other_geo.loc.x + other_geo.size.w
+                            && window_geo.loc.x + window_geo.size.w > other_geo.loc.x;
+
+                        if v_dist <= tolerance && h_overlap && !rendered_pairs.contains(&pair_key) {
+                            rendered_pairs.insert(pair_key);
+                            let seam_y = window_geo.loc.y + window_geo.size.h + (v_dist / 2) - 2;
+                            let seam_x = window_geo.loc.x.max(other_geo.loc.x);
+                            let seam_w = (window_geo.loc.x + window_geo.size.w)
+                                .min(other_geo.loc.x + other_geo.size.w)
+                                - seam_x;
+
+                            let seam_geo = Rectangle::new(
+                                Point::from((seam_x, seam_y)),
+                                Size::from((seam_w, 4)),
+                            );
+
+                            let seam_elem = IndicatorShader::seam_element(
+                                renderer,
+                                Key::Window(Usage::FusedEdgeSeam, other.key()),
+                                seam_geo,
+                                alpha * 0.8,
+                                seam_color,
+                            );
+                            elements.push(seam_elem.into());
+                        }
+                    }
+                }
+            }
+        }
+
         elements
     }
 
     fn gaps(&self) -> (i32, i32) {
         let g = self.theme.cosmic().gaps;
         (g.0 as i32, g.1 as i32)
+    }
+
+    /// Find a snapped window adjacent to the given window on the specified edge.
+    /// Returns the adjacent window and its current geometry if found.
+    pub fn find_adjacent_snapped(
+        &self,
+        window: &CosmicMapped,
+        edge: ResizeEdge,
+    ) -> Option<(CosmicMapped, Rectangle<i32, Local>)> {
+        let window_geo = self.space.element_geometry(window)?.as_local();
+        let (_, inner_gap) = self.gaps();
+        let tolerance = inner_gap + 4; // gap plus small tolerance
+
+        for other in self.space.elements() {
+            if other == window {
+                continue;
+            }
+
+            // only consider snapped windows
+            if other.floating_tiled.lock().unwrap().is_none() {
+                continue;
+            }
+
+            let other_geo = self.space.element_geometry(other)?.as_local();
+
+            let adjacent = match edge {
+                ResizeEdge::RIGHT => {
+                    // window's right edge touches other's left edge
+                    let edge_dist = (other_geo.loc.x - (window_geo.loc.x + window_geo.size.w)).abs();
+                    let vertical_overlap = window_geo.loc.y < other_geo.loc.y + other_geo.size.h
+                        && window_geo.loc.y + window_geo.size.h > other_geo.loc.y;
+                    edge_dist <= tolerance && vertical_overlap
+                }
+                ResizeEdge::LEFT => {
+                    // window's left edge touches other's right edge
+                    let edge_dist = (window_geo.loc.x - (other_geo.loc.x + other_geo.size.w)).abs();
+                    let vertical_overlap = window_geo.loc.y < other_geo.loc.y + other_geo.size.h
+                        && window_geo.loc.y + window_geo.size.h > other_geo.loc.y;
+                    edge_dist <= tolerance && vertical_overlap
+                }
+                ResizeEdge::BOTTOM => {
+                    // window's bottom edge touches other's top edge
+                    let edge_dist = (other_geo.loc.y - (window_geo.loc.y + window_geo.size.h)).abs();
+                    let horizontal_overlap = window_geo.loc.x < other_geo.loc.x + other_geo.size.w
+                        && window_geo.loc.x + window_geo.size.w > other_geo.loc.x;
+                    edge_dist <= tolerance && horizontal_overlap
+                }
+                ResizeEdge::TOP => {
+                    // window's top edge touches other's bottom edge
+                    let edge_dist = (window_geo.loc.y - (other_geo.loc.y + other_geo.size.h)).abs();
+                    let horizontal_overlap = window_geo.loc.x < other_geo.loc.x + other_geo.size.w
+                        && window_geo.loc.x + window_geo.size.w > other_geo.loc.x;
+                    edge_dist <= tolerance && horizontal_overlap
+                }
+                _ => false,
+            };
+
+            if adjacent {
+                return Some((other.clone(), other_geo));
+            }
+        }
+
+        None
     }
 }
