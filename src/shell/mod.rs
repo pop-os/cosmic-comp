@@ -359,6 +359,7 @@ pub struct WorkspaceSet {
     pub sticky_layer: FloatingLayout,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub workspaces: Vec<Workspace>,
+    max_window_width: u32,
 }
 
 fn create_workspace(
@@ -368,6 +369,7 @@ fn create_workspace(
     active: bool,
     tiling: bool,
     theme: cosmic::Theme,
+    max_window_width: u32,
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
@@ -391,7 +393,13 @@ fn create_workspace(
             | WorkspaceCapabilities::Pin
             | WorkspaceCapabilities::Move,
     );
-    Workspace::new(workspace_handle, output.clone(), tiling, theme.clone())
+    Workspace::new(
+        workspace_handle,
+        output.clone(),
+        tiling,
+        theme.clone(),
+        max_window_width,
+    )
 }
 
 fn create_workspace_from_pinned(
@@ -401,6 +409,7 @@ fn create_workspace_from_pinned(
     group_handle: &WorkspaceGroupHandle,
     active: bool,
     theme: cosmic::Theme,
+    max_window_width: u32,
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
@@ -424,7 +433,13 @@ fn create_workspace_from_pinned(
             | WorkspaceCapabilities::Pin
             | WorkspaceCapabilities::Move,
     );
-    Workspace::from_pinned(pinned, workspace_handle, output.clone(), theme.clone())
+    Workspace::from_pinned(
+        pinned,
+        workspace_handle,
+        output.clone(),
+        theme.clone(),
+        max_window_width,
+    )
 }
 
 /* We will probably need this again at some point
@@ -459,6 +474,7 @@ impl WorkspaceSet {
         output: &Output,
         tiling_enabled: bool,
         theme: cosmic::Theme,
+        max_window_width: u32,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
         let sticky_layer = FloatingLayout::new(theme.clone(), output);
@@ -473,6 +489,7 @@ impl WorkspaceSet {
             minimized_windows: Vec::new(),
             workspaces: Vec::new(),
             output: output.clone(),
+            max_window_width,
         }
     }
 
@@ -590,6 +607,7 @@ impl WorkspaceSet {
             false,
             self.tiling_enabled,
             self.theme.clone(),
+            self.max_window_width,
         );
         workspace_set_idx(
             state,
@@ -720,6 +738,7 @@ pub struct Workspaces {
     theme: cosmic::Theme,
     // Persisted workspace to add on first `output_add`
     persisted_workspaces: Vec<PinnedWorkspace>,
+    max_window_width: u32,
 }
 
 impl Workspaces {
@@ -733,6 +752,7 @@ impl Workspaces {
             autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
             persisted_workspaces: config.cosmic_conf.pinned_workspaces.clone(),
+            max_window_width: config.cosmic_conf.max_window_width,
         }
     }
 
@@ -753,7 +773,13 @@ impl Workspaces {
                 set
             })
             .unwrap_or_else(|| {
-                WorkspaceSet::new(workspace_state, output, self.autotile, self.theme.clone())
+                WorkspaceSet::new(
+                    workspace_state,
+                    output,
+                    self.autotile,
+                    self.theme.clone(),
+                    self.max_window_width,
+                )
             });
         workspace_state.add_group_output(&set.group, output);
 
@@ -766,6 +792,7 @@ impl Workspaces {
                 &set.group,
                 false,
                 self.theme.clone(),
+                self.max_window_width,
             );
             set.workspaces.push(workspace);
         }
@@ -1089,6 +1116,7 @@ impl Workspaces {
                                     false,
                                     config.cosmic_conf.autotile,
                                     self.theme.clone(),
+                                    self.max_window_width,
                                 ),
                             );
                         }

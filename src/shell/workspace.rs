@@ -359,8 +359,9 @@ impl Workspace {
         output: Output,
         tiling_enabled: bool,
         theme: cosmic::Theme,
+        max_window_width: u32,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), &output, max_window_width);
         let floating_layer = FloatingLayout::new(theme, &output);
         let output_match = output_match_for_output(&output);
 
@@ -391,8 +392,9 @@ impl Workspace {
         handle: WorkspaceHandle,
         output: Output,
         theme: cosmic::Theme,
+        max_window_width: u32,
     ) -> Self {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), &output, max_window_width);
         let floating_layer = FloatingLayout::new(theme, &output);
         let output_match = output_match_for_output(&output);
 
