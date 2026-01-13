@@ -74,7 +74,7 @@ use smithay::{
     utils::{Clock, Monotonic, Point},
     wayland::{
         alpha_modifier::AlphaModifierState,
-        compositor::{CompositorClientState, CompositorState, SurfaceData},
+        compositor::{CompositorClientState, CompositorState, SurfaceData, send_surface_state},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
         fractional_scale::{FractionalScaleManagerState, with_fractional_scale},
@@ -930,6 +930,12 @@ impl Common {
                 primary_scanout_output_compare,
             );
             if let Some(output) = primary_scanout_output {
+                send_surface_state(
+                    surface,
+                    states,
+                    output.current_scale().integer_scale(),
+                    output.current_transform(),
+                );
                 with_fractional_scale(states, |fraction_scale| {
                     fraction_scale.set_preferred_scale(output.current_scale().fractional_scale());
                 });
