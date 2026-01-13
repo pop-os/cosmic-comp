@@ -894,25 +894,34 @@ impl State {
            Action::ShowDesktop => {
                 let mut shell = self.common.shell.write();
                 if let Some(output) = seat.focused_output() {
-                    let surfaces = {
-                        let workspace = shell.active_space(&output).unwrap();
-                        workspace
-                            .mapped()
-                            .map(|m| m.active_window())
-                            .collect::<Vec<_>>()
-                    };
+                    let workspace = shell.active_space_mut(&output).unwrap();
+                    let surfaces: Vec<_> = workspace
+                        .mapped()
+                        .map(|m| m.active_window())
+                        .collect();
 
-                    for surface in surfaces {
-                        shell.minimize_request(&surface);
+                    let start = Some(workspace.minimized_windows.len());
+                    for surface in &surfaces {
+                        shell.minimize_request(surface);
                     }
+                    let workspace = shell.active_space_mut(&output).unwrap();
+                    workspace.hidden_windows_start = start;
                 } else {
                     let output = seat.active_output();
-                    let workspace = shell.active_space_mut(&output).unwrap();
-                    let minimized = std::mem::take(&mut workspace.minimized_windows);
-                    let wo = workspace.output().clone();
-                    for mw in minimized.into_iter() {
-                        let from = minimize_rectangle(&wo, &mw.active_window());
-                        workspace.unminimize(mw, from, seat);
+                    let windows = {
+                        let workspace = shell.active_space_mut(&output).unwrap();
+                        let start: usize = workspace.hidden_windows_start.unwrap_or(0);
+                        workspace.minimized_windows[start..]
+                            .iter()
+                            .map(|mw| mw.active_window())
+                            .collect::<Vec<_>>()
+                    };
+                    for window in windows {
+                        shell.unminimize_request(
+                            &window,
+                            seat,
+                            &self.common.event_loop_handle,
+                        );
                     }
                 }
             }
