@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::EdidProduct;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::OpenOptions, path::Path};
 use tracing::{error, warn};
@@ -70,9 +71,12 @@ impl Default for OutputConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutputInfo {
-    pub connector: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
     pub make: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edid: Option<EdidProduct>,
 }
 
 pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
@@ -90,7 +94,7 @@ pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
                                 if let Some((j, _)) = info
                                     .iter()
                                     .enumerate()
-                                    .find(|(_, info)| &info.connector == conn)
+                                    .find(|(_, info)| info.connector.as_deref() == Some(conn.as_str()))
                                 {
                                     if config_clone[j].enabled != OutputState::Enabled {
                                         warn!(

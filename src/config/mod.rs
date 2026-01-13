@@ -417,11 +417,50 @@ impl Config {
             .collect::<Vec<_>>();
         infos.sort();
 
-        if let Some(configs) = self
+        // Apply the same duplicate detection logic as write_outputs():
+        // If all monitors are unique (different make/model/edid), strip connectors for lookup
+        let has_duplicates = {
+            let mut seen = std::collections::HashSet::new();
+            !infos.iter().all(|info| {
+                let key = (&info.make, &info.model, &info.edid);
+                seen.insert(key)
+            })
+        };
+
+        let infos = if has_duplicates {
+            infos
+        } else {
+            infos
+                .into_iter()
+                .map(|mut info| {
+                    info.connector = None;
+                    info
+                })
+                .collect()
+        };
+
+        tracing::debug!(
+            "Looking up output config for key (has_duplicates={}): {:?}",
+            has_duplicates,
+            infos
+        );
+
+        // Try exact match first (with EDID if available), then fallback to match without EDID
+        let configs = self
             .dynamic_conf
             .outputs()
             .config
             .get(&infos)
+            .or_else(|| {
+                tracing::debug!("Exact match failed, trying fallback without EDID");
+                // Fallback: try matching without EDID (for old configs)
+                let infos_no_edid = infos_without_edid(&infos);
+                tracing::debug!("Fallback key (without EDID): {:?}", infos_no_edid);
+                self.dynamic_conf
+                    .outputs()
+                    .config
+                    .get(&infos_no_edid)
+            })
             .filter(|configs| {
                 if configs
                     .iter()
@@ -438,8 +477,19 @@ impl Config {
                     true
                 }
             })
-            .cloned()
-        {
+            .cloned();
+
+        if configs.is_none() {
+            tracing::warn!("Failed to find output config for key: {:?}", infos);
+            tracing::warn!("Available config keys:");
+            for (idx, key) in self.dynamic_conf.outputs().config.keys().enumerate() {
+                tracing::warn!("  [{}]: {:?}", idx, key);
+            }
+        } else {
+            tracing::debug!("Successfully found output config");
+        }
+
+        if let Some(configs) = configs {
             let known_good_configs = outputs
                 .iter()
                 .map(|output| {
@@ -453,9 +503,20 @@ impl Config {
                 .collect::<Vec<_>>();
 
             let mut found_outputs = Vec::new();
-            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
+            for (info, output_config) in infos.iter().zip(configs.into_iter())
             {
-                let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
+                // Match by connector if present, otherwise match by EDID (position in sorted list)
+                let output = if let Some(connector_name) = &info.connector {
+                    outputs.iter().find(|o| &o.name() == connector_name).unwrap().clone()
+                } else {
+                    // When connector is not in saved config, match by EDID/make/model
+                    // Since both lists are sorted by OutputInfo (which includes make/model/edid),
+                    // we can match by finding the output with matching EDID info
+                    outputs.iter().find(|o| {
+                        let o_info = Into::<CompOutputInfo>::into((*o).clone()).0;
+                        o_info.make == info.make && o_info.model == info.model && o_info.edid == info.edid
+                    }).unwrap().clone()
+                };
                 let enabled = output_config.enabled.clone();
                 *output
                     .user_data()
@@ -603,7 +664,36 @@ impl Config {
             })
             .collect::<Vec<(OutputInfo, OutputConfig)>>();
         infos.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let (infos, configs) = infos.into_iter().unzip();
+
+        // Check if there are duplicate monitors (same make/model/edid)
+        let has_duplicates = {
+            let mut seen = std::collections::HashSet::new();
+            !infos.iter().all(|(info, _)| {
+                let key = (&info.make, &info.model, &info.edid);
+                seen.insert(key)
+            })
+        };
+
+        // If all monitors are unique, remove connectors from keys
+        // If there are duplicates, keep connectors to distinguish them
+        let infos = if has_duplicates {
+            infos
+        } else {
+            infos
+                .into_iter()
+                .map(|(mut info, config)| {
+                    info.connector = None;
+                    (info, config)
+                })
+                .collect()
+        };
+
+        let (infos, configs): (Vec<OutputInfo>, Vec<OutputConfig>) = infos.into_iter().unzip();
+        tracing::debug!(
+            "Saving output config with key (has_duplicates={}): {:?}",
+            has_duplicates,
+            infos
+        );
         self.dynamic_conf
             .outputs_mut()
             .config
@@ -964,9 +1054,23 @@ impl From<Output> for CompOutputInfo {
     fn from(o: Output) -> CompOutputInfo {
         let physical = o.physical_properties();
         CompOutputInfo(OutputInfo {
-            connector: o.name(),
+            connector: Some(o.name()),
             make: physical.make,
             model: physical.model,
+            edid: o.edid().cloned(),
         })
     }
+}
+
+/// Create a fallback key without EDID for backward compatibility with old configs
+fn infos_without_edid(infos: &[OutputInfo]) -> Vec<OutputInfo> {
+    infos
+        .iter()
+        .map(|info| OutputInfo {
+            connector: info.connector.clone(),
+            make: info.make.clone(),
+            model: info.model.clone(),
+            edid: None,
+        })
+        .collect()
 }
