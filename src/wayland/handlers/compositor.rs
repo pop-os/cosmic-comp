@@ -151,20 +151,18 @@ pub fn recursive_frame_time_estimation(
     overall_estimate
 }
 
-pub const FRAME_TIME_FILTER: KindEvaluation = KindEvaluation::Dynamic({
-    fn frame_time_filter_fn(states: &SurfaceData) -> Kind {
-        let clock = Clock::<Monotonic>::new();
-        const _20_FPS: Duration = Duration::from_nanos(1_000_000_000 / 20);
+pub fn frame_time_filter_fn(states: &SurfaceData) -> Kind {
+    let clock = Clock::<Monotonic>::new();
+    const _20_FPS: Duration = Duration::from_nanos(1_000_000_000 / 20);
 
-        if frame_time_estimation(&clock, states).is_some_and(|dur| dur <= _20_FPS) {
-            Kind::ScanoutCandidate
-        } else {
-            Kind::Unspecified
-        }
+    if frame_time_estimation(&clock, states).is_some_and(|dur| dur <= _20_FPS) {
+        Kind::ScanoutCandidate
+    } else {
+        Kind::Unspecified
     }
+}
 
-    frame_time_filter_fn
-});
+pub const FRAME_TIME_FILTER: KindEvaluation = KindEvaluation::Dynamic(frame_time_filter_fn);
 
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
