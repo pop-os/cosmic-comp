@@ -45,7 +45,7 @@ mod types;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
+    AppearanceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling,
     XwaylandEavesdropping, ZoomConfig,
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
     output::comp::{
@@ -180,8 +180,10 @@ impl Config {
 
         let cosmic_comp_config =
             CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
-                for err in errs {
-                    error!(?err, "");
+                if cfg!(debug_assertions) {
+                    for err in errs {
+                        warn!(?err, "");
+                    }
                 }
                 c
             });
@@ -189,6 +191,11 @@ impl Config {
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
             fn handle_new_toolkit_config(config: CosmicTk, state: &mut State) {
+                if cosmic::icon_theme::default() != config.icon_theme {
+                    cosmic::icon_theme::set_default(config.icon_theme.clone());
+                    state.common.update_xwayland_settings();
+                }
+
                 let mut workspace_guard = state.common.workspace_state.update();
                 state.common.shell.write().update_toolkit(
                     config,
@@ -197,19 +204,32 @@ impl Config {
                 );
             }
 
-            if let Ok(config) = CosmicTk::get_entry(&tk_config) {
-                let _ = loop_handle.insert_idle(move |state| {
-                    handle_new_toolkit_config(config, state);
-                });
-            }
+            let config = CosmicTk::get_entry(&tk_config).unwrap_or_else(|(errs, c)| {
+                if cfg!(debug_assertions) {
+                    for err in errs {
+                        warn!(?err, "");
+                    }
+                }
+                c
+            });
+            let _ = loop_handle.insert_idle(move |state| {
+                handle_new_toolkit_config(config, state);
+            });
 
             match cosmic_config::calloop::ConfigWatchSource::new(&tk_config) {
                 Ok(source) => {
                     if let Err(err) =
                         loop_handle.insert_source(source, |(config, _keys), (), state| {
-                            if let Ok(config) = CosmicTk::get_entry(&config) {
-                                handle_new_toolkit_config(config, state);
-                            }
+                            let config =
+                                CosmicTk::get_entry(&config).unwrap_or_else(|(errs, c)| {
+                                    if cfg!(debug_assertions) {
+                                        for err in errs {
+                                            warn!(?err, "");
+                                        }
+                                    }
+                                    c
+                                });
+                            handle_new_toolkit_config(config, state);
                         })
                     {
                         warn!(?err, "Failed to watch com.system76.CosmicTk config");
@@ -879,7 +899,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<XwaylandDescaling>(&config, "descale_xwayland");
                 if new != state.common.config.cosmic_conf.descale_xwayland {
                     state.common.config.cosmic_conf.descale_xwayland = new;
-                    state.common.update_xwayland_scale();
+                    state.common.update_xwayland_settings();
                 }
             }
             "xwayland_eavesdropping" => {
@@ -920,6 +940,16 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.accessibility_zoom {
                     state.common.config.cosmic_conf.accessibility_zoom = new;
                     state.common.update_config();
+                }
+            }
+            "appearance_settings" => {
+                let new = get_config::<AppearanceConfig>(&config, "appearance_settings");
+                if new != state.common.config.cosmic_conf.appearance_settings {
+                    state.common.config.cosmic_conf.appearance_settings = new;
+                    state.common.update_config();
+                    for output in state.common.shell.read().outputs() {
+                        state.backend.schedule_render(output);
+                    }
                 }
             }
             _ => {}

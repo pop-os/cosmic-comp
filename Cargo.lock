@@ -844,6 +844,7 @@ dependencies = [
  "anyhow",
  "bitflags 2.9.4",
  "calloop 0.14.3",
+ "cgmath",
  "clap_lex",
  "cosmic-comp-config",
  "cosmic-config",
@@ -4991,7 +4992,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/smithay/smithay.git?rev=cb9acba#cb9acba2775de4f2032e023520e007cd66909eda"
+source = "git+https://github.com/smithay/smithay.git?rev=8148d67#8148d67ea3ee3959a84970e8f80f591e068e65ce"
 dependencies = [
  "aliasable",
  "appendlist",
