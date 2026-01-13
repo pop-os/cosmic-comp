@@ -581,6 +581,7 @@ impl CosmicWindow {
                         p.window.set_tiled(false);
                     }
                 }
+                p.window.send_configure();
             }
         })
     }

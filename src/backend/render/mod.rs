@@ -280,10 +280,10 @@ impl IndicatorShader {
                     Uniform::new(
                         "radius",
                         [
-                            outer_radius[0] as f32,
-                            outer_radius[1] as f32,
-                            outer_radius[2] as f32,
                             outer_radius[3] as f32,
+                            outer_radius[1] as f32,
+                            outer_radius[0] as f32,
+                            outer_radius[2] as f32,
                         ],
                     ),
                     Uniform::new("scale", scale as f32),
