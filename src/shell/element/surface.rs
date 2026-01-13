@@ -1,8 +1,5 @@
 use crate::{
-    shell::focus::target::PointerFocusTarget,
-    wayland::{
-        handlers::compositor::frame_time_filter_fn, protocols::corner_radius::CacheableCorners,
-    },
+    shell::focus::target::PointerFocusTarget, wayland::protocols::corner_radius::CacheableCorners,
 };
 use std::{
     borrow::Cow,
@@ -19,6 +16,7 @@ use smithay::{
         element::{
             AsRenderElements, Kind, RenderElementStates,
             surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            utils::select_dmabuf_feedback,
         },
     },
     desktop::{
@@ -172,13 +170,6 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => toplevel.with_pending_state(|state| state.size),
             WindowSurface::X11(surface) => Some(surface.geometry().size),
-        }
-    }
-
-    pub fn has_pending_changes(&self) -> bool {
-        match self.0.underlying_surface() {
-            WindowSurface::Wayland(toplevel) => toplevel.has_pending_changes(),
-            WindowSurface::X11(_surface) => false,
         }
     }
 
@@ -683,7 +674,7 @@ impl CosmicSurface {
         &self,
         output: &Output,
         feedback: &SurfaceDmabufFeedback,
-        _render_element_states: &RenderElementStates,
+        render_element_states: &RenderElementStates,
         primary_scan_out_output: F1,
     ) where
         F1: FnMut(&WlSurface, &SurfaceData) -> Option<Output> + Copy,
@@ -691,22 +682,17 @@ impl CosmicSurface {
         let is_fullscreen = self.is_fullscreen(false);
 
         self.0
-            .send_dmabuf_feedback(output, primary_scan_out_output, |_, data| {
-                if is_fullscreen {
-                    feedback
-                        .primary_scanout_feedback
-                        .as_ref()
-                        .unwrap_or(&feedback.render_feedback)
-                } else {
-                    if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
-                        feedback
-                            .overlay_scanout_feedback
-                            .as_ref()
-                            .unwrap_or(&feedback.render_feedback)
+            .send_dmabuf_feedback(output, primary_scan_out_output, |surface, _| {
+                select_dmabuf_feedback(
+                    surface,
+                    render_element_states,
+                    &feedback.render_feedback,
+                    if is_fullscreen {
+                        &feedback.primary_scanout_feedback
                     } else {
-                        &feedback.render_feedback
-                    }
-                }
+                        &feedback.scanout_feedback
+                    },
+                )
             })
     }
 

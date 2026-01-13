@@ -1,5 +1,5 @@
 use crate::{
-    shell::{CosmicSurface, MinimizedWindow, Shell, Trigger, element::CosmicMapped},
+    shell::{CosmicSurface, MinimizedWindow, Shell, element::CosmicMapped},
     state::Common,
     utils::prelude::*,
     wayland::handlers::{xdg_shell::PopupGrabData, xwayland_keyboard_grab::XWaylandGrabSeatData},
@@ -684,23 +684,17 @@ fn update_focus_target(
             .cloned()
             .map(KeyboardFocusTarget::from)
     } else {
-        let workspace = shell.active_space(output).unwrap();
-
-        if let Some(Trigger::KeyboardSwap(_, desc)) = shell.overview_mode().0.active_trigger() {
-            if workspace.handle == desc.handle && workspace.tiling_layer.has_node(&desc.node) {
-                if let Some(focus) = workspace.tiling_layer.node_desc_to_focus(desc) {
-                    return Some(focus);
-                }
-            }
-        }
-
-        workspace
+        shell
+            .active_space(output)
+            .unwrap()
             .focus_stack
             .get(seat)
             .last()
             .cloned()
             .map(Into::<KeyboardFocusTarget>::into)
             .or_else(|| {
+                let workspace = shell.active_space(output).unwrap();
+
                 workspace
                     .mapped()
                     .next()
