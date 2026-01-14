@@ -18,7 +18,7 @@ use crate::{
             a11y::A11yState,
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
-            image_capture_source::ImageCaptureSourceState,
+            image_capture_source::CosmicImageCaptureSourceState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
@@ -80,6 +80,7 @@ use smithay::{
         fractional_scale::{FractionalScaleManagerState, with_fractional_scale},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
+        image_capture_source::{OutputCaptureSourceState, ToplevelCaptureSourceState},
         input_method::InputMethodManagerState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
@@ -260,7 +261,9 @@ pub struct Common {
     pub primary_selection_state: PrimarySelectionState,
     pub ext_data_control_state: ExtDataControlState,
     pub wlr_data_control_state: WlrDataControlState,
-    pub image_capture_source_state: ImageCaptureSourceState,
+    pub cosmic_image_capture_source_state: CosmicImageCaptureSourceState,
+    pub output_capture_source_state: OutputCaptureSourceState,
+    pub toplevel_capture_source_state: ToplevelCaptureSourceState,
     pub screencopy_state: ScreencopyState,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
@@ -645,8 +648,12 @@ impl State {
             OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
-        let image_capture_source_state =
-            ImageCaptureSourceState::new::<Self, _>(dh, client_not_sandboxed);
+        let cosmic_image_capture_source_state =
+            CosmicImageCaptureSourceState::new::<Self, _>(dh, client_not_sandboxed);
+        let output_capture_source_state =
+            OutputCaptureSourceState::new_with_filter::<State, _>(&dh, client_not_sandboxed);
+        let toplevel_capture_source_state =
+            ToplevelCaptureSourceState::new_with_filter::<State, _>(&dh, client_not_sandboxed);
         let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_not_sandboxed);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
@@ -754,7 +761,9 @@ impl State {
                 idle_notifier_state,
                 idle_inhibit_manager_state,
                 idle_inhibiting_surfaces,
-                image_capture_source_state,
+                cosmic_image_capture_source_state,
+                output_capture_source_state,
+                toplevel_capture_source_state,
                 screencopy_state,
                 shm_state,
                 cursor_shape_manager_state,
