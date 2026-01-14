@@ -13,7 +13,7 @@ use crate::{
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
     wayland::{
-        handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
+        handlers::{data_device::get_dnd_icon, image_copy_capture::SessionHolder},
         protocols::{
             a11y::A11yState,
             corner_radius::CornerRadiusState,
@@ -22,7 +22,6 @@ use crate::{
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
-            screencopy::ScreencopyState,
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
             workspace::{WorkspaceState, WorkspaceUpdateGuard},
@@ -81,6 +80,7 @@ use smithay::{
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
         image_capture_source::{OutputCaptureSourceState, ToplevelCaptureSourceState},
+        image_copy_capture::ImageCopyCaptureState,
         input_method::InputMethodManagerState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
@@ -264,7 +264,7 @@ pub struct Common {
     pub cosmic_image_capture_source_state: CosmicImageCaptureSourceState,
     pub output_capture_source_state: OutputCaptureSourceState,
     pub toplevel_capture_source_state: ToplevelCaptureSourceState,
-    pub screencopy_state: ScreencopyState,
+    pub image_copy_capture_state: ImageCopyCaptureState,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
     pub idle_notifier_state: IdleNotifierState<State>,
@@ -654,7 +654,8 @@ impl State {
             OutputCaptureSourceState::new_with_filter::<State, _>(&dh, client_not_sandboxed);
         let toplevel_capture_source_state =
             ToplevelCaptureSourceState::new_with_filter::<State, _>(&dh, client_not_sandboxed);
-        let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_not_sandboxed);
+        let image_copy_capture_state =
+            ImageCopyCaptureState::new_with_filter::<Self, _>(dh, client_not_sandboxed);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
@@ -764,7 +765,7 @@ impl State {
                 cosmic_image_capture_source_state,
                 output_capture_source_state,
                 toplevel_capture_source_state,
-                screencopy_state,
+                image_copy_capture_state,
                 shm_state,
                 cursor_shape_manager_state,
                 seat_state,

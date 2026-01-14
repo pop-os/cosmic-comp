@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 use std::{borrow::Borrow, collections::HashMap, sync::Mutex};
 
 use smithay::{
@@ -15,7 +17,15 @@ use smithay::{
     output::Output,
     reexports::wayland_server::protocol::wl_shm::Format as ShmFormat,
     utils::{Buffer as BufferCoords, Point, Size, Transform},
-    wayland::{dmabuf::get_dmabuf, seat::WaylandFocus},
+    wayland::{
+        dmabuf::get_dmabuf,
+        image_capture_source::ImageCaptureSource,
+        image_copy_capture::{
+            BufferConstraints, CursorSession, CursorSessionRef, DmabufConstraints, Frame, FrameRef,
+            ImageCopyCaptureHandler, ImageCopyCaptureState, Session, SessionRef,
+        },
+        seat::WaylandFocus,
+    },
 };
 
 use crate::{
@@ -24,28 +34,23 @@ use crate::{
     utils::prelude::{
         OutputExt, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt, SeatExt,
     },
-    wayland::protocols::{
-        image_capture_source::ImageCaptureSourceKind,
-        screencopy::{
-            BufferConstraints, CursorSession, CursorSessionRef, DmabufConstraints, Frame, FrameRef,
-            ScreencopyHandler, ScreencopyState, Session, SessionRef, delegate_screencopy,
-        },
-    },
+    wayland::protocols::image_capture_source::ImageCaptureSourceKind,
 };
 
 mod render;
 mod user_data;
 pub use self::render::*;
 use self::user_data::*;
-pub use self::user_data::{FrameHolder, ScreencopySessions, SessionData, SessionHolder};
+pub use self::user_data::{FrameHolder, ImageCopySessions, SessionData, SessionHolder};
 
-impl ScreencopyHandler for State {
-    fn screencopy_state(&mut self) -> &mut ScreencopyState {
-        &mut self.common.screencopy_state
+impl ImageCopyCaptureHandler for State {
+    fn image_copy_capture_state(&mut self) -> &mut ImageCopyCaptureState {
+        &mut self.common.image_copy_capture_state
     }
 
-    fn capture_source(&mut self, source: &ImageCaptureSourceKind) -> Option<BufferConstraints> {
-        match source {
+    fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
+        let kind = source.user_data().get::<ImageCaptureSourceKind>().unwrap();
+        match kind {
             ImageCaptureSourceKind::Output(weak) => weak
                 .upgrade()
                 .and_then(|output| constraints_for_output(&output, &mut self.backend)),
@@ -60,9 +65,10 @@ impl ScreencopyHandler for State {
             _ => None,
         }
     }
-    fn capture_cursor_source(
+
+    fn cursor_capture_constraints(
         &mut self,
-        _source: &ImageCaptureSourceKind,
+        _source: &ImageCaptureSource,
     ) -> Option<BufferConstraints> {
         let size = if let Some((geometry, _)) = self
             .common
@@ -85,7 +91,13 @@ impl ScreencopyHandler for State {
     }
 
     fn new_session(&mut self, session: Session) {
-        match session.source() {
+        let kind = session
+            .source()
+            .user_data()
+            .get::<ImageCaptureSourceKind>()
+            .unwrap()
+            .clone();
+        match kind {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     session.stop();
@@ -128,6 +140,7 @@ impl ScreencopyHandler for State {
             ImageCaptureSourceKind::Destroyed => unreachable!(),
         }
     }
+
     fn new_cursor_session(&mut self, session: CursorSession) {
         let (pointer_loc, pointer_size, hotspot) = {
             let seat = self.common.shell.read().seats.last_active().clone();
@@ -154,7 +167,13 @@ impl ScreencopyHandler for State {
             )))
         });
 
-        match session.source() {
+        let kind = session
+            .source()
+            .user_data()
+            .get::<ImageCaptureSourceKind>()
+            .unwrap()
+            .clone();
+        match kind {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     return;
@@ -242,14 +261,20 @@ impl ScreencopyHandler for State {
         }
     }
 
-    fn frame(&mut self, session: SessionRef, frame: Frame) {
-        match session.source() {
+    fn frame(&mut self, session: &SessionRef, frame: Frame) {
+        let kind = session
+            .source()
+            .user_data()
+            .get::<ImageCaptureSourceKind>()
+            .unwrap()
+            .clone();
+        match kind {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     return;
                 };
 
-                output.add_frame(session, frame);
+                output.add_frame(session.clone(), frame);
                 self.backend.schedule_render(&output);
             }
             ImageCaptureSourceKind::Workspace(handle) => {
@@ -262,14 +287,14 @@ impl ScreencopyHandler for State {
         }
     }
 
-    fn cursor_frame(&mut self, session: CursorSessionRef, frame: Frame) {
+    fn cursor_frame(&mut self, session: &CursorSessionRef, frame: Frame) {
         if !session.has_cursor() {
             frame.success(Transform::Normal, Vec::new(), self.common.clock.now());
             return;
         }
 
         let seat = self.common.shell.read().seats.last_active().clone();
-        render_cursor_to_buffer(self, &session, frame, &seat);
+        render_cursor_to_buffer(self, session, frame, &seat);
     }
 
     fn frame_aborted(&mut self, frame: FrameRef) {
@@ -280,7 +305,13 @@ impl ScreencopyHandler for State {
     }
 
     fn session_destroyed(&mut self, session: SessionRef) {
-        match session.source() {
+        let kind = session
+            .source()
+            .user_data()
+            .get::<ImageCaptureSourceKind>()
+            .unwrap()
+            .clone();
+        match kind {
             ImageCaptureSourceKind::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
                     output.remove_session(&session);
@@ -303,7 +334,13 @@ impl ScreencopyHandler for State {
     }
 
     fn cursor_session_destroyed(&mut self, session: CursorSessionRef) {
-        match session.source() {
+        let kind = session
+            .source()
+            .user_data()
+            .get::<ImageCaptureSourceKind>()
+            .unwrap()
+            .clone();
+        match kind {
             ImageCaptureSourceKind::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
                     output.remove_cursor_session(&session);
@@ -413,4 +450,4 @@ fn constraints_for_renderer(
     constraints
 }
 
-delegate_screencopy!(State);
+smithay::delegate_image_copy_capture!(State);

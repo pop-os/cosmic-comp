@@ -12,7 +12,7 @@ use crate::{
         zoom::ZoomFocusTarget,
     },
     utils::prelude::*,
-    wayland::handlers::{screencopy::SessionHolder, xdg_shell::popup::get_popup_toplevel},
+    wayland::handlers::{image_copy_capture::SessionHolder, xdg_shell::popup::get_popup_toplevel},
 };
 use id_tree::NodeId;
 use smithay::{

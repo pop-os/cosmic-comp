@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 use calloop::LoopHandle;
 use smithay::{
     backend::{
@@ -26,6 +28,9 @@ use smithay::{
     },
     wayland::{
         dmabuf::get_dmabuf,
+        image_copy_capture::{
+            BufferConstraints, CaptureFailureReason, CursorSessionRef, Frame, SessionRef,
+        },
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents, with_buffer_contents_mut},
     },
@@ -43,13 +48,10 @@ use crate::{
     state::{Common, KmsNodes, State},
     utils::prelude::{PointExt, PointGlobalExt, RectExt, RectLocalExt, SeatExt},
     wayland::{
-        handlers::screencopy::{
+        handlers::image_copy_capture::{
             SessionData, SessionUserData, constraints_for_output, constraints_for_toplevel,
         },
-        protocols::{
-            screencopy::{BufferConstraints, CursorSessionRef, FailureReason, Frame, SessionRef},
-            workspace::WorkspaceHandle,
-        },
+        protocols::workspace::WorkspaceHandle,
     },
 };
 
@@ -165,7 +167,7 @@ where
         .map_err(|err| R::Error::from_gles_error(GlesError::BufferAccessError(err)))
         .and_then(|x| x)
         {
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             return Err(err);
         }
     }
@@ -249,7 +251,7 @@ where
         )
         .map_err(DTError::Rendering),
         Err(err) => {
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             Err(err)
         }
     }
@@ -257,7 +259,7 @@ where
 
 pub fn render_workspace_to_buffer(
     state: &mut State,
-    session: SessionRef,
+    session: &SessionRef,
     frame: Frame,
     handle: WorkspaceHandle,
 ) {
@@ -278,14 +280,14 @@ pub fn render_workspace_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if mode != Some(buffer_size) {
         let Some(constraints) = constraints_for_output(&output, &mut state.backend) else {
-            output.remove_session(&session);
+            output.remove_session(session);
             return;
         };
         session.update_constraints(constraints);
         if let Some(data) = session.user_data().get::<SessionData>() {
             *data.lock().unwrap() = SessionUserData::new(OutputDamageTracker::from_output(&output));
         }
-        frame.fail(FailureReason::BufferConstraints);
+        frame.fail(CaptureFailureReason::BufferConstraints);
         return;
     }
 
@@ -414,7 +416,7 @@ pub fn render_workspace_to_buffer(
         Ok(renderer) => renderer,
         Err(err) => {
             warn!(?err, "Couldn't use node for screencopy");
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             return;
         }
     };
@@ -495,12 +497,12 @@ smithay::render_elements! {
 
 pub fn render_window_to_buffer(
     state: &mut State,
-    session: SessionRef,
+    session: &SessionRef,
     frame: Frame,
     toplevel: &CosmicSurface,
 ) {
     if !toplevel.alive() {
-        toplevel.clone().remove_session(&session);
+        toplevel.clone().remove_session(session);
         return;
     }
 
@@ -509,7 +511,7 @@ pub fn render_window_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if buffer_size != geometry.size.to_buffer(1, Transform::Normal) {
         let Some(constraints) = constraints_for_toplevel(toplevel, &mut state.backend) else {
-            toplevel.clone().remove_session(&session);
+            toplevel.clone().remove_session(session);
             return;
         };
         session.update_constraints(constraints);
@@ -518,7 +520,7 @@ pub fn render_window_to_buffer(
             *data.lock().unwrap() =
                 SessionUserData::new(OutputDamageTracker::new(size, 1.0, Transform::Normal));
         }
-        frame.fail(FailureReason::BufferConstraints);
+        frame.fail(CaptureFailureReason::BufferConstraints);
         return;
     }
 
@@ -666,7 +668,7 @@ pub fn render_window_to_buffer(
         Ok(renderer) => renderer,
         Err(err) => {
             warn!(?err, "Couldn't use node for screencopy");
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             return;
         }
     };
@@ -760,7 +762,7 @@ pub fn render_cursor_to_buffer(
                 Transform::Normal,
             ));
         }
-        frame.fail(FailureReason::BufferConstraints);
+        frame.fail(CaptureFailureReason::BufferConstraints);
         return;
     }
 
@@ -826,7 +828,7 @@ pub fn render_cursor_to_buffer(
         Ok(renderer) => renderer,
         Err(err) => {
             warn!(?err, "Couldn't use node for screencopy");
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             return;
         }
     };

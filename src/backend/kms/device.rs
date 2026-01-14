@@ -8,7 +8,7 @@ use crate::{
     config::{CompTransformDef, EdidProduct, ScreenFilter},
     shell::Shell,
     utils::{env::dev_list_var, prelude::*},
-    wayland::handlers::screencopy::PendingImageCopyData,
+    wayland::handlers::image_copy_capture::PendingImageCopyData,
 };
 
 use anyhow::{Context, Result};
