@@ -13,7 +13,7 @@ use crate::{
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
-        handlers::screencopy::ScreencopySessions,
+        handlers::image_copy_capture::ImageCopySessions,
         protocols::{
             toplevel_info::{toplevel_enter_output, toplevel_leave_output},
             workspace::{WorkspaceHandle, WorkspaceUpdateGuard},
@@ -110,7 +110,7 @@ pub struct Workspace {
 
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
-    pub screencopy: ScreencopySessions,
+    pub image_copy: ImageCopySessions,
     output_stack: VecDeque<OutputMatch>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
@@ -377,7 +377,7 @@ impl Workspace {
             id: None,
             handle,
             focus_stack: FocusStacks::default(),
-            screencopy: ScreencopySessions::default(),
+            image_copy: ImageCopySessions::default(),
             output_stack: {
                 let mut queue = VecDeque::new();
                 queue.push_back(output_match);
@@ -410,7 +410,7 @@ impl Workspace {
             id: pinned.id.clone(),
             handle,
             focus_stack: FocusStacks::default(),
-            screencopy: ScreencopySessions::default(),
+            image_copy: ImageCopySessions::default(),
             output_stack: {
                 let mut queue = VecDeque::new();
                 queue.push_back(pinned.output.clone());

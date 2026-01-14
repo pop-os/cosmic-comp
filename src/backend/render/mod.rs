@@ -35,7 +35,7 @@ use crate::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
             data_device::get_dnd_icon,
-            screencopy::{FrameHolder, SessionData, render_session},
+            image_copy_capture::{FrameHolder, SessionData, render_session},
         },
         protocols::workspace::WorkspaceHandle,
     },
