@@ -33,7 +33,7 @@ use smithay::{
 use tracing::debug;
 use wayland_backend::server::GlobalId;
 
-use super::image_capture_source::ImageCaptureSourceData;
+use super::image_capture_source::ImageCaptureSourceKind;
 
 #[derive(Debug)]
 pub struct ScreencopyState {
@@ -103,12 +103,12 @@ struct SessionInner {
     stopped: bool,
     constraints: Option<BufferConstraints>,
     draw_cursors: bool,
-    source: ImageCaptureSourceData,
+    source: ImageCaptureSourceKind,
     active_frames: Vec<FrameRef>,
 }
 
 impl SessionInner {
-    fn new(source: ImageCaptureSourceData, draw_cursors: bool) -> SessionInner {
+    fn new(source: ImageCaptureSourceKind, draw_cursors: bool) -> SessionInner {
         SessionInner {
             stopped: false,
             constraints: None,
@@ -158,7 +158,7 @@ impl SessionRef {
         self.inner.lock().unwrap().constraints.clone()
     }
 
-    pub fn source(&self) -> ImageCaptureSourceData {
+    pub fn source(&self) -> ImageCaptureSourceKind {
         self.inner.lock().unwrap().source.clone()
     }
 
@@ -233,14 +233,14 @@ struct CursorSessionInner {
     session: Option<ExtImageCopyCaptureSessionV1>,
     stopped: bool,
     constraints: Option<BufferConstraints>,
-    source: ImageCaptureSourceData,
+    source: ImageCaptureSourceKind,
     position: Option<Point<i32, BufferCoords>>,
     hotspot: Point<i32, BufferCoords>,
     active_frames: Vec<FrameRef>,
 }
 
 impl CursorSessionInner {
-    fn new(source: ImageCaptureSourceData) -> CursorSessionInner {
+    fn new(source: ImageCaptureSourceKind) -> CursorSessionInner {
         CursorSessionInner {
             session: None,
             stopped: false,
@@ -293,7 +293,7 @@ impl CursorSessionRef {
         self.inner.lock().unwrap().constraints.clone()
     }
 
-    pub fn source(&self) -> ImageCaptureSourceData {
+    pub fn source(&self) -> ImageCaptureSourceKind {
         self.inner.lock().unwrap().source.clone()
     }
 
@@ -529,10 +529,10 @@ impl FrameInner {
 pub trait ScreencopyHandler {
     fn screencopy_state(&mut self) -> &mut ScreencopyState;
 
-    fn capture_source(&mut self, source: &ImageCaptureSourceData) -> Option<BufferConstraints>;
+    fn capture_source(&mut self, source: &ImageCaptureSourceKind) -> Option<BufferConstraints>;
     fn capture_cursor_source(
         &mut self,
-        source: &ImageCaptureSourceData,
+        source: &ImageCaptureSourceKind,
     ) -> Option<BufferConstraints>;
 
     fn new_session(&mut self, session: Session);
@@ -619,9 +619,9 @@ where
                 source,
                 options,
             } => {
-                if let Some(src) = source.data::<ImageCaptureSourceData>() {
-                    if *src != ImageCaptureSourceData::Destroyed {
-                        if let Some(buffer_constraints) = state.capture_source(src) {
+                if let Some(src) = ImageCaptureSourceKind::from_resource(&source) {
+                    if src != ImageCaptureSourceKind::Destroyed {
+                        if let Some(buffer_constraints) = state.capture_source(&src) {
                             let session_data = Arc::new(Mutex::new(SessionInner::new(
                                 src.clone(),
                                 Into::<u32>::into(options) == 1,
@@ -650,7 +650,7 @@ where
                 }
 
                 let session_data = Arc::new(Mutex::new(SessionInner::new(
-                    ImageCaptureSourceData::Destroyed,
+                    ImageCaptureSourceKind::Destroyed,
                     false,
                 )));
                 let obj = data_init.init(
@@ -673,9 +673,9 @@ where
             } => {
                 // TODO: use pointer, but we need new smithay api for that.
 
-                if let Some(src) = source.data::<ImageCaptureSourceData>() {
-                    if *src != ImageCaptureSourceData::Destroyed {
-                        if let Some(buffer_constraints) = state.capture_cursor_source(src) {
+                if let Some(src) = ImageCaptureSourceKind::from_resource(&source) {
+                    if src != ImageCaptureSourceKind::Destroyed {
+                        if let Some(buffer_constraints) = state.capture_cursor_source(&src) {
                             let session_data =
                                 Arc::new(Mutex::new(CursorSessionInner::new(src.clone())));
                             let obj = data_init.init(
@@ -702,7 +702,7 @@ where
                 }
 
                 let session_data = Arc::new(Mutex::new(CursorSessionInner::new(
-                    ImageCaptureSourceData::Destroyed,
+                    ImageCaptureSourceKind::Destroyed,
                 )));
                 let obj = data_init.init(
                     session,
