@@ -11,14 +11,9 @@ use crate::{
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
-    wayland::{
-        handlers::{
-            compositor::recursive_frame_time_estimation,
-            screencopy::{FrameHolder, PendingImageCopyData, SessionData, submit_buffer},
-        },
-        protocols::screencopy::{
-            FailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
-        },
+    wayland::handlers::{
+        compositor::recursive_frame_time_estimation,
+        image_copy_capture::{FrameHolder, PendingImageCopyData, SessionData, submit_buffer},
     },
 };
 
@@ -82,6 +77,9 @@ use smithay::{
     utils::{Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
         dmabuf::{DmabufFeedbackBuilder, get_dmabuf},
+        image_copy_capture::{
+            CaptureFailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
+        },
         presentation::Refresh,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -1398,7 +1396,7 @@ impl SurfaceThreadState {
                                 .lock()
                                 .unwrap()
                                 .reset();
-                            frame.fail(FailureReason::Unknown);
+                            frame.fail(CaptureFailureReason::Unknown);
                         }
                         return Err(err).with_context(|| "Failed to submit result for display");
                     }
