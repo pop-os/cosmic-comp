@@ -1,5 +1,5 @@
 [Unit]
-Description=Cosmic session
+Description=Cosmic compositor-only session
 Documentation=man:systemd.special(7)
 RefuseManualStart=yes
 StopWhenUnneeded=yes
