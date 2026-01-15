@@ -38,12 +38,13 @@ use smithay::{
         drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
         gbm::BufferObjectFlags as GbmBufferFlags,
         rustix::fs::OFlags,
-        wayland_server::{DisplayHandle, Weak, protocol::wl_buffer::WlBuffer},
+        wayland_server::DisplayHandle,
     },
     utils::{Clock, DevPath, DeviceFd, Monotonic, Point, Transform},
     wayland::drm_lease::{DrmLease, DrmLeaseState},
 };
 use tracing::{error, info, warn};
+use wayland_backend::server::ClientId;
 
 use std::{
     borrow::BorrowMut,
@@ -117,7 +118,7 @@ pub struct InnerDevice {
     pub leased_connectors: Vec<(connector::Handle, crtc::Handle)>,
     pub leasing_global: Option<DrmLeaseState>,
     pub active_leases: Vec<DrmLease>,
-    pub active_buffers: HashSet<Weak<WlBuffer>>,
+    pub active_clients: HashSet<ClientId>,
 }
 
 impl fmt::Debug for InnerDevice {
@@ -133,7 +134,7 @@ impl fmt::Debug for InnerDevice {
             .field("leased_connectors", &self.leased_connectors)
             .field("leasing_global", &self.leasing_global)
             .field("active_leases", &self.active_leases)
-            .field("active_buffers", &self.active_buffers.len())
+            .field("active_clients", &self.active_clients.len())
             .finish()
     }
 }
@@ -243,7 +244,7 @@ impl State {
 
         let gbm = GbmDevice::new(fd)
             .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
-        let (render_node, render_formats, is_software) = {
+        let (render_node, render_formats, texture_formats, is_software) = {
             let egl = init_egl(&gbm)?;
 
             let render_node = egl
@@ -253,8 +254,14 @@ impl State {
                 .and_then(std::convert::identity)
                 .unwrap_or(drm_node);
             let render_formats = egl.context.dmabuf_render_formats().clone();
+            let texture_formats = egl.context.dmabuf_texture_formats().clone();
 
-            (render_node, render_formats, egl.device.is_software())
+            (
+                render_node,
+                render_formats,
+                texture_formats,
+                egl.device.is_software(),
+            )
         };
 
         let token = self
@@ -278,7 +285,7 @@ impl State {
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
         let socket = match (!is_software)
-            .then(|| self.create_socket(dh, render_node, render_formats.clone()))
+            .then(|| self.create_socket(dh, render_node, texture_formats))
             .transpose()
         {
             Ok(socket) => socket,
@@ -338,7 +345,7 @@ impl State {
                 leased_connectors: Vec::new(),
                 leasing_global,
                 active_leases: Vec::new(),
-                active_buffers: HashSet::new(),
+                active_clients: HashSet::new(),
             },
 
             supports_atomic,
@@ -738,7 +745,7 @@ impl InnerDevice {
     pub fn in_use(&self, primary: Option<&DrmNode>) -> bool {
         Some(&self.render_node) == primary
             || !self.surfaces.is_empty()
-            || !self.active_buffers.is_empty()
+            || !self.active_clients.is_empty()
     }
 
     pub fn connector_added(

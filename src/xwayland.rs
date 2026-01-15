@@ -1,4 +1,10 @@
-use std::{ffi::OsString, os::unix::io::OwnedFd, process::Stdio};
+use std::{
+    ffi::OsString,
+    io::Write,
+    os::unix::io::OwnedFd,
+    process::Stdio,
+    sync::mpsc::{self, Receiver, Sender},
+};
 
 use crate::{
     backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
@@ -64,6 +70,39 @@ pub struct XWaylandState {
     pub last_modifier_state: Option<ModifiersState>,
     pub clipboard_selection_dirty: Option<Vec<String>>,
     pub primary_selection_dirty: Option<Vec<String>>,
+    pub xrdb_thread: Sender<(String, u32)>,
+}
+
+fn xrdb_thread(rx: Receiver<(String, u32)>, display: u32) {
+    while let Ok((cursor_theme, cursor_size)) = rx.recv() {
+        if let Ok(mut child) = std::process::Command::new("xrdb")
+            .arg("-merge")
+            .env("DISPLAY", format!(":{}", display))
+            .stdin(Stdio::piped())
+            .spawn()
+        {
+            let resources = format!(
+                "Xcursor.theme: {}\nXcursor.size: {}\n",
+                cursor_theme, cursor_size,
+            );
+            if let Some(mut stdin) = child.stdin.take() {
+                if let Err(err) = stdin.write_all(resources.as_bytes()) {
+                    warn!("Failed to update xresources: {}", err);
+                }
+            }
+            match child.wait() {
+                Ok(code) if code.success() => {}
+                Ok(code) => {
+                    warn!("xrdb failed with code: {}", code);
+                }
+                Err(err) => {
+                    warn!("Failed to wait for child: {}", err);
+                }
+            }
+        } else {
+            warn!("`xrdb` not found, cannot update Xresources.");
+        }
+    }
 }
 
 impl State {
@@ -101,6 +140,9 @@ impl State {
                     x11_socket,
                     display_number,
                 } => {
+                    let (tx, rx) = mpsc::channel();
+                    std::thread::spawn(move || xrdb_thread(rx, display_number));
+
                     data.common.xwayland_state = Some(XWaylandState {
                         client: client.clone(),
                         xwm: None,
@@ -110,6 +152,7 @@ impl State {
                         last_modifier_state: None,
                         clipboard_selection_dirty: None,
                         primary_selection_dirty: None,
+                        xrdb_thread: tx,
                     });
 
                     let wm = match X11Wm::start_wm(
@@ -130,7 +173,7 @@ impl State {
                     xwayland_state.reload_cursor(1.);
                     data.notify_ready();
 
-                    data.common.update_xwayland_scale();
+                    data.common.update_xwayland_settings();
                     data.common.update_xwayland_primary_output();
                 }
                 XWaylandEvent::Error => {
@@ -594,7 +637,7 @@ impl Common {
         }
     }
 
-    pub fn update_xwayland_scale(&mut self) {
+    pub fn update_xwayland_settings(&mut self) {
         let new_scale = match self.config.cosmic_conf.descale_xwayland {
             XwaylandDescaling::Disabled => 1.,
             XwaylandDescaling::Enabled => {
@@ -619,10 +662,11 @@ impl Common {
                 val
             }
         };
+        let (_, cursor_size) = load_cursor_env();
 
         // compare with current scale
-        if Some(new_scale) != self.xwayland_scale {
-            if let Some(xwayland) = self.xwayland_state.as_mut() {
+        if let Some(xwayland) = self.xwayland_state.as_mut() {
+            let geometries = if Some(new_scale) != self.xwayland_scale {
                 // backup geometries
                 let geometries = self
                     .shell
@@ -631,8 +675,6 @@ impl Common {
                     .flat_map(|m| m.windows().map(|(s, _)| s))
                     .filter_map(|s| s.0.x11_surface().map(|x| (x.clone(), x.geometry())))
                     .collect::<Vec<_>>();
-
-                let (_, cursor_size) = load_cursor_env();
 
                 // update xorg dpi
                 if let Some(xwm) = xwayland.xwm.as_mut() {
@@ -644,10 +686,6 @@ impl Common {
                     if let Err(err) = xwm.set_xsettings(
                         [
                             ("Xft/DPI".into(), (dpi.round() as i32).into()),
-                            (
-                                "Xcursor/size".into(),
-                                ((new_scale * cursor_size as f64).round() as i32).into(),
-                            ),
                             (
                                 "Gdk/UnscaledDPI".into(),
                                 (unscaled_dpi.round() as i32).into(),
@@ -667,9 +705,22 @@ impl Common {
                     }
                 }
 
-                // update cursor
-                xwayland.reload_cursor(new_scale);
+                Some(geometries)
+            } else {
+                None
+            };
 
+            if let Err(_) = xwayland.xrdb_thread.send((
+                cosmic::icon_theme::default(),
+                (new_scale * cursor_size as f64).round() as u32,
+            )) {
+                warn!("xrdb thread died");
+            }
+
+            // update cursor
+            xwayland.reload_cursor(new_scale);
+
+            if let Some(geometries) = geometries {
                 // update client scale
                 xwayland
                     .client
@@ -822,7 +873,11 @@ impl XwmHandler for State {
             shell.override_redirect_windows.retain(|or| or != &window);
         } else {
             let seat = shell.seats.last_active().clone();
-            shell.unmap_surface(&window, &seat, &mut self.common.toplevel_info_state);
+            if let Some(pending) =
+                shell.unmap_surface(&window, &seat, &mut self.common.toplevel_info_state)
+            {
+                shell.pending_windows.push(pending);
+            }
         }
 
         let outputs = if let Some(wl_surface) = window.wl_surface() {
@@ -1192,7 +1247,7 @@ impl XwmHandler for State {
                 output_name.as_deref().is_some_and(|o| o == output.name());
         }
         self.common.output_configuration_state.update();
-        self.common.update_xwayland_scale();
+        self.common.update_xwayland_settings();
         self.common
             .config
             .write_outputs(self.common.output_configuration_state.outputs());
