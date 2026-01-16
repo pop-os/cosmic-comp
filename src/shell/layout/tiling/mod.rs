@@ -1384,6 +1384,13 @@ impl TilingLayout {
     ) -> Option<NodeId> {
         let node_id = window.tiling_node_id.lock().unwrap().take()?;
 
+        // Initialize last_overview_hover to the placeholder position so that
+        // dropping without mouse movement restores the window to its original position
+        if matches!(type_, PlaceholderType::GrabbedWindow) {
+            self.last_overview_hover =
+                Some((None, TargetZone::InitialPlaceholder(node_id.clone())));
+        }
+
         let data = self
             .queue
             .trees
@@ -2666,7 +2673,7 @@ impl TilingLayout {
             window.set_bounds(layer_map.non_exclusive_zone().size);
         }
 
-        let mapped = match self.last_overview_hover.as_ref().map(|x| &x.1) {
+        let mapped = match self.last_overview_hover.as_ref().map(|(_, zone)| zone) {
             Some(TargetZone::GroupEdge(group_id, direction)) if tree.get(group_id).is_ok() => {
                 let new_id = tree
                     .insert(
@@ -4039,7 +4046,7 @@ impl TilingLayout {
 
         let is_overview = !matches!(overview.0, OverviewMode::None);
         let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
-            .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
+            .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
         let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
             Some(desc.clone())
         } else {
@@ -4190,7 +4197,7 @@ impl TilingLayout {
         let mut elements = Vec::default();
 
         let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
-            .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
+            .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
         let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
             Some(desc.clone())
         } else {
