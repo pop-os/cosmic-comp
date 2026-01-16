@@ -417,9 +417,10 @@ impl Config {
             .collect::<Vec<_>>();
         infos.sort();
 
-        // Apply the same duplicate detection logic as write_outputs():
-        // If all monitors are unique (different make/model/edid), strip connectors for lookup
-        let has_duplicates = {
+        // Check if any monitors have identical EDID info (same make/model/edid).
+        // If all monitors are unique, strip connectors for lookup.
+        // If there are identical monitors, keep connectors to distinguish them.
+        let has_identical_outputs = {
             let mut seen = std::collections::HashSet::new();
             !infos.iter().all(|info| {
                 let key = (&info.make, &info.model, &info.edid);
@@ -427,7 +428,7 @@ impl Config {
             })
         };
 
-        let infos: Vec<OutputInfo> = if has_duplicates {
+        let infos: Vec<OutputInfo> = if has_identical_outputs {
             infos
         } else {
             infos
@@ -440,8 +441,8 @@ impl Config {
         };
 
         tracing::debug!(
-            "Looking up output config for key (has_duplicates={}): {:?}",
-            has_duplicates,
+            "Looking up output config for key (has_identical_outputs={}): {:?}",
+            has_identical_outputs,
             infos
         );
 
@@ -698,8 +699,8 @@ impl Config {
             .collect::<Vec<(OutputInfo, OutputConfig)>>();
         infos.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        // Check if there are duplicate monitors (same make/model/edid)
-        let has_duplicates = {
+        // Check if any monitors have identical EDID info (same make/model/edid)
+        let has_identical_outputs = {
             let mut seen = std::collections::HashSet::new();
             !infos.iter().all(|(info, _)| {
                 let key = (&info.make, &info.model, &info.edid);
@@ -709,7 +710,7 @@ impl Config {
 
         // If all monitors are unique, remove connectors from keys
         // If there are duplicates, keep connectors to distinguish them
-        let infos: Vec<(OutputInfo, OutputConfig)> = if has_duplicates {
+        let infos: Vec<(OutputInfo, OutputConfig)> = if has_identical_outputs {
             infos
         } else {
             infos
@@ -722,9 +723,38 @@ impl Config {
         };
 
         let (infos, configs): (Vec<OutputInfo>, Vec<OutputConfig>) = infos.into_iter().unzip();
+
+        // For configs without connectors (unique monitors), remove any existing
+        // config entries that match the same set of monitors but with different
+        // ordering, to avoid accumulating duplicate config entries
+        if !has_identical_outputs {
+            let infos_set: std::collections::HashSet<_> = infos.iter().collect();
+            let keys_to_remove: Vec<_> = self
+                .dynamic_conf
+                .outputs()
+                .config
+                .keys()
+                .filter(|key| {
+                    // Only consider keys without connectors
+                    key.iter().all(|info| info.connector.is_none())
+                        && key.len() == infos.len()
+                        && {
+                            let key_set: std::collections::HashSet<_> = key.iter().collect();
+                            infos_set == key_set
+                        }
+                })
+                .cloned()
+                .collect();
+
+            for key in keys_to_remove {
+                tracing::debug!("Removing duplicate config with different order: {:?}", key);
+                self.dynamic_conf.outputs_mut().config.remove(&key);
+            }
+        }
+
         tracing::debug!(
-            "Saving output config with key (has_duplicates={}): {:?}",
-            has_duplicates,
+            "Saving output config with key (has_identical_outputs={}): {:?}",
+            has_identical_outputs,
             infos
         );
         self.dynamic_conf
