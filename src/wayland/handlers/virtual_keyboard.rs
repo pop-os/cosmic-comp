@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::State;
+use smithay::backend::input::KeyState;
 use smithay::delegate_virtual_keyboard_manager;
+use smithay::input::keyboard::FilterResult;
+use smithay::input::keyboard::KeyboardHandle;
+use smithay::input::keyboard::Keycode;
 use smithay::input::keyboard::xkb::ModMask;
 use smithay::utils::SERIAL_COUNTER;
-use smithay::input::keyboard::KeyboardHandle;
-use smithay::backend::input::KeyState;
 use smithay::wayland::virtual_keyboard::VirtualKeyboardHandler;
-use smithay::input::keyboard::Keycode;
-use smithay::input::keyboard::FilterResult;
 
 impl VirtualKeyboardHandler for State {
     fn on_keyboard_event(
