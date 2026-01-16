@@ -831,32 +831,66 @@ impl<T: Serialize> std::ops::DerefMut for PersistenceGuard<'_, T> {
 impl<T: Serialize> Drop for PersistenceGuard<'_, T> {
     fn drop(&mut self) {
         if let Some(path) = self.0.as_ref() {
+            tracing::debug!("Persisting config to: {:?}", path);
             let content = match ron::ser::to_string_pretty(&self.1, Default::default()) {
-                Ok(content) => content,
+                Ok(content) => {
+                    tracing::debug!("Serialized config: {} bytes", content.len());
+                    if content.len() < 50 {
+                        tracing::warn!("Serialized config is suspiciously small ({} bytes): {}", content.len(), content);
+                    }
+                    content
+                }
                 Err(err) => {
                     warn!("Failed to serialize: {:?}", err);
                     return;
                 }
             };
 
+            // Use atomic write: write to temp file, then rename
+            // This prevents corruption if the process crashes during write
+            let temp_path = path.with_extension("ron.tmp");
+
             let mut writer = match OpenOptions::new()
                 .create(true)
                 .truncate(true)
                 .write(true)
-                .open(path)
+                .open(&temp_path)
             {
                 Ok(writer) => writer,
                 Err(err) => {
-                    warn!(?err, "Failed to persist {}.", path.display());
+                    warn!(?err, "Failed to create temp file for {}.", path.display());
                     return;
                 }
             };
 
             if let Err(err) = writer.write_all(content.as_bytes()) {
-                warn!(?err, "Failed to persist {}", path.display());
-            } else {
-                let _ = writer.flush();
+                warn!(?err, "Failed to write to temp file for {}", path.display());
+                let _ = std::fs::remove_file(&temp_path);
+                return;
             }
+
+            if let Err(err) = writer.flush() {
+                warn!(?err, "Failed to flush temp file for {}", path.display());
+                let _ = std::fs::remove_file(&temp_path);
+                return;
+            }
+
+            // Ensure data is synced to disk before rename
+            if let Err(err) = writer.sync_all() {
+                warn!(?err, "Failed to sync temp file for {}", path.display());
+                let _ = std::fs::remove_file(&temp_path);
+                return;
+            }
+
+            // Atomic rename
+            if let Err(err) = std::fs::rename(&temp_path, path) {
+                warn!(?err, "Failed to rename temp file to {}", path.display());
+                let _ = std::fs::remove_file(&temp_path);
+            } else {
+                tracing::debug!("Successfully persisted config to: {:?}", path);
+            }
+        } else {
+            tracing::warn!("No path provided for config persistence, changes will not be saved");
         }
     }
 }

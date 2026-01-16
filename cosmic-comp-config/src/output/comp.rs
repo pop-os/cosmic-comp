@@ -82,11 +82,33 @@ pub struct OutputInfo {
 pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
     if let Some(path) = path.as_ref() {
         let path: &Path = path.as_ref();
+        tracing::debug!("Loading output config from: {:?}", path);
+
+        // Check for leftover temp file from interrupted write
+        let temp_path = path.with_extension("ron.tmp");
+        if temp_path.exists() {
+            tracing::warn!(
+                "Found leftover temp file from interrupted write: {:?}",
+                temp_path
+            );
+        }
+
         if path.exists() {
+            // Log file size for debugging
+            if let Ok(metadata) = std::fs::metadata(path) {
+                tracing::debug!("Output config file size: {} bytes", metadata.len());
+                if metadata.len() == 0 {
+                    tracing::error!("Output config file is EMPTY (0 bytes): {:?}", path);
+                }
+            }
             match ron::de::from_reader::<_, OutputsConfig>(
                 OpenOptions::new().read(true).open(path).unwrap(),
             ) {
                 Ok(mut config) => {
+                    tracing::debug!(
+                        "Successfully loaded output config with {} entries",
+                        config.config.len()
+                    );
                     for (info, config) in config.config.iter_mut() {
                         let config_clone = config.clone();
                         for conf in config.iter_mut() {
@@ -114,13 +136,20 @@ pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
                     return config;
                 }
                 Err(err) => {
-                    warn!(?err, "Failed to read output_config, resetting..");
+                    // Log at ERROR level since this causes file deletion
+                    error!(?err, "Failed to parse output_config, DELETING FILE: {:?}", path);
                     if let Err(err) = std::fs::remove_file(path) {
                         error!(?err, "Failed to remove output_config.");
+                    } else {
+                        error!("Successfully deleted corrupted output_config: {:?}", path);
                     }
                 }
             };
+        } else {
+            tracing::warn!("Output config file does not exist: {:?}", path);
         }
+    } else {
+        tracing::warn!("No output config path provided");
     }
 
     OutputsConfig {
