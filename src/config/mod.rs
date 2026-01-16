@@ -427,7 +427,7 @@ impl Config {
             })
         };
 
-        let infos = if has_duplicates {
+        let infos: Vec<OutputInfo> = if has_duplicates {
             infos
         } else {
             infos
@@ -445,21 +445,55 @@ impl Config {
             infos
         );
 
-        // Try exact match first (with EDID if available), then fallback to match without EDID
-        let configs = self
+        // Try exact match first, then fallbacks for old configs
+        let configs: Option<Vec<OutputConfig>> = self
             .dynamic_conf
             .outputs()
             .config
             .get(&infos)
+            .cloned()
             .or_else(|| {
                 tracing::debug!("Exact match failed, trying fallback without EDID");
-                // Fallback: try matching without EDID (for old configs)
+                // Fallback 1: try matching without EDID (for old configs)
                 let infos_no_edid = infos_without_edid(&infos);
                 tracing::debug!("Fallback key (without EDID): {:?}", infos_no_edid);
                 self.dynamic_conf
                     .outputs()
                     .config
                     .get(&infos_no_edid)
+                    .cloned()
+            })
+            .or_else(|| {
+                // Fallback 2: try set-based comparison (ignoring order)
+                // This handles old configs that were saved with different sort order
+                tracing::debug!("Fallback without EDID failed, trying set-based match (ignoring order)");
+                let infos_set: std::collections::HashSet<_> = infos.iter().collect();
+                self.dynamic_conf
+                    .outputs()
+                    .config
+                    .iter()
+                    .find(|(key, _)| {
+                        key.len() == infos.len() && {
+                            let key_set: std::collections::HashSet<_> = key.iter().collect();
+                            infos_set == key_set
+                        }
+                    })
+                    .map(|(saved_key, saved_configs)| {
+                        tracing::debug!("Set-based match found! Reordering configs to match lookup order");
+                        tracing::debug!("  Saved key order: {:?}", saved_key);
+                        // Reorder configs to match the lookup order (infos)
+                        // For each info in our lookup key, find the matching saved info and its config
+                        infos
+                            .iter()
+                            .map(|info| {
+                                let idx = saved_key
+                                    .iter()
+                                    .position(|saved_info| saved_info == info)
+                                    .unwrap();
+                                saved_configs[idx].clone()
+                            })
+                            .collect::<Vec<_>>()
+                    })
             })
             .filter(|configs| {
                 if configs
@@ -476,8 +510,7 @@ impl Config {
                 } else {
                     true
                 }
-            })
-            .cloned();
+            });
 
         if configs.is_none() {
             tracing::warn!("Failed to find output config for key: {:?}", infos);
@@ -676,7 +709,7 @@ impl Config {
 
         // If all monitors are unique, remove connectors from keys
         // If there are duplicates, keep connectors to distinguish them
-        let infos = if has_duplicates {
+        let infos: Vec<(OutputInfo, OutputConfig)> = if has_duplicates {
             infos
         } else {
             infos
