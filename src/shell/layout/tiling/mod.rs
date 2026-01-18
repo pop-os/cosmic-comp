@@ -2775,9 +2775,22 @@ impl TilingLayout {
                         }
                         mapped.clone()
                     }
-                    _ => unreachable!(),
+                    // Race condition: the target node changed type between hover detection
+                    // and drop execution. Fall through to default placement.
+                    _ => {
+                        TilingLayout::map_to_tree(
+                            &mut tree,
+                            window.clone(),
+                            &self.output,
+                            None,
+                            None,
+                            None,
+                        );
+                        window
+                    }
                 }
             }
+
             _ => {
                 TilingLayout::map_to_tree(
                     &mut tree,
