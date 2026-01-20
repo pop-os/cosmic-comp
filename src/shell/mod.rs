@@ -4124,6 +4124,26 @@ impl Shell {
         }
     }
 
+    pub fn tile_window(&mut self, corner: layout::floating::TiledCorners, seat: &Seat<State>) {
+        let output = seat.active_output();
+        let Some(workspace) = self.workspaces.active_mut(&output) else {
+            return;
+        };
+
+        let Some(KeyboardFocusTarget::Element(window)) =
+            seat.get_keyboard().and_then(|k| k.current_focus())
+        else {
+            return;
+        };
+
+        // Only works on floating windows
+        if workspace.floating_layer.mapped().any(|w| w == &window) {
+            workspace
+                .floating_layer
+                .tile_window(&window, corner, &self.theme);
+        }
+    }
+
     pub fn minimize_request<S>(&mut self, surface: &S)
     where
         CosmicSurface: PartialEq<S>,
