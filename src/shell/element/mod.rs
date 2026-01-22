@@ -11,7 +11,7 @@ use smithay::{
         input::KeyState,
         renderer::{
             element::{
-                Element, RenderElement, UnderlyingStorage,
+                Element, Kind, RenderElement, UnderlyingStorage,
                 memory::MemoryRenderBufferRenderElement,
                 utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
             },
@@ -30,6 +30,7 @@ use smithay::{
     space_elements,
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
+        user_data::UserDataMap,
     },
     wayland::seat::WaylandFocus,
     xwayland::{X11Surface, xwm::X11Relatable},
@@ -1274,6 +1275,44 @@ where
             CosmicMappedRenderElement::Egui(elem) => elem.alpha(),
         }
     }
+
+    fn kind(&self) -> Kind {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.kind(),
+            CosmicMappedRenderElement::Window(elem) => elem.kind(),
+            CosmicMappedRenderElement::TiledStack(elem) => elem.kind(),
+            CosmicMappedRenderElement::TiledWindow(elem) => elem.kind(),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.kind(),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.kind(),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.kind(),
+            CosmicMappedRenderElement::GrabbedStack(elem) => elem.kind(),
+            CosmicMappedRenderElement::GrabbedWindow(elem) => elem.kind(),
+            CosmicMappedRenderElement::FocusIndicator(elem) => elem.kind(),
+            CosmicMappedRenderElement::Overlay(elem) => elem.kind(),
+            CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.kind(),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.kind(),
+        }
+    }
+
+    fn is_framebuffer_effect(&self) -> bool {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::Window(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::TiledStack(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::TiledWindow(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::TiledOverlay(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::MovingStack(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::MovingWindow(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::GrabbedStack(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::GrabbedWindow(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::FocusIndicator(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::Overlay(elem) => elem.is_framebuffer_effect(),
+            CosmicMappedRenderElement::StackHoverIndicator(elem) => elem.is_framebuffer_effect(),
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => elem.is_framebuffer_effect(),
+        }
+    }
 }
 
 impl<R> RenderElement<R> for CosmicMappedRenderElement<R>
@@ -1289,19 +1328,20 @@ where
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
         match self {
             CosmicMappedRenderElement::Stack(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicMappedRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicMappedRenderElement::TiledStack(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicMappedRenderElement::TiledWindow(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicMappedRenderElement::TiledOverlay(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
@@ -1310,19 +1350,20 @@ where
                 dst,
                 damage,
                 opaque_regions,
+                cache,
             )
             .map_err(FromGlesError::from_gles_error),
             CosmicMappedRenderElement::MovingStack(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicMappedRenderElement::MovingWindow(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicMappedRenderElement::GrabbedStack(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicMappedRenderElement::GrabbedWindow(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicMappedRenderElement::FocusIndicator(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
@@ -1331,6 +1372,7 @@ where
                 dst,
                 damage,
                 opaque_regions,
+                cache,
             )
             .map_err(FromGlesError::from_gles_error),
             CosmicMappedRenderElement::Overlay(elem) => RenderElement::<GlowRenderer>::draw(
@@ -1340,10 +1382,11 @@ where
                 dst,
                 damage,
                 opaque_regions,
+                cache,
             )
             .map_err(FromGlesError::from_gles_error),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             #[cfg(feature = "debug")]
             CosmicMappedRenderElement::Egui(elem) => {
@@ -1355,6 +1398,7 @@ where
                     dst,
                     damage,
                     opaque_regions,
+                    cache,
                 )
                 .map_err(FromGlesError::from_gles_error)
             }
@@ -1387,6 +1431,82 @@ where
             CosmicMappedRenderElement::Egui(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
                 elem.underlying_storage(glow_renderer)
+            }
+        }
+    }
+
+    fn capture_framebuffer(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+        cache: &UserDataMap,
+    ) -> Result<(), R::Error> {
+        match self {
+            CosmicMappedRenderElement::Stack(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicMappedRenderElement::Window(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicMappedRenderElement::TiledStack(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicMappedRenderElement::TiledWindow(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicMappedRenderElement::TiledOverlay(elem) => {
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem,
+                    R::glow_frame_mut(frame),
+                    src,
+                    dst,
+                    cache,
+                )
+                .map_err(FromGlesError::from_gles_error)
+            }
+            CosmicMappedRenderElement::MovingStack(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicMappedRenderElement::MovingWindow(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicMappedRenderElement::GrabbedStack(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicMappedRenderElement::GrabbedWindow(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicMappedRenderElement::FocusIndicator(elem) => {
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem,
+                    R::glow_frame_mut(frame),
+                    src,
+                    dst,
+                    cache,
+                )
+                .map_err(FromGlesError::from_gles_error)
+            }
+            CosmicMappedRenderElement::Overlay(elem) => {
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem,
+                    R::glow_frame_mut(frame),
+                    src,
+                    dst,
+                    cache,
+                )
+                .map_err(FromGlesError::from_gles_error)
+            }
+            CosmicMappedRenderElement::StackHoverIndicator(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            #[cfg(feature = "debug")]
+            CosmicMappedRenderElement::Egui(elem) => {
+                let glow_frame = R::glow_frame_mut(frame);
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem, glow_frame, src, dst, cache,
+                )
+                .map_err(FromGlesError::from_gles_error)
             }
         }
     }
