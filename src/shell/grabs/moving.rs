@@ -2,7 +2,9 @@
 
 use crate::{
     backend::render::{
-        BackdropShader, IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
+        BackdropShader, IndicatorShader, Key, Usage,
+        cursor::CursorState,
+        element::{AsGlowRenderer, FromGlesError},
     },
     shell::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
@@ -72,6 +74,7 @@ impl MoveGrabState {
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
+        R::Error: FromGlesError,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         I: From<CosmicMappedRenderElement<R>>,
     {

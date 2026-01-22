@@ -190,6 +190,20 @@ where
             CosmicElement::Egui(elem) => elem.kind(),
         }
     }
+
+    fn is_framebuffer_effect(&self) -> bool {
+        match self {
+            CosmicElement::Workspace(elem) => elem.is_framebuffer_effect(),
+            CosmicElement::Cursor(elem) => elem.is_framebuffer_effect(),
+            CosmicElement::Dnd(elem) => elem.is_framebuffer_effect(),
+            CosmicElement::MoveGrab(elem) => elem.is_framebuffer_effect(),
+            CosmicElement::AdditionalDamage(elem) => elem.is_framebuffer_effect(),
+            CosmicElement::Postprocess(elem) => elem.is_framebuffer_effect(),
+            CosmicElement::Zoom(elem) => elem.is_framebuffer_effect(),
+            #[cfg(feature = "debug")]
+            CosmicElement::Egui(elem) => elem.is_framebuffer_effect(),
+        }
+    }
 }
 
 impl<R> RenderElement<R> for CosmicElement<R>
@@ -260,6 +274,35 @@ where
             CosmicElement::Egui(elem) => {
                 let glow_renderer = renderer.glow_renderer_mut();
                 elem.underlying_storage(glow_renderer)
+            }
+        }
+    }
+
+    fn capture_framebuffer(
+        &self,
+        frame: &mut <R>::Frame<'_, '_>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+    ) -> Result<(), <R>::Error> {
+        match self {
+            CosmicElement::Workspace(elem) => elem.capture_framebuffer(frame, src, dst),
+            CosmicElement::Cursor(elem) => elem.capture_framebuffer(frame, src, dst),
+            CosmicElement::Dnd(elem) => elem.capture_framebuffer(frame, src, dst),
+            CosmicElement::MoveGrab(elem) => elem.capture_framebuffer(frame, src, dst),
+            CosmicElement::AdditionalDamage(elem) => {
+                RenderElement::<R>::capture_framebuffer(elem, frame, src, dst)
+            }
+            CosmicElement::Postprocess(elem) => {
+                let glow_frame = R::glow_frame_mut(frame);
+                RenderElement::<GlowRenderer>::capture_framebuffer(elem, glow_frame, src, dst)
+                    .map_err(FromGlesError::from_gles_error)
+            }
+            CosmicElement::Zoom(elem) => elem.capture_framebuffer(frame, src, dst),
+            #[cfg(feature = "debug")]
+            CosmicElement::Egui(elem) => {
+                let glow_frame = R::glow_frame_mut(frame);
+                RenderElement::<GlowRenderer>::capture_framebuffer(elem, glow_frame, src, dst)
+                    .map_err(FromGlesError::from_gles_error)
             }
         }
     }

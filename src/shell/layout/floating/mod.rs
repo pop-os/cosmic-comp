@@ -25,7 +25,10 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::{IndicatorShader, Key, Usage, element::AsGlowRenderer},
+    backend::render::{
+        IndicatorShader, Key, Usage,
+        element::{AsGlowRenderer, FromGlesError},
+    },
     shell::{
         CosmicSurface, Direction, ManagedLayer, MoveResult, ResizeMode,
         element::{
@@ -1423,6 +1426,7 @@ impl FloatingLayout {
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
+        R::Error: FromGlesError,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -1474,6 +1478,7 @@ impl FloatingLayout {
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
+        R::Error: FromGlesError,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,

@@ -28,6 +28,7 @@ use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::Tiling
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smithay::backend::renderer::element::Kind;
 use smithay::output::WeakOutput;
 use smithay::{
     backend::renderer::{
@@ -1510,6 +1511,7 @@ impl Workspace {
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
+        R::Error: FromGlesError,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -1591,6 +1593,8 @@ impl Workspace {
                     output_scale.into(),
                     alpha,
                     Some(true),
+                    false,
+                    [0, 0, 0, 0],
                 )
                 .into_iter()
                 .map(animation_rescale)
@@ -1712,6 +1716,7 @@ impl Workspace {
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
+        R::Error: FromGlesError,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -1958,6 +1963,26 @@ where
             WorkspaceRenderElement::Backdrop(elem) => elem.alpha(),
         }
     }
+
+    fn kind(&self) -> Kind {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => elem.kind(),
+            WorkspaceRenderElement::Fullscreen(elem) => elem.kind(),
+            WorkspaceRenderElement::FullscreenPopup(elem) => elem.kind(),
+            WorkspaceRenderElement::Window(elem) => elem.kind(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.kind(),
+        }
+    }
+
+    fn is_framebuffer_effect(&self) -> bool {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Fullscreen(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::FullscreenPopup(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Window(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.is_framebuffer_effect(),
+        }
+    }
 }
 
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
@@ -2010,6 +2035,33 @@ where
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Backdrop(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
+            }
+        }
+    }
+
+    fn capture_framebuffer(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+    ) -> Result<(), R::Error> {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.capture_framebuffer(frame, src, dst)
+            }
+            WorkspaceRenderElement::Fullscreen(elem) => elem.capture_framebuffer(frame, src, dst),
+            WorkspaceRenderElement::FullscreenPopup(elem) => {
+                elem.capture_framebuffer(frame, src, dst)
+            }
+            WorkspaceRenderElement::Window(elem) => elem.capture_framebuffer(frame, src, dst),
+            WorkspaceRenderElement::Backdrop(elem) => {
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem,
+                    R::glow_frame_mut(frame),
+                    src,
+                    dst,
+                )
+                .map_err(FromGlesError::from_gles_error)
             }
         }
     }

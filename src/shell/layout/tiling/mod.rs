@@ -3,7 +3,7 @@
 use crate::{
     backend::render::{
         ACTIVE_GROUP_COLOR, BackdropShader, GROUP_COLOR, IndicatorShader, Key, Usage,
-        element::AsGlowRenderer,
+        element::{AsGlowRenderer, FromGlesError},
     },
     shell::{
         CosmicSurface, Direction, FocusResult, MoveResult, OutputNotMapped, OverviewMode,
@@ -4005,6 +4005,7 @@ impl TilingLayout {
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
+        R::Error: FromGlesError,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -4165,6 +4166,7 @@ impl TilingLayout {
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
+        R::Error: FromGlesError,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
@@ -4971,6 +4973,7 @@ fn render_old_tree_popups<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5014,6 +5017,7 @@ fn render_old_tree_windows<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5197,6 +5201,7 @@ fn render_new_tree_popups<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5263,6 +5268,7 @@ fn render_new_tree_windows<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
+    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
@@ -5376,29 +5382,32 @@ where
             (swap_geo.loc.as_logical() - window_geo.loc).to_physical_precise_round(output_scale);
 
         swap_elements.extend(
-            AsRenderElements::render_elements::<CosmicWindowRenderElement<R>>(
-                &window,
-                renderer,
-                render_loc,
-                output_scale.into(),
-                1.0,
-            )
-            .into_iter()
-            .map(|window| {
-                CosmicMappedRenderElement::GrabbedWindow(RescaleRenderElement::from_element(
-                    window,
-                    swap_geo
-                        .loc
-                        .as_logical()
-                        .to_physical_precise_round(output_scale),
-                    ease(
-                        Linear,
-                        1.0,
-                        swap_factor(window_geo.size),
-                        transition.unwrap_or(1.0),
-                    ),
-                ))
-            }),
+            window
+                .render_elements::<_, CosmicWindowRenderElement<R>>(
+                    renderer,
+                    render_loc,
+                    output_scale.into(),
+                    1.0,
+                    None,
+                    false,
+                    [0, 0, 0, 0],
+                )
+                .into_iter()
+                .map(|window| {
+                    CosmicMappedRenderElement::GrabbedWindow(RescaleRenderElement::from_element(
+                        window,
+                        swap_geo
+                            .loc
+                            .as_logical()
+                            .to_physical_precise_round(output_scale),
+                        ease(
+                            Linear,
+                            1.0,
+                            swap_factor(window_geo.size),
+                            transition.unwrap_or(1.0),
+                        ),
+                    ))
+                }),
         )
     }
 

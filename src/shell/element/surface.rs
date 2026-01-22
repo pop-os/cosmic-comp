@@ -1,4 +1,8 @@
 use crate::{
+    backend::render::{
+        element::{AsGlowRenderer, FromGlesError},
+        wayland::{SurfaceRenderElement, render_elements_from_surface_tree},
+    },
     shell::focus::target::PointerFocusTarget,
     wayland::{
         handlers::compositor::frame_time_filter_fn, protocols::corner_radius::CacheableCorners,
@@ -17,8 +21,7 @@ use smithay::{
     backend::renderer::{
         ImportAll, Renderer,
         element::{
-            AsRenderElements, Kind, RenderElementStates,
-            surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+            AsRenderElements, Kind, RenderElementStates, surface::WaylandSurfaceRenderElement,
         },
     },
     desktop::{
@@ -745,9 +748,10 @@ impl CosmicSurface {
         alpha: f32,
     ) -> Vec<C>
     where
-        R: Renderer + ImportAll,
+        R: Renderer + ImportAll + AsGlowRenderer,
         R::TextureId: Clone + 'static,
-        C: From<WaylandSurfaceRenderElement<R>>,
+        R::Error: FromGlesError,
+        C: From<SurfaceRenderElement>,
     {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
@@ -756,13 +760,18 @@ impl CosmicSurface {
                     .flat_map(move |(popup, popup_offset)| {
                         let offset = (self.0.geometry().loc + popup_offset - popup.geometry().loc)
                             .to_physical_precise_round(scale);
+                        let mut geometry = popup.geometry().to_f64();
+                        geometry.loc += location.to_f64().to_logical(scale) + popup_offset.to_f64();
 
                         render_elements_from_surface_tree(
                             renderer,
                             popup.wl_surface(),
                             location + offset,
+                            geometry,
                             scale,
                             alpha,
+                            false,
+                            [0, 0, 0, 0],
                             FRAME_TIME_FILTER,
                         )
                     })
@@ -779,12 +788,18 @@ impl CosmicSurface {
         scale: Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
+        should_clip: bool,
+        radii: [u8; 4],
     ) -> Vec<C>
     where
-        R: Renderer + ImportAll,
+        R: Renderer + ImportAll + AsGlowRenderer,
+        R::Error: FromGlesError,
         R::TextureId: Clone + 'static,
-        C: From<WaylandSurfaceRenderElement<R>>,
+        C: From<SurfaceRenderElement>,
     {
+        let mut geometry = self.0.geometry().to_f64();
+        geometry.loc += location.to_f64().to_logical(scale);
+
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 let surface = toplevel.wl_surface();
@@ -793,8 +808,11 @@ impl CosmicSurface {
                     renderer,
                     surface,
                     location,
+                    geometry,
                     scale,
                     alpha,
+                    should_clip,
+                    radii,
                     scanout_override
                         .map(|val| {
                             if val {
@@ -816,8 +834,11 @@ impl CosmicSurface {
                     renderer,
                     &surface,
                     location,
+                    geometry,
                     scale,
                     alpha,
+                    should_clip,
+                    radii,
                     scanout_override
                         .map(|val| {
                             if val {
