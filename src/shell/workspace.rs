@@ -20,6 +20,7 @@ use crate::{
         },
     },
 };
+use cosmic_comp_config::AppearanceConfig;
 use cosmic_comp_config::workspace::{OutputMatch, PinnedWorkspace};
 
 use cosmic::theme::CosmicTheme;
@@ -361,9 +362,10 @@ impl Workspace {
         output: Output,
         tiling_enabled: bool,
         theme: cosmic::Theme,
+        appearance: AppearanceConfig,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
-        let floating_layer = FloatingLayout::new(theme, &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
+        let floating_layer = FloatingLayout::new(theme, appearance, &output);
         let output_match = output_match_for_output(&output);
 
         Workspace {
@@ -394,9 +396,10 @@ impl Workspace {
         handle: WorkspaceHandle,
         output: Output,
         theme: cosmic::Theme,
+        appearance: AppearanceConfig,
     ) -> Self {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
-        let floating_layer = FloatingLayout::new(theme, &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
+        let floating_layer = FloatingLayout::new(theme, appearance, &output);
         let output_match = output_match_for_output(&output);
 
         Workspace {
