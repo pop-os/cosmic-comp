@@ -896,6 +896,7 @@ dependencies = [
  "sendfd",
  "serde",
  "serde_json",
+ "smallvec",
  "smithay",
  "smithay-egui",
  "thiserror 2.0.18",
@@ -5102,7 +5103,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/smithay/smithay.git?rev=da42569#da42569e7a0e1669acb1e15d96cbb500a27cb266"
+source = "git+https://github.com/smithay/smithay.git?rev=f6d1070#f6d10709db2bb68c46b9c128a4163d035356572c"
 dependencies = [
  "aliasable",
  "appendlist",

@@ -943,6 +943,7 @@ impl Common {
                 surface,
                 output,
                 states,
+                None,
                 render_element_states,
                 primary_scanout_output_compare,
             );

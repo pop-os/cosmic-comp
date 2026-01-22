@@ -89,6 +89,7 @@ logind-zbus = { version = "5.3.2", optional = true }
 futures-executor = { version = "0.3.32", features = ["thread-pool"] }
 futures-util = "0.3.32"
 cgmath = "0.18.0"
+smallvec = "1.15.1"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
@@ -148,4 +149,4 @@ cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch
 cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "da42569" }
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "f6d1070" }

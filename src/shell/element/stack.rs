@@ -67,7 +67,10 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform},
+    utils::{
+        Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform,
+        user_data::UserDataMap,
+    },
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -1991,6 +1994,16 @@ where
             CosmicStackRenderElement::Clipped(elem) => elem.kind(),
         }
     }
+
+    fn is_framebuffer_effect(&self) -> bool {
+        match self {
+            CosmicStackRenderElement::Header(elem) => elem.is_framebuffer_effect(),
+            CosmicStackRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
+            CosmicStackRenderElement::Border(elem) => elem.is_framebuffer_effect(),
+            CosmicStackRenderElement::Window(elem) => elem.is_framebuffer_effect(),
+            CosmicStackRenderElement::Clipped(elem) => elem.is_framebuffer_effect(),
+        }
+    }
 }
 
 impl<R> RenderElement<R> for CosmicStackRenderElement<R>
@@ -2006,10 +2019,11 @@ where
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), <R>::Error> {
         match self {
             CosmicStackRenderElement::Header(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicStackRenderElement::Shadow(elem) | CosmicStackRenderElement::Border(elem) => {
                 RenderElement::<GlowRenderer>::draw(
@@ -2019,14 +2033,15 @@ where
                     dst,
                     damage,
                     opaque_regions,
+                    cache,
                 )
                 .map_err(FromGlesError::from_gles_error)
             }
             CosmicStackRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicStackRenderElement::Clipped(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
         }
     }
@@ -2039,6 +2054,36 @@ where
             }
             CosmicStackRenderElement::Window(elem) => elem.underlying_storage(renderer),
             CosmicStackRenderElement::Clipped(elem) => elem.underlying_storage(renderer),
+        }
+    }
+
+    fn capture_framebuffer(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        cache: &UserDataMap,
+    ) -> Result<(), <R>::Error> {
+        match self {
+            CosmicStackRenderElement::Header(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicStackRenderElement::Shadow(elem) | CosmicStackRenderElement::Border(elem) => {
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem,
+                    R::glow_frame_mut(frame),
+                    src,
+                    dst,
+                    cache,
+                )
+                .map_err(FromGlesError::from_gles_error)
+            }
+            CosmicStackRenderElement::Window(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicStackRenderElement::Clipped(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
         }
     }
 }
