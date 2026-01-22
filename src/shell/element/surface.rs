@@ -142,10 +142,10 @@ impl CosmicSurface {
                 let corners = guard.current().0?;
 
                 Some([
-                    corners.bottom_right.min(half_min_dim),
-                    corners.top_right.min(half_min_dim),
-                    corners.bottom_left.min(half_min_dim),
                     corners.top_left.min(half_min_dim),
+                    corners.top_right.min(half_min_dim),
+                    corners.bottom_right.min(half_min_dim),
+                    corners.bottom_left.min(half_min_dim),
                 ])
             })
         })
