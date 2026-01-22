@@ -53,7 +53,10 @@ use smithay::{
     },
     output::Output,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform},
+    utils::{
+        Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform,
+        user_data::UserDataMap,
+    },
     wayland::seat::WaylandFocus,
 };
 use std::{
@@ -1356,6 +1359,16 @@ where
             CosmicWindowRenderElement::Clipped(elem) => elem.kind(),
         }
     }
+
+    fn is_framebuffer_effect(&self) -> bool {
+        match self {
+            CosmicWindowRenderElement::Header(elem) => elem.is_framebuffer_effect(),
+            CosmicWindowRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
+            CosmicWindowRenderElement::Border(elem) => elem.is_framebuffer_effect(),
+            CosmicWindowRenderElement::Window(elem) => elem.is_framebuffer_effect(),
+            CosmicWindowRenderElement::Clipped(elem) => elem.is_framebuffer_effect(),
+        }
+    }
 }
 
 impl<R> RenderElement<R> for CosmicWindowRenderElement<R>
@@ -1371,10 +1384,11 @@ where
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), <R>::Error> {
         match self {
             CosmicWindowRenderElement::Header(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicWindowRenderElement::Shadow(elem) | CosmicWindowRenderElement::Border(elem) => {
                 RenderElement::<GlowRenderer>::draw(
@@ -1384,14 +1398,15 @@ where
                     dst,
                     damage,
                     opaque_regions,
+                    cache,
                 )
                 .map_err(FromGlesError::from_gles_error)
             }
             CosmicWindowRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             CosmicWindowRenderElement::Clipped(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
         }
     }
@@ -1404,6 +1419,36 @@ where
             }
             CosmicWindowRenderElement::Window(elem) => elem.underlying_storage(renderer),
             CosmicWindowRenderElement::Clipped(elem) => elem.underlying_storage(renderer),
+        }
+    }
+
+    fn capture_framebuffer(
+        &self,
+        frame: &mut <R>::Frame<'_, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        cache: &UserDataMap,
+    ) -> Result<(), <R>::Error> {
+        match self {
+            CosmicWindowRenderElement::Header(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicWindowRenderElement::Shadow(elem) | CosmicWindowRenderElement::Border(elem) => {
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem,
+                    R::glow_frame_mut(frame),
+                    src,
+                    dst,
+                    cache,
+                )
+                .map_err(FromGlesError::from_gles_error)
+            }
+            CosmicWindowRenderElement::Window(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicWindowRenderElement::Clipped(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
         }
     }
 }

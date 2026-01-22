@@ -31,7 +31,9 @@ use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::Tiling
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smithay::backend::renderer::element::Kind;
 use smithay::output::WeakOutput;
+use smithay::utils::user_data::UserDataMap;
 use smithay::{
     backend::renderer::{
         element::{
@@ -1987,6 +1989,26 @@ where
             WorkspaceRenderElement::Backdrop(elem) => elem.alpha(),
         }
     }
+
+    fn kind(&self) -> Kind {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => elem.kind(),
+            WorkspaceRenderElement::Fullscreen(elem) => elem.kind(),
+            WorkspaceRenderElement::FullscreenPopup(elem) => elem.kind(),
+            WorkspaceRenderElement::Window(elem) => elem.kind(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.kind(),
+        }
+    }
+
+    fn is_framebuffer_effect(&self) -> bool {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Fullscreen(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::FullscreenPopup(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Window(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.is_framebuffer_effect(),
+        }
+    }
 }
 
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
@@ -2002,19 +2024,20 @@ where
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Fullscreen(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::FullscreenPopup(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Backdrop(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
@@ -2023,6 +2046,7 @@ where
                 dst,
                 damage,
                 opaque_regions,
+                cache,
             )
             .map_err(FromGlesError::from_gles_error),
         }
@@ -2039,6 +2063,39 @@ where
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Backdrop(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
+            }
+        }
+    }
+
+    fn capture_framebuffer(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+        cache: &UserDataMap,
+    ) -> Result<(), R::Error> {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::Fullscreen(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::FullscreenPopup(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::Window(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::Backdrop(elem) => {
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem,
+                    R::glow_frame_mut(frame),
+                    src,
+                    dst,
+                    cache,
+                )
+                .map_err(FromGlesError::from_gles_error)
             }
         }
     }
