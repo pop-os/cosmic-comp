@@ -646,7 +646,7 @@ impl Config {
             &self.cosmic_conf.input_default
         };
 
-        let mut device_config = self.cosmic_conf.input_devices.get(device.name()).cloned();
+        let mut device_config = self.cosmic_conf.input_devices.get(&*device.name()).cloned();
         if is_touchpad && self.cosmic_conf.input_touchpad_override == TouchpadOverride::ForceDisable
         {
             device_config = Some({
