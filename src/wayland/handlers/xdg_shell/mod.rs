@@ -8,7 +8,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::{
     delegate_xdg_shell,
     desktop::{
-        PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
+        PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupTouchGrab, PopupUngrabStrategy,
         WindowSurfaceType, find_popup_root_surface,
     },
     input::{Seat, pointer::Focus},
@@ -132,6 +132,10 @@ impl XdgShellHandler for State {
                             return;
                         }
                         pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+                    }
+
+                    if let Some(touch) = seat.get_touch() {
+                        touch.set_grab(self, PopupTouchGrab::new(&grab), serial);
                     }
 
                     seat.user_data()
