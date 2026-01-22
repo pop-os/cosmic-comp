@@ -5563,11 +5563,18 @@ where
                 let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
 
                 let scale = geo.size.to_f64() / original_geo.size.to_f64();
+                // In overview mode, don't pass max_size to avoid pre-clipping.
+                // Let constrain_render_elements handle scaling instead.
+                let max_size = if is_overview {
+                    None
+                } else {
+                    Some(geo.size.as_logical())
+                };
                 let shadow_element = mapped.shadow_render_element(
                     renderer,
                     geo.loc.as_logical().to_physical_precise_round(output_scale)
                         - elem_geometry.loc,
-                    Some(geo.size.as_logical()),
+                    max_size,
                     Scale::from(output_scale),
                     scale.x.min(scale.y),
                     alpha,
@@ -5577,7 +5584,7 @@ where
                     //original_location,
                     geo.loc.as_logical().to_physical_precise_round(output_scale)
                         - elem_geometry.loc,
-                    Some(geo.size.as_logical()),
+                    max_size,
                     Scale::from(output_scale),
                     alpha,
                     None,
