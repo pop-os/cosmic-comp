@@ -1,8 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, fs::OpenOptions, path::Path};
 use tracing::{error, warn};
+
+fn deserialize_optional_trimmed_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.and_then(|s| {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }))
+}
+
+fn is_none_or_whitespace(value: &Option<String>) -> bool {
+    match value {
+        None => true,
+        Some(v) => v.trim().is_empty(),
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -73,6 +95,12 @@ pub struct OutputInfo {
     pub connector: String,
     pub make: String,
     pub model: String,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_trimmed_string",
+        skip_serializing_if = "is_none_or_whitespace"
+    )]
+    pub serial_number: Option<String>,
 }
 
 pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {

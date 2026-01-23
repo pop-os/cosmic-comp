@@ -35,6 +35,7 @@ impl From<CompList> for cosmic_randr_shell::List {
                 } else {
                     info.model
                 },
+                serial_number: info.serial_number.unwrap_or_default(),
                 position: (output.position.0 as i32, output.position.1 as i32),
                 scale: output.scale,
                 transform: Some(match output.transform {

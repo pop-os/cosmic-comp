@@ -417,11 +417,26 @@ impl Config {
             .collect::<Vec<_>>();
         infos.sort();
 
-        if let Some(configs) = self
-            .dynamic_conf
-            .outputs()
-            .config
-            .get(&infos)
+        let outputs_config = self.dynamic_conf.outputs();
+
+        // Backward-compatible lookup: older `outputs.ron` files won't have `serial_number`.
+        // If a strict match fails, retry with serial numbers ignored.
+        // This prevents bricking a users config and resetting to default. 
+        let mut infos_key = infos.clone();
+        let mut configs_ref_opt = outputs_config.config.get(&infos);
+        if configs_ref_opt.is_none() {
+            let mut infos_no_serial = infos.clone();
+            for info in &mut infos_no_serial {
+                info.serial_number = None;
+            }
+            infos_no_serial.sort();
+            if let Some(cfgs) = outputs_config.config.get(&infos_no_serial) {
+                infos_key = infos_no_serial;
+                configs_ref_opt = Some(cfgs);
+            }
+        }
+
+        if let Some(configs) = configs_ref_opt
             .filter(|configs| {
                 if configs
                     .iter()
@@ -453,7 +468,10 @@ impl Config {
                 .collect::<Vec<_>>();
 
             let mut found_outputs = Vec::new();
-            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
+            for (name, output_config) in infos_key
+                .iter()
+                .map(|o| &o.connector)
+                .zip(configs.into_iter())
             {
                 let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
                 let enabled = output_config.enabled.clone();
@@ -963,10 +981,15 @@ pub struct CompOutputInfo(OutputInfo);
 impl From<Output> for CompOutputInfo {
     fn from(o: Output) -> CompOutputInfo {
         let physical = o.physical_properties();
+        let serial_number = match physical.serial_number.as_str().trim() {
+            "" | "Unknown" => None,
+            s => Some(s.to_string()),
+        };
         CompOutputInfo(OutputInfo {
             connector: o.name(),
             make: physical.make,
             model: physical.model,
+            serial_number,
         })
     }
 }
