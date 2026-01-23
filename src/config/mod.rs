@@ -422,6 +422,7 @@ impl Config {
         // Backward-compatible lookup: older `outputs.ron` files won't have `serial_number`.
         // If a strict match fails, retry with serial numbers ignored.
         // This prevents bricking a users config and resetting to default. 
+        let mut used_fallback_key = false;
         let mut infos_key = infos.clone();
         let mut configs_ref_opt = outputs_config.config.get(&infos);
         if configs_ref_opt.is_none() {
@@ -433,6 +434,7 @@ impl Config {
             if let Some(cfgs) = outputs_config.config.get(&infos_no_serial) {
                 infos_key = infos_no_serial;
                 configs_ref_opt = Some(cfgs);
+                used_fallback_key = true;
             }
         }
 
@@ -484,6 +486,7 @@ impl Config {
             }
 
             let mut backend = backend.lock();
+            let mut applied_config_ok = false;
             if let Err(err) = backend.apply_config_for_outputs(
                 false,
                 loop_handle,
@@ -531,6 +534,7 @@ impl Config {
                     }
                 }
             } else {
+                applied_config_ok = true;
                 for (output, enabled) in found_outputs {
                     if enabled == OutputState::Enabled {
                         output_state.enable_head(&output);
@@ -542,6 +546,13 @@ impl Config {
 
             output_state.update();
             self.write_outputs(output_state.outputs());
+
+            // One-time migration: if we only found a config by ignoring serial numbers,
+            // persist the now-known serial-aware key and remove the old key.
+            if used_fallback_key && applied_config_ok {
+                let mut outputs_mut = self.dynamic_conf.outputs_mut();
+                outputs_mut.config.remove(&infos_key);
+            }
         } else {
             if outputs
                 .iter()
