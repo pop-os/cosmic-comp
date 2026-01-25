@@ -241,7 +241,12 @@ pub fn init_backend(
         }
         state.common.refresh();
     }
-    state.launch_xwayland(None);
+
+    if state.common.with_xwayland {
+        state.launch_xwayland(None);
+    } else {
+        state.notify_ready();
+    }
 
     Ok(())
 }
