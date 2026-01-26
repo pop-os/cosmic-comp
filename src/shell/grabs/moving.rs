@@ -804,11 +804,14 @@ impl Drop for MoveGrab {
         let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
         let cursor_output = self.cursor_output.clone();
 
+        let grab_state = seat
+            .user_data()
+            .get::<SeatMoveGrabState>()
+            .and_then(|s| s.lock().unwrap().take());
+
         let _ = self.evlh.0.insert_idle(move |state| {
             let position: Option<(CosmicMapped, Point<i32, Global>)> = if let Some(grab_state) =
-                seat.user_data()
-                    .get::<SeatMoveGrabState>()
-                    .and_then(|s| s.lock().unwrap().take())
+                grab_state
             {
                 if grab_state.window.alive() {
                     let window_location =
