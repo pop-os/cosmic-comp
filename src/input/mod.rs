@@ -1283,6 +1283,12 @@ impl State {
                             time: event.time_msec(),
                         },
                     );
+
+                    let shell = self.common.shell.write();
+                    if let Some(target) = State::element_under(position, &output, &shell, &seat) {
+                        drop(shell);
+                        Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
+                    }
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
