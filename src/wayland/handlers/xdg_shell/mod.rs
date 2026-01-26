@@ -44,13 +44,21 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
-        let window = CosmicSurface::from(surface);
-        shell.pending_windows.push(PendingWindow {
-            surface: window,
-            seat,
-            fullscreen: None,
-            maximized: false,
-        });
+
+        if shell
+            .pending_windows
+            .iter()
+            .find(|w| &w.surface == &surface)
+            .is_none()
+        {
+            let surface = CosmicSurface::from(surface);
+            shell.pending_windows.push(PendingWindow {
+                surface,
+                seat,
+                fullscreen: None,
+                maximized: false,
+            })
+        }
         // We will position the window after the first commit, when we know its size hints
     }
 
