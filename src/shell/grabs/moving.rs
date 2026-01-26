@@ -2,7 +2,7 @@
 
 use crate::{
     backend::render::{
-        BackdropShader, IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
+        BackdropShader, IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer, SecurityContextIndicatorSettings
     },
     shell::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
@@ -108,26 +108,67 @@ impl MoveGrabState {
             + self.window_offset
             - scaling_offset;
 
+        // Security context indicator
+        let mut secctx_element = None;
+        let mut secctx_border_size = 0;
+        if self.window.is_window() {
+            let surface = self.window.active_window();
+            if let Some(secctx_settings) = surface.user_data().get::<SecurityContextIndicatorSettings>() {
+                secctx_border_size = secctx_settings.border_size;
+                let radius = self.element().corner_radius(window_geo.size, secctx_border_size);
+                secctx_element = Some(
+                    CosmicMappedRenderElement::from(IndicatorShader::focus_element(
+                        renderer,
+                        Key::Window(Usage::SecurityContextIndicator, self.window.key()),
+                        Rectangle::new(
+                            render_location,
+                            self.window
+                                .geometry()
+                                .size
+                                .to_f64()
+                                .upscale(scale)
+                                .to_i32_round(),
+                        )
+                        .as_local(),
+                        secctx_border_size,
+                        radius,
+                        alpha,
+                        output_scale.x,
+                        secctx_settings.border_color,
+                    ))
+                    .into(),
+                );
+            }
+        }
+
         let active_window_hint = crate::theme::active_window_hint(theme);
-        let radius = self
+        let mut radius = self
             .element()
             .corner_radius(window_geo.size, self.indicator_thickness);
 
         let focus_element = if self.indicator_thickness > 0 {
-            Some(CosmicMappedRenderElement::from(
-                IndicatorShader::focus_element(
+            let mut indicator_geometry = Rectangle::new(
+                render_location,
+                self.window
+                    .geometry()
+                    .size
+                    .to_f64()
+                    .upscale(scale)
+                    .to_i32_round(),
+            ).as_local();
+            if secctx_border_size > 0 {
+                let offset = secctx_border_size as i32;
+                indicator_geometry.loc -= (offset, offset).into();
+                indicator_geometry.size += (offset * 2, offset * 2).into();
+                for r in &mut radius {
+                   *r += offset as u8;
+                }
+            }
+            Some(
+                CosmicMappedRenderElement::from(IndicatorShader::focus_element(
                     renderer,
                     Key::Window(Usage::MoveGrabIndicator, self.window.key()),
-                    Rectangle::new(
-                        render_location,
-                        self.window
-                            .geometry()
-                            .size
-                            .to_f64()
-                            .upscale(scale)
-                            .to_i32_round(),
-                    )
-                    .as_local(),
+                    indicator_geometry,
                     self.indicator_thickness,
                     radius,
                     alpha,
@@ -137,8 +178,9 @@ impl MoveGrabState {
                         active_window_hint.green,
                         active_window_hint.blue,
                     ],
-                ),
-            ))
+                ))
+                .into(),
+            )
         } else {
             None
         };
@@ -229,6 +271,7 @@ impl MoveGrabState {
             })
             .chain(p_elements)
             .chain(focus_element)
+            .chain(secctx_element)
             .chain(
                 w_elements
                     .into_iter()
