@@ -417,11 +417,85 @@ impl Config {
             .collect::<Vec<_>>();
         infos.sort();
 
-        if let Some(configs) = self
+        // Check if any monitors have identical EDID info (same make/model/edid).
+        // If all monitors are unique, strip connectors for lookup.
+        // If there are identical monitors, keep connectors to distinguish them.
+        let has_identical_outputs = {
+            let mut seen = std::collections::HashSet::new();
+            !infos.iter().all(|info| {
+                let key = (&info.make, &info.model, &info.edid);
+                seen.insert(key)
+            })
+        };
+
+        let infos: Vec<OutputInfo> = if has_identical_outputs {
+            infos
+        } else {
+            infos
+                .into_iter()
+                .map(|mut info| {
+                    info.connector = None;
+                    info
+                })
+                .collect()
+        };
+
+        tracing::debug!(
+            "Looking up output config for key (has_identical_outputs={}): {:?}",
+            has_identical_outputs,
+            infos
+        );
+
+        // Try exact match first, then fallbacks for old configs
+        let configs: Option<Vec<OutputConfig>> = self
             .dynamic_conf
             .outputs()
             .config
             .get(&infos)
+            .cloned()
+            .or_else(|| {
+                tracing::debug!("Exact match failed, trying fallback without EDID");
+                // Fallback 1: try matching without EDID (for old configs)
+                let infos_no_edid = infos_without_edid(&infos);
+                tracing::debug!("Fallback key (without EDID): {:?}", infos_no_edid);
+                self.dynamic_conf
+                    .outputs()
+                    .config
+                    .get(&infos_no_edid)
+                    .cloned()
+            })
+            .or_else(|| {
+                // Fallback 2: try set-based comparison (ignoring order)
+                // This handles old configs that were saved with different sort order
+                tracing::debug!("Fallback without EDID failed, trying set-based match (ignoring order)");
+                let infos_set: std::collections::HashSet<_> = infos.iter().collect();
+                self.dynamic_conf
+                    .outputs()
+                    .config
+                    .iter()
+                    .find(|(key, _)| {
+                        key.len() == infos.len() && {
+                            let key_set: std::collections::HashSet<_> = key.iter().collect();
+                            infos_set == key_set
+                        }
+                    })
+                    .map(|(saved_key, saved_configs)| {
+                        tracing::debug!("Set-based match found! Reordering configs to match lookup order");
+                        tracing::debug!("  Saved key order: {:?}", saved_key);
+                        // Reorder configs to match the lookup order (infos)
+                        // For each info in our lookup key, find the matching saved info and its config
+                        infos
+                            .iter()
+                            .map(|info| {
+                                let idx = saved_key
+                                    .iter()
+                                    .position(|saved_info| saved_info == info)
+                                    .unwrap();
+                                saved_configs[idx].clone()
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            })
             .filter(|configs| {
                 if configs
                     .iter()
@@ -437,9 +511,19 @@ impl Config {
                 } else {
                     true
                 }
-            })
-            .cloned()
-        {
+            });
+
+        if configs.is_none() {
+            tracing::warn!("Failed to find output config for key: {:?}", infos);
+            tracing::warn!("Available config keys:");
+            for (idx, key) in self.dynamic_conf.outputs().config.keys().enumerate() {
+                tracing::warn!("  [{}]: {:?}", idx, key);
+            }
+        } else {
+            tracing::debug!("Successfully found output config");
+        }
+
+        if let Some(configs) = configs {
             let known_good_configs = outputs
                 .iter()
                 .map(|output| {
@@ -453,9 +537,20 @@ impl Config {
                 .collect::<Vec<_>>();
 
             let mut found_outputs = Vec::new();
-            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
+            for (info, output_config) in infos.iter().zip(configs.into_iter())
             {
-                let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
+                // Match by connector if present, otherwise match by EDID (position in sorted list)
+                let output = if let Some(connector_name) = &info.connector {
+                    outputs.iter().find(|o| &o.name() == connector_name).unwrap().clone()
+                } else {
+                    // When connector is not in saved config, match by EDID/make/model
+                    // Since both lists are sorted by OutputInfo (which includes make/model/edid),
+                    // we can match by finding the output with matching EDID info
+                    outputs.iter().find(|o| {
+                        let o_info = Into::<CompOutputInfo>::into((*o).clone()).0;
+                        o_info.make == info.make && o_info.model == info.model && o_info.edid == info.edid
+                    }).unwrap().clone()
+                };
                 let enabled = output_config.enabled.clone();
                 *output
                     .user_data()
@@ -603,7 +698,65 @@ impl Config {
             })
             .collect::<Vec<(OutputInfo, OutputConfig)>>();
         infos.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let (infos, configs) = infos.into_iter().unzip();
+
+        // Check if any monitors have identical EDID info (same make/model/edid)
+        let has_identical_outputs = {
+            let mut seen = std::collections::HashSet::new();
+            !infos.iter().all(|(info, _)| {
+                let key = (&info.make, &info.model, &info.edid);
+                seen.insert(key)
+            })
+        };
+
+        // If all monitors are unique, remove connectors from keys
+        // If there are duplicates, keep connectors to distinguish them
+        let infos: Vec<(OutputInfo, OutputConfig)> = if has_identical_outputs {
+            infos
+        } else {
+            infos
+                .into_iter()
+                .map(|(mut info, config)| {
+                    info.connector = None;
+                    (info, config)
+                })
+                .collect()
+        };
+
+        let (infos, configs): (Vec<OutputInfo>, Vec<OutputConfig>) = infos.into_iter().unzip();
+
+        // For configs without connectors (unique monitors), remove any existing
+        // config entries that match the same set of monitors but with different
+        // ordering, to avoid accumulating duplicate config entries
+        if !has_identical_outputs {
+            let infos_set: std::collections::HashSet<_> = infos.iter().collect();
+            let keys_to_remove: Vec<_> = self
+                .dynamic_conf
+                .outputs()
+                .config
+                .keys()
+                .filter(|key| {
+                    // Only consider keys without connectors
+                    key.iter().all(|info| info.connector.is_none())
+                        && key.len() == infos.len()
+                        && {
+                            let key_set: std::collections::HashSet<_> = key.iter().collect();
+                            infos_set == key_set
+                        }
+                })
+                .cloned()
+                .collect();
+
+            for key in keys_to_remove {
+                tracing::debug!("Removing duplicate config with different order: {:?}", key);
+                self.dynamic_conf.outputs_mut().config.remove(&key);
+            }
+        }
+
+        tracing::debug!(
+            "Saving output config with key (has_identical_outputs={}): {:?}",
+            has_identical_outputs,
+            infos
+        );
         self.dynamic_conf
             .outputs_mut()
             .config
@@ -678,32 +831,66 @@ impl<T: Serialize> std::ops::DerefMut for PersistenceGuard<'_, T> {
 impl<T: Serialize> Drop for PersistenceGuard<'_, T> {
     fn drop(&mut self) {
         if let Some(path) = self.0.as_ref() {
+            tracing::debug!("Persisting config to: {:?}", path);
             let content = match ron::ser::to_string_pretty(&self.1, Default::default()) {
-                Ok(content) => content,
+                Ok(content) => {
+                    tracing::debug!("Serialized config: {} bytes", content.len());
+                    if content.len() < 50 {
+                        tracing::warn!("Serialized config is suspiciously small ({} bytes): {}", content.len(), content);
+                    }
+                    content
+                }
                 Err(err) => {
                     warn!("Failed to serialize: {:?}", err);
                     return;
                 }
             };
 
+            // Use atomic write: write to temp file, then rename
+            // This prevents corruption if the process crashes during write
+            let temp_path = path.with_extension("ron.tmp");
+
             let mut writer = match OpenOptions::new()
                 .create(true)
                 .truncate(true)
                 .write(true)
-                .open(path)
+                .open(&temp_path)
             {
                 Ok(writer) => writer,
                 Err(err) => {
-                    warn!(?err, "Failed to persist {}.", path.display());
+                    warn!(?err, "Failed to create temp file for {}.", path.display());
                     return;
                 }
             };
 
             if let Err(err) = writer.write_all(content.as_bytes()) {
-                warn!(?err, "Failed to persist {}", path.display());
-            } else {
-                let _ = writer.flush();
+                warn!(?err, "Failed to write to temp file for {}", path.display());
+                let _ = std::fs::remove_file(&temp_path);
+                return;
             }
+
+            if let Err(err) = writer.flush() {
+                warn!(?err, "Failed to flush temp file for {}", path.display());
+                let _ = std::fs::remove_file(&temp_path);
+                return;
+            }
+
+            // Ensure data is synced to disk before rename
+            if let Err(err) = writer.sync_all() {
+                warn!(?err, "Failed to sync temp file for {}", path.display());
+                let _ = std::fs::remove_file(&temp_path);
+                return;
+            }
+
+            // Atomic rename
+            if let Err(err) = std::fs::rename(&temp_path, path) {
+                warn!(?err, "Failed to rename temp file to {}", path.display());
+                let _ = std::fs::remove_file(&temp_path);
+            } else {
+                tracing::debug!("Successfully persisted config to: {:?}", path);
+            }
+        } else {
+            tracing::warn!("No path provided for config persistence, changes will not be saved");
         }
     }
 }
@@ -964,9 +1151,23 @@ impl From<Output> for CompOutputInfo {
     fn from(o: Output) -> CompOutputInfo {
         let physical = o.physical_properties();
         CompOutputInfo(OutputInfo {
-            connector: o.name(),
+            connector: Some(o.name()),
             make: physical.make,
             model: physical.model,
+            edid: o.edid().cloned(),
         })
     }
+}
+
+/// Create a fallback key without EDID for backward compatibility with old configs
+fn infos_without_edid(infos: &[OutputInfo]) -> Vec<OutputInfo> {
+    infos
+        .iter()
+        .map(|info| OutputInfo {
+            connector: info.connector.clone(),
+            make: info.make.clone(),
+            model: info.model.clone(),
+            edid: None,
+        })
+        .collect()
 }
