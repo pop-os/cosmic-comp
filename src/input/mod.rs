@@ -24,9 +24,8 @@ use crate::{
         zoom::ZoomState,
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
-    wayland::{
-        handlers::{screencopy::SessionHolder, xwayland_keyboard_grab::XWaylandGrabSeat},
-        protocols::screencopy::{BufferConstraints, CursorSessionRef},
+    wayland::handlers::{
+        image_copy_capture::SessionHolder, xwayland_keyboard_grab::XWaylandGrabSeat,
     },
 };
 use calloop::{
@@ -62,6 +61,7 @@ use smithay::{
     },
     utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
+        image_copy_capture::{BufferConstraints, CursorSessionRef},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{PointerConstraint, with_pointer_constraint},
         seat::WaylandFocus,
