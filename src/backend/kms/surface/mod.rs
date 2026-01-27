@@ -448,7 +448,7 @@ impl Surface {
             .send(ThreadCommand::Resume { compositor });
     }
 
-    pub fn get_dpms(&mut self) -> bool {
+    pub fn get_dpms(&self) -> bool {
         self.dpms
     }
 

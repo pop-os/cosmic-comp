@@ -655,29 +655,39 @@ impl LockedDevice<'_> {
                 .surfaces
                 .iter()
                 .filter(|(_, s)| s.is_active())
-                .map(|(crtc, surface)| (*crtc, surface.output.clone()))
+                .map(|(crtc, surface)| (*crtc, (surface.output.clone(), surface.get_dpms())))
                 .collect::<HashMap<_, _>>();
 
             for (crtc, compositor) in self.drm.compositors().iter() {
-                let elements = match output_map.get(crtc) {
-                    Some(output) => output_elements(
-                        Some(&self.inner.render_node),
-                        renderer,
-                        shell,
-                        now,
-                        output,
-                        CursorMode::All,
-                        None,
-                    )
-                    .with_context(|| "Failed to render outputs")?,
-                    None => Vec::new(),
+                let (elements, dpms) = match output_map.get(crtc) {
+                    Some((output, dpms)) => (
+                        output_elements(
+                            Some(&self.inner.render_node),
+                            renderer,
+                            shell,
+                            now,
+                            output,
+                            CursorMode::All,
+                            None,
+                        )
+                        .with_context(|| "Failed to render outputs")?,
+                        *dpms,
+                    ),
+                    None => (Vec::new(), true),
                 };
 
-                let mut compositor = compositor.lock().unwrap();
-                compositor.render_frame(renderer, &elements, CLEAR_COLOR, FrameFlags::empty())?;
-                if let Err(err) = compositor.commit_frame() {
-                    if !matches!(err, FrameError::EmptyFrame) {
-                        return Err(err.into());
+                if dpms {
+                    let mut compositor = compositor.lock().unwrap();
+                    compositor.render_frame(
+                        renderer,
+                        &elements,
+                        CLEAR_COLOR,
+                        FrameFlags::empty(),
+                    )?;
+                    if let Err(err) = compositor.commit_frame() {
+                        if !matches!(err, FrameError::EmptyFrame) {
+                            return Err(err.into());
+                        }
                     }
                 }
             }
