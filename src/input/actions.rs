@@ -18,7 +18,7 @@ use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     input::{Seat, pointer::MotionEvent},
-    utils::{Point, Serial},
+    utils::{Point, Serial, SERIAL_COUNTER},
 };
 #[cfg(not(feature = "debug"))]
 use tracing::info;
@@ -118,6 +118,28 @@ impl State {
                     seat,
                     true,
                     &mut self.common.workspace_state.update(),
+                );
+            }
+            SwipeAction::WindowSwitcher => {
+                self.handle_shortcut_action(
+                    shortcuts::Action::WindowSwitcher,
+                    seat,
+                    SERIAL_COUNTER.next_serial(),
+                    0,
+                    shortcuts::Binding::default(),
+                    None,
+                    false,
+                );
+            }
+            SwipeAction::WindowSwitcherPrevious => {
+                self.handle_shortcut_action(
+                    shortcuts::Action::WindowSwitcherPrevious,
+                    seat,
+                    SERIAL_COUNTER.next_serial(),
+                    0,
+                    shortcuts::Binding::default(),
+                    None,
+                    false,
                 );
             }
         }

@@ -16,7 +16,13 @@ pub struct SwipeEvent {
 pub enum SwipeAction {
     NextWorkspace,
     PrevWorkspace,
+    WindowSwitcher,
+    WindowSwitcherPrevious,
 }
+
+/// Minimum distance (in logical pixels) required to trigger a gesture action
+/// Prevents accidental swipes from being interpreted as commands
+const MIN_GESTURE_DISTANCE: f64 = 20.0;
 
 #[derive(Debug, Clone)]
 pub struct GestureState {
@@ -24,6 +30,8 @@ pub struct GestureState {
     pub direction: Option<Direction>,
     pub action: Option<SwipeAction>,
     pub delta: f64,
+    /// True if gesture has moved far enough to trigger (prevents accidental triggers)
+    pub triggered: bool,
     // Delta tracking inspired by Niri (GPL-3.0) https://github.com/YaLTeR/niri/tree/v0.1.3
     pub history: VecDeque<SwipeEvent>,
 }
@@ -35,6 +43,7 @@ impl GestureState {
             direction: None,
             action: None,
             delta: 0.0,
+            triggered: false,
             history: VecDeque::new(),
         }
     }
@@ -66,6 +75,12 @@ impl GestureState {
         };
 
         self.push(delta, timestamp);
+        
+        // Check if we've exceeded minimum distance to prevent accidental triggers
+        if !self.triggered && self.delta.abs() >= MIN_GESTURE_DISTANCE {
+            self.triggered = true;
+        }
+        
         first_update
     }
 

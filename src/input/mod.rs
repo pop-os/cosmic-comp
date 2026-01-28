@@ -979,7 +979,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
+                    if (event.fingers() == 3 || event.fingers() == 4) && !workspace_overview_is_open(&seat.active_output()) {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();
@@ -1022,7 +1022,14 @@ impl State {
                                 }
                             }
                             activate_action = match gesture_state.fingers {
-                                3 => None, // TODO: 3 finger gestures
+                                3 => {
+                                    // 3-finger gestures for window switcher (horizontal only)
+                                    match gesture_state.direction {
+                                        Some(Direction::Left) => Some(SwipeAction::WindowSwitcherPrevious),
+                                        Some(Direction::Right) => Some(SwipeAction::WindowSwitcher),
+                                        _ => None, // Ignore vertical directions for 3-finger
+                                    }
+                                }
                                 4 => {
                                     if self.common.config.cosmic_conf.workspaces.workspace_layout
                                         == WorkspaceLayout::Horizontal
@@ -1092,8 +1099,12 @@ impl State {
                         );
                     }
 
+                    // Only trigger the action if minimum distance has been exceeded
+                    // This prevents accidental triggers from light touches
                     if let Some(action) = activate_action {
-                        self.handle_swipe_action(action, &seat);
+                        if gesture_state.triggered {
+                            self.handle_swipe_action(action, &seat);
+                        }
                     }
                 }
             }
@@ -1124,6 +1135,10 @@ impl State {
                                     norm_velocity,
                                     &mut self.common.workspace_state.update(),
                                 );
+                            }
+                            Some(SwipeAction::WindowSwitcher) | Some(SwipeAction::WindowSwitcherPrevious) => {
+                                // Window switcher actions are already triggered in GestureSwipeUpdate
+                                // No additional finalization needed
                             }
                             _ => {}
                         }
