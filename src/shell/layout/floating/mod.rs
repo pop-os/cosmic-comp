@@ -682,8 +682,8 @@ impl FloatingLayout {
                 mapped_geometry.size = last_size;
             }
         } else if !window.is_maximized(true) {
-            if window.active_window().has_pending_changes()
-                && let Some(pending_size) = window.pending_size()
+            if (window.active_window().has_pending_changes() || window.active_window().was_maximized())
+                && let Some(pending_size) = window.pending_size() 
             {
                 mapped_geometry.size = pending_size.as_local();
             }

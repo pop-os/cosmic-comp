@@ -104,6 +104,9 @@ impl PartialEq<X11Surface> for CosmicSurface {
 }
 
 #[derive(Default)]
+struct WasMaximized(AtomicBool);
+
+#[derive(Default)]
 struct Minimized(AtomicBool);
 
 #[derive(Default)]
@@ -399,6 +402,16 @@ impl CosmicSurface {
     }
 
     pub fn set_maximized(&self, maximized: bool) {
+        let was_maximized = self.is_maximized(false);
+
+        // update was_maximized flag
+        self.0
+            .user_data()
+            .get_or_insert_threadsafe(WasMaximized::default)
+            .0
+            .store(was_maximized && !maximized, Ordering::SeqCst);
+
+
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => toplevel.with_pending_state(|state| {
                 if maximized {
@@ -434,6 +447,14 @@ impl CosmicSurface {
                 let _ = surface.set_mapped(true);
             }
         }
+    }
+
+    pub fn was_maximized(&self) -> bool {
+        self.0
+            .user_data()
+            .get_or_insert_threadsafe(WasMaximized::default)
+            .0
+            .load(Ordering::SeqCst)
     }
 
     pub fn is_sticky(&self) -> bool {
