@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::EdidProduct;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
     pub workspace_mode: WorkspaceMode,
     #[serde(default)]
@@ -13,18 +13,9 @@ pub struct WorkspaceConfig {
     pub action_on_typing: Action,
 }
 
-impl Default for WorkspaceConfig {
-    fn default() -> Self {
-        Self {
-            workspace_mode: WorkspaceMode::OutputBound,
-            workspace_layout: WorkspaceLayout::Vertical,
-            action_on_typing: Action::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WorkspaceMode {
+    #[default]
     OutputBound,
     Global,
 }
