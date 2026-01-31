@@ -9,6 +9,8 @@ pub struct WorkspaceConfig {
     pub workspace_mode: WorkspaceMode,
     #[serde(default)]
     pub workspace_layout: WorkspaceLayout,
+    #[serde(default)]
+    pub action_on_typing: Action,
 }
 
 impl Default for WorkspaceConfig {
@@ -16,6 +18,7 @@ impl Default for WorkspaceConfig {
         Self {
             workspace_mode: WorkspaceMode::OutputBound,
             workspace_layout: WorkspaceLayout::Vertical,
+            action_on_typing: Action::default(),
         }
     }
 }
@@ -31,6 +34,14 @@ pub enum WorkspaceLayout {
     #[default]
     Vertical,
     Horizontal,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Action {
+    #[default]
+    None,
+    OpenLauncher,
+    OpenApplications,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
