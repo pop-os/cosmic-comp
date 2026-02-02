@@ -107,6 +107,7 @@ features = [
     "backend_winit",
     "backend_vulkan",
     "backend_x11",
+    "backend_libei",
     "desktop",
     "renderer_glow",
     "renderer_multi",
@@ -142,9 +143,6 @@ inherits = "release"
 [profile.release]
 lto = "fat"
 
-[patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "8148d67" }
+# smithay = { git = "https://github.com/smithay/smithay.git", rev = "8148d67" }
+smithay = {git = "https://github.com/ids1024/smithay", branch = "reis"}
