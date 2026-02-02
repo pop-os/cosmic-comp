@@ -134,7 +134,13 @@ where
             };
             let source = ImageCaptureSource::new();
             source.user_data().insert_if_missing(|| data);
-            data_init.init(source_handle, ImageCaptureSourceData { source });
+            let instance = data_init.init(
+                source_handle,
+                ImageCaptureSourceData {
+                    source: source.clone(),
+                },
+            );
+            source.add_instance(&instance);
         }
     }
 }
