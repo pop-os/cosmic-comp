@@ -125,6 +125,7 @@ debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
 systemd = ["libsystemd", "logind-zbus"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
+profile-with-tracy-gpu = ["profile-with-tracy", "smithay/tracy_gpu_profiling"]
 
 [profile.dev.package.tiny-skia]
 opt-level = 2
