@@ -83,9 +83,11 @@ pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
     if let Some(path) = path.as_ref() {
         let path: &Path = path.as_ref();
         if path.exists() {
-            match ron::de::from_reader::<_, OutputsConfig>(
-                OpenOptions::new().read(true).open(path).unwrap(),
-            ) {
+            // IMPLICIT_SOME neede for configs written before `connector` became optional
+            match ron::Options::default()
+                .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+                .from_reader::<_, OutputsConfig>(OpenOptions::new().read(true).open(path).unwrap())
+            {
                 Ok(mut config) => {
                     config.config.retain(|info, configs| {
                         let valid = info.len() == configs.len();
