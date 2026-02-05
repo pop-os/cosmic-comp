@@ -409,13 +409,10 @@ impl Config {
         clock: &Clock<Monotonic>,
     ) -> anyhow::Result<()> {
         let outputs = output_state.outputs().collect::<Vec<_>>();
-        let mut infos = outputs
-            .iter()
-            .cloned()
-            .map(Into::<crate::config::CompOutputInfo>::into)
-            .map(|i| i.0)
-            .collect::<Vec<_>>();
-        infos.sort();
+        let (infos, _): (Vec<OutputInfo>, Vec<OutputConfig>) =
+            prepare_infos(outputs.clone().into_iter())
+                .into_iter()
+                .unzip();
 
         if let Some(configs) = self
             .dynamic_conf
@@ -453,9 +450,27 @@ impl Config {
                 .collect::<Vec<_>>();
 
             let mut found_outputs = Vec::new();
-            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
-            {
-                let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
+            for (info, output_config) in infos.iter().zip(configs.into_iter()) {
+                // Match by connector if present, otherwise match by EDID (position in sorted list)
+                let output = if let Some(connector_name) = &info.connector {
+                    outputs
+                        .iter()
+                        .find(|o| &o.name() == connector_name)
+                        .unwrap()
+                        .clone()
+                } else {
+                    // When connector is not in saved config, match by EDID/make/model
+                    outputs
+                        .iter()
+                        .find(|o| {
+                            let o_info = Into::<CompOutputInfo>::into((*o).clone()).0;
+                            o_info.make == info.make
+                                && o_info.model == info.model
+                                && o_info.edid == info.edid
+                        })
+                        .unwrap()
+                        .clone()
+                };
                 let enabled = output_config.enabled.clone();
                 *output
                     .user_data()
@@ -589,21 +604,9 @@ impl Config {
         &mut self,
         outputs: impl Iterator<Item = impl std::borrow::Borrow<Output>>,
     ) {
-        let mut infos = outputs
-            .map(|o| {
-                let o = o.borrow();
-                (
-                    Into::<CompOutputInfo>::into(o.clone()).0,
-                    o.user_data()
-                        .get::<RefCell<OutputConfig>>()
-                        .unwrap()
-                        .borrow()
-                        .clone(),
-                )
-            })
-            .collect::<Vec<(OutputInfo, OutputConfig)>>();
-        infos.sort_by(|(a, _), (b, _)| a.cmp(b));
-        let (infos, configs) = infos.into_iter().unzip();
+        let (infos, configs): (Vec<OutputInfo>, Vec<OutputConfig>) =
+            prepare_infos(outputs).into_iter().unzip();
+
         self.dynamic_conf
             .outputs_mut()
             .config
@@ -964,9 +967,75 @@ impl From<Output> for CompOutputInfo {
     fn from(o: Output) -> CompOutputInfo {
         let physical = o.physical_properties();
         CompOutputInfo(OutputInfo {
-            connector: o.name(),
+            connector: Some(o.name()),
             make: physical.make,
             model: physical.model,
+            edid: o.edid().cloned(),
         })
     }
+}
+
+fn prepare_infos(
+    outputs: impl Iterator<Item = impl std::borrow::Borrow<Output>>,
+) -> Vec<(OutputInfo, OutputConfig)> {
+    let mut output_infos = outputs
+        .map(|o| {
+            let o = o.borrow();
+            (
+                Into::<CompOutputInfo>::into(o.clone()).0,
+                o.user_data()
+                    .get::<RefCell<OutputConfig>>()
+                    .unwrap()
+                    .borrow()
+                    .clone(),
+            )
+        })
+        .collect::<Vec<(OutputInfo, OutputConfig)>>();
+
+    // Check if any monitors have identical EDID info (same make/model/edid).
+    let has_identical_outputs = {
+        let mut seen = std::collections::HashSet::new();
+        !output_infos.iter().all(|(info, _)| {
+            let key = (&info.make, &info.model, &info.edid);
+            seen.insert(key)
+        })
+    };
+
+    // If all monitors are unique, strip connectors for lookup.
+    // If there are identical monitors, keep connectors to distinguish them.
+    if has_identical_outputs {
+        // since edid doesn't have any useful information, remove it, which makes info
+        // compatible with the old configs making the fallback simpler
+        output_infos = output_infos
+            .iter()
+            .map(|(info, output)| {
+                (
+                    OutputInfo {
+                        connector: info.connector.clone(),
+                        make: info.make.clone(),
+                        model: info.model.clone(),
+                        edid: None,
+                    },
+                    output.clone(),
+                )
+            })
+            .collect();
+    } else {
+        output_infos = output_infos
+            .iter()
+            .map(|(info, output)| {
+                (
+                    OutputInfo {
+                        connector: None,
+                        make: info.make.clone(),
+                        model: info.model.clone(),
+                        edid: info.edid.clone(),
+                    },
+                    output.clone(),
+                )
+            })
+            .collect();
+    }
+    output_infos.sort_by(|(a, _), (b, _)| a.cmp(b));
+    output_infos
 }
