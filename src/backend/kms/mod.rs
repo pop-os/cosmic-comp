@@ -14,7 +14,7 @@ use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{
     backend::{
-        allocator::{dmabuf::Dmabuf, format::FormatSet},
+        allocator::{Buffer, dmabuf::Dmabuf, format::FormatSet},
         drm::{DrmDeviceFd, DrmNode, NodeType, VrrSupport, output::DrmOutputRenderElements},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
@@ -491,7 +491,7 @@ impl KmsState {
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
     ) -> Result<DrmNode> {
-        let device = self
+        let mut device = self
             .drm_devices
             .values_mut()
             .find(|device| {
@@ -502,6 +502,21 @@ impl KmsState {
                     .unwrap_or(false)
             })
             .context("Couldn't find gpu for dmabuf global")?;
+
+        // If device advertised to client doesn't support format/modifier, select
+        // first device that does. This is needed for image-copy from
+        // output/toplevel on a different node.
+        //
+        // TODO: After
+        // https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/268,
+        // only try the device specified explicitly by the client, if set.
+        if !device.texture_formats.contains(&dmabuf.format()) {
+            device = self
+                .drm_devices
+                .values_mut()
+                .find(|device| device.texture_formats.contains(&dmabuf.format()))
+                .context("Dmabuf cannot be imported on any gpu")?;
+        }
 
         let new_client = if let Some(client) = client {
             let new = device.inner.active_clients.insert(client.id());
