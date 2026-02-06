@@ -909,6 +909,7 @@ dependencies = [
  "libdisplay-info",
  "ron",
  "serde",
+ "slotmap",
  "tracing",
 ]
 
@@ -973,12 +974,11 @@ dependencies = [
 [[package]]
 name = "cosmic-randr-shell"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-randr/#bce9cdf2d447508d4e2d54a2be4fcd738ab51df5"
+source = "git+https://github.com/pop-os/cosmic-randr/#741089cf5e3aa7d5e48042101c1d4cc813b13637"
 dependencies = [
  "kdl",
  "slotmap",
  "thiserror 2.0.17",
- "tokio",
 ]
 
 [[package]]
@@ -4672,7 +4672,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5491,20 +5491,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
-name = "tokio"
-version = "1.48.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408"
-dependencies = [
- "bytes",
- "libc",
- "mio",
- "pin-project-lite",
- "signal-hook-registry",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "toml"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5655,7 +5641,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "319c70195101a93f56db4c74733e272d720768e13471f400c78406a326b172b0"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
