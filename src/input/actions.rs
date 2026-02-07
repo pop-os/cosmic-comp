@@ -3,13 +3,11 @@
 use crate::{
     config::{Action, PrivateAction},
     shell::{
-        FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
-        focus::{FocusTarget, target::KeyboardFocusTarget},
-        layout::tiling::SwapWindowGrab,
+        focus::{target::KeyboardFocusTarget, FocusTarget}, layout::tiling::SwapWindowGrab, FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta
     },
     utils::prelude::*,
     wayland::{
-        handlers::xdg_activation::ActivationContext, protocols::workspace::WorkspaceUpdateGuard,
+        handlers::{toplevel_management::minimize_rectangle, xdg_activation::ActivationContext}, protocols::workspace::WorkspaceUpdateGuard,
     },
 };
 use cosmic_comp_config::{TileBehavior, workspace::WorkspaceLayout};
@@ -17,8 +15,7 @@ use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
-    input::{Seat, pointer::MotionEvent},
-    utils::{Point, Serial},
+    input::{pointer::MotionEvent, Seat}, utils::{Point, Serial}
 };
 #[cfg(not(feature = "debug"))]
 use tracing::info;
@@ -892,6 +889,43 @@ impl State {
                     shell.maximize_toggle(&window, seat, &self.common.event_loop_handle);
                 }
             }
+        
+
+           Action::ShowDesktop => {
+                let mut shell = self.common.shell.write();
+                if let Some(output) = seat.focused_output() {
+                    let workspace = shell.active_space_mut(&output).unwrap();
+                    let surfaces: Vec<_> = workspace
+                        .mapped()
+                        .map(|m| m.active_window())
+                        .collect();
+
+                    let start = Some(workspace.minimized_windows.len());
+                    for surface in &surfaces {
+                        shell.minimize_request(surface);
+                    }
+                    let workspace = shell.active_space_mut(&output).unwrap();
+                    workspace.hidden_windows_start = start;
+                } else {
+                    let output = seat.active_output();
+                    let windows = {
+                        let workspace = shell.active_space_mut(&output).unwrap();
+                        let start: usize = workspace.hidden_windows_start.unwrap_or(0);
+                        workspace.minimized_windows[start..]
+                            .iter()
+                            .map(|mw| mw.active_window())
+                            .collect::<Vec<_>>()
+                    };
+                    for window in windows {
+                        shell.unminimize_request(
+                            &window,
+                            seat,
+                            &self.common.event_loop_handle,
+                        );
+                    }
+                }
+            }
+
 
             Action::Fullscreen => {
                 let Some(focused_output) = seat.focused_output() else {

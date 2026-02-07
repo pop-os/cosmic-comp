@@ -180,10 +180,8 @@ impl Config {
 
         let cosmic_comp_config =
             CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
-                if cfg!(debug_assertions) {
-                    for err in errs {
-                        warn!(?err, "");
-                    }
+                for err in errs {
+                    error!(?err, "");
                 }
                 c
             });
@@ -191,11 +189,6 @@ impl Config {
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
             fn handle_new_toolkit_config(config: CosmicTk, state: &mut State) {
-                if cosmic::icon_theme::default() != config.icon_theme {
-                    cosmic::icon_theme::set_default(config.icon_theme.clone());
-                    state.common.update_xwayland_settings();
-                }
-
                 let mut workspace_guard = state.common.workspace_state.update();
                 state.common.shell.write().update_toolkit(
                     config,
@@ -204,32 +197,19 @@ impl Config {
                 );
             }
 
-            let config = CosmicTk::get_entry(&tk_config).unwrap_or_else(|(errs, c)| {
-                if cfg!(debug_assertions) {
-                    for err in errs {
-                        warn!(?err, "");
-                    }
-                }
-                c
-            });
-            let _ = loop_handle.insert_idle(move |state| {
-                handle_new_toolkit_config(config, state);
-            });
+            if let Ok(config) = CosmicTk::get_entry(&tk_config) {
+                let _ = loop_handle.insert_idle(move |state| {
+                    handle_new_toolkit_config(config, state);
+                });
+            }
 
             match cosmic_config::calloop::ConfigWatchSource::new(&tk_config) {
                 Ok(source) => {
                     if let Err(err) =
                         loop_handle.insert_source(source, |(config, _keys), (), state| {
-                            let config =
-                                CosmicTk::get_entry(&config).unwrap_or_else(|(errs, c)| {
-                                    if cfg!(debug_assertions) {
-                                        for err in errs {
-                                            warn!(?err, "");
-                                        }
-                                    }
-                                    c
-                                });
-                            handle_new_toolkit_config(config, state);
+                            if let Ok(config) = CosmicTk::get_entry(&config) {
+                                handle_new_toolkit_config(config, state);
+                            }
                         })
                     {
                         warn!(?err, "Failed to watch com.system76.CosmicTk config");
@@ -899,7 +879,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<XwaylandDescaling>(&config, "descale_xwayland");
                 if new != state.common.config.cosmic_conf.descale_xwayland {
                     state.common.config.cosmic_conf.descale_xwayland = new;
-                    state.common.update_xwayland_settings();
+                    state.common.update_xwayland_scale();
                 }
             }
             "xwayland_eavesdropping" => {

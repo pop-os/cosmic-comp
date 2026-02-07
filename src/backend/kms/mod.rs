@@ -41,7 +41,7 @@ use smithay::{
     },
 };
 use surface::GbmDrmOutput;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -487,14 +487,14 @@ impl KmsState {
 
     pub fn dmabuf_imported(
         &mut self,
-        client: Option<Client>,
+        _client: Option<Client>,
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
     ) -> Result<DrmNode> {
         let mut device = self
             .drm_devices
             .values_mut()
-            .find(|device| {
+            .partition::<Vec<_>, _>(|device| {
                 device
                     .socket
                     .as_ref()
@@ -540,17 +540,38 @@ impl KmsState {
                     **egl.display.get_display_handle(),
                     *image,
                 );
-            })
-            .context("Failed to create EGLImage from dmabuf")?;
+                continue;
+            }
 
-        let node = device.inner.render_node;
-        dmabuf.set_node(node);
+            let result = egl_display
+                .create_image_from_dmabuf(&dmabuf)
+                .map(|image| {
+                    unsafe {
+                        smithay::backend::egl::ffi::egl::DestroyImageKHR(
+                            **egl_display.get_display_handle(),
+                            image,
+                        );
+                    };
+                    device.inner.render_node
+                })
+                .map_err(Into::into);
 
-        if new_client {
-            self.refresh_used_devices()?;
+            match result {
+                Ok(node) => {
+                    dmabuf.set_node(node); // so the MultiRenderer knows what node to use
+                    return Ok(node);
+                }
+                Err(err) => {
+                    trace!(
+                        ?err,
+                        "Failed to import dmabuf on {:?}", device.inner.render_node
+                    );
+                    last_err = err;
+                }
+            }
         }
 
-        Ok(node)
+        Err(last_err)
     }
 
     pub fn schedule_render(&mut self, output: &Output) {
@@ -867,36 +888,35 @@ impl KmsGuard<'_> {
 
                 if !test_only {
                     if !surface.is_active() {
-                        let mut planes = drm
-                            .device()
-                            .planes(crtc)
-                            .with_context(|| "Failed to enumerate planes")?;
-
-                        let driver = drm.device().get_driver().ok();
-
-                        // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
-                        if driver.as_ref().is_some_and(|driver| {
-                            driver
-                                .name()
-                                .to_string_lossy()
-                                .to_lowercase()
-                                .contains("nvidia")
-                        }) {
-                            planes.overlay = vec![];
-                        }
-                        // QUIRK: Cursor planes on evdi sometimes don't disappear correctly.
-                        // TODO: Debug and figure out, as they can be a nice improvement.
-                        if driver.as_ref().is_some_and(|driver| {
-                            driver
-                                .name()
-                                .to_string_lossy()
-                                .to_lowercase()
-                                .contains("evdi")
-                        }) {
-                            planes.cursor = vec![];
-                        }
-
                         let compositor: GbmDrmOutput = {
+                            let mut planes = drm
+                                .device()
+                                .planes(crtc)
+                                .with_context(|| "Failed to enumerate planes")?;
+                            let driver = drm.device().get_driver().ok();
+
+                            // QUIRK: Using an overlay plane on a nvidia card breaks the display controller (wtf...)
+                            if driver.as_ref().is_some_and(|driver| {
+                                driver
+                                    .name()
+                                    .to_string_lossy()
+                                    .to_lowercase()
+                                    .contains("nvidia")
+                            }) {
+                                planes.overlay = vec![];
+                            }
+                            // QUIRK: Cursor planes on evdi sometimes don't disappear correctly.
+                            // TODO: Debug and figure out, as they can be a nice improvement.
+                            if driver.as_ref().is_some_and(|driver| {
+                                driver
+                                    .name()
+                                    .to_string_lossy()
+                                    .to_lowercase()
+                                    .contains("evdi")
+                            }) {
+                                planes.cursor = vec![];
+                            }
+
                             let mut renderer = self
                                 .api
                                 .single_renderer(&device.inner.render_node)
@@ -924,7 +944,7 @@ impl KmsGuard<'_> {
                                     *mode,
                                     &[conn],
                                     &surface.output,
-                                    Some(planes.clone()),
+                                    Some(planes),
                                     &mut renderer,
                                     &elements,
                                 )
@@ -959,17 +979,16 @@ impl KmsGuard<'_> {
                                     .unwrap(),
                             )
                             .ok();
-
-                        let primary_formats = compositor_ref.surface().plane_info().formats.clone();
-                        let overlay_formats = planes
-                            .overlay
-                            .iter()
-                            .flat_map(|p| p.formats.iter().cloned())
-                            .collect::<FormatSet>();
                         surface.resume(
                             compositor,
-                            primary_formats,
-                            Some(overlay_formats).filter(|f| !f.indexset().is_empty()),
+                            compositor_ref.surface().plane_info().formats.clone(),
+                            compositor_ref
+                                .surface()
+                                .planes()
+                                .overlay
+                                .iter()
+                                .flat_map(|p| p.formats.iter().cloned())
+                                .collect::<FormatSet>(),
                         );
 
                         surface.output.set_adaptive_sync_support(vrr_support);
