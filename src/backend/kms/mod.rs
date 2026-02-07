@@ -491,7 +491,7 @@ impl KmsState {
         global: &DmabufGlobal,
         dmabuf: Dmabuf,
     ) -> Result<DrmNode> {
-        let (expected_node, mut other_nodes) = self
+        let mut device = self
             .drm_devices
             .values_mut()
             .partition::<Vec<_>, _>(|device| {
@@ -500,32 +500,45 @@ impl KmsState {
                     .as_ref()
                     .map(|s| &s.dmabuf_global == global)
                     .unwrap_or(false)
-            });
-        other_nodes.retain(|device| device.socket.is_some());
+            })
+            .context("Couldn't find gpu for dmabuf global")?;
 
-        let mut last_err = anyhow::anyhow!("Dmabuf cannot be imported on any gpu");
-        for device in expected_node.into_iter().chain(other_nodes.into_iter()) {
-            let mut _egl = None;
-            let egl_display = if let Some(egl_display) = device
-                .inner
-                .egl
-                .as_ref()
-                .map(|internals| &internals.display)
-            {
-                egl_display
-            } else {
-                _egl =
-                    Some(init_egl(&device.inner.gbm).context("Failed to initialize egl context")?);
-                &_egl.as_ref().unwrap().display
-            };
+        // If device advertised to client doesn't support format/modifier, select
+        // first device that does. This is needed for image-copy from
+        // output/toplevel on a different node.
+        //
+        // TODO: After
+        // https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/268,
+        // only try the device specified explicitly by the client, if set.
+        if !device.texture_formats.contains(&dmabuf.format()) {
+            device = self
+                .drm_devices
+                .values_mut()
+                .find(|device| device.texture_formats.contains(&dmabuf.format()))
+                .context("Dmabuf cannot be imported on any gpu")?;
+        }
 
-            if !egl_display
-                .dmabuf_texture_formats()
-                .contains(&dmabuf.format())
-            {
-                trace!(
-                    "Skipping import of dmabuf on {:?}: unsupported format",
-                    device.inner.render_node
+        let new_client = if let Some(client) = client {
+            let new = device.inner.active_clients.insert(client.id());
+            device.inner.update_egl(
+                self.primary_node.read().unwrap().as_ref(),
+                self.api.as_mut(),
+            )? && new
+        } else {
+            false
+        };
+
+        let egl = device
+            .inner
+            .egl
+            .as_ref()
+            .context("EGL initialization Error")?;
+        egl.display
+            .create_image_from_dmabuf(&dmabuf)
+            .inspect(|image| unsafe {
+                smithay::backend::egl::ffi::egl::DestroyImageKHR(
+                    **egl.display.get_display_handle(),
+                    *image,
                 );
                 continue;
             }

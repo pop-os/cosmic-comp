@@ -8,7 +8,7 @@ use crate::{
     config::{CompTransformDef, EdidProduct, ScreenFilter},
     shell::Shell,
     utils::{env::dev_list_var, prelude::*},
-    wayland::handlers::screencopy::PendingImageCopyData,
+    wayland::handlers::image_copy_capture::PendingImageCopyData,
 };
 
 use anyhow::{Context, Result};
@@ -94,6 +94,7 @@ pub struct Device {
     pub drm: GbmDrmOutputManager,
 
     supports_atomic: bool,
+    pub texture_formats: FormatSet,
     event_token: Option<RegistrationToken>,
     pub socket: Option<Socket>,
 }
@@ -278,7 +279,7 @@ impl State {
             .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
 
         let socket = match (!is_software)
-            .then(|| self.create_socket(dh, render_node, render_formats.clone()))
+            .then(|| self.create_socket(dh, render_node, texture_formats.clone()))
             .transpose()
         {
             Ok(socket) => socket,
@@ -342,6 +343,7 @@ impl State {
             },
 
             supports_atomic,
+            texture_formats,
             event_token: Some(token),
             socket,
         };
