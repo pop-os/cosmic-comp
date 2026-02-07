@@ -164,12 +164,6 @@ impl XdgShellHandler for State {
 
         self.common.shell.read().unconstrain_popup(&surface);
         surface.send_repositioned(token);
-        if let Err(err) = surface.send_configure() {
-            warn!(
-                ?err,
-                "Client bug: Unable to re-configure repositioned popup.",
-            );
-        }
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
