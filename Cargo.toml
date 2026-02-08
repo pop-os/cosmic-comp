@@ -125,6 +125,7 @@ debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
 systemd = ["libsystemd", "logind-zbus"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
+profile-with-tracy-gpu = ["profile-with-tracy", "smithay/tracy_gpu_profiling"]
 
 [profile.dev.package.tiny-skia]
 opt-level = 2
@@ -147,4 +148,4 @@ cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch
 cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "8148d67" }
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "14a2009" }

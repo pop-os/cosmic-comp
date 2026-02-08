@@ -11,14 +11,9 @@ use crate::{
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
-    wayland::{
-        handlers::{
-            compositor::recursive_frame_time_estimation,
-            screencopy::{FrameHolder, PendingImageCopyData, SessionData, submit_buffer},
-        },
-        protocols::screencopy::{
-            FailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
-        },
+    wayland::handlers::{
+        compositor::recursive_frame_time_estimation,
+        image_copy_capture::{FrameHolder, PendingImageCopyData, SessionData, submit_buffer},
     },
 };
 
@@ -82,6 +77,9 @@ use smithay::{
     utils::{Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
         dmabuf::{DmabufFeedbackBuilder, get_dmabuf},
+        image_copy_capture::{
+            CaptureFailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
+        },
         presentation::Refresh,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -1082,7 +1080,7 @@ impl SurfaceThreadState {
         let frames = self
             .mirroring
             .is_none()
-            .then(|| take_screencopy_frames(&self.output, &mut elements, &mut has_cursor_mode_none))
+            .then(|| take_screencopy_frames(&self.output, &elements, &mut has_cursor_mode_none))
             .unwrap_or_default();
 
         // actual rendering
@@ -1355,13 +1353,6 @@ impl SurfaceThreadState {
                                 (&session, frame, res),
                                 now.into(),
                             ) {
-                                session
-                                    .user_data()
-                                    .get::<SessionData>()
-                                    .unwrap()
-                                    .lock()
-                                    .unwrap()
-                                    .reset();
                                 tracing::warn!(?err, "Failed to screencopy");
                             }
                         }
@@ -1390,15 +1381,8 @@ impl SurfaceThreadState {
                         }
                     }
                     Err(err) => {
-                        for (session, frame, _) in frames {
-                            session
-                                .user_data()
-                                .get::<SessionData>()
-                                .unwrap()
-                                .lock()
-                                .unwrap()
-                                .reset();
-                            frame.fail(FailureReason::Unknown);
+                        for (_session, frame, _) in frames {
+                            frame.fail(CaptureFailureReason::Unknown);
                         }
                         return Err(err).with_context(|| "Failed to submit result for display");
                     }
@@ -1608,10 +1592,9 @@ fn get_surface_dmabuf_feedback(
     }
 }
 
-// TODO: Don't mutate `elements`
 fn take_screencopy_frames(
     output: &Output,
-    elements: &mut Vec<CosmicElement<GlMultiRenderer>>,
+    elements: &[CosmicElement<GlMultiRenderer>],
     has_cursor_mode_none: &mut bool,
 ) -> Vec<(
     ScreencopySessionRef,
@@ -1626,7 +1609,15 @@ fn take_screencopy_frames(
             let session_data = session.user_data().get::<SessionData>().unwrap();
             let mut damage_tracking = session_data.lock().unwrap();
 
-            let old_len = if !additional_damage.is_empty() {
+            let buffer = frame.buffer();
+            let age = if matches!(buffer_type(&buffer), Some(BufferType::Shm)) {
+                // TODO re-use offscreen buffer to damage track screencopy to shm
+                0
+            } else {
+                1
+            };
+
+            if !additional_damage.is_empty() {
                 let area = output
                     .current_mode()
                     .unwrap()
@@ -1636,40 +1627,25 @@ fn take_screencopy_frames(
                     .to_buffer(1, Transform::Normal)
                     .to_f64();
 
-                let old_len = elements.len();
-                elements.extend(
-                    additional_damage
-                        .into_iter()
-                        .map(|rect| {
-                            rect.to_f64()
-                                .to_logical(
-                                    output.current_scale().fractional_scale(),
-                                    output.current_transform(),
-                                    &area,
-                                )
-                                .to_i32_round()
-                        })
-                        .map(DamageElement::new)
-                        .map(Into::into),
-                );
-
-                Some(old_len)
-            } else {
-                None
+                let additional_damage_elements: Vec<_> = additional_damage
+                    .into_iter()
+                    .map(|rect| {
+                        rect.to_f64()
+                            .to_logical(
+                                output.current_scale().fractional_scale(),
+                                output.current_transform(),
+                                &area,
+                            )
+                            .to_i32_round()
+                    })
+                    .map(DamageElement::new)
+                    .collect();
+                let _ = damage_tracking
+                    .dt
+                    .damage_output(age, &additional_damage_elements);
             };
 
-            let buffer = frame.buffer();
-            let age = if matches!(buffer_type(&frame.buffer()), Some(BufferType::Shm)) {
-                // TODO re-use offscreen buffer to damage track screencopy to shm
-                0
-            } else {
-                damage_tracking.age_for_buffer(&buffer)
-            };
             let res = damage_tracking.dt.damage_output(age, elements);
-
-            if let Some(old_len) = old_len {
-                elements.truncate(old_len);
-            }
 
             if !session.draw_cursor() {
                 *has_cursor_mode_none = true;

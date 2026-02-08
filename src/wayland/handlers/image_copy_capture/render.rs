@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+
 use calloop::LoopHandle;
 use smithay::{
     backend::{
@@ -26,6 +28,9 @@ use smithay::{
     },
     wayland::{
         dmabuf::get_dmabuf,
+        image_copy_capture::{
+            BufferConstraints, CaptureFailureReason, CursorSessionRef, Frame, SessionRef,
+        },
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents, with_buffer_contents_mut},
     },
@@ -43,13 +48,10 @@ use crate::{
     state::{Common, KmsNodes, State},
     utils::prelude::{PointExt, PointGlobalExt, RectExt, RectLocalExt, SeatExt},
     wayland::{
-        handlers::screencopy::{
+        handlers::image_copy_capture::{
             SessionData, SessionUserData, constraints_for_output, constraints_for_toplevel,
         },
-        protocols::{
-            screencopy::{BufferConstraints, CursorSessionRef, FailureReason, Frame, SessionRef},
-            workspace::WorkspaceHandle,
-        },
+        protocols::workspace::WorkspaceHandle,
     },
 };
 
@@ -165,7 +167,7 @@ where
         .map_err(|err| R::Error::from_gles_error(GlesError::BufferAccessError(err)))
         .and_then(|x| x)
         {
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             return Err(err);
         }
     }
@@ -223,7 +225,7 @@ where
         // TODO re-use offscreen buffer to damage track screencopy to shm
         0
     } else {
-        session_damage_tracking.age_for_buffer(&buffer)
+        1
     };
     let mut fb = offscreen
         .as_mut()
@@ -249,7 +251,7 @@ where
         )
         .map_err(DTError::Rendering),
         Err(err) => {
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             Err(err)
         }
     }
@@ -257,7 +259,7 @@ where
 
 pub fn render_workspace_to_buffer(
     state: &mut State,
-    session: SessionRef,
+    session: &SessionRef,
     frame: Frame,
     handle: WorkspaceHandle,
 ) {
@@ -278,14 +280,14 @@ pub fn render_workspace_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if mode != Some(buffer_size) {
         let Some(constraints) = constraints_for_output(&output, &mut state.backend) else {
-            output.remove_session(&session);
+            output.remove_session(session);
             return;
         };
         session.update_constraints(constraints);
         if let Some(data) = session.user_data().get::<SessionData>() {
             *data.lock().unwrap() = SessionUserData::new(OutputDamageTracker::from_output(&output));
         }
-        frame.fail(FailureReason::BufferConstraints);
+        frame.fail(CaptureFailureReason::BufferConstraints);
         return;
     }
 
@@ -414,7 +416,7 @@ pub fn render_workspace_to_buffer(
         Ok(renderer) => renderer,
         Err(err) => {
             warn!(?err, "Couldn't use node for screencopy");
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             return;
         }
     };
@@ -490,17 +492,16 @@ smithay::render_elements! {
     pub WindowCaptureElement<R> where R: ImportAll + ImportMem;
     WaylandElement=WaylandSurfaceRenderElement<R>,
     CursorElement=RelocateRenderElement<cursor::CursorRenderElement<R>>,
-    AdditionalDamage=DamageElement,
 }
 
 pub fn render_window_to_buffer(
     state: &mut State,
-    session: SessionRef,
+    session: &SessionRef,
     frame: Frame,
     toplevel: &CosmicSurface,
 ) {
     if !toplevel.alive() {
-        toplevel.clone().remove_session(&session);
+        toplevel.clone().remove_session(session);
         return;
     }
 
@@ -509,7 +510,7 @@ pub fn render_window_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if buffer_size != geometry.size.to_buffer(1, Transform::Normal) {
         let Some(constraints) = constraints_for_toplevel(toplevel, &mut state.backend) else {
-            toplevel.clone().remove_session(&session);
+            toplevel.clone().remove_session(session);
             return;
         };
         session.update_constraints(constraints);
@@ -518,7 +519,7 @@ pub fn render_window_to_buffer(
             *data.lock().unwrap() =
                 SessionUserData::new(OutputDamageTracker::new(size, 1.0, Transform::Normal));
         }
-        frame.fail(FailureReason::BufferConstraints);
+        frame.fail(CaptureFailureReason::BufferConstraints);
         return;
     }
 
@@ -541,22 +542,19 @@ pub fn render_window_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = Vec::new();
-
-        elements.extend(
-            additional_damage
-                .into_iter()
-                .filter_map(|rect| {
-                    let logical_rect = rect.to_logical(
-                        1,
-                        Transform::Normal,
-                        &geometry.size.to_buffer(1, Transform::Normal),
-                    );
-                    logical_rect.intersection(Rectangle::from_size(geometry.size))
-                })
-                .map(DamageElement::new)
-                .map(Into::<WindowCaptureElement<R>>::into),
-        );
+        let additional_damage_elements: Vec<_> = additional_damage
+            .into_iter()
+            .filter_map(|rect| {
+                let logical_rect = rect.to_logical(
+                    1,
+                    Transform::Normal,
+                    &geometry.size.to_buffer(1, Transform::Normal),
+                );
+                logical_rect.intersection(Rectangle::from_size(geometry.size))
+            })
+            .map(DamageElement::new)
+            .collect();
+        dt.damage_output(age, &additional_damage_elements)?;
 
         let shell = common.shell.read();
         let seat = shell.seats.last_active().clone();
@@ -578,6 +576,8 @@ pub fn render_window_to_buffer(
             }
         };
         std::mem::drop(shell);
+
+        let mut elements = Vec::new();
 
         if let Some(location) = location {
             if draw_cursor {
@@ -666,7 +666,7 @@ pub fn render_window_to_buffer(
         Ok(renderer) => renderer,
         Err(err) => {
             warn!(?err, "Couldn't use node for screencopy");
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             return;
         }
     };
@@ -760,7 +760,7 @@ pub fn render_cursor_to_buffer(
                 Transform::Normal,
             ));
         }
-        frame.fail(FailureReason::BufferConstraints);
+        frame.fail(CaptureFailureReason::BufferConstraints);
         return;
     }
 
@@ -781,7 +781,17 @@ pub fn render_cursor_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = cursor::draw_cursor(
+        let additional_damage_elements: Vec<_> = additional_damage
+            .into_iter()
+            .filter_map(|rect| {
+                let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
+                logical_rect.intersection(Rectangle::from_size((64, 64).into()))
+            })
+            .map(DamageElement::new)
+            .collect();
+        dt.damage_output(age, &additional_damage_elements)?;
+
+        let elements = cursor::draw_cursor(
             renderer,
             seat,
             Point::from((0.0, 0.0)),
@@ -794,17 +804,6 @@ pub fn render_cursor_to_buffer(
         .map(|(elem, _)| RelocateRenderElement::from_element(elem, (0, 0), Relocate::Relative))
         .map(WindowCaptureElement::from)
         .collect::<Vec<_>>();
-
-        elements.extend(
-            additional_damage
-                .into_iter()
-                .filter_map(|rect| {
-                    let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
-                    logical_rect.intersection(Rectangle::from_size((64, 64).into()))
-                })
-                .map(DamageElement::new)
-                .map(Into::<WindowCaptureElement<R>>::into),
-        );
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
             let mut dmabuf_clone = dmabuf.clone();
@@ -826,7 +825,7 @@ pub fn render_cursor_to_buffer(
         Ok(renderer) => renderer,
         Err(err) => {
             warn!(?err, "Couldn't use node for screencopy");
-            frame.fail(FailureReason::Unknown);
+            frame.fail(CaptureFailureReason::Unknown);
             return;
         }
     };

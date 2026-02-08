@@ -13,16 +13,15 @@ use crate::{
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
     wayland::{
-        handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
+        handlers::{data_device::get_dnd_icon, image_copy_capture::SessionHolder},
         protocols::{
             a11y::A11yState,
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
-            image_capture_source::ImageCaptureSourceState,
+            image_capture_source::CosmicImageCaptureSourceState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
-            screencopy::ScreencopyState,
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
             workspace::{WorkspaceState, WorkspaceUpdateGuard},
@@ -77,9 +76,12 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
+        fixes::FixesState,
         fractional_scale::{FractionalScaleManagerState, with_fractional_scale},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
+        image_capture_source::{OutputCaptureSourceState, ToplevelCaptureSourceState},
+        image_copy_capture::ImageCopyCaptureState,
         input_method::InputMethodManagerState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
@@ -260,8 +262,10 @@ pub struct Common {
     pub primary_selection_state: PrimarySelectionState,
     pub ext_data_control_state: ExtDataControlState,
     pub wlr_data_control_state: WlrDataControlState,
-    pub image_capture_source_state: ImageCaptureSourceState,
-    pub screencopy_state: ScreencopyState,
+    pub cosmic_image_capture_source_state: CosmicImageCaptureSourceState,
+    pub output_capture_source_state: OutputCaptureSourceState,
+    pub toplevel_capture_source_state: ToplevelCaptureSourceState,
+    pub image_copy_capture_state: ImageCopyCaptureState,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
     pub idle_notifier_state: IdleNotifierState<State>,
@@ -645,9 +649,14 @@ impl State {
             OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
-        let image_capture_source_state =
-            ImageCaptureSourceState::new::<Self, _>(dh, client_not_sandboxed);
-        let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_not_sandboxed);
+        let cosmic_image_capture_source_state =
+            CosmicImageCaptureSourceState::new::<Self, _>(dh, client_not_sandboxed);
+        let output_capture_source_state =
+            OutputCaptureSourceState::new_with_filter::<State, _>(&dh, client_not_sandboxed);
+        let toplevel_capture_source_state =
+            ToplevelCaptureSourceState::new_with_filter::<State, _>(&dh, client_not_sandboxed);
+        let image_copy_capture_state =
+            ImageCopyCaptureState::new_with_filter::<Self, _>(dh, client_not_sandboxed);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
@@ -669,6 +678,7 @@ impl State {
         VirtualKeyboardManagerState::new::<State, _>(dh, client_not_sandboxed);
         AlphaModifierState::new::<Self>(dh);
         SinglePixelBufferState::new::<Self>(dh);
+        FixesState::new::<Self>(&dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
@@ -754,8 +764,10 @@ impl State {
                 idle_notifier_state,
                 idle_inhibit_manager_state,
                 idle_inhibiting_surfaces,
-                image_capture_source_state,
-                screencopy_state,
+                cosmic_image_capture_source_state,
+                output_capture_source_state,
+                toplevel_capture_source_state,
+                image_copy_capture_state,
                 shm_state,
                 cursor_shape_manager_state,
                 seat_state,
