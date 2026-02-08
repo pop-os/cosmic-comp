@@ -11,14 +11,9 @@ use crate::{
     shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
-    wayland::{
-        handlers::{
-            compositor::recursive_frame_time_estimation,
-            screencopy::{FrameHolder, PendingImageCopyData, SessionData, submit_buffer},
-        },
-        protocols::screencopy::{
-            FailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
-        },
+    wayland::handlers::{
+        compositor::recursive_frame_time_estimation,
+        image_copy_capture::{FrameHolder, PendingImageCopyData, SessionData, submit_buffer},
     },
 };
 
@@ -82,6 +77,9 @@ use smithay::{
     utils::{Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
         dmabuf::{DmabufFeedbackBuilder, get_dmabuf},
+        image_copy_capture::{
+            CaptureFailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
+        },
         presentation::Refresh,
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents},
@@ -118,9 +116,9 @@ pub struct Surface {
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,
-    pub(super) feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
+    pub feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
     pub(super) primary_plane_formats: FormatSet,
-    overlay_plane_formats: FormatSet,
+    overlay_plane_formats: Option<FormatSet>,
 
     loop_handle: LoopHandle<'static, State>,
     thread_command: Sender<ThreadCommand>,
@@ -343,7 +341,7 @@ impl Surface {
             active,
             feedback: HashMap::new(),
             primary_plane_formats: FormatSet::default(),
-            overlay_plane_formats: FormatSet::default(),
+            overlay_plane_formats: None,
             loop_handle: evlh.clone(),
             thread_command: tx,
             thread_token,
@@ -436,10 +434,11 @@ impl Surface {
         &mut self,
         compositor: GbmDrmOutput,
         primary_plane_formats: FormatSet,
-        overlay_plane_formats: FormatSet,
+        overlay_plane_formats: Option<FormatSet>,
     ) {
         self.primary_plane_formats = primary_plane_formats;
         self.overlay_plane_formats = overlay_plane_formats;
+        self.feedback.clear();
         self.active.store(true, Ordering::SeqCst);
 
         let _ = self
@@ -1081,7 +1080,7 @@ impl SurfaceThreadState {
         let frames = self
             .mirroring
             .is_none()
-            .then(|| take_screencopy_frames(&self.output, &mut elements, &mut has_cursor_mode_none))
+            .then(|| take_screencopy_frames(&self.output, &elements, &mut has_cursor_mode_none))
             .unwrap_or_default();
 
         // actual rendering
@@ -1354,13 +1353,6 @@ impl SurfaceThreadState {
                                 (&session, frame, res),
                                 now.into(),
                             ) {
-                                session
-                                    .user_data()
-                                    .get::<SessionData>()
-                                    .unwrap()
-                                    .lock()
-                                    .unwrap()
-                                    .reset();
                                 tracing::warn!(?err, "Failed to screencopy");
                             }
                         }
@@ -1389,15 +1381,8 @@ impl SurfaceThreadState {
                         }
                     }
                     Err(err) => {
-                        for (session, frame, _) in frames {
-                            session
-                                .user_data()
-                                .get::<SessionData>()
-                                .unwrap()
-                                .lock()
-                                .unwrap()
-                                .reset();
-                            frame.fail(FailureReason::Unknown);
+                        for (_session, frame, _) in frames {
+                            frame.fail(CaptureFailureReason::Unknown);
                         }
                         return Err(err).with_context(|| "Failed to submit result for display");
                     }
@@ -1527,83 +1512,89 @@ fn get_surface_dmabuf_feedback(
     render_node: DrmNode,
     target_node: DrmNode,
     render_formats: FormatSet,
-    target_formats: FormatSet,
+    _target_formats: FormatSet,
     primary_plane_formats: FormatSet,
-    overlay_plane_formats: FormatSet,
+    overlay_plane_formats: Option<FormatSet>,
 ) -> SurfaceDmabufFeedback {
-    let combined_formats = render_formats
-        .intersection(&target_formats)
-        .copied()
-        .collect::<FormatSet>();
-
     // We limit the scan-out trache to formats we can also render from
     // so that there is always a fallback render path available in case
     // the supplied buffer can not be scanned out directly
-    let primary_plane_formats = primary_plane_formats
-        .intersection(&combined_formats)
-        .copied()
-        .collect::<FormatSet>();
-    let overlay_plane_formats = overlay_plane_formats
-        .intersection(&combined_formats)
-        .copied()
-        .collect::<FormatSet>();
 
+    let primary_plane_formats = primary_plane_formats
+        .intersection(&render_formats)
+        .cloned()
+        .collect::<FormatSet>();
+    let overlay_plane_formats = overlay_plane_formats.map(|formats| {
+        formats
+            .intersection(&render_formats)
+            .cloned()
+            .collect::<FormatSet>()
+    });
     let builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
+
     /*
-    // iris doesn't handle nvidia buffers very well (it hangs).
-    // so only do this in the future with v6 and clients telling us the gpu
+    // Sadly no implementation would pick this up as a preferred render tranche,
+    // where the combined formats would increase our chances of doing a dmabuf copy.
+    // .. So we should probably not advertise this on the off-chance it actually triggers bugs.
+    //
+
+    let combined_formats = render_formats.intersection(&target_formats).cloned().collect::<FormatSet>();
     if target_node != render_node.dev_id() && !combined_formats.is_empty() {
         builder = builder.add_preference_tranche(
-            target_node,
+            render_node.dev_id(),
+            None,
+            combined_formats,
+        );
+    };
+
+    // We also can't advertise scan out tranches for the actual display device,
+    // as e.g. the nvidia driver might then send us dmabufs, that makes e.g. the iris hangs on import...
+    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
+        builder = builder.add_preference_tranche(
+            target_node.dev_id(),
             Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
             combined_formats,
         );
     };
+
+    // So no fun combinations, we gotta wait for dmabuf-v6
     */
 
     let render_feedback = builder.clone().build().unwrap();
-    // we would want to do this in other cases as well, but same thing as above applies
-    let primary_scanout_feedback = if target_node == render_node {
+    let primary_scanout_feedback = (target_node == render_node).then(|| {
         builder
             .clone()
             .add_preference_tranche(
-                target_node.dev_id(),
+                render_node.dev_id(),
                 Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                primary_plane_formats.clone(),
+                primary_plane_formats,
             )
             .build()
             .unwrap()
-    } else {
-        builder.clone().build().unwrap()
-    };
-    let scanout_feedback = if target_node == render_node {
-        builder
-            .add_preference_tranche(
-                target_node.dev_id(),
-                Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                FormatSet::from_iter(
-                    primary_plane_formats
-                        .into_iter()
-                        .chain(overlay_plane_formats),
-                ),
-            )
-            .build()
-            .unwrap()
-    } else {
-        builder.build().unwrap()
-    };
+    });
+    let overlay_scanout_feedback = overlay_plane_formats
+        .filter(|_| target_node == render_node)
+        .map(|formats| {
+            builder
+                .add_preference_tranche(
+                    render_node.dev_id(),
+                    Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
+                    formats,
+                )
+                .build()
+                .unwrap()
+        });
 
     SurfaceDmabufFeedback {
         render_feedback,
-        scanout_feedback,
+        overlay_scanout_feedback,
         primary_scanout_feedback,
     }
 }
 
-// TODO: Don't mutate `elements`
 fn take_screencopy_frames(
     output: &Output,
-    elements: &mut Vec<CosmicElement<GlMultiRenderer>>,
+    elements: &[CosmicElement<GlMultiRenderer>],
     has_cursor_mode_none: &mut bool,
 ) -> Vec<(
     ScreencopySessionRef,
@@ -1618,7 +1609,15 @@ fn take_screencopy_frames(
             let session_data = session.user_data().get::<SessionData>().unwrap();
             let mut damage_tracking = session_data.lock().unwrap();
 
-            let old_len = if !additional_damage.is_empty() {
+            let buffer = frame.buffer();
+            let age = if matches!(buffer_type(&buffer), Some(BufferType::Shm)) {
+                // TODO re-use offscreen buffer to damage track screencopy to shm
+                0
+            } else {
+                1
+            };
+
+            if !additional_damage.is_empty() {
                 let area = output
                     .current_mode()
                     .unwrap()
@@ -1628,40 +1627,25 @@ fn take_screencopy_frames(
                     .to_buffer(1, Transform::Normal)
                     .to_f64();
 
-                let old_len = elements.len();
-                elements.extend(
-                    additional_damage
-                        .into_iter()
-                        .map(|rect| {
-                            rect.to_f64()
-                                .to_logical(
-                                    output.current_scale().fractional_scale(),
-                                    output.current_transform(),
-                                    &area,
-                                )
-                                .to_i32_round()
-                        })
-                        .map(DamageElement::new)
-                        .map(Into::into),
-                );
-
-                Some(old_len)
-            } else {
-                None
+                let additional_damage_elements: Vec<_> = additional_damage
+                    .into_iter()
+                    .map(|rect| {
+                        rect.to_f64()
+                            .to_logical(
+                                output.current_scale().fractional_scale(),
+                                output.current_transform(),
+                                &area,
+                            )
+                            .to_i32_round()
+                    })
+                    .map(DamageElement::new)
+                    .collect();
+                let _ = damage_tracking
+                    .dt
+                    .damage_output(age, &additional_damage_elements);
             };
 
-            let buffer = frame.buffer();
-            let age = if matches!(buffer_type(&frame.buffer()), Some(BufferType::Shm)) {
-                // TODO re-use offscreen buffer to damage track screencopy to shm
-                0
-            } else {
-                damage_tracking.age_for_buffer(&buffer)
-            };
             let res = damage_tracking.dt.damage_output(age, elements);
-
-            if let Some(old_len) = old_len {
-                elements.truncate(old_len);
-            }
 
             if !session.draw_cursor() {
                 *has_cursor_mode_none = true;

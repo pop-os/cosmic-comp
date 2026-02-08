@@ -12,7 +12,14 @@ use std::{
 #[cfg(feature = "debug")]
 use crate::debug::fps_ui;
 use crate::{
-    backend::{kms::render::gles::GbmGlowBackend, render::element::DamageElement},
+    backend::{
+        kms::render::gles::GbmGlowBackend,
+        render::{
+            clipped_surface::{CLIPPING_SHADER, ClippingShader},
+            element::DamageElement,
+            shadow::{SHADOW_SHADER, ShadowShader},
+        },
+    },
     config::ScreenFilter,
     shell::{
         CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
@@ -28,7 +35,7 @@ use crate::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
             data_device::get_dnd_icon,
-            screencopy::{FrameHolder, SessionData, render_session},
+            image_copy_capture::{FrameHolder, SessionData, render_session},
         },
         protocols::workspace::WorkspaceHandle,
     },
@@ -75,9 +82,10 @@ use smithay::{
 use smithay_egui::EguiState;
 
 pub mod animations;
-
+pub mod clipped_surface;
 pub mod cursor;
 pub mod element;
+pub mod shadow;
 use self::element::{AsGlowRenderer, CosmicElement};
 
 use super::kms::Timings;
@@ -128,6 +136,7 @@ pub enum Usage {
     FocusIndicator,
     PotentialGroupIndicator,
     SnappingIndicator,
+    Border,
 }
 
 #[derive(Clone)]
@@ -173,9 +182,10 @@ impl From<Id> for Key {
 #[derive(PartialEq)]
 struct IndicatorSettings {
     thickness: u8,
-    radius: [u8; 4],
+    outer_radius: [u8; 4],
     alpha: f32,
     color: [f32; 3],
+    scale: f64,
 }
 type IndicatorCache = RefCell<HashMap<Key, (IndicatorSettings, PixelShaderElement)>>;
 
@@ -195,21 +205,24 @@ impl IndicatorShader {
         key: impl Into<Key>,
         mut element_geo: Rectangle<i32, Local>,
         thickness: u8,
-        radius: [u8; 4],
+        inner_radius: [u8; 4],
         alpha: f32,
+        scale: f64,
         active_window_hint: [f32; 3],
     ) -> PixelShaderElement {
         let t = thickness as i32;
         element_geo.loc -= (t, t).into();
         element_geo.size += (t * 2, t * 2).into();
+        let outer_radius = inner_radius.map(|r| r + thickness);
 
         IndicatorShader::element(
             renderer,
             key,
             element_geo,
             thickness,
-            radius,
+            outer_radius,
             alpha,
+            scale,
             active_window_hint,
         )
     }
@@ -219,14 +232,16 @@ impl IndicatorShader {
         key: impl Into<Key>,
         geo: Rectangle<i32, Local>,
         thickness: u8,
-        radius: [u8; 4],
+        outer_radius: [u8; 4],
         alpha: f32,
+        scale: f64,
         color: [f32; 3],
     ) -> PixelShaderElement {
         let settings = IndicatorSettings {
             thickness,
-            radius,
+            outer_radius,
             alpha,
+            scale,
             color,
         };
 
@@ -248,7 +263,7 @@ impl IndicatorShader {
             .filter(|(old_settings, _)| &settings == old_settings)
             .is_none()
         {
-            let thickness: f32 = thickness as f32;
+            let thickness: f32 = ((thickness as f64 * scale).ceil() / scale) as f32;
             let shader = Self::get(renderer);
 
             let elem = PixelShaderElement::new(
@@ -265,12 +280,13 @@ impl IndicatorShader {
                     Uniform::new(
                         "radius",
                         [
-                            radius[0] as f32 + thickness / 2.,
-                            radius[1] as f32 + thickness / 2.,
-                            radius[2] as f32 + thickness / 2.,
-                            radius[3] as f32 + thickness / 2.,
+                            outer_radius[3] as f32,
+                            outer_radius[1] as f32,
+                            outer_radius[0] as f32,
+                            outer_radius[2] as f32,
                         ],
                     ),
+                    Uniform::new("scale", scale as f32),
                 ],
                 Kind::Unspecified,
             );
@@ -383,6 +399,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
         &[
             UniformName::new("color", UniformType::_3f),
             UniformName::new("thickness", UniformType::_1f),
+            UniformName::new("scale", UniformType::_1f),
             UniformName::new("radius", UniformType::_4f),
         ],
     )?;
@@ -400,6 +417,27 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("color_mode", UniformType::_1f),
         ],
     )?;
+    let clipping_shader = renderer.compile_custom_texture_shader(
+        CLIPPING_SHADER,
+        &[
+            UniformName::new("geo_size", UniformType::_2f),
+            UniformName::new("corner_radius", UniformType::_4f),
+            UniformName::new("input_to_geo", UniformType::Matrix3x3),
+        ],
+    )?;
+    let shadow_shader = renderer.compile_custom_pixel_shader(
+        SHADOW_SHADER,
+        &[
+            UniformName::new("shadow_color", UniformType::_4f),
+            UniformName::new("sigma", UniformType::_1f),
+            UniformName::new("input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("geo_size", UniformType::_2f),
+            UniformName::new("corner_radius", UniformType::_4f),
+            UniformName::new("window_input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("window_geo_size", UniformType::_2f),
+            UniformName::new("window_corner_radius", UniformType::_4f),
+        ],
+    )?;
 
     let egl_context = renderer.egl_context();
     egl_context
@@ -411,6 +449,12 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     egl_context
         .user_data()
         .insert_if_missing(|| PostprocessShader(postprocess_shader));
+    egl_context
+        .user_data()
+        .insert_if_missing(|| ClippingShader(clipping_shader));
+    egl_context
+        .user_data()
+        .insert_if_missing(|| ShadowShader(shadow_shader));
 
     Ok(())
 }
@@ -1349,21 +1393,20 @@ where
                                 )?;
 
                             let old_len = elements.len();
-                            elements.extend(
-                                additional_damage
-                                    .into_iter()
-                                    .map(|rect| {
-                                        rect.to_f64()
-                                            .to_logical(
-                                                output.current_scale().fractional_scale(),
-                                                output.current_transform(),
-                                                &area,
-                                            )
-                                            .to_i32_round()
-                                    })
-                                    .map(DamageElement::new)
-                                    .map(Into::into),
-                            );
+                            let additional_damage_elements: Vec<_> = additional_damage
+                                .into_iter()
+                                .map(|rect| {
+                                    rect.to_f64()
+                                        .to_logical(
+                                            output.current_scale().fractional_scale(),
+                                            output.current_transform(),
+                                            &area,
+                                        )
+                                        .to_i32_round()
+                                })
+                                .map(DamageElement::new)
+                                .collect();
+                            dt.damage_output(age, &additional_damage_elements)?;
 
                             Some(old_len)
                         } else {
@@ -1469,7 +1512,7 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let mut elements: Vec<CosmicElement<R>> = workspace_elements(
+    let elements: Vec<CosmicElement<R>> = workspace_elements(
         gpu,
         renderer,
         shell,
@@ -1484,13 +1527,12 @@ where
 
     if let Some(additional_damage) = additional_damage {
         let output_geo = output.geometry().to_local(output).as_logical();
-        elements.extend(
-            additional_damage
-                .into_iter()
-                .filter_map(|rect| rect.intersection(output_geo))
-                .map(DamageElement::new)
-                .map(Into::<CosmicElement<R>>::into),
-        );
+        let additional_damage_elements: Vec<_> = additional_damage
+            .into_iter()
+            .filter_map(|rect| rect.intersection(output_geo))
+            .map(DamageElement::new)
+            .collect();
+        damage_tracker.damage_output(age, &additional_damage_elements)?;
     }
 
     let res = damage_tracker.render_output(

@@ -13,13 +13,14 @@ use crate::{
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
     wayland::{
-        handlers::screencopy::ScreencopySessions,
+        handlers::image_copy_capture::ImageCopySessions,
         protocols::{
             toplevel_info::{toplevel_enter_output, toplevel_leave_output},
             workspace::{WorkspaceHandle, WorkspaceUpdateGuard},
         },
     },
 };
+use cosmic_comp_config::AppearanceConfig;
 use cosmic_comp_config::workspace::{OutputMatch, PinnedWorkspace};
 
 use cosmic::theme::CosmicTheme;
@@ -109,7 +110,7 @@ pub struct Workspace {
 
     pub handle: WorkspaceHandle,
     pub focus_stack: FocusStacks,
-    pub screencopy: ScreencopySessions,
+    pub image_copy: ImageCopySessions,
     output_stack: VecDeque<OutputMatch>,
     pub(super) backdrop_id: Id,
     pub dirty: AtomicBool,
@@ -359,9 +360,10 @@ impl Workspace {
         output: Output,
         tiling_enabled: bool,
         theme: cosmic::Theme,
+        appearance: AppearanceConfig,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
-        let floating_layer = FloatingLayout::new(theme, &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
+        let floating_layer = FloatingLayout::new(theme, appearance, &output);
         let output_match = output_match_for_output(&output);
 
         Workspace {
@@ -375,7 +377,7 @@ impl Workspace {
             id: None,
             handle,
             focus_stack: FocusStacks::default(),
-            screencopy: ScreencopySessions::default(),
+            image_copy: ImageCopySessions::default(),
             output_stack: {
                 let mut queue = VecDeque::new();
                 queue.push_back(output_match);
@@ -391,9 +393,10 @@ impl Workspace {
         handle: WorkspaceHandle,
         output: Output,
         theme: cosmic::Theme,
+        appearance: AppearanceConfig,
     ) -> Self {
-        let tiling_layer = TilingLayout::new(theme.clone(), &output);
-        let floating_layer = FloatingLayout::new(theme, &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
+        let floating_layer = FloatingLayout::new(theme, appearance, &output);
         let output_match = output_match_for_output(&output);
 
         Workspace {
@@ -407,7 +410,7 @@ impl Workspace {
             id: pinned.id.clone(),
             handle,
             focus_stack: FocusStacks::default(),
-            screencopy: ScreencopySessions::default(),
+            image_copy: ImageCopySessions::default(),
             output_stack: {
                 let mut queue = VecDeque::new();
                 queue.push_back(pinned.output.clone());

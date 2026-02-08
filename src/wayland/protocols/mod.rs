@@ -7,7 +7,6 @@ pub mod image_capture_source;
 pub mod output_configuration;
 pub mod output_power;
 pub mod overlap_notify;
-pub mod screencopy;
 pub mod toplevel_info;
 pub mod toplevel_management;
 pub mod workspace;

@@ -335,9 +335,16 @@ where
         let toplevel_handle = self
             .foreign_toplevel_list
             .new_toplevel::<D>(toplevel.title(), toplevel.app_id());
-        toplevel
-            .user_data()
-            .insert_if_missing(move || ToplevelStateInner::from_foreign(toplevel_handle));
+
+        if let Some(toplevel_state) = toplevel.user_data().get::<ToplevelState>() {
+            let mut toplevel_state = toplevel_state.lock().unwrap();
+            toplevel_state.foreign_handle = Some(toplevel_handle);
+        } else {
+            toplevel
+                .user_data()
+                .insert_if_missing(move || ToplevelStateInner::from_foreign(toplevel_handle));
+        }
+
         for instance in &self.instances {
             send_toplevel_to_client::<D, W>(&self.dh, workspace_state, instance, toplevel);
         }
@@ -628,14 +635,13 @@ pub fn window_from_handle<W: Window + 'static>(handle: ZcosmicToplevelHandleV1) 
         .and_then(|state| state.lock().unwrap().window.clone())
 }
 
-pub fn window_from_ext_handle<'a, W: Window + 'static, D>(
+pub fn window_from_ext<'a, W: Window + 'static, D>(
     state: &'a D,
-    foreign_toplevel: &ExtForeignToplevelHandleV1,
+    handle: &ForeignToplevelHandle,
 ) -> Option<&'a W>
 where
     D: ToplevelInfoHandler<Window = W>,
 {
-    let handle = ForeignToplevelHandle::from_resource(foreign_toplevel)?;
     state.toplevel_info_state().toplevels.iter().find(|w| {
         w.user_data().get::<ToplevelState>().and_then(|inner| {
             inner
@@ -646,6 +652,17 @@ where
                 .map(|handle| handle.identifier())
         }) == Some(handle.identifier())
     })
+}
+
+pub fn window_from_ext_handle<'a, W: Window + 'static, D>(
+    state: &'a D,
+    foreign_toplevel: &ExtForeignToplevelHandleV1,
+) -> Option<&'a W>
+where
+    D: ToplevelInfoHandler<Window = W>,
+{
+    let handle = ForeignToplevelHandle::from_resource(foreign_toplevel)?;
+    window_from_ext(state, &handle)
 }
 
 macro_rules! delegate_toplevel_info {
