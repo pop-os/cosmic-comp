@@ -111,7 +111,9 @@ impl ToplevelManagementHandler for State {
             std::mem::drop(shell);
 
             // move pointer to window if it’s on a different monitor/output
-            if seat.active_output() != *output && self.common.config.cosmic_conf.cursor_follows_focus {
+            if seat.active_output() != *output
+                && self.common.config.cosmic_conf.cursor_follows_focus
+            {
                 if let Some(new_pos) = new_pos {
                     seat.set_active_output(output);
                     if let Some(ptr) = seat.get_pointer() {
