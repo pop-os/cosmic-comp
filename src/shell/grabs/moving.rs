@@ -906,19 +906,21 @@ impl Drop for MoveGrab {
                         }
                     }
                 } else {
-                    let mut shell = state.common.shell.write();
-                    shell
-                        .workspaces
-                        .active_mut(&cursor_output)
-                        .unwrap()
-                        .tiling_layer
-                        .cleanup_drag();
-                    shell.set_overview_mode(None, state.common.event_loop_handle.clone());
                     None
                 }
             } else {
                 None
             };
+
+            let mut shell = state.common.shell.write();
+            shell
+                .workspaces
+                .active_mut(&cursor_output)
+                .unwrap()
+                .tiling_layer
+                .cleanup_drag();
+            shell.set_overview_mode(None, state.common.event_loop_handle.clone());
+            drop(shell);
 
             {
                 let cursor_state = seat.user_data().get::<CursorState>().unwrap();
