@@ -9,6 +9,7 @@ use crate::{
 
 use anyhow::{Context, Result};
 use calloop::LoopSignal;
+use calloop::timer::{TimeoutAction, Timer};
 use cosmic_comp_config::output::comp::{AdaptiveSync, OutputState};
 use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
@@ -47,6 +48,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, RwLock, atomic::AtomicBool},
+    time::{Duration, Instant},
 };
 
 mod device;
@@ -73,6 +75,7 @@ pub struct KmsState {
     libinput: Libinput,
 
     pub syncobj_state: Option<DrmSyncobjState>,
+    pub udev_dispatcher: Dispatcher<'static, UdevBackend, State>,
 }
 
 pub struct KmsGuard<'a> {
@@ -130,6 +133,7 @@ pub fn init_backend(
         libinput: libinput_context,
 
         syncobj_state: None,
+        udev_dispatcher: udev_dispatcher.clone(),
     });
 
     // manually add already present gpus
@@ -347,7 +351,7 @@ fn init_udev(
 }
 
 impl State {
-    fn resume_session(
+    pub(crate) fn resume_session(
         &mut self,
         dispatcher: Dispatcher<'static, UdevBackend, Self>,
         loop_handle: LoopHandle<'static, State>,
@@ -413,10 +417,53 @@ impl State {
             }
             state.common.refresh();
         });
+
+        // Schedule delayed re-probes for connectors that need link training
+        // after resume (e.g., DisplayPort takes 1-3s to re-establish).
+        let resume_start = Instant::now();
+        if let Err(err) = loop_handle.insert_source(
+            Timer::from_duration(Duration::from_secs(1)),
+            move |_, _, state| {
+                let nodes = match &mut state.backend {
+                    BackendData::Kms(kms) => kms.drm_devices.keys().cloned().collect::<Vec<_>>(),
+                    _ => Vec::new(),
+                };
+                let mut added = Vec::new();
+                for node in nodes {
+                    match state.device_changed(node.dev_id()) {
+                        Ok(outputs) => added.extend(outputs),
+                        Err(err) => {
+                            error!(?err, "Failed to re-probe drm device {}.", node);
+                        }
+                    }
+                }
+                if let Err(err) = state.refresh_output_config() {
+                    warn!("Unable to load output config during re-probe: {}", err);
+                    if !added.is_empty() {
+                        for output in added {
+                            output.config_mut().enabled = OutputState::Disabled;
+                        }
+                        if let Err(err) = state.refresh_output_config() {
+                            error!("Unrecoverable config error during re-probe: {}", err);
+                        }
+                    }
+                }
+                state.common.refresh();
+
+                if resume_start.elapsed() < Duration::from_secs(3) {
+                    TimeoutAction::ToDuration(Duration::from_secs(1))
+                } else {
+                    TimeoutAction::Drop
+                }
+            },
+        ) {
+            error!(?err, "Failed to schedule post-resume re-probe timer");
+        }
+
         loop_signal.wakeup();
     }
 
-    fn pause_session(&mut self) {
+    pub(crate) fn pause_session(&mut self) {
         let backend = self.backend.kms();
         backend.libinput.suspend();
         for device in backend.drm_devices.values_mut() {

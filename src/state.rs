@@ -296,6 +296,8 @@ pub struct Common {
 
     #[cfg(feature = "systemd")]
     pub inhibit_lid_fd: Option<OwnedFd>,
+    #[cfg(feature = "systemd")]
+    pub inhibit_sleep_fd: Option<OwnedFd>,
 }
 
 #[derive(Debug)]
@@ -801,6 +803,8 @@ impl State {
 
                 #[cfg(feature = "systemd")]
                 inhibit_lid_fd: None,
+                #[cfg(feature = "systemd")]
+                inhibit_sleep_fd: crate::dbus::logind::inhibit_sleep().ok(),
             },
             backend: BackendData::Unset,
             ready: Once::new(),

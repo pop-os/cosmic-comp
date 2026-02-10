@@ -16,6 +16,8 @@ pub mod a11y_keyboard_monitor;
 pub mod logind;
 mod name_owners;
 mod power;
+#[cfg(feature = "systemd")]
+mod sleep;
 
 pub fn init(
     evlh: &LoopHandle<'static, State>,
@@ -77,6 +79,62 @@ pub fn init(
         }
         Err(err) => {
             tracing::info!(?err, "Failed to connect to com.system76.PowerDaemon");
+        }
+    };
+
+    // Listen for system sleep events (PrepareForSleep)
+    #[cfg(feature = "systemd")]
+    match block_on(sleep::init()) {
+        Ok(logind_manager) => {
+            let (tx, rx) = calloop::channel::channel::<bool>();
+
+            let token = evlh
+                .insert_source(rx, |event, _, state| match event {
+                    calloop::channel::Event::Msg(preparing) => {
+                        if preparing {
+                            state.pause_session();
+                            // Release the inhibitor lock so logind proceeds with suspend.
+                            state.common.inhibit_sleep_fd.take();
+                        } else {
+                            // Session resume is handled by SessionEvent::ActivateSession
+                            // (from libseat), which always fires on wake. Calling
+                            // resume_session here as well would race with the render
+                            // threads' first frame submission (use_mode resets the
+                            // swapchain), leaving NVIDIA primary-plane outputs blank.
+                            // Re-acquire the sleep inhibitor lock for the next cycle.
+                            state.common.event_loop_handle.insert_idle(|state| {
+                                match logind::inhibit_sleep() {
+                                    Ok(fd) => {
+                                        state.common.inhibit_sleep_fd = Some(fd);
+                                    }
+                                    Err(err) => {
+                                        warn!(?err, "Failed to re-acquire sleep inhibitor lock");
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    calloop::channel::Event::Closed => (),
+                })
+                .map_err(|InsertError { error, .. }| error)
+                .with_context(|| "Failed to add sleep channel to event_loop")?;
+
+            executor.spawn_ok(async move {
+                if let Ok(mut stream) = logind_manager.receive_prepare_for_sleep().await {
+                    while let Some(signal) = stream.next().await {
+                        if let Ok(args) = signal.args() {
+                            if tx.send(args.start).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+
+            tokens.push(token);
+        }
+        Err(err) => {
+            tracing::info!(?err, "Failed to connect to logind for sleep signals");
         }
     };
 

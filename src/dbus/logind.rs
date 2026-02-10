@@ -1,7 +1,10 @@
 use std::os::fd::OwnedFd;
 
 use anyhow::{Context, Result};
-use logind_zbus::manager::{InhibitType::HandleLidSwitch, ManagerProxyBlocking};
+use logind_zbus::manager::{
+    InhibitType::{self, HandleLidSwitch},
+    ManagerProxyBlocking,
+};
 use zbus::blocking::Connection;
 
 pub fn inhibit_lid() -> Result<OwnedFd> {
@@ -14,6 +17,18 @@ pub fn inhibit_lid() -> Result<OwnedFd> {
         "block",
     )?;
 
+    Ok(fd.into())
+}
+
+pub fn inhibit_sleep() -> Result<OwnedFd> {
+    let conn = Connection::system()?;
+    let proxy = ManagerProxyBlocking::new(&conn)?;
+    let fd = proxy.inhibit(
+        InhibitType::Sleep,
+        "cosmic-comp",
+        "Pausing rendering before suspend",
+        "delay",
+    )?;
     Ok(fd.into())
 }
 
