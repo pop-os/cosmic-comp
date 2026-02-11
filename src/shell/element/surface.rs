@@ -22,7 +22,7 @@ use smithay::{
         },
     },
     desktop::{
-        PopupManager, Window, WindowSurface, WindowSurfaceType, space::SpaceElement,
+        PopupManager, WeakWindow, Window, WindowSurface, WindowSurfaceType, space::SpaceElement,
         utils::OutputPresentationFeedback,
     },
     input::{
@@ -66,6 +66,25 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct CosmicSurface(pub Window);
+
+/// A weak reference to a [`CosmicSurface`] that does not keep it alive.
+#[derive(Debug, Clone)]
+pub struct WeakCosmicSurface(WeakWindow);
+
+impl WeakCosmicSurface {
+    /// Attempt to upgrade to a strong [`CosmicSurface`] reference.
+    /// Returns `None` if the window has already been dropped.
+    pub fn upgrade(&self) -> Option<CosmicSurface> {
+        self.0.upgrade().map(CosmicSurface)
+    }
+}
+
+impl CosmicSurface {
+    /// Create a weak reference to this surface.
+    pub fn downgrade(&self) -> WeakCosmicSurface {
+        WeakCosmicSurface(self.0.downgrade())
+    }
+}
 
 impl From<ToplevelSurface> for CosmicSurface {
     fn from(s: ToplevelSurface) -> Self {
