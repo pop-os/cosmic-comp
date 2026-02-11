@@ -7,7 +7,7 @@ use crate::{
     state::State,
     utils::prelude::Global,
     wayland::protocols::toplevel_info::{
-        ToplevelInfoHandler, ToplevelInfoState, Window, WindowWeak, delegate_toplevel_info,
+        ToplevelInfoHandler, ToplevelInfoState, Window, delegate_toplevel_info,
     },
 };
 
@@ -67,14 +67,11 @@ impl Window for CosmicSurface {
         CosmicSurface::downgrade(self)
     }
 
-    type Weak = WeakCosmicSurface;
-}
-
-impl WindowWeak for WeakCosmicSurface {
-    type Window = CosmicSurface;
-    fn upgrade(&self) -> Option<CosmicSurface> {
-        WeakCosmicSurface::upgrade(self)
+    fn upgrade(weak: &WeakCosmicSurface) -> Option<Self> {
+        weak.upgrade()
     }
+
+    type Weak = WeakCosmicSurface;
 }
 
 delegate_toplevel_info!(State, CosmicSurface);

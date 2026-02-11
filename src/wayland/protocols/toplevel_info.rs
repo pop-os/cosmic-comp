@@ -30,7 +30,7 @@ use tracing::error;
 
 pub trait Window: IsAlive + Clone + PartialEq + Send {
     /// A weak reference type that does not keep the window alive.
-    type Weak: WindowWeak<Window = Self> + Send + 'static;
+    type Weak: Clone + Send + 'static;
 
     fn title(&self) -> String;
     fn app_id(&self) -> String;
@@ -43,11 +43,7 @@ pub trait Window: IsAlive + Clone + PartialEq + Send {
     fn global_geometry(&self) -> Option<Rectangle<i32, Global>>;
     fn user_data(&self) -> &UserDataMap;
     fn downgrade(&self) -> Self::Weak;
-}
-
-pub trait WindowWeak {
-    type Window;
-    fn upgrade(&self) -> Option<Self::Window>;
+    fn upgrade(weak: &Self::Weak) -> Option<Self>;
 }
 
 #[derive(Debug)]
@@ -641,7 +637,7 @@ where
 pub fn window_from_handle<W: Window + 'static>(handle: ZcosmicToplevelHandleV1) -> Option<W> {
     handle
         .data::<ToplevelHandleState<W>>()
-        .and_then(|state| state.lock().unwrap().window.as_ref().and_then(|w| w.upgrade()))
+        .and_then(|state| state.lock().unwrap().window.as_ref().and_then(W::upgrade))
 }
 
 pub fn window_from_ext<'a, W: Window + 'static, D>(
