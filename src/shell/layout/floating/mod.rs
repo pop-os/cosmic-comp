@@ -25,7 +25,7 @@ use smithay::{
 };
 
 use crate::{
-    backend::render::{IndicatorShader, Key, Usage, element::AsGlowRenderer},
+    backend::render::{IndicatorShader, Key, Usage, element::AsGlowRenderer, SecurityContextIndicatorSettings},
     shell::{
         CosmicSurface, Direction, ManagedLayer, MoveResult, ResizeMode,
         element::{
@@ -1590,6 +1590,27 @@ impl FloatingLayout {
                     .collect();
             }
 
+            // Security context indicator
+            let mut secctx_border_size = 0;
+            if elem.is_window() {
+                let surface = elem.active_window();
+                if let Some(secctx_settings) = surface.user_data().get::<SecurityContextIndicatorSettings>() {
+                    secctx_border_size =  secctx_settings.border_size;
+                    let radius = elem.corner_radius(geometry.size.as_logical(), secctx_border_size);
+                    let element = IndicatorShader::focus_element(
+                        renderer,
+                        Key::Window(Usage::SecurityContextIndicator, elem.key()),
+                        geometry,
+                        secctx_border_size,
+                        radius,
+                        alpha,
+                        output_scale,
+                        secctx_settings.border_color,
+                    );
+                    window_elements.insert(0, element.into());
+                }
+            }
+
             if focused == Some(elem) && !elem.is_maximized(false) {
                 if let Some((mode, resize)) = resize_indicator.as_mut() {
                     let mut resize_geometry = geometry;
@@ -1615,12 +1636,21 @@ impl FloatingLayout {
                 }
 
                 let active_window_hint = crate::theme::active_window_hint(theme);
-                let radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
+                let mut radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
                 if indicator_thickness > 0 {
+                    let mut indicator_geometry = geometry.clone();
+                    if secctx_border_size > 0 {
+                        let offset = secctx_border_size as i32;
+                        indicator_geometry.loc -= (offset, offset).into();
+                        indicator_geometry.size += (offset * 2, offset * 2).into();
+                        for r in &mut radius {
+                            *r += offset as u8;
+                        }
+                    }
                     let element = IndicatorShader::focus_element(
                         renderer,
                         Key::Window(Usage::FocusIndicator, elem.key()),
-                        geometry,
+                        indicator_geometry,
                         indicator_thickness,
                         radius,
                         alpha,
