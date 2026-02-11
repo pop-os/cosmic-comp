@@ -209,15 +209,35 @@ impl State {
                 if next.is_err() {
                     if propagate {
                         if let Some(inferred) = pattern.inferred_direction() {
-                            self.handle_shortcut_action(
-                                Action::SwitchOutput(inferred),
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                direction,
-                                true,
-                            )
+                            // Check if there's an output to switch to in this direction
+                            let has_output = self
+                                .common
+                                .shell
+                                .read()
+                                .next_output(&seat.active_output(), inferred)
+                                .is_some();
+                            if has_output {
+                                self.handle_shortcut_action(
+                                    Action::SwitchOutput(inferred),
+                                    seat,
+                                    serial,
+                                    time,
+                                    pattern,
+                                    direction,
+                                    true,
+                                )
+                            } else {
+                                // No output in that direction, wrap to first workspace
+                                self.handle_shortcut_action(
+                                    Action::Workspace(1),
+                                    seat,
+                                    serial,
+                                    time,
+                                    pattern,
+                                    direction,
+                                    false,
+                                )
+                            }
                         };
                     } else {
                         self.handle_shortcut_action(
@@ -255,15 +275,35 @@ impl State {
                 if previous.is_err() {
                     if propagate {
                         if let Some(inferred) = pattern.inferred_direction() {
-                            self.handle_shortcut_action(
-                                Action::SwitchOutput(inferred),
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                direction,
-                                true,
-                            )
+                            // Check if there's an output to switch to in this direction
+                            let has_output = self
+                                .common
+                                .shell
+                                .read()
+                                .next_output(&seat.active_output(), inferred)
+                                .is_some();
+                            if has_output {
+                                self.handle_shortcut_action(
+                                    Action::SwitchOutput(inferred),
+                                    seat,
+                                    serial,
+                                    time,
+                                    pattern,
+                                    direction,
+                                    true,
+                                )
+                            } else {
+                                // No output in that direction, wrap to last workspace
+                                self.handle_shortcut_action(
+                                    Action::LastWorkspace,
+                                    seat,
+                                    serial,
+                                    time,
+                                    pattern,
+                                    direction,
+                                    false,
+                                )
+                            }
                         };
                     } else {
                         self.handle_shortcut_action(
@@ -1109,12 +1149,10 @@ fn to_next_workspace(
 ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let active = shell.workspaces.active_num(&current_output).1;
-    let mut workspace = active.checked_add(1).ok_or(InvalidWorkspaceIndex)?;
+    let workspace = active.checked_add(1).ok_or(InvalidWorkspaceIndex)?;
 
+    // Don't wrap around - return error at boundary so we can switch outputs instead
     if workspace >= shell.workspaces.len(&current_output) {
-        workspace = 0;
-    }
-    if workspace == active {
         return Err(InvalidWorkspaceIndex);
     }
 
@@ -1138,17 +1176,8 @@ fn to_previous_workspace(
 ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let active = shell.workspaces.active_num(&current_output).1;
-    let workspace = active.checked_sub(1).unwrap_or(
-        shell
-            .workspaces
-            .len(&current_output)
-            .checked_sub(1)
-            .ok_or(InvalidWorkspaceIndex)?,
-    );
-
-    if workspace == active {
-        return Err(InvalidWorkspaceIndex);
-    }
+    // Don't wrap around - return error at boundary so we can switch outputs instead
+    let workspace = active.checked_sub(1).ok_or(InvalidWorkspaceIndex)?;
 
     shell.activate(
         &current_output,
