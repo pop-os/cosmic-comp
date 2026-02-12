@@ -59,9 +59,9 @@ impl ImageCopyCaptureHandler for State {
                 let output = shell.workspaces.space_for_handle(handle)?.output();
                 constraints_for_output(output, &mut self.backend)
             }
-            ImageCaptureSourceKind::Toplevel(window) => {
-                constraints_for_toplevel(window, &mut self.backend)
-            }
+            ImageCaptureSourceKind::Toplevel(weak) => weak
+                .upgrade()
+                .and_then(|window| constraints_for_toplevel(&window, &mut self.backend)),
             _ => None,
         }
     }
@@ -126,7 +126,11 @@ impl ImageCopyCaptureHandler for State {
                 });
                 workspace.add_session(session);
             }
-            ImageCaptureSourceKind::Toplevel(mut toplevel) => {
+            ImageCaptureSourceKind::Toplevel(weak) => {
+                let Some(mut toplevel) = weak.upgrade() else {
+                    session.stop();
+                    return;
+                };
                 let size = toplevel.geometry().size.to_physical(1);
                 session.user_data().insert_if_missing_threadsafe(|| {
                     Mutex::new(SessionUserData::new(OutputDamageTracker::new(
@@ -234,7 +238,10 @@ impl ImageCopyCaptureHandler for State {
 
                 workspace.add_cursor_session(session);
             }
-            ImageCaptureSourceKind::Toplevel(mut toplevel) => {
+            ImageCaptureSourceKind::Toplevel(weak) => {
+                let Some(mut toplevel) = weak.upgrade() else {
+                    return;
+                };
                 let shell = self.common.shell.read();
                 if let Some(element) = shell.element_for_surface(&toplevel) {
                     if element.has_active_window(&toplevel) {
@@ -280,7 +287,10 @@ impl ImageCopyCaptureHandler for State {
             ImageCaptureSourceKind::Workspace(handle) => {
                 render_workspace_to_buffer(self, session, frame, handle)
             }
-            ImageCaptureSourceKind::Toplevel(toplevel) => {
+            ImageCaptureSourceKind::Toplevel(weak) => {
+                let Some(toplevel) = weak.upgrade() else {
+                    return;
+                };
                 render_window_to_buffer(self, session, frame, &toplevel)
             }
             ImageCaptureSourceKind::Destroyed => unreachable!(),
@@ -328,7 +338,11 @@ impl ImageCopyCaptureHandler for State {
                     workspace.remove_session(&session)
                 }
             }
-            ImageCaptureSourceKind::Toplevel(mut toplevel) => toplevel.remove_session(&session),
+            ImageCaptureSourceKind::Toplevel(weak) => {
+                if let Some(mut toplevel) = weak.upgrade() {
+                    toplevel.remove_session(&session);
+                }
+            }
             ImageCaptureSourceKind::Destroyed => unreachable!(),
         }
     }
@@ -357,8 +371,10 @@ impl ImageCopyCaptureHandler for State {
                     workspace.remove_cursor_session(&session)
                 }
             }
-            ImageCaptureSourceKind::Toplevel(mut toplevel) => {
-                toplevel.remove_cursor_session(&session)
+            ImageCaptureSourceKind::Toplevel(weak) => {
+                if let Some(mut toplevel) = weak.upgrade() {
+                    toplevel.remove_cursor_session(&session);
+                }
             }
             ImageCaptureSourceKind::Destroyed => unreachable!(),
         }

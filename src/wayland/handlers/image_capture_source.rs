@@ -45,7 +45,7 @@ impl ToplevelCaptureSourceHandler for State {
         toplevel: &ForeignToplevelHandle,
     ) {
         let data = match window_from_ext(self, toplevel) {
-            Some(toplevel) => ImageCaptureSourceKind::Toplevel(toplevel.clone()),
+            Some(toplevel) => ImageCaptureSourceKind::Toplevel(toplevel.downgrade()),
             None => ImageCaptureSourceKind::Destroyed,
         };
         source.user_data().insert_if_missing(|| data);
