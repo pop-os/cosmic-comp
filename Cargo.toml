@@ -80,7 +80,7 @@ xdg-user = "0.2.1"
 xkbcommon = "0.9"
 zbus = "5.12.0"
 profiling = { version = "1.0" }
-rustix = { version = "1.1.2", features = ["process"] }
+rustix = { version = "1.1.2", features = ["process", "event"] }
 rand = "0.9.2"
 # CLI arguments
 clap_lex = "0.7"
@@ -89,6 +89,7 @@ logind-zbus = { version = "5.3.2", optional = true }
 futures-executor = { version = "0.3.31", features = ["thread-pool"] }
 futures-util = "0.3.31"
 cgmath = "0.18.0"
+reis = { version = "0.5", features = ["tokio"] }
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"

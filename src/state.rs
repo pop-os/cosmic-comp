@@ -294,6 +294,9 @@ pub struct Common {
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
 
+    // EIS input injection (remote desktop)
+    pub eis_state: Option<crate::input::eis::EisState>,
+
     #[cfg(feature = "systemd")]
     pub inhibit_lid_fd: Option<OwnedFd>,
 }
@@ -798,6 +801,8 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+
+                eis_state: None,
 
                 #[cfg(feature = "systemd")]
                 inhibit_lid_fd: None,

@@ -81,6 +81,7 @@ use std::{
 };
 
 pub mod actions;
+pub mod eis;
 pub mod gestures;
 
 /// Used for debouncing focus updates due to pointer motion, if after the focus change is

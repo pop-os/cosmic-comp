@@ -12,6 +12,7 @@ use tracing::{error, warn};
 use zbus::blocking::{Connection, fdo::DBusProxy};
 
 pub mod a11y_keyboard_monitor;
+pub mod eis;
 #[cfg(feature = "systemd")]
 pub mod logind;
 mod name_owners;
@@ -22,6 +23,11 @@ pub fn init(
     executor: &ThreadPool,
 ) -> Result<Vec<RegistrationToken>> {
     let mut tokens = Vec::new();
+
+    // Register EIS D-Bus interface for RemoteDesktop portal input injection
+    if let Err(err) = eis::init(evlh, executor) {
+        tracing::info!(?err, "Failed to initialize EIS D-Bus interface");
+    }
 
     match block_on(power::init()) {
         Ok(power_daemon) => {
