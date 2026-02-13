@@ -2,7 +2,6 @@
 //!
 //! Compare to Mutter's `MetaDbusAccessChecker`
 
-use futures_executor::ThreadPool;
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use std::{
     collections::{HashMap, HashSet},
@@ -87,7 +86,10 @@ fn update_task(inner: Weak<Mutex<Inner>>) -> impl Future<Output = ()> {
 pub struct NameOwners(Arc<Mutex<Inner>>);
 
 impl NameOwners {
-    pub async fn new(connection: &zbus::Connection, executor: &ThreadPool) -> zbus::Result<Self> {
+    pub async fn new(
+        connection: &zbus::Connection,
+        executor: &calloop::futures::Scheduler<()>,
+    ) -> zbus::Result<Self> {
         let dbus = fdo::DBusProxy::new(connection).await?;
         let stream = dbus.receive_name_owner_changed().await?;
 
@@ -119,7 +121,7 @@ impl NameOwners {
         }));
 
         if enforce {
-            executor.spawn_ok(update_task(Arc::downgrade(&inner)));
+            let _ = executor.schedule(update_task(Arc::downgrade(&inner)));
         }
 
         Ok(NameOwners(inner))
