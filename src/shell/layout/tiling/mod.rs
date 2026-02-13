@@ -1384,6 +1384,13 @@ impl TilingLayout {
     ) -> Option<NodeId> {
         let node_id = window.tiling_node_id.lock().unwrap().take()?;
 
+        // Initialize last_overview_hover to the placeholder position so that
+        // dropping without mouse movement restores the window to its original position
+        if matches!(type_, PlaceholderType::GrabbedWindow) {
+            self.last_overview_hover =
+                Some((None, TargetZone::InitialPlaceholder(node_id.clone())));
+        }
+
         let data = self
             .queue
             .trees
@@ -2630,28 +2637,36 @@ impl TilingLayout {
     }
 
     pub fn cleanup_drag(&mut self) {
-        let gaps = self.gaps();
+        let old_tree = &self.queue.trees.back().unwrap().0;
+        let mut new_tree = None;
 
-        let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
-
-        if let Some(root) = tree.root_node_id() {
-            for id in tree
-                .traverse_pre_order_ids(root)
-                .unwrap()
-                .collect::<Vec<_>>()
-                .into_iter()
-            {
-                match tree.get_mut(&id).map(|node| node.data_mut()) {
-                    Ok(Data::Placeholder { .. }) => TilingLayout::unmap_internal(&mut tree, &id),
+        if let Some(root) = old_tree.root_node_id() {
+            for id in old_tree.traverse_pre_order_ids(root).unwrap() {
+                match old_tree.get(&id).map(|node| node.data()) {
+                    Ok(Data::Placeholder { .. }) => {
+                        // Copy a tree on write
+                        let new_tree = new_tree.get_or_insert_with(|| old_tree.copy_clone());
+                        TilingLayout::unmap_internal(new_tree, &id)
+                    }
                     Ok(Data::Group { pill_indicator, .. }) if pill_indicator.is_some() => {
-                        pill_indicator.take();
+                        let new_tree = new_tree.get_or_insert_with(|| old_tree.copy_clone());
+                        match new_tree.get_mut(&id).unwrap().data_mut() {
+                            Data::Group { pill_indicator, .. } => {
+                                *pill_indicator = None;
+                            }
+                            _ => unreachable!(),
+                        }
                     }
                     _ => {}
                 }
             }
 
-            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-            self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
+            // If anything was changed, push updated tree
+            if let Some(mut new_tree) = new_tree {
+                let blocker =
+                    TilingLayout::update_positions(&self.output, &mut new_tree, self.gaps());
+                self.queue.push_tree(new_tree, ANIMATION_DURATION, blocker);
+            }
         }
     }
 
@@ -2666,7 +2681,7 @@ impl TilingLayout {
             window.set_bounds(layer_map.non_exclusive_zone().size);
         }
 
-        let mapped = match self.last_overview_hover.as_ref().map(|x| &x.1) {
+        let mapped = match self.last_overview_hover.as_ref().map(|(_, zone)| zone) {
             Some(TargetZone::GroupEdge(group_id, direction)) if tree.get(group_id).is_ok() => {
                 let new_id = tree
                     .insert(
@@ -4039,7 +4054,7 @@ impl TilingLayout {
 
         let is_overview = !matches!(overview.0, OverviewMode::None);
         let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
-            .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
+            .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
         let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
             Some(desc.clone())
         } else {
@@ -4190,7 +4205,7 @@ impl TilingLayout {
         let mut elements = Vec::default();
 
         let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
-            .then(|| self.last_overview_hover.as_ref().map(|x| &x.1));
+            .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
         let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
             Some(desc.clone())
         } else {
@@ -5563,11 +5578,18 @@ where
                 let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
 
                 let scale = geo.size.to_f64() / original_geo.size.to_f64();
+                // In overview mode, don't pass max_size to avoid pre-clipping.
+                // Let constrain_render_elements handle scaling instead.
+                let max_size = if is_overview {
+                    None
+                } else {
+                    Some(geo.size.as_logical())
+                };
                 let shadow_element = mapped.shadow_render_element(
                     renderer,
                     geo.loc.as_logical().to_physical_precise_round(output_scale)
                         - elem_geometry.loc,
-                    Some(geo.size.as_logical()),
+                    max_size,
                     Scale::from(output_scale),
                     scale.x.min(scale.y),
                     alpha,
@@ -5577,7 +5599,7 @@ where
                     //original_location,
                     geo.loc.as_logical().to_physical_precise_round(output_scale)
                         - elem_geometry.loc,
-                    Some(geo.size.as_logical()),
+                    max_size,
                     Scale::from(output_scale),
                     alpha,
                     None,

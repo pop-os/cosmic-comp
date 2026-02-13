@@ -3135,8 +3135,8 @@ impl Shell {
         toplevel_enter_workspace(window, to);
 
         // we can't restore to a given position
-        if let WorkspaceRestoreData::Tiling(state) = &mut window_state {
-            state.take();
+        if let WorkspaceRestoreData::Tiling(Some(state)) = &mut window_state {
+            state.state.take();
         }
         // update fullscreen state to restore to the new workspace
         if let WorkspaceRestoreData::Fullscreen(Some(FullscreenRestoreData {

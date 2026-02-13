@@ -35,7 +35,7 @@ use crate::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
             data_device::get_dnd_icon,
-            screencopy::{FrameHolder, SessionData, render_session},
+            image_copy_capture::{FrameHolder, SessionData, render_session},
         },
         protocols::workspace::WorkspaceHandle,
     },
@@ -1393,21 +1393,20 @@ where
                                 )?;
 
                             let old_len = elements.len();
-                            elements.extend(
-                                additional_damage
-                                    .into_iter()
-                                    .map(|rect| {
-                                        rect.to_f64()
-                                            .to_logical(
-                                                output.current_scale().fractional_scale(),
-                                                output.current_transform(),
-                                                &area,
-                                            )
-                                            .to_i32_round()
-                                    })
-                                    .map(DamageElement::new)
-                                    .map(Into::into),
-                            );
+                            let additional_damage_elements: Vec<_> = additional_damage
+                                .into_iter()
+                                .map(|rect| {
+                                    rect.to_f64()
+                                        .to_logical(
+                                            output.current_scale().fractional_scale(),
+                                            output.current_transform(),
+                                            &area,
+                                        )
+                                        .to_i32_round()
+                                })
+                                .map(DamageElement::new)
+                                .collect();
+                            dt.damage_output(age, &additional_damage_elements)?;
 
                             Some(old_len)
                         } else {
@@ -1513,7 +1512,7 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let mut elements: Vec<CosmicElement<R>> = workspace_elements(
+    let elements: Vec<CosmicElement<R>> = workspace_elements(
         gpu,
         renderer,
         shell,
@@ -1528,13 +1527,12 @@ where
 
     if let Some(additional_damage) = additional_damage {
         let output_geo = output.geometry().to_local(output).as_logical();
-        elements.extend(
-            additional_damage
-                .into_iter()
-                .filter_map(|rect| rect.intersection(output_geo))
-                .map(DamageElement::new)
-                .map(Into::<CosmicElement<R>>::into),
-        );
+        let additional_damage_elements: Vec<_> = additional_damage
+            .into_iter()
+            .filter_map(|rect| rect.intersection(output_geo))
+            .map(DamageElement::new)
+            .collect();
+        damage_tracker.damage_output(age, &additional_damage_elements)?;
     }
 
     let res = damage_tracker.render_output(
