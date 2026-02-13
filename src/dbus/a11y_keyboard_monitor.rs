@@ -1,6 +1,5 @@
 // https://gitlab.gnome.org/GNOME/mutter/-/blob/main/data/dbus-interfaces/org.freedesktop.a11y.xml
 
-use futures_executor::ThreadPool;
 use smithay::{
     backend::input::KeyState,
     input::keyboard::{KeysymHandle, ModifiersState},
@@ -72,7 +71,7 @@ impl Clients {
 
 #[derive(Debug)]
 pub struct A11yKeyboardMonitorState {
-    executor: ThreadPool,
+    executor: calloop::futures::Scheduler<()>,
     clients: Arc<Mutex<Clients>>,
     active_virtual_mods: HashSet<Keysym>,
     conn: Arc<OnceLock<zbus::Connection>>,
@@ -80,7 +79,7 @@ pub struct A11yKeyboardMonitorState {
 }
 
 impl A11yKeyboardMonitorState {
-    pub fn new(executor: &ThreadPool) -> Self {
+    pub fn new(executor: &calloop::futures::Scheduler<()>) -> Self {
         let clients = Arc::new(Mutex::new(Clients::default()));
         let clients_clone = clients.clone();
         let conn_cell = Arc::new(OnceLock::new());
@@ -88,7 +87,7 @@ impl A11yKeyboardMonitorState {
         let name_owners_cell = Arc::new(OnceLock::new());
         let name_owners_cell_clone = name_owners_cell.clone();
         let executor_clone = executor.clone();
-        executor.spawn_ok(async move {
+        let _ = executor.schedule(async move {
             match serve(clients_clone, &executor_clone).await {
                 Ok((conn, name_owners)) => {
                     conn_cell_clone.set(conn).unwrap();
@@ -186,7 +185,7 @@ impl A11yKeyboardMonitorState {
                 unichar,
                 keysym.raw_code().raw() as u16,
             );
-            self.executor.spawn_ok(async {
+            let _ = self.executor.schedule(async {
                 let _ = future.await;
             });
         }
@@ -314,7 +313,7 @@ impl KeyboardMonitor {
 
 async fn serve(
     clients: Arc<Mutex<Clients>>,
-    executor: &ThreadPool,
+    executor: &calloop::futures::Scheduler<()>,
 ) -> zbus::Result<(zbus::Connection, NameOwners)> {
     let conn = zbus::Connection::session().await?;
     let name_owners = NameOwners::new(&conn, executor).await?;
