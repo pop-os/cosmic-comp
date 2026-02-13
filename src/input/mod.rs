@@ -1581,6 +1581,13 @@ impl State {
         handle: KeysymHandle<'_>,
         serial: Serial,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
+        // Pre-compute for layout-agnostic shortcut matching
+        let raw_syms = handle.raw_syms();
+        let latin_sym = handle.raw_latin_sym_or_raw_current_sym();
+        let key_matches = |binding_key: Keysym| -> bool {
+            raw_syms.contains(&binding_key) || latin_sym.is_some_and(|sym| sym == binding_key)
+        };
+
         let mut shell = self.common.shell.write();
 
         let keyboard = seat.get_keyboard().unwrap();
@@ -1632,7 +1639,7 @@ impl State {
                 || (action_pattern.modifiers.logo && !modifiers.logo)
                 || (action_pattern.modifiers.shift && !modifiers.shift)
                 || (action_pattern.key.is_some()
-                    && handle.raw_syms().contains(&action_pattern.key.unwrap())
+                    && key_matches(action_pattern.key.unwrap())
                     && event.state() == KeyState::Released)
             {
                 shell.set_overview_mode(None, self.common.event_loop_handle.clone());
@@ -1651,7 +1658,7 @@ impl State {
         if let Some(action_pattern) = shell.resize_mode().0.active_binding() {
             if action_pattern.key.is_some()
                 && event.state() == KeyState::Released
-                && handle.raw_syms().contains(&action_pattern.key.unwrap())
+                && key_matches(action_pattern.key.unwrap())
             {
                 shell.set_resize_mode(
                     None,
@@ -1896,7 +1903,7 @@ impl State {
                 // is this a normal binding?
                 if binding.key.is_some()
                     && event.state() == KeyState::Pressed
-                    && handle.raw_syms().contains(&binding.key.unwrap())
+                    && key_matches(binding.key.unwrap())
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
                     modifiers_queue.clear();
