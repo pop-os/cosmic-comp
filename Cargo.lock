@@ -535,6 +535,7 @@ checksum = "4dbf9978365bac10f54d1d4b04f7ce4427e51f71d61f2fe15e3fed5166474df7"
 dependencies = [
  "async-task",
  "bitflags 2.11.0",
+ "futures-core",
  "polling",
  "rustix 1.1.4",
  "slab",

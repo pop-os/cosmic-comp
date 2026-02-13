@@ -3,10 +3,9 @@ use crate::{
     utils::prelude::OutputExt,
 };
 use anyhow::{Context, Result};
-use calloop::{InsertError, LoopHandle, RegistrationToken};
+use calloop::{InsertError, LoopHandle, RegistrationToken, stream::StreamSource};
 use cosmic_comp_config::output::comp::OutputState;
-use futures_executor::{ThreadPool, block_on};
-use futures_util::stream::StreamExt;
+use futures_executor::block_on;
 use std::collections::HashMap;
 use tracing::{error, warn};
 use zbus::blocking::{Connection, fdo::DBusProxy};
@@ -17,19 +16,15 @@ pub mod logind;
 mod name_owners;
 mod power;
 
-pub fn init(
-    evlh: &LoopHandle<'static, State>,
-    executor: &ThreadPool,
-) -> Result<Vec<RegistrationToken>> {
+pub fn init(evlh: &LoopHandle<'static, State>) -> Result<Vec<RegistrationToken>> {
     let mut tokens = Vec::new();
 
     match block_on(power::init()) {
         Ok(power_daemon) => {
-            let (tx, rx) = calloop::channel::channel();
-
-            let token = evlh
-                .insert_source(rx, |event, _, state| match event {
-                    calloop::channel::Event::Msg(_) => {
+            if let Ok(stream) = block_on(power_daemon.receive_hot_plug_detect()) {
+                let source = StreamSource::new(stream).unwrap();
+                let token = evlh
+                    .insert_source(source, |_, _, state| {
                         let nodes = match &mut state.backend {
                             BackendData::Kms(kms) => {
                                 kms.drm_devices.keys().cloned().collect::<Vec<_>>()
@@ -56,24 +51,12 @@ pub fn init(
                                 }
                             }
                         }
-                    }
-                    calloop::channel::Event::Closed => (),
-                })
-                .map_err(|InsertError { error, .. }| error)
-                .with_context(|| "Failed to add channel to event_loop")?;
+                    })
+                    .map_err(|InsertError { error, .. }| error)
+                    .with_context(|| "Failed to add channel to event_loop")?;
 
-            // start helper thread
-            executor.spawn_ok(async move {
-                if let Ok(mut msg_iter) = power_daemon.receive_hot_plug_detect().await {
-                    while let Some(msg) = msg_iter.next().await {
-                        if tx.send(msg).is_err() {
-                            break;
-                        }
-                    }
-                }
-            });
-
-            tokens.push(token);
+                tokens.push(token);
+            }
         }
         Err(err) => {
             tracing::info!(?err, "Failed to connect to com.system76.PowerDaemon");

@@ -726,7 +726,7 @@ impl State {
 
         let async_executor = ThreadPool::builder().pool_size(1).create().unwrap();
 
-        if let Err(err) = crate::dbus::init(&handle, &async_executor) {
+        if let Err(err) = crate::dbus::init(&handle) {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
 
