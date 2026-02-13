@@ -288,6 +288,15 @@ impl Shell {
             }
 
             let workspace = &mut set.workspaces[set.active];
+            //low cost reset check between ShowDesktop show/hide calls if windows change (one closes, new one opens, or old one unminimizes)
+            if workspace.hidden_windows_start.is_some()
+                && workspace.minimized_windows.len()
+                    != (workspace.floating_layer.mapped().count()
+                        + workspace.tiling_layer.mapped().count()
+                        + workspace.minimized_windows.len())
+            {
+                workspace.hidden_windows_start = None;
+            }
             if let Some(fullscreen) = workspace.get_fullscreen() {
                 if self.seats.iter().any(|seat| {
                     if let Some(KeyboardFocusTarget::Fullscreen(s)) =

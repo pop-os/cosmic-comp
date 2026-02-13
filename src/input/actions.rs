@@ -893,6 +893,39 @@ impl State {
                 }
             }
 
+            Action::ShowDesktop => {
+                let mut shell = self.common.shell.write();
+                if let Some(output) = seat.focused_output() {
+                    let workspace = shell.active_space_mut(&output).unwrap();
+                    let surfaces: Vec<_> = workspace
+                        .get_fullscreen()
+                        .cloned()
+                        .into_iter()
+                        .chain(workspace.mapped().map(|m| m.active_window()))
+                        .collect();
+
+                    let start = Some(workspace.minimized_windows.len());
+                    for surface in &surfaces {
+                        shell.minimize_request(surface);
+                    }
+                    let workspace = shell.active_space_mut(&output).unwrap();
+                    workspace.hidden_windows_start = start;
+                } else {
+                    let output = seat.active_output();
+                    let windows = {
+                        let workspace = shell.active_space_mut(&output).unwrap();
+                        let start: usize = workspace.hidden_windows_start.unwrap_or(0);
+                        workspace.minimized_windows[start..]
+                            .iter()
+                            .map(|mw| mw.active_window())
+                            .collect::<Vec<_>>()
+                    };
+                    for window in windows {
+                        shell.unminimize_request(&window, seat, &self.common.event_loop_handle);
+                    }
+                }
+            }
+
             Action::Fullscreen => {
                 let Some(focused_output) = seat.focused_output() else {
                     return;
