@@ -12,7 +12,7 @@ members = ["cosmic-comp-config"]
 [dependencies]
 anyhow = { version = "1.0.102", features = ["backtrace"] }
 bitflags = "2.11.0"
-calloop = { version = "0.14.4", features = ["executor"] }
+calloop = { version = "0.14.4", features = ["executor", "stream"] }
 cosmic-comp-config = { path = "cosmic-comp-config", features = [
     "libdisplay-info",
     "output",
