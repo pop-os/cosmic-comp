@@ -4658,6 +4658,8 @@ impl Shell {
                 stack.remove_window(&surface);
                 surface
             } else {
+                mapped.set_fullscreen(true);
+
                 if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
                     mapped.set_maximized(false);
                     set.sticky_layer.map_internal(
@@ -4698,6 +4700,8 @@ impl Shell {
                 // TODO: Rewrite the `MinimizedWindow` to restore to fullscreen
                 return None;
             }
+
+            mapped.set_fullscreen(true);
 
             let from = workspace.element_geometry(&mapped).unwrap();
             let (surface, state) = workspace.unmap_surface(surface).unwrap();
