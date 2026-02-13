@@ -19,6 +19,7 @@ use smithay::{
 };
 
 use crate::utils::prelude::{Global, OutputExt, RectGlobalExt};
+use crate::wayland::handlers::image_copy_capture::stop_all_capture_sessions;
 
 use super::workspace::{WorkspaceHandle, WorkspaceHandler, WorkspaceState};
 
@@ -377,6 +378,7 @@ where
             *state_inner = Default::default();
             self.dirty = true;
         }
+        stop_all_capture_sessions(toplevel.user_data());
         self.toplevels.retain(|w| w != toplevel);
     }
 
@@ -417,6 +419,7 @@ where
                         handle.closed();
                     }
                 }
+                stop_all_capture_sessions(window.user_data());
                 dirty = true;
                 false
             }

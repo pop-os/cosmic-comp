@@ -10,6 +10,8 @@ use smithay::{
     },
 };
 
+use smithay::utils::user_data::UserDataMap;
+
 use crate::shell::{CosmicSurface, Workspace};
 
 type ImageCopySessionsData = RefCell<ImageCopySessions>;
@@ -31,6 +33,13 @@ impl SessionUserData {
 pub struct ImageCopySessions {
     sessions: Vec<Session>,
     cursor_sessions: Vec<CursorSession>,
+}
+
+pub fn stop_all_capture_sessions(user_data: &UserDataMap) {
+    if let Some(data) = user_data.get::<ImageCopySessionsData>() {
+        let _sessions: Vec<_> = data.borrow_mut().sessions.drain(..).collect();
+        let _cursor_sessions: Vec<_> = data.borrow_mut().cursor_sessions.drain(..).collect();
+    }
 }
 
 pub trait SessionHolder {
