@@ -416,6 +416,37 @@ impl State {
                 }
             }
             state.common.refresh();
+
+            // Re-configure lock surfaces to prompt the client to re-commit
+            // fresh buffers. During S3 suspend, the GPU context may change
+            // (new EGL context / DRM device reset), invalidating cached textures
+            // in RendererSurfaceState. The lock client was frozen during suspend
+            // and never re-committed, so its old buffer may be unimportable.
+            // Without this, a deadlock occurs: no valid buffer → 0 render
+            // elements → primary scanout never set → frame callbacks suppressed
+            // → client never learns it needs to re-commit.
+            //
+            // Smithay deduplicates send_configure() when the size hasn't changed,
+            // so we bump height by 1, send, then correct and send again. The
+            // client processes both in one dispatch, acks the correct size, and
+            // re-commits.
+            {
+                let shell = state.common.shell.read();
+                if let Some(session_lock) = &shell.session_lock {
+                    for (output, lock_surface) in &session_lock.surfaces {
+                        let size = output.geometry().size;
+                        let (w, h) = (size.w as u32, size.h as u32);
+                        lock_surface.with_pending_state(|states| {
+                            states.size = Some(Size::from((w, h.saturating_add(1))));
+                        });
+                        lock_surface.send_configure();
+                        lock_surface.with_pending_state(|states| {
+                            states.size = Some(Size::from((w, h)));
+                        });
+                        lock_surface.send_configure();
+                    }
+                }
+            }
         });
 
         // Schedule delayed re-probes for connectors that need link training
@@ -449,6 +480,40 @@ impl State {
                     }
                 }
                 state.common.refresh();
+
+                // Safety net: if any lock surface still has no renderer buffer,
+                // re-send configure. Handles the case where the initial
+                // re-configure was sent before the client processed its events.
+                {
+                    let shell = state.common.shell.read();
+                    if let Some(session_lock) = &shell.session_lock {
+                        for (output, lock_surface) in &session_lock.surfaces {
+                            let has_buffer =
+                                smithay::backend::renderer::utils::with_renderer_surface_state(
+                                    lock_surface.wl_surface(),
+                                    |rs| rs.buffer().is_some(),
+                                )
+                                .unwrap_or(false);
+                            if !has_buffer {
+                                let size = output.geometry().size;
+                                let (w, h) = (size.w as u32, size.h as u32);
+                                lock_surface.with_pending_state(|states| {
+                                    states.size =
+                                        Some(Size::from((w, h.saturating_add(1))));
+                                });
+                                lock_surface.send_configure();
+                                lock_surface.with_pending_state(|states| {
+                                    states.size = Some(Size::from((w, h)));
+                                });
+                                lock_surface.send_configure();
+                                warn!(
+                                    "Lock surface for {} had no buffer after resume, re-sent configure",
+                                    output.name(),
+                                );
+                            }
+                        }
+                    }
+                }
 
                 if resume_start.elapsed() < Duration::from_secs(3) {
                     TimeoutAction::ToDuration(Duration::from_secs(1))
