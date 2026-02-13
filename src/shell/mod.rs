@@ -2570,6 +2570,7 @@ impl Shell {
                 state:
                     FloatingRestoreData {
                         was_maximized,
+                        was_snapped,
                         geometry,
                         ..
                     },
@@ -2593,6 +2594,12 @@ impl Shell {
                         fullscreen_geometry,
                         true,
                     );
+                } else if let Some(corners) = was_snapped {
+                    *window.floating_tiled.lock().unwrap() = Some(corners);
+                    window.set_tiled(true);
+                    let snapped_geo = workspace.floating_layer.snapped_geometry(&corners);
+                    window.set_geometry(snapped_geo.to_global(&workspace.output));
+                    window.configure();
                 }
             }
             Some(FullscreenRestoreState::Tiling {
@@ -4144,6 +4151,7 @@ impl Shell {
                     geometry: geo,
                     output_size: set.output.geometry().size.as_logical(),
                     was_maximized: false,
+                    was_snapped: None,
                 },
             });
         } else if let Some((workspace, window)) =
@@ -4690,6 +4698,7 @@ impl Shell {
                         geometry: from,
                         output_size: workspace.output.geometry().size.as_logical(),
                         was_maximized,
+                        was_snapped: None,
                     },
                 }),
                 Some(from),
