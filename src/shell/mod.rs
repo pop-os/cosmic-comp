@@ -3348,13 +3348,31 @@ impl Shell {
 
         let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
         if !to_workspace.tiling_enabled {
-            let position = match window_state {
-                WorkspaceRestoreData::Floating(Some(data)) => {
-                    Some(data.position_relative(to_workspace.output.geometry().size.as_logical()))
-                }
-                _ => None,
+            let (position, was_maximized, was_snapped) = match &window_state {
+                WorkspaceRestoreData::Floating(Some(data)) => (
+                    Some(data.position_relative(to_workspace.output.geometry().size.as_logical())),
+                    data.was_maximized,
+                    data.was_snapped,
+                ),
+                _ => (None, false, None),
             };
             to_workspace.floating_layer.map(mapped.clone(), position);
+            if was_maximized {
+                let geometry = to_workspace.floating_layer.element_geometry(mapped).unwrap();
+                *mapped.maximized_state.lock().unwrap() = Some(MaximizedState {
+                    original_geometry: geometry,
+                    original_layer: ManagedLayer::Floating,
+                });
+                to_workspace
+                    .floating_layer
+                    .map_maximized(mapped.clone(), geometry, false);
+            } else if let Some(corners) = was_snapped {
+                *mapped.floating_tiled.lock().unwrap() = Some(corners);
+                mapped.set_tiled(true);
+                let snapped_geo = to_workspace.floating_layer.snapped_geometry(&corners);
+                mapped.set_geometry(snapped_geo.to_global(&to_workspace.output));
+                mapped.configure();
+            }
         } else {
             for mapped in to_workspace
                 .mapped()
