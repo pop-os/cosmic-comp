@@ -8,7 +8,7 @@ use crate::{
     },
     shell::{
         ANIMATION_DURATION, OverviewMode, SeatMoveGrabState,
-        layout::{floating::FloatingLayout, tiling::TilingLayout},
+        layout::{floating::{FloatingLayout, TiledCorners}, tiling::TilingLayout},
     },
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
@@ -286,6 +286,7 @@ pub struct FloatingRestoreData {
     pub geometry: Rectangle<i32, Local>,
     pub output_size: Size<i32, Logical>,
     pub was_maximized: bool,
+    pub was_snapped: Option<TiledCorners>,
 }
 
 impl FloatingRestoreData {
@@ -637,6 +638,7 @@ impl Workspace {
             })));
         }
 
+        let was_snapped = mapped.floating_tiled.lock().unwrap().clone();
         // unmaximize_request might have triggered a `floating_layer.refresh()`,
         // which may have already removed a non-alive surface.
         if let Some(floating_geometry) = self.floating_layer.unmap(mapped, None).or(was_maximized) {
@@ -644,6 +646,7 @@ impl Workspace {
                 geometry: floating_geometry,
                 output_size: self.output.geometry().size.as_logical(),
                 was_maximized: was_maximized.is_some(),
+                was_snapped
             })));
         };
 
@@ -1066,6 +1069,7 @@ impl Workspace {
         mapped.set_minimized(true);
         mapped.configure();
 
+        let was_snapped = mapped.floating_tiled.lock().unwrap().clone();
         if let Some(geometry) = self.floating_layer.unmap(&mapped, Some(to)) {
             return Some(MinimizedWindow::Floating {
                 window: mapped,
@@ -1073,6 +1077,7 @@ impl Workspace {
                     geometry: was_maximized.unwrap_or(geometry),
                     output_size: self.output.geometry().size.as_logical(),
                     was_maximized: was_maximized.is_some(),
+                    was_snapped,
                 },
             });
         }
@@ -1133,6 +1138,12 @@ impl Workspace {
                     });
                     std::mem::drop(state);
                     self.floating_layer.map_maximized(window, geometry, true);
+                } else if let Some(corners) = previous.was_snapped {
+                    *window.floating_tiled.lock().unwrap() = Some(corners);
+                    window.set_tiled(true);
+                    let snapped_geo = self.floating_layer.snapped_geometry(&corners);
+                    window.set_geometry(snapped_geo.to_global(&self.output));
+                    window.configure();
                 }
 
                 None
