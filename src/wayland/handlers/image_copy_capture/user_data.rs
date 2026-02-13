@@ -10,6 +10,8 @@ use smithay::{
     },
 };
 
+use smithay::utils::user_data::UserDataMap;
+
 use crate::shell::{CosmicSurface, Workspace};
 
 type ImageCopySessionsData = RefCell<ImageCopySessions>;
@@ -31,6 +33,25 @@ impl SessionUserData {
 pub struct ImageCopySessions {
     sessions: Vec<Session>,
     cursor_sessions: Vec<CursorSession>,
+}
+
+/// Drop all capture sessions stored in the given `UserDataMap`.
+///
+/// When a toplevel is destroyed, its owned `Session` objects must be dropped
+/// so that `Session::drop()` fires — this fails active frames and sends
+/// `stopped` to the client, releasing GPU buffers.
+///
+/// Smithay doesn't automatically stop sessions when their capture source's
+/// underlying toplevel dies. A cleaner long-term fix would be in smithay's
+/// `ImageCopyCaptureState::cleanup()` — e.g. stopping sessions whose
+/// `source().alive()` is false — so all compositors benefit without manual
+/// session management. For now, we handle it on the cosmic-comp side.
+pub fn stop_all_capture_sessions(user_data: &UserDataMap) {
+    if let Some(data) = user_data.get::<ImageCopySessionsData>() {
+        let mut data = data.borrow_mut();
+        data.sessions.clear();
+        data.cursor_sessions.clear();
+    }
 }
 
 pub trait SessionHolder {

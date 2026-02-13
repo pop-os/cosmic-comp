@@ -89,7 +89,7 @@ pub mod layout;
 mod seats;
 mod workspace;
 pub mod zoom;
-pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
+pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface, WeakCosmicSurface};
 pub use self::seats::*;
 pub use self::workspace::*;
 use self::zoom::{OutputZoomState, ZoomState};

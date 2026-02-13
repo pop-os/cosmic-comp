@@ -47,7 +47,7 @@ use std::{
 
 pub mod surface;
 use self::stack::MoveResult;
-pub use self::surface::CosmicSurface;
+pub use self::surface::{CosmicSurface, WeakCosmicSurface};
 pub mod stack;
 pub use self::stack::CosmicStack;
 pub mod window;
