@@ -31,6 +31,11 @@ use tracing::error;
 
 pub trait Window: IsAlive + Clone + PartialEq + Send {
     /// A weak reference type that does not keep the window alive.
+    ///
+    /// Used by `ToplevelHandleStateInner` to avoid preventing window cleanup.
+    /// Protocol handle objects persist until the *client* destroys them, so
+    /// a strong reference here would keep `Arc<WindowInner>` (and its GPU
+    /// textures) alive indefinitely.
     type Weak: Clone + Send + 'static;
 
     fn title(&self) -> String;
@@ -96,6 +101,14 @@ impl ToplevelStateInner {
     }
 }
 
+/// Per-handle state stored in each `ZcosmicToplevelHandleV1`'s user data.
+///
+/// The `window` field stores a *weak* reference (`W::Weak`) to avoid keeping
+/// the underlying window alive. Protocol handles persist until the client
+/// destroys them — long-lived clients (cosmic-panel, cosmic-workspaces, and
+/// even cosmic-term itself) hold handles indefinitely. A strong reference
+/// here would prevent `WindowInner` from dropping, trapping GPU textures
+/// in `SurfaceUserData::data_map` → `MultiTextureInternal`.
 pub struct ToplevelHandleStateInner<W: Window> {
     outputs: Vec<Output>,
     geometry: Option<Rectangle<i32, Global>>,
@@ -378,6 +391,9 @@ where
             *state_inner = Default::default();
             self.dirty = true;
         }
+        // Drop owned capture sessions so Session::drop() fails active
+        // frames and releases GPU buffers before we lose access to the
+        // toplevel's user_data.
         stop_all_capture_sessions(toplevel.user_data());
         self.toplevels.retain(|w| w != toplevel);
     }
@@ -419,6 +435,8 @@ where
                         handle.closed();
                     }
                 }
+                // Safety net: drop capture sessions for dead windows
+                // detected during refresh (same reason as remove_toplevel).
                 stop_all_capture_sessions(window.user_data());
                 dirty = true;
                 false

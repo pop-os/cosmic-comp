@@ -30,6 +30,12 @@ pub struct WorkspaceImageCaptureSourceManagerGlobalData {
     filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
 }
 
+/// What a capture source targets.
+///
+/// `Toplevel` uses `WeakCosmicSurface` (not a strong `CosmicSurface`) so
+/// that capture sources created by cosmic-workspaces for window thumbnails
+/// don't prevent the underlying window from being dropped. `Output` already
+/// uses `WeakOutput` for the same reason.
 #[derive(Debug, Clone)]
 pub enum ImageCaptureSourceKind {
     Output(WeakOutput),
