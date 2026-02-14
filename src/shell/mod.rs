@@ -2570,6 +2570,7 @@ impl Shell {
                 state:
                     FloatingRestoreData {
                         was_maximized,
+                        was_snapped,
                         geometry,
                         ..
                     },
@@ -2593,6 +2594,12 @@ impl Shell {
                         fullscreen_geometry,
                         true,
                     );
+                } else if let Some(corners) = was_snapped {
+                    *window.floating_tiled.lock().unwrap() = Some(corners);
+                    window.set_tiled(true);
+                    let snapped_geo = workspace.floating_layer.snapped_geometry(&corners);
+                    window.set_geometry(snapped_geo.to_global(&workspace.output));
+                    window.configure();
                 }
             }
             Some(FullscreenRestoreState::Tiling {
@@ -3341,13 +3348,34 @@ impl Shell {
 
         let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
         if !to_workspace.tiling_enabled {
-            let position = match window_state {
-                WorkspaceRestoreData::Floating(Some(data)) => {
-                    Some(data.position_relative(to_workspace.output.geometry().size.as_logical()))
-                }
-                _ => None,
+            let (position, was_maximized, was_snapped) = match &window_state {
+                WorkspaceRestoreData::Floating(Some(data)) => (
+                    Some(data.position_relative(to_workspace.output.geometry().size.as_logical())),
+                    data.was_maximized,
+                    data.was_snapped,
+                ),
+                _ => (None, false, None),
             };
             to_workspace.floating_layer.map(mapped.clone(), position);
+            if was_maximized {
+                let geometry = to_workspace
+                    .floating_layer
+                    .element_geometry(mapped)
+                    .unwrap();
+                *mapped.maximized_state.lock().unwrap() = Some(MaximizedState {
+                    original_geometry: geometry,
+                    original_layer: ManagedLayer::Floating,
+                });
+                to_workspace
+                    .floating_layer
+                    .map_maximized(mapped.clone(), geometry, false);
+            } else if let Some(corners) = was_snapped {
+                *mapped.floating_tiled.lock().unwrap() = Some(corners);
+                mapped.set_tiled(true);
+                let snapped_geo = to_workspace.floating_layer.snapped_geometry(&corners);
+                mapped.set_geometry(snapped_geo.to_global(&to_workspace.output));
+                mapped.configure();
+            }
         } else {
             for mapped in to_workspace
                 .mapped()
@@ -4144,6 +4172,7 @@ impl Shell {
                     geometry: geo,
                     output_size: set.output.geometry().size.as_logical(),
                     was_maximized: false,
+                    was_snapped: None,
                 },
             });
         } else if let Some((workspace, window)) =
@@ -4657,6 +4686,8 @@ impl Shell {
                 stack.remove_window(&surface);
                 surface
             } else {
+                mapped.set_fullscreen(true);
+
                 if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
                     mapped.set_maximized(false);
                     set.sticky_layer.map_internal(
@@ -4688,6 +4719,7 @@ impl Shell {
                         geometry: from,
                         output_size: workspace.output.geometry().size.as_logical(),
                         was_maximized,
+                        was_snapped: None,
                     },
                 }),
                 Some(from),
@@ -4697,6 +4729,8 @@ impl Shell {
                 // TODO: Rewrite the `MinimizedWindow` to restore to fullscreen
                 return None;
             }
+
+            mapped.set_fullscreen(true);
 
             let from = workspace.element_geometry(&mapped).unwrap();
             let (surface, state) = workspace.unmap_surface(surface).unwrap();
