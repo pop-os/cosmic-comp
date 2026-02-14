@@ -3358,7 +3358,10 @@ impl Shell {
             };
             to_workspace.floating_layer.map(mapped.clone(), position);
             if was_maximized {
-                let geometry = to_workspace.floating_layer.element_geometry(mapped).unwrap();
+                let geometry = to_workspace
+                    .floating_layer
+                    .element_geometry(mapped)
+                    .unwrap();
                 *mapped.maximized_state.lock().unwrap() = Some(MaximizedState {
                     original_geometry: geometry,
                     original_layer: ManagedLayer::Floating,
