@@ -8,7 +8,10 @@ use crate::{
     },
     shell::{
         ANIMATION_DURATION, OverviewMode, SeatMoveGrabState,
-        layout::{floating::{FloatingLayout, TiledCorners}, tiling::TilingLayout},
+        layout::{
+            floating::{FloatingLayout, TiledCorners},
+            tiling::TilingLayout,
+        },
     },
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
@@ -646,7 +649,7 @@ impl Workspace {
                 geometry: floating_geometry,
                 output_size: self.output.geometry().size.as_logical(),
                 was_maximized: was_maximized.is_some(),
-                was_snapped
+                was_snapped,
             })));
         };
 
