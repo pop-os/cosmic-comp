@@ -788,7 +788,15 @@ impl XwmHandler for State {
         }
 
         let mut shell = self.common.shell.write();
-        let startup_id = window.startup_id();
+
+        if shell.pending_windows.iter().any(|p| &p.surface == &window) {
+            warn!(
+                ?window,
+                "Got map_request for already pending window? Ignoring"
+            );
+            return;
+        }
+
         if shell.is_surface_mapped(&window) {
             warn!(
                 ?window,
@@ -798,7 +806,7 @@ impl XwmHandler for State {
         }
 
         let seat = shell.seats.last_active().clone();
-        if let Some(context) = startup_id
+        if let Some(context) = window.startup_id()
             .map(XdgActivationToken::from)
             .and_then(|token| self.common.xdg_activation_state.data_for_token(&token))
             .and_then(|data| data.user_data.get::<ActivationContext>())
