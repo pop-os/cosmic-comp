@@ -116,6 +116,7 @@ pub struct Surface {
     known_nodes: HashSet<DrmNode>,
 
     active: Arc<AtomicBool>,
+    pub(super) swapchain_on_primary: Arc<AtomicBool>,
     pub feedback: HashMap<DrmNode, SurfaceDmabufFeedback>,
     pub(super) primary_plane_formats: FormatSet,
     overlay_plane_formats: Option<FormatSet>,
@@ -133,6 +134,8 @@ pub struct SurfaceThreadState {
     api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
     primary_node: Arc<RwLock<Option<DrmNode>>>,
     target_node: DrmNode,
+    target_is_software: bool,
+    swapchain_on_primary: Arc<AtomicBool>,
     active: Arc<AtomicBool>,
     vrr_mode: AdaptiveSync,
     frame_flags: FrameFlags,
@@ -245,6 +248,7 @@ impl Surface {
         primary_node: Arc<RwLock<Option<DrmNode>>>,
         dev_node: DrmNode,
         target_node: DrmNode,
+        is_software: bool,
         evlh: &LoopHandle<'static, State>,
         screen_filter: ScreenFilter,
         shell: Arc<parking_lot::RwLock<Shell>>,
@@ -253,8 +257,10 @@ impl Surface {
         let (tx, rx) = channel::<ThreadCommand>();
         let (tx2, rx2) = channel::<SurfaceCommand>();
         let active = Arc::new(AtomicBool::new(false));
+        let swapchain_on_primary = Arc::new(AtomicBool::new(false));
 
         let active_clone = active.clone();
+        let swapchain_on_primary_clone = swapchain_on_primary.clone();
         let output_clone = output.clone();
 
         let thread = std::thread::Builder::new()
@@ -264,6 +270,8 @@ impl Surface {
                     output_clone,
                     primary_node,
                     target_node,
+                    is_software,
+                    swapchain_on_primary_clone,
                     shell,
                     active_clone,
                     screen_filter,
@@ -339,6 +347,7 @@ impl Surface {
             output: output.clone(),
             known_nodes: HashSet::new(),
             active,
+            swapchain_on_primary,
             feedback: HashMap::new(),
             primary_plane_formats: FormatSet::default(),
             overlay_plane_formats: None,
@@ -492,6 +501,8 @@ fn surface_thread(
     output: Output,
     primary_node: Arc<RwLock<Option<DrmNode>>>,
     target_node: DrmNode,
+    is_software: bool,
+    swapchain_on_primary: Arc<AtomicBool>,
     shell: Arc<parking_lot::RwLock<Shell>>,
     active: Arc<AtomicBool>,
     screen_filter: ScreenFilter,
@@ -517,6 +528,10 @@ fn surface_thread(
         state
     };
 
+    if is_software {
+        warn!("Software target {name}: will use primary GPU for rendering");
+    }
+
     let vblank_frame_name = tracy_client::FrameName::new_leak(format!("vblank on {name}"));
     let time_since_presentation_plot_name =
         tracy_client::PlotName::new_leak(format!("{name} time since presentation, ms"));
@@ -529,6 +544,8 @@ fn surface_thread(
         api,
         primary_node,
         target_node,
+        target_is_software: is_software,
+        swapchain_on_primary,
         active,
         compositor: None,
         frame_flags: FrameFlags::DEFAULT,
@@ -993,23 +1010,38 @@ impl SurfaceThreadState {
             return Ok(());
         };
 
-        let render_node = render_node_for_output(
-            self.mirroring.as_ref().unwrap_or(&self.output),
-            self.primary_node
+        // For software targets where set_format() succeeded, the swapchain
+        // is on the primary GPU. Use single_renderer to avoid cross-device copy.
+        let use_primary = self.target_is_software
+            && self.swapchain_on_primary.load(Ordering::Relaxed);
+        let (render_node, effective_target) = if use_primary {
+            let pn = *self
+                .primary_node
                 .read()
                 .unwrap()
                 .as_ref()
-                .unwrap_or(&self.target_node),
-            &self.target_node,
-            &self.shell.read(),
-        );
+                .unwrap_or(&self.target_node);
+            (pn, pn)
+        } else {
+            let rn = render_node_for_output(
+                self.mirroring.as_ref().unwrap_or(&self.output),
+                self.primary_node
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .unwrap_or(&self.target_node),
+                &self.target_node,
+                &self.shell.read(),
+            );
+            (rn, self.target_node)
+        };
 
-        let mut renderer = if render_node != self.target_node {
+        let mut renderer = if render_node != effective_target {
             self.api
-                .renderer(&render_node, &self.target_node, compositor.format())
+                .renderer(&render_node, &effective_target, compositor.format())
                 .unwrap()
         } else {
-            self.api.single_renderer(&self.target_node).unwrap()
+            self.api.single_renderer(&effective_target).unwrap()
         };
 
         self.timings.start_render(&self.clock);

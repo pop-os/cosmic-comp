@@ -14,7 +14,12 @@ use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
 use smithay::{
     backend::{
-        allocator::{Buffer, dmabuf::Dmabuf, format::FormatSet},
+        allocator::{
+            Buffer, Modifier,
+            dmabuf::Dmabuf,
+            format::FormatSet,
+            gbm::{GbmAllocator, GbmBufferFlags},
+        },
         drm::{DrmDeviceFd, DrmNode, NodeType, VrrSupport, output::DrmOutputRenderElements},
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
@@ -46,7 +51,7 @@ use tracing::{debug, error, info, warn};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
-    sync::{Arc, RwLock, atomic::AtomicBool},
+    sync::{Arc, RwLock, atomic::{AtomicBool, Ordering}},
 };
 
 mod device;
@@ -718,6 +723,18 @@ impl KmsGuard<'_> {
             return Ok(());
         }
 
+        // Extract primary GPU's GBM device so we can replace the swapchain allocator
+        // on software targets (EVDI/DisplayLink) after initialize_output().
+        let primary_gbm = {
+            let primary_node = self.primary_node.read().unwrap();
+            primary_node.and_then(|pn| {
+                self.drm_devices.values().find_map(|d| {
+                    (d.inner.render_node == pn && !d.inner.is_software)
+                        .then(|| d.inner.gbm.clone())
+                })
+            })
+        };
+
         for device in self.drm_devices.values_mut() {
             // we only want outputs exposed to wayland - not leased ones
             // but that is also not all surface, because that doesn't contain all detected, but unmapped outputs
@@ -934,6 +951,43 @@ impl KmsGuard<'_> {
 
                             compositor
                         };
+
+                        // For software targets (EVDI/DisplayLink), replace the swapchain
+                        // allocator with the primary GPU's GBM using Linear modifier.
+                        // This keeps rendering on the primary GPU (single_renderer path)
+                        // while the GbmFramebufferExporter imports the dmabuf into EVDI.
+                        //
+                        // NOTE: We access the compositor directly through
+                        // drm.compositors() instead of compositor.with_compositor()
+                        // because LockedDrmOutputManager already holds a write lock
+                        // on the compositor RwLock — calling with_compositor() would
+                        // deadlock trying to acquire a read lock on it.
+                        if device.inner.is_software {
+                            if let Some(ref primary_gbm) = primary_gbm {
+                                let mut comp = drm.compositors().get(crtc).unwrap().lock().unwrap();
+                                let current_format = comp.format();
+                                match comp.set_format(
+                                    GbmAllocator::new(
+                                        primary_gbm.clone(),
+                                        GbmBufferFlags::RENDERING | GbmBufferFlags::SCANOUT,
+                                    ),
+                                    current_format,
+                                    [Modifier::Linear],
+                                ) {
+                                    Ok(()) => {
+                                        surface.swapchain_on_primary.store(true, Ordering::Release);
+                                        warn!(
+                                            "Software target {}: swapchain moved to hardware GPU (Linear)",
+                                            surface.output.name(),
+                                        );
+                                    }
+                                    Err(err) => warn!(
+                                        "Failed to set hardware GPU allocator for {}: {:?}",
+                                        surface.output.name(), err,
+                                    ),
+                                }
+                            }
+                        }
 
                         if let Some(bpc) = output_config.0.max_bpc {
                             if let Err(err) = drm_helpers::set_max_bpc(drm.device(), conn, bpc) {
