@@ -4313,6 +4313,20 @@ impl Shell {
             return None;
         }
 
+        // Reject duplicate resize requests (e.g. Steam sends two
+        // _NET_WM_MOVERESIZE messages). Creating a new grab while one is
+        // already active would corrupt the resize state when the old grab's
+        // ungrab() overwrites the freshly-set Resizing state.
+        if let Some(ResizeState::Resizing(data)) = *mapped.resize_state.lock().unwrap() {
+            tracing::warn!(
+                app_id = mapped.active_window().app_id(),
+                active_edges = ?data.edges,
+                requested_edges = ?edges,
+                "Rejecting duplicate resize request while resize is already active",
+            );
+            return None;
+        }
+
         let floating_layer = if let Some(set) = self
             .workspaces
             .sets
