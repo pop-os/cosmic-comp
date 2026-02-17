@@ -764,7 +764,8 @@ impl KmsGuard<'_> {
                         .outputs
                         .iter()
                         .find_map(|(conn, o)| (output == o).then_some(*conn))
-                });
+                })
+                .filter(|conn| !device.inner.suspended_connectors.contains(conn));
 
             for conn in open_conns {
                 let conn_info = device
