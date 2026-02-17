@@ -3,7 +3,7 @@
 use smithay::utils::{Rectangle, user_data::UserDataMap};
 
 use crate::{
-    shell::CosmicSurface,
+    shell::{CosmicSurface, element::surface::WeakCosmicSurface},
     state::State,
     utils::prelude::Global,
     wayland::protocols::toplevel_info::{
@@ -62,6 +62,16 @@ impl Window for CosmicSurface {
     fn user_data(&self) -> &UserDataMap {
         CosmicSurface::user_data(self)
     }
+
+    fn downgrade(&self) -> WeakCosmicSurface {
+        CosmicSurface::downgrade(self)
+    }
+
+    fn upgrade(weak: &WeakCosmicSurface) -> Option<Self> {
+        weak.upgrade()
+    }
+
+    type Weak = WeakCosmicSurface;
 }
 
 delegate_toplevel_info!(State, CosmicSurface);

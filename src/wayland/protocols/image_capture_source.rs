@@ -2,7 +2,7 @@ use super::{
     workspace::{WorkspaceHandle, WorkspaceHandler},
 };
 use crate::{
-    shell::CosmicSurface,
+    shell::WeakCosmicSurface,
 };
 use cosmic_protocols::image_capture_source::v1::server::{
     zcosmic_workspace_image_capture_source_manager_v1::{
@@ -30,11 +30,17 @@ pub struct WorkspaceImageCaptureSourceManagerGlobalData {
     filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// What a capture source targets.
+///
+/// `Toplevel` uses `WeakCosmicSurface` (not a strong `CosmicSurface`) so
+/// that capture sources created by cosmic-workspaces for window thumbnails
+/// don't prevent the underlying window from being dropped. `Output` already
+/// uses `WeakOutput` for the same reason.
+#[derive(Debug, Clone)]
 pub enum ImageCaptureSourceKind {
     Output(WeakOutput),
     Workspace(WorkspaceHandle),
-    Toplevel(CosmicSurface),
+    Toplevel(WeakCosmicSurface),
     Destroyed,
 }
 

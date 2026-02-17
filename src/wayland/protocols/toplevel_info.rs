@@ -19,6 +19,7 @@ use smithay::{
 };
 
 use crate::utils::prelude::{Global, OutputExt, RectGlobalExt};
+use crate::wayland::handlers::image_copy_capture::stop_all_capture_sessions;
 
 use super::workspace::{WorkspaceHandle, WorkspaceHandler, WorkspaceState};
 
@@ -29,6 +30,14 @@ use cosmic_protocols::toplevel_info::v1::server::{
 use tracing::error;
 
 pub trait Window: IsAlive + Clone + PartialEq + Send {
+    /// A weak reference type that does not keep the window alive.
+    ///
+    /// Used by `ToplevelHandleStateInner` to avoid preventing window cleanup.
+    /// Protocol handle objects persist until the *client* destroys them, so
+    /// a strong reference here would keep `Arc<WindowInner>` (and its GPU
+    /// textures) alive indefinitely.
+    type Weak: Clone + Send + 'static;
+
     fn title(&self) -> String;
     fn app_id(&self) -> String;
     fn is_activated(&self) -> bool;
@@ -39,6 +48,8 @@ pub trait Window: IsAlive + Clone + PartialEq + Send {
     fn is_resizing(&self) -> bool;
     fn global_geometry(&self) -> Option<Rectangle<i32, Global>>;
     fn user_data(&self) -> &UserDataMap;
+    fn downgrade(&self) -> Self::Weak;
+    fn upgrade(weak: &Self::Weak) -> Option<Self>;
 }
 
 #[derive(Debug)]
@@ -90,6 +101,14 @@ impl ToplevelStateInner {
     }
 }
 
+/// Per-handle state stored in each `ZcosmicToplevelHandleV1`'s user data.
+///
+/// The `window` field stores a *weak* reference (`W::Weak`) to avoid keeping
+/// the underlying window alive. Protocol handles persist until the client
+/// destroys them — long-lived clients (cosmic-panel, cosmic-workspaces, and
+/// even cosmic-term itself) hold handles indefinitely. A strong reference
+/// here would prevent `WindowInner` from dropping, trapping GPU textures
+/// in `SurfaceUserData::data_map` → `MultiTextureInternal`.
 pub struct ToplevelHandleStateInner<W: Window> {
     outputs: Vec<Output>,
     geometry: Option<Rectangle<i32, Global>>,
@@ -98,7 +117,7 @@ pub struct ToplevelHandleStateInner<W: Window> {
     title: String,
     app_id: String,
     states: Option<Vec<States>>,
-    pub(super) window: Option<W>,
+    window: Option<W::Weak>,
 }
 pub type ToplevelHandleState<W> = Mutex<ToplevelHandleStateInner<W>>;
 
@@ -112,7 +131,7 @@ impl<W: Window> ToplevelHandleStateInner<W> {
             title: String::new(),
             app_id: String::new(),
             states: None,
-            window: Some(window.clone()),
+            window: Some(window.downgrade()),
         })
     }
 
@@ -372,6 +391,10 @@ where
             *state_inner = Default::default();
             self.dirty = true;
         }
+        // Drop owned capture sessions so Session::drop() fails active
+        // frames and releases GPU buffers before we lose access to the
+        // toplevel's user_data.
+        stop_all_capture_sessions(toplevel.user_data());
         self.toplevels.retain(|w| w != toplevel);
     }
 
@@ -412,6 +435,9 @@ where
                         handle.closed();
                     }
                 }
+                // Safety net: drop capture sessions for dead windows
+                // detected during refresh (same reason as remove_toplevel).
+                stop_all_capture_sessions(window.user_data());
                 dirty = true;
                 false
             }
@@ -632,7 +658,7 @@ where
 pub fn window_from_handle<W: Window + 'static>(handle: ZcosmicToplevelHandleV1) -> Option<W> {
     handle
         .data::<ToplevelHandleState<W>>()
-        .and_then(|state| state.lock().unwrap().window.clone())
+        .and_then(|state| state.lock().unwrap().window.as_ref().and_then(W::upgrade))
 }
 
 pub fn window_from_ext<'a, W: Window + 'static, D>(
