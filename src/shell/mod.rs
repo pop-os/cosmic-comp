@@ -262,6 +262,7 @@ pub struct PendingLayer {
 pub struct Shell {
     pub workspaces: Workspaces,
 
+    // Can't make this into a HashSet. See https://github.com/pop-os/cosmic-comp/pull/1902
     pub pending_windows: Vec<PendingWindow>,
     pub pending_layers: Vec<PendingLayer>,
     pub pending_activations: HashMap<ActivationKey, ActivationContext>,
