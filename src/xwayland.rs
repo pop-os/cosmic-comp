@@ -806,7 +806,8 @@ impl XwmHandler for State {
         }
 
         let seat = shell.seats.last_active().clone();
-        if let Some(context) = window.startup_id()
+        if let Some(context) = window
+            .startup_id()
             .map(XdgActivationToken::from)
             .and_then(|token| self.common.xdg_activation_state.data_for_token(&token))
             .and_then(|data| data.user_data.get::<ActivationContext>())
