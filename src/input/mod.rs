@@ -58,6 +58,7 @@ use smithay::{
     output::Output,
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
+        winit::dpi::Position,
     },
     utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
@@ -357,14 +358,46 @@ impl State {
                         .unwrap_or(current_output.clone());
 
                     let output_geometry = output.geometry();
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        (output_geometry.loc.x + output_geometry.size.w - 1) as f64,
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        (output_geometry.loc.y + output_geometry.size.h - 1) as f64,
-                    );
+
+                    let max_x = (output_geometry.loc.x + output_geometry.size.w) as f64;
+                    let clamp_x = if position.x >= max_x - 1.0
+                        && shell
+                            .outputs()
+                            .find(|output| {
+                                output
+                                    .geometry()
+                                    .to_f64()
+                                    .contains(Point::new(max_x + 1.0, position.y))
+                            })
+                            .is_some()
+                    {
+                        0.0
+                    } else {
+                        1.0
+                    };
+                    position.x = position
+                        .x
+                        .clamp(output_geometry.loc.x as f64, max_x - clamp_x);
+
+                    let max_y = (output_geometry.loc.y + output_geometry.size.h) as f64;
+                    let clamp_y = if position.y >= max_y - 1.0
+                        && shell
+                            .outputs()
+                            .find(|output| {
+                                output
+                                    .geometry()
+                                    .to_f64()
+                                    .contains(Point::new(position.x, max_y + 1.0))
+                            })
+                            .is_some()
+                    {
+                        0.0
+                    } else {
+                        1.0
+                    };
+                    position.y = position
+                        .y
+                        .clamp(output_geometry.loc.y as f64, max_y - clamp_y);
 
                     let new_under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
