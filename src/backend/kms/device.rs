@@ -120,6 +120,7 @@ pub struct InnerDevice {
     pub leasing_global: Option<DrmLeaseState>,
     pub active_leases: Vec<DrmLease>,
     pub active_clients: HashSet<ClientId>,
+    pub suspended_connectors: HashSet<connector::Handle>,
 }
 
 impl fmt::Debug for InnerDevice {
@@ -136,6 +137,7 @@ impl fmt::Debug for InnerDevice {
             .field("leasing_global", &self.leasing_global)
             .field("active_leases", &self.active_leases)
             .field("active_clients", &self.active_clients.len())
+            .field("suspended_connectors", &self.suspended_connectors)
             .finish()
     }
 }
@@ -347,6 +349,7 @@ impl State {
                 leasing_global,
                 active_leases: Vec::new(),
                 active_clients: HashSet::new(),
+                suspended_connectors: HashSet::new(),
             },
 
             supports_atomic,
@@ -405,7 +408,7 @@ impl State {
         }
 
         let drm_node = DrmNode::from_dev_id(dev)?;
-        let mut outputs_removed = Vec::new();
+        let outputs_removed = Vec::<Output>::new();
         let mut outputs_added = Vec::new();
 
         {
@@ -415,6 +418,11 @@ impl State {
 
                 let mut w = self.common.shell.read().global_space().size.w as u32;
                 for conn in changes.removed {
+                    // Skip already-suspended connectors (repeated udev events)
+                    if device.inner.suspended_connectors.contains(&conn) {
+                        continue;
+                    }
+
                     // contains conns with updated crtcs, just drop the surface and re-create
                     if let Some(pos) = device
                         .inner
@@ -437,17 +445,17 @@ impl State {
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
-                        outputs_removed.push(
-                            device
-                                .inner
-                                .outputs
-                                .remove(&conn)
-                                .expect("Connector without output?"),
-                        );
+                        // Keep the Output alive — mark connector as suspended instead of
+                        // removing. The wl_output global, workspace assignments, and client
+                        // bindings all survive. When the connector reappears,
+                        // connector_added() will find the existing Output and create a new
+                        // Surface for it.
+                        device.inner.suspended_connectors.insert(conn);
                     }
                 }
 
                 for (conn, maybe_crtc) in changes.added {
+                    device.inner.suspended_connectors.remove(&conn);
                     match device.inner.connector_added(
                         device.drm.device_mut(),
                         backend.primary_node.clone(),
@@ -509,6 +517,12 @@ impl State {
             for (_, surface) in device.inner.surfaces.drain() {
                 outputs_removed.push(surface.output.clone());
                 surface.drop_and_join();
+            }
+            // Clean up outputs for suspended connectors (no Surface to drain)
+            for conn in device.inner.suspended_connectors.drain() {
+                if let Some(output) = device.inner.outputs.remove(&conn) {
+                    outputs_removed.push(output);
+                }
             }
             if let Some(token) = device.event_token.take() {
                 self.common.event_loop_handle.remove(token);
@@ -607,7 +621,9 @@ impl Device {
                 // see `removed`
                 (Some(_), None) => true,
                 // if we already know about it, we don't consider it added
-                (None, _) => !self.inner.outputs.contains_key(conn),
+                // ...unless it's suspended (connector reconnected, needs new Surface)
+                (None, _) => !self.inner.outputs.contains_key(conn)
+                    || self.inner.suspended_connectors.contains(conn),
             })
             .map(|(conn, crtc)| (*conn, *crtc))
             .collect::<Vec<_>>();
@@ -616,6 +632,7 @@ impl Device {
             .inner
             .outputs
             .iter()
+            .filter(|(conn, _)| !self.inner.suspended_connectors.contains(conn))
             .filter(|(conn, _)| match config.get(conn) {
                 Some(Some(c)) => surfaces.get(conn).is_some_and(|crtc| c != crtc),
                 // if don't have a crtc, we need to drop the surface if it exists.
