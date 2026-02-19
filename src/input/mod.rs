@@ -374,6 +374,24 @@ impl State {
                     {
                         position.x = position.x.clamp(min_x, max_x - 1.0);
                     } else {
+                        if let Some(right_output) = shell
+                            .outputs()
+                            .find(|o| {
+                                *o != &output
+                                    && o.geometry()
+                                        .to_f64()
+                                        .contains(Point::new(max_x, position.y))
+                            })
+                            .cloned()
+                        {
+                            warn!(
+                                "DEV JODESOUS : Output right {}, min_x = {}, max_x = {}, position_x = {}",
+                                right_output.name(),
+                                min_x,
+                                max_x,
+                                position.x
+                            );
+                        }
                         position.x = position.x.clamp(min_x, max_x);
                     };
 
