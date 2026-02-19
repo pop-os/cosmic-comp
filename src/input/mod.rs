@@ -360,8 +360,8 @@ impl State {
                     let output_geometry = output.geometry();
 
                     let max_x = (output_geometry.loc.x + output_geometry.size.w) as f64;
-                    let clamp_x = if position.x >= max_x - 1.0
-                        && shell
+                    if position.x < max_x - 1.0
+                        || shell
                             .outputs()
                             .find(|output| {
                                 output
@@ -369,19 +369,16 @@ impl State {
                                     .to_f64()
                                     .contains(Point::new(max_x + 1.0, position.y))
                             })
-                            .is_some()
+                            .is_none()
                     {
-                        0.0
+                        position.x = position.x.clamp(output_geometry.loc.x as f64, max_x - 1.0);
                     } else {
-                        1.0
+                        position.x = position.x.clamp(output_geometry.loc.x as f64, max_x);
                     };
-                    position.x = position
-                        .x
-                        .clamp(output_geometry.loc.x as f64, max_x - clamp_x);
 
                     let max_y = (output_geometry.loc.y + output_geometry.size.h) as f64;
-                    let clamp_y = if position.y >= max_y - 1.0
-                        && shell
+                    if position.y < max_y - 1.0
+                        || shell
                             .outputs()
                             .find(|output| {
                                 output
@@ -389,15 +386,12 @@ impl State {
                                     .to_f64()
                                     .contains(Point::new(position.x, max_y + 1.0))
                             })
-                            .is_some()
+                            .is_none()
                     {
-                        0.0
+                        position.y = position.y.clamp(output_geometry.loc.y as f64, max_y - 1.0);
                     } else {
-                        1.0
+                        position.y = position.y.clamp(output_geometry.loc.y as f64, max_y);
                     };
-                    position.y = position
-                        .y
-                        .clamp(output_geometry.loc.y as f64, max_y - clamp_y);
 
                     let new_under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
