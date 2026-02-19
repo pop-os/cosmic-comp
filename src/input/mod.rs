@@ -359,38 +359,40 @@ impl State {
 
                     let output_geometry = output.geometry();
 
-                    let max_x = (output_geometry.loc.x + output_geometry.size.w) as f64;
+                    let min_x = output_geometry.loc.x as f64;
+                    let max_x = min_x + output_geometry.size.w as f64;
                     if position.x < max_x - 1.0
                         || shell
                             .outputs()
-                            .find(|output| {
-                                output
-                                    .geometry()
-                                    .to_f64()
-                                    .contains(Point::new(max_x + 1.0, position.y))
+                            .find(|o| {
+                                *o != &output
+                                    && o.geometry()
+                                        .to_f64()
+                                        .contains(Point::new(max_x, position.y))
                             })
                             .is_none()
                     {
-                        position.x = position.x.clamp(output_geometry.loc.x as f64, max_x - 1.0);
+                        position.x = position.x.clamp(min_x, max_x - 1.0);
                     } else {
-                        position.x = position.x.clamp(output_geometry.loc.x as f64, max_x);
+                        position.x = position.x.clamp(min_x, max_x);
                     };
 
-                    let max_y = (output_geometry.loc.y + output_geometry.size.h) as f64;
+                    let min_y = output_geometry.loc.y as f64;
+                    let max_y = min_y + output_geometry.size.h as f64;
                     if position.y < max_y - 1.0
                         || shell
                             .outputs()
-                            .find(|output| {
-                                output
-                                    .geometry()
-                                    .to_f64()
-                                    .contains(Point::new(position.x, max_y + 1.0))
+                            .find(|o| {
+                                *o != &output
+                                    && o.geometry()
+                                        .to_f64()
+                                        .contains(Point::new(position.x, max_y))
                             })
                             .is_none()
                     {
-                        position.y = position.y.clamp(output_geometry.loc.y as f64, max_y - 1.0);
+                        position.y = position.y.clamp(min_y, max_y - 1.0);
                     } else {
-                        position.y = position.y.clamp(output_geometry.loc.y as f64, max_y);
+                        position.y = position.y.clamp(min_y, max_y);
                     };
 
                     let new_under = State::surface_under(position, &output, &shell)
