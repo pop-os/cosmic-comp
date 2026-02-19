@@ -15,7 +15,7 @@ use smithay::{
     },
     desktop::space::SpaceElement,
     output::Output,
-    reexports::wayland_server::protocol::wl_shm::Format as ShmFormat,
+    reexports::wayland_server::protocol::{wl_pointer::WlPointer, wl_shm::Format as ShmFormat},
     utils::{Buffer as BufferCoords, Point, Size, Transform},
     wayland::{
         dmabuf::get_dmabuf,
@@ -69,6 +69,7 @@ impl ImageCopyCaptureHandler for State {
     fn cursor_capture_constraints(
         &mut self,
         _source: &ImageCaptureSource,
+        _pointer: &WlPointer,
     ) -> Option<BufferConstraints> {
         let size = if let Some((geometry, _)) = self
             .common
