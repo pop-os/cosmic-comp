@@ -58,6 +58,7 @@ use smithay::{
     output::Output,
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
+        winit::dpi::Position,
     },
     utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
@@ -357,14 +358,60 @@ impl State {
                         .unwrap_or(current_output.clone());
 
                     let output_geometry = output.geometry();
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        (output_geometry.loc.x + output_geometry.size.w - 1) as f64,
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        (output_geometry.loc.y + output_geometry.size.h - 1) as f64,
-                    );
+
+                    let min_x = output_geometry.loc.x as f64;
+                    let max_x = min_x + output_geometry.size.w as f64;
+                    if position.x < max_x - 1.0
+                        || shell
+                            .outputs()
+                            .find(|o| {
+                                *o != &output
+                                    && o.geometry()
+                                        .to_f64()
+                                        .contains(Point::new(max_x, position.y))
+                            })
+                            .is_none()
+                    {
+                        position.x = position.x.clamp(min_x, max_x - 1.0);
+                    } else {
+                        if let Some(right_output) = shell
+                            .outputs()
+                            .find(|o| {
+                                *o != &output
+                                    && o.geometry()
+                                        .to_f64()
+                                        .contains(Point::new(max_x, position.y))
+                            })
+                            .cloned()
+                        {
+                            warn!(
+                                "DEV JODESOUS : Output right {}, min_x = {}, max_x = {}, position_x = {}",
+                                right_output.name(),
+                                min_x,
+                                max_x,
+                                position.x
+                            );
+                        }
+                        position.x = position.x.clamp(min_x, max_x);
+                    };
+
+                    let min_y = output_geometry.loc.y as f64;
+                    let max_y = min_y + output_geometry.size.h as f64;
+                    if position.y < max_y - 1.0
+                        || shell
+                            .outputs()
+                            .find(|o| {
+                                *o != &output
+                                    && o.geometry()
+                                        .to_f64()
+                                        .contains(Point::new(position.x, max_y))
+                            })
+                            .is_none()
+                    {
+                        position.y = position.y.clamp(min_y, max_y - 1.0);
+                    } else {
+                        position.y = position.y.clamp(min_y, max_y);
+                    };
 
                     let new_under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
