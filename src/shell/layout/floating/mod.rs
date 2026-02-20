@@ -6,6 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
@@ -59,6 +60,7 @@ pub struct FloatingLayout {
     hovered_stack: Option<(CosmicMapped, Rectangle<i32, Local>)>,
     dirty: AtomicBool,
     pub theme: cosmic::Theme,
+    pub appearance: AppearanceConfig,
 }
 
 #[derive(Debug)]
@@ -263,10 +265,15 @@ impl TiledCorners {
 }
 
 impl FloatingLayout {
-    pub fn new(theme: cosmic::Theme, output: &Output) -> FloatingLayout {
+    pub fn new(
+        theme: cosmic::Theme,
+        appearance: AppearanceConfig,
+        output: &Output,
+    ) -> FloatingLayout {
         let mut layout = Self {
             theme,
             last_output_size: output.geometry().size.as_local(),
+            appearance,
             ..Default::default()
         };
         layout.space.map_output(output, (0, 0));
@@ -679,8 +686,10 @@ impl FloatingLayout {
                 mapped_geometry.size = last_size;
             }
         } else if !window.is_maximized(true) {
-            if let Some(pending_size) = window.pending_size() {
-                mapped_geometry.size = pending_size.as_local();
+            if window.active_window().has_pending_changes() {
+                if let Some(pending_size) = window.pending_size() {
+                    mapped_geometry.size = pending_size.as_local();
+                }
             }
             *window.last_geometry.lock().unwrap() = Some(mapped_geometry);
         }
@@ -1012,7 +1021,11 @@ impl FloatingLayout {
         if mapped.is_window() {
             // if it is just a window
             self.space.unmap_elem(&mapped);
-            mapped.convert_to_stack((&output, mapped.bbox()), self.theme.clone());
+            mapped.convert_to_stack(
+                (&output, mapped.bbox()),
+                self.theme.clone(),
+                self.appearance,
+            );
             self.map_internal(
                 mapped.clone(),
                 Some(location.as_local()),
@@ -1029,7 +1042,12 @@ impl FloatingLayout {
 
             self.space.unmap_elem(&mapped);
             let handle = mapped.loop_handle();
-            mapped.convert_to_surface(first, (&output, mapped.bbox()), self.theme.clone());
+            mapped.convert_to_surface(
+                first,
+                (&output, mapped.bbox()),
+                self.theme.clone(),
+                self.appearance,
+            );
             let mut new_elements = vec![mapped.clone()];
 
             // map the rest
@@ -1041,6 +1059,7 @@ impl FloatingLayout {
                     other,
                     handle.clone(),
                     self.theme.clone(),
+                    self.appearance,
                 ));
                 window.output_enter(&output, window.bbox());
 
@@ -1092,7 +1111,7 @@ impl FloatingLayout {
             StackMoveResult::Handled => MoveResult::Done,
             StackMoveResult::MoveOut(surface, loop_handle) => {
                 let mapped: CosmicMapped =
-                    CosmicWindow::new(surface, loop_handle, theme.clone()).into();
+                    CosmicWindow::new(surface, loop_handle, theme.clone(), self.appearance).into();
                 let output = seat.active_output();
                 let pos = self.space.element_geometry(element).unwrap().loc
                     + match direction {
@@ -1487,9 +1506,22 @@ impl FloatingLayout {
                 render_location
                     .as_logical()
                     .to_physical_precise_round(output_scale),
+                None,
                 output_scale.into(),
                 alpha,
                 None,
+            );
+            window_elements.extend(
+                elem.shadow_render_element(
+                    renderer,
+                    render_location
+                        .as_logical()
+                        .to_physical_precise_round(output_scale),
+                    None,
+                    output_scale.into(),
+                    1.,
+                    alpha,
+                ),
             );
 
             if let Some(anim) = self.animations.get(elem) {
@@ -1592,6 +1624,7 @@ impl FloatingLayout {
                         indicator_thickness,
                         radius,
                         alpha,
+                        output_scale,
                         [
                             active_window_hint.red,
                             active_window_hint.green,

@@ -13,16 +13,15 @@ use crate::{
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
     wayland::{
-        handlers::{data_device::get_dnd_icon, screencopy::SessionHolder},
+        handlers::{data_device::get_dnd_icon, image_copy_capture::SessionHolder},
         protocols::{
             a11y::A11yState,
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
-            image_capture_source::ImageCaptureSourceState,
+            image_capture_source::CosmicImageCaptureSourceState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
-            screencopy::ScreencopyState,
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
             workspace::{WorkspaceState, WorkspaceUpdateGuard},
@@ -77,9 +76,12 @@ use smithay::{
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
+        fixes::FixesState,
         fractional_scale::{FractionalScaleManagerState, with_fractional_scale},
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
+        image_capture_source::{OutputCaptureSourceState, ToplevelCaptureSourceState},
+        image_copy_capture::ImageCopyCaptureState,
         input_method::InputMethodManagerState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
@@ -114,6 +116,7 @@ use smithay::{
     xwayland::XWaylandClientData,
 };
 use time::UtcOffset;
+use tracing::warn;
 
 #[cfg(feature = "systemd")]
 use std::os::fd::OwnedFd;
@@ -149,9 +152,12 @@ macro_rules! fl {
 pub struct ClientState {
     pub compositor_client_state: CompositorClientState,
     pub advertised_drm_node: Option<DrmNode>,
+    pub evlh: LoopHandle<'static, State>,
     pub evls: LoopSignal,
     pub security_context: Option<SecurityContext>,
 }
+unsafe impl Send for ClientState {}
+unsafe impl Sync for ClientState {}
 
 impl ClientState {
     /// We treat a client as "sandboxed" if it has a security context for any sandbox engine
@@ -167,7 +173,23 @@ impl ClientState {
 
 impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
-    fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {
+    fn disconnected(&self, client_id: ClientId, _reason: DisconnectReason) {
+        self.evlh.insert_idle(move |state| {
+            if let BackendData::Kms(kms_state) = &mut state.backend {
+                for device in kms_state.drm_devices.values_mut() {
+                    if device.inner.active_clients.remove(&client_id)
+                        && !device
+                            .inner
+                            .in_use(kms_state.primary_node.read().unwrap().as_ref())
+                    {
+                        if let Err(err) = kms_state.refresh_used_devices() {
+                            warn!(?err, "Failed to init devices.");
+                        };
+                        break;
+                    }
+                }
+            }
+        });
         self.evls.wakeup();
     }
 }
@@ -240,8 +262,10 @@ pub struct Common {
     pub primary_selection_state: PrimarySelectionState,
     pub ext_data_control_state: ExtDataControlState,
     pub wlr_data_control_state: WlrDataControlState,
-    pub image_capture_source_state: ImageCaptureSourceState,
-    pub screencopy_state: ScreencopyState,
+    pub cosmic_image_capture_source_state: CosmicImageCaptureSourceState,
+    pub output_capture_source_state: OutputCaptureSourceState,
+    pub toplevel_capture_source_state: ToplevelCaptureSourceState,
+    pub image_copy_capture_state: ImageCopyCaptureState,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
     pub idle_notifier_state: IdleNotifierState<State>,
@@ -293,8 +317,8 @@ pub enum LockedBackend<'a> {
 #[derive(Debug, Clone)]
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
-    pub scanout_feedback: DmabufFeedback,
-    pub primary_scanout_feedback: DmabufFeedback,
+    pub overlay_scanout_feedback: Option<DmabufFeedback>,
+    pub primary_scanout_feedback: Option<DmabufFeedback>,
 }
 
 #[derive(Debug)]
@@ -559,7 +583,7 @@ impl LockedBackend<'_> {
 
         loop_handle.insert_idle(move |state| {
             state.update_inhibitor_locks();
-            state.common.update_xwayland_scale();
+            state.common.update_xwayland_settings();
             state.common.update_xwayland_primary_output();
         });
 
@@ -625,9 +649,14 @@ impl State {
             OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
-        let image_capture_source_state =
-            ImageCaptureSourceState::new::<Self, _>(dh, client_not_sandboxed);
-        let screencopy_state = ScreencopyState::new::<Self, _>(dh, client_not_sandboxed);
+        let cosmic_image_capture_source_state =
+            CosmicImageCaptureSourceState::new::<Self, _>(dh, client_not_sandboxed);
+        let output_capture_source_state =
+            OutputCaptureSourceState::new_with_filter::<State, _>(&dh, client_not_sandboxed);
+        let toplevel_capture_source_state =
+            ToplevelCaptureSourceState::new_with_filter::<State, _>(&dh, client_not_sandboxed);
+        let image_copy_capture_state =
+            ImageCopyCaptureState::new_with_filter::<Self, _>(dh, client_not_sandboxed);
         let shm_state =
             ShmState::new::<Self>(dh, vec![wl_shm::Format::Xbgr8888, wl_shm::Format::Abgr8888]);
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
@@ -649,6 +678,7 @@ impl State {
         VirtualKeyboardManagerState::new::<State, _>(dh, client_not_sandboxed);
         AlphaModifierState::new::<Self>(dh);
         SinglePixelBufferState::new::<Self>(dh);
+        FixesState::new::<Self>(&dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
@@ -734,8 +764,10 @@ impl State {
                 idle_notifier_state,
                 idle_inhibit_manager_state,
                 idle_inhibiting_surfaces,
-                image_capture_source_state,
-                screencopy_state,
+                cosmic_image_capture_source_state,
+                output_capture_source_state,
+                toplevel_capture_source_state,
+                image_copy_capture_state,
                 shm_state,
                 cursor_shape_manager_state,
                 seat_state,
@@ -783,6 +815,7 @@ impl State {
                 BackendData::Kms(kms_state) => *kms_state.primary_node.read().unwrap(),
                 _ => None,
             },
+            evlh: self.common.event_loop_handle.clone(),
             evls: self.common.event_loop_signal.clone(),
             security_context: None,
         }
@@ -1014,7 +1047,10 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.primary_scanout_feedback,
+                                feedback
+                                    .primary_scanout_feedback
+                                    .as_ref()
+                                    .unwrap_or(&feedback.render_feedback),
                             )
                         },
                     )
@@ -1043,7 +1079,10 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.scanout_feedback,
+                                feedback
+                                    .overlay_scanout_feedback
+                                    .as_ref()
+                                    .unwrap_or(&feedback.render_feedback),
                             )
                         },
                     );
@@ -1064,7 +1103,10 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.scanout_feedback,
+                                feedback
+                                    .overlay_scanout_feedback
+                                    .as_ref()
+                                    .unwrap_or(&feedback.render_feedback),
                             )
                         },
                     );
@@ -1171,7 +1213,10 @@ impl Common {
                                 surface,
                                 render_element_states,
                                 &feedback.render_feedback,
-                                &feedback.scanout_feedback,
+                                feedback
+                                    .overlay_scanout_feedback
+                                    .as_ref()
+                                    .unwrap_or(&feedback.render_feedback),
                             )
                         },
                     )
@@ -1193,7 +1238,10 @@ impl Common {
                             surface,
                             render_element_states,
                             &feedback.render_feedback,
-                            &feedback.scanout_feedback,
+                            feedback
+                                .overlay_scanout_feedback
+                                .as_ref()
+                                .unwrap_or(&feedback.render_feedback),
                         )
                     },
                 );

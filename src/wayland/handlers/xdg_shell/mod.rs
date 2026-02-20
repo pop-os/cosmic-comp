@@ -44,13 +44,21 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
-        let window = CosmicSurface::from(surface);
-        shell.pending_windows.push(PendingWindow {
-            surface: window,
-            seat,
-            fullscreen: None,
-            maximized: false,
-        });
+
+        if shell
+            .pending_windows
+            .iter()
+            .find(|w| &w.surface == &surface)
+            .is_none()
+        {
+            let surface = CosmicSurface::from(surface);
+            shell.pending_windows.push(PendingWindow {
+                surface,
+                seat,
+                fullscreen: None,
+                maximized: false,
+            })
+        }
         // We will position the window after the first commit, when we know its size hints
     }
 
@@ -164,12 +172,6 @@ impl XdgShellHandler for State {
 
         self.common.shell.read().unconstrain_popup(&surface);
         surface.send_repositioned(token);
-        if let Err(err) = surface.send_configure() {
-            warn!(
-                ?err,
-                "Client bug: Unable to re-configure repositioned popup.",
-            );
-        }
     }
 
     fn move_request(&mut self, surface: ToplevelSurface, seat: WlSeat, serial: Serial) {
@@ -321,7 +323,7 @@ impl XdgShellHandler for State {
             let output = shell
                 .visible_output_for_surface(surface.wl_surface())
                 .cloned();
-            shell.unmap_surface(
+            let _ = shell.unmap_surface(
                 surface.wl_surface(),
                 &seat,
                 &mut self.common.toplevel_info_state,
