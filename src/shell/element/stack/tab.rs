@@ -9,14 +9,13 @@ use cosmic::{
         Border, Clipboard, Color, Length, Rectangle, Shell, Size, alignment, event,
         layout::{Layout, Limits, Node},
         mouse, overlay, renderer,
+        text::{Ellipsize, EllipsizeHeightLimit, Shaping, Wrapping},
         widget::{Id, Widget, operation::Operation, tree::Tree},
     },
     iced_widget::scrollable::AbsoluteOffset,
     theme,
     widget::{Icon, icon::from_name},
 };
-
-use super::tab_text::tab_text;
 
 #[derive(Clone, Copy)]
 pub(super) enum TabRuleTheme {
@@ -194,9 +193,13 @@ impl<Message: TabMessage + 'static> Tab<Message> {
                 .padding([2, 4])
                 .center_y(Length::Fill)
                 .into(),
-            tab_text(self.title, self.active)
+            cosmic::widget::text(self.title)
                 .font(self.font)
-                .font_size(14.0)
+                .size(14.0)
+                .wrapping(Wrapping::None)
+                .shaping(Shaping::Advanced)
+                .ellipsize(Ellipsize::End(EllipsizeHeightLimit::Lines(1)))
+                .align_y(alignment::Vertical::Center)
                 .height(Length::Fill)
                 .width(Length::Fill)
                 .into(),

@@ -81,7 +81,6 @@ use std::{
 };
 
 mod tab;
-mod tab_text;
 mod tabs;
 
 use self::{
