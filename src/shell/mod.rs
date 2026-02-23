@@ -4687,6 +4687,9 @@ impl Shell {
                 stack.remove_window(&surface);
                 surface
             } else {
+                // Must be set before `map_internal`/`unmap` below, as both may call
+                // intermediate `configure()`, which would send a configure event without the
+                // fullscreen state, causing clients like Chromium to cancel the transition.
                 mapped.set_fullscreen(true);
 
                 if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
@@ -4731,6 +4734,9 @@ impl Shell {
                 return None;
             }
 
+            // Must be set before `unmap_surface()`.
+            // `Workspace::unmap_surface` may call intermediate `configure()` internally, which would send
+            // a configure event without the fullscreen state, causing clients like Chromium to cancel the transition.
             mapped.set_fullscreen(true);
 
             let from = workspace.element_geometry(&mapped).unwrap();
