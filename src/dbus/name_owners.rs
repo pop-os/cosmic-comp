@@ -156,7 +156,7 @@ impl NameOwners {
         } else {
             allowed_names
                 .iter()
-                .any(|n| inner.name_owners.get(n).map(|x| x.as_ref()).flatten() == Some(name))
+                .any(|n| inner.name_owners.get(n).and_then(|x| x.as_ref()) == Some(name))
         }
     }
 

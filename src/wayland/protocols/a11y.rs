@@ -204,10 +204,10 @@ where
                     state.request_screen_invert(inverted);
                 }
 
-                if let Ok(filter) = filter {
-                    if filter != state.a11y_state().screen_filter {
-                        state.request_screen_filter(filter);
-                    }
+                if let Ok(filter) = filter
+                    && filter != state.a11y_state().screen_filter
+                {
+                    state.request_screen_filter(filter);
                 }
             }
             _ => unreachable!(),

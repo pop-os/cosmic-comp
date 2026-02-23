@@ -63,18 +63,18 @@ impl<G: PointerGrab<State>> PointerGrab<State> for DelayGrab<G> {
         handle.motion(data, focus, event);
 
         let distance = self.start_data.distance(event.location);
-        if distance >= 1. {
-            if let Some(factory) = self.grab_factory.take() {
-                let serial = self.serial.unwrap_or(event.serial);
-                let seat = self.seat.clone();
-                data.common.event_loop_handle.insert_idle(move |data| {
-                    if let Some((grab, focus)) = factory(data) {
-                        seat.get_pointer()
-                            .unwrap()
-                            .set_grab(data, grab, serial, focus);
-                    }
-                });
-            }
+        if distance >= 1.
+            && let Some(factory) = self.grab_factory.take()
+        {
+            let serial = self.serial.unwrap_or(event.serial);
+            let seat = self.seat.clone();
+            data.common.event_loop_handle.insert_idle(move |data| {
+                if let Some((grab, focus)) = factory(data) {
+                    seat.get_pointer()
+                        .unwrap()
+                        .set_grab(data, grab, serial, focus);
+                }
+            });
         }
     }
 
@@ -232,16 +232,16 @@ impl<G: TouchGrab<State>> TouchGrab<State> for DelayGrab<G> {
         handle.motion(data, focus, event, seq);
 
         let distance = self.start_data.distance(event.location);
-        if distance >= 1. {
-            if let Some(factory) = self.grab_factory.take() {
-                let seat = self.seat.clone();
-                let serial = self.serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial());
-                data.common.event_loop_handle.insert_idle(move |data| {
-                    if let Some((grab, _)) = factory(data) {
-                        seat.get_touch().unwrap().set_grab(data, grab, serial);
-                    }
-                });
-            }
+        if distance >= 1.
+            && let Some(factory) = self.grab_factory.take()
+        {
+            let seat = self.seat.clone();
+            let serial = self.serial.unwrap_or_else(|| SERIAL_COUNTER.next_serial());
+            data.common.event_loop_handle.insert_idle(move |data| {
+                if let Some((grab, _)) = factory(data) {
+                    seat.get_touch().unwrap().set_grab(data, grab, serial);
+                }
+            });
         }
     }
 

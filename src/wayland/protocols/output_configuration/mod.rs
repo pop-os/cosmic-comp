@@ -428,15 +428,13 @@ where
             }
         } else {
             None
-        } {
-            if inner.enabled
-                && output
-                    .current_mode()
-                    .map(|c| c == output_mode)
-                    .unwrap_or(false)
-            {
-                instance.obj.current_mode(mode);
-            }
+        } && inner.enabled
+            && output
+                .current_mode()
+                .map(|c| c == output_mode)
+                .unwrap_or(false)
+        {
+            instance.obj.current_mode(mode);
         }
     }
 
@@ -513,12 +511,11 @@ where
         }
     }
 
-    if let Some(extension_obj) = instance.extension_obj.as_ref() {
-        if inner.enabled
-            && extension_obj.version() >= zcosmic_output_head_v1::EVT_XWAYLAND_PRIMARY_SINCE
-        {
-            extension_obj.xwayland_primary(output.config().xwayland_primary as u32);
-        }
+    if let Some(extension_obj) = instance.extension_obj.as_ref()
+        && inner.enabled
+        && extension_obj.version() >= zcosmic_output_head_v1::EVT_XWAYLAND_PRIMARY_SINCE
+    {
+        extension_obj.xwayland_primary(output.config().xwayland_primary as u32);
     }
 }
 

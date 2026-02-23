@@ -85,8 +85,8 @@ where
         };
 
         let buf_translation = Matrix3::from_translation(Vector2::new(
-            (view.src.loc.x as f64 / buf_size.w as f64) as f32,
-            (view.src.loc.y as f64 / buf_size.h as f64) as f32,
+            (view.src.loc.x / buf_size.w as f64) as f32,
+            (view.src.loc.y / buf_size.h as f64) as f32,
         ));
 
         let input_to_geo =

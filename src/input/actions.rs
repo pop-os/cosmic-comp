@@ -188,16 +188,15 @@ impl State {
             }
 
             Action::NextWorkspace => {
-                if let Some(direction) = pattern.inferred_direction() {
-                    if ((direction == Direction::Left || direction == Direction::Right)
+                if let Some(direction) = pattern.inferred_direction()
+                    && (((direction == Direction::Left || direction == Direction::Right)
                         && self.common.config.cosmic_conf.workspaces.workspace_layout
                             == WorkspaceLayout::Vertical)
                         || ((direction == Direction::Up || direction == Direction::Down)
                             && self.common.config.cosmic_conf.workspaces.workspace_layout
-                                == WorkspaceLayout::Horizontal)
-                    {
-                        return;
-                    }
+                                == WorkspaceLayout::Horizontal))
+                {
+                    return;
                 }
 
                 let next = to_next_workspace(
@@ -234,16 +233,15 @@ impl State {
             }
 
             Action::PreviousWorkspace => {
-                if let Some(direction) = pattern.inferred_direction() {
-                    if ((direction == Direction::Left || direction == Direction::Right)
+                if let Some(direction) = pattern.inferred_direction()
+                    && (((direction == Direction::Left || direction == Direction::Right)
                         && self.common.config.cosmic_conf.workspaces.workspace_layout
                             == WorkspaceLayout::Vertical)
                         || ((direction == Direction::Up || direction == Direction::Down)
                             && self.common.config.cosmic_conf.workspaces.workspace_layout
-                                == WorkspaceLayout::Horizontal)
-                    {
-                        return;
-                    }
+                                == WorkspaceLayout::Horizontal))
+                {
+                    return;
                 }
 
                 let previous = to_previous_workspace(
@@ -336,16 +334,15 @@ impl State {
             }
 
             x @ Action::MoveToNextWorkspace | x @ Action::SendToNextWorkspace => {
-                if let Some(direction) = pattern.inferred_direction() {
-                    if ((direction == Direction::Left || direction == Direction::Right)
+                if let Some(direction) = pattern.inferred_direction()
+                    && (((direction == Direction::Left || direction == Direction::Right)
                         && self.common.config.cosmic_conf.workspaces.workspace_layout
                             == WorkspaceLayout::Vertical)
                         || ((direction == Direction::Up || direction == Direction::Down)
                             && self.common.config.cosmic_conf.workspaces.workspace_layout
-                                == WorkspaceLayout::Horizontal)
-                    {
-                        return;
-                    }
+                                == WorkspaceLayout::Horizontal))
+                {
+                    return;
                 }
                 let Some(focused_output) = seat.focused_output() else {
                     return;
@@ -420,16 +417,15 @@ impl State {
             }
 
             x @ Action::MoveToPreviousWorkspace | x @ Action::SendToPreviousWorkspace => {
-                if let Some(direction) = pattern.inferred_direction() {
-                    if ((direction == Direction::Left || direction == Direction::Right)
+                if let Some(direction) = pattern.inferred_direction()
+                    && (((direction == Direction::Left || direction == Direction::Right)
                         && self.common.config.cosmic_conf.workspaces.workspace_layout
                             == WorkspaceLayout::Vertical)
                         || ((direction == Direction::Up || direction == Direction::Down)
                             && self.common.config.cosmic_conf.workspaces.workspace_layout
-                                == WorkspaceLayout::Horizontal)
-                    {
-                        return;
-                    }
+                                == WorkspaceLayout::Horizontal))
+                {
+                    return;
                 }
                 let Some(focused_output) = seat.focused_output() else {
                     return;
@@ -511,21 +507,18 @@ impl State {
                 if let Some(next_output) = next_output {
                     let res = {
                         let mut workspace_guard = self.common.workspace_state.update();
-                        if propagate {
-                            if let Some((serial, prev_output, prev_idx)) =
+                        if propagate
+                            && let Some((serial, prev_output, prev_idx)) =
                                 shell.previous_workspace_idx.take()
-                            {
-                                if seat.last_modifier_change().is_some_and(|s| s == serial)
-                                    && prev_output == current_output
-                                {
-                                    let _ = shell.activate(
-                                        &current_output,
-                                        prev_idx,
-                                        WorkspaceDelta::new_shortcut(),
-                                        &mut workspace_guard,
-                                    );
-                                }
-                            }
+                            && seat.last_modifier_change().is_some_and(|s| s == serial)
+                            && prev_output == current_output
+                        {
+                            let _ = shell.activate(
+                                &current_output,
+                                prev_idx,
+                                WorkspaceDelta::new_shortcut(),
+                                &mut workspace_guard,
+                            );
                         }
 
                         let idx = shell.workspaces.active_num(&next_output).1;
@@ -607,19 +600,18 @@ impl State {
                             &self.common.event_loop_handle,
                         );
 
-                        if is_move_action && propagate {
-                            if let Some((_, prev_output, prev_idx)) =
+                        if is_move_action
+                            && propagate
+                            && let Some((_, prev_output, prev_idx)) =
                                 shell.previous_workspace_idx.take()
-                            {
-                                if prev_output == focused_output {
-                                    let _ = shell.activate(
-                                        &focused_output,
-                                        prev_idx,
-                                        WorkspaceDelta::new_shortcut(),
-                                        &mut workspace_guard,
-                                    );
-                                }
-                            }
+                            && prev_output == focused_output
+                        {
+                            let _ = shell.activate(
+                                &focused_output,
+                                prev_idx,
+                                WorkspaceDelta::new_shortcut(),
+                                &mut workspace_guard,
+                            );
                         }
                         res
                     };
@@ -837,13 +829,12 @@ impl State {
                         let workspace = shell.active_space(&current_output).unwrap();
                         if let Some(FocusTarget::Window(focused_window)) =
                             workspace.focus_stack.get(seat).last()
+                            && workspace.is_tiled(&focused_window.active_window())
                         {
-                            if workspace.is_tiled(&focused_window.active_window()) {
-                                shell.set_overview_mode(
-                                    Some(Trigger::KeyboardMove(pattern.modifiers)),
-                                    self.common.event_loop_handle.clone(),
-                                );
-                            }
+                            shell.set_overview_mode(
+                                Some(Trigger::KeyboardMove(pattern.modifiers)),
+                                self.common.event_loop_handle.clone(),
+                            );
                         }
                     }
                 }
@@ -858,17 +849,17 @@ impl State {
                 let workspace = shell.active_space_mut(&focused_output).unwrap();
                 let keyboard_handle = seat.get_keyboard().unwrap();
 
-                if let Some(focus) = keyboard_handle.current_focus() {
-                    if let Some(descriptor) = workspace.node_desc(focus) {
-                        let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
-                        drop(shell);
-                        keyboard_handle.set_grab(self, grab, serial);
-                        let mut shell = self.common.shell.write();
-                        shell.set_overview_mode(
-                            Some(Trigger::KeyboardSwap(pattern, descriptor)),
-                            self.common.event_loop_handle.clone(),
-                        );
-                    }
+                if let Some(focus) = keyboard_handle.current_focus()
+                    && let Some(descriptor) = workspace.node_desc(focus)
+                {
+                    let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
+                    drop(shell);
+                    keyboard_handle.set_grab(self, grab, serial);
+                    let mut shell = self.common.shell.write();
+                    shell.set_overview_mode(
+                        Some(Trigger::KeyboardSwap(pattern, descriptor)),
+                        self.common.event_loop_handle.clone(),
+                    );
                 }
             }
 
