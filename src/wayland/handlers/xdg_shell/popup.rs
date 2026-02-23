@@ -96,7 +96,7 @@ pub fn update_reactive_popups<'a>(
     for (popup, _) in PopupManager::popups_for_surface(toplevel.wl_surface()) {
         match popup {
             PopupKind::Xdg(surface) => {
-                let positioner = with_states(&surface.wl_surface(), |states| {
+                let positioner = with_states(surface.wl_surface(), |states| {
                     let mut guard = states.cached_state.get::<PopupCachedState>();
                     guard
                         .current()

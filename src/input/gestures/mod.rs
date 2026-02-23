@@ -73,14 +73,14 @@ impl GestureState {
     fn push(&mut self, delta: f64, timestamp: Duration) {
         // For the events that we care about, timestamps should always increase
         // monotonically.
-        if let Some(last) = self.history.back() {
-            if timestamp < last.timestamp {
-                trace!(
-                    "ignoring event with timestamp {timestamp:?} earlier than last {:?}",
-                    last.timestamp
-                );
-                return;
-            }
+        if let Some(last) = self.history.back()
+            && timestamp < last.timestamp
+        {
+            trace!(
+                "ignoring event with timestamp {timestamp:?} earlier than last {:?}",
+                last.timestamp
+            );
+            return;
         }
 
         self.history.push_back(SwipeEvent { delta, timestamp });

@@ -782,91 +782,90 @@ impl SurfaceThreadState {
         // mark last frame completed
         if let Ok(Some(Some((mut feedback, frames, estimated_presentation_time)))) =
             compositor.frame_submitted()
+            && self.mirroring.is_none()
         {
-            if self.mirroring.is_none() {
-                let name = self.output.name();
-                let message = if let Some(presentation_time) = presentation_time {
-                    let misprediction_s =
-                        presentation_time.as_secs_f64() - estimated_presentation_time.as_secs_f64();
-                    tracy_client::Client::running().unwrap().plot(
-                        self.presentation_misprediction_plot_name,
-                        misprediction_s * 1000.,
-                    );
+            let name = self.output.name();
+            let message = if let Some(presentation_time) = presentation_time {
+                let misprediction_s =
+                    presentation_time.as_secs_f64() - estimated_presentation_time.as_secs_f64();
+                tracy_client::Client::running().unwrap().plot(
+                    self.presentation_misprediction_plot_name,
+                    misprediction_s * 1000.,
+                );
 
-                    let now = Duration::from(now);
-                    if presentation_time > now {
-                        let diff = presentation_time - now;
-                        tracy_client::Client::running().unwrap().plot(
-                            self.time_since_presentation_plot_name,
-                            -diff.as_secs_f64() * 1000.,
-                        );
-                        format!("vblank on {name}, presentation is {diff:?} later")
-                    } else {
-                        let diff = now - presentation_time;
-                        tracy_client::Client::running().unwrap().plot(
-                            self.time_since_presentation_plot_name,
-                            diff.as_secs_f64() * 1000.,
-                        );
-                        format!("vblank on {name}, presentation was {diff:?} ago")
-                    }
+                let now = Duration::from(now);
+                if presentation_time > now {
+                    let diff = presentation_time - now;
+                    tracy_client::Client::running().unwrap().plot(
+                        self.time_since_presentation_plot_name,
+                        -diff.as_secs_f64() * 1000.,
+                    );
+                    format!("vblank on {name}, presentation is {diff:?} later")
                 } else {
-                    format!("vblank on {name}, presentation time unknown")
-                };
+                    let diff = now - presentation_time;
+                    tracy_client::Client::running().unwrap().plot(
+                        self.time_since_presentation_plot_name,
+                        diff.as_secs_f64() * 1000.,
+                    );
+                    format!("vblank on {name}, presentation was {diff:?} ago")
+                }
+            } else {
+                format!("vblank on {name}, presentation time unknown")
+            };
+            tracy_client::Client::running()
+                .unwrap()
+                .message(&message, 0);
+
+            let (clock, flags) = if let Some(tp) = presentation_time {
+                (
+                    tp.into(),
+                    wp_presentation_feedback::Kind::Vsync
+                        | wp_presentation_feedback::Kind::HwClock
+                        | wp_presentation_feedback::Kind::HwCompletion,
+                )
+            } else {
+                (
+                    now,
+                    wp_presentation_feedback::Kind::Vsync
+                        | wp_presentation_feedback::Kind::HwCompletion,
+                )
+            };
+
+            let rate = self
+                .output
+                .current_mode()
+                .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64));
+            let refresh = match rate {
+                Some(rate)
+                    if self
+                        .compositor
+                        .as_ref()
+                        .is_some_and(|comp| comp.with_compositor(|c| c.vrr_enabled())) =>
+                {
+                    Refresh::Variable(rate)
+                }
+                Some(rate) => Refresh::Fixed(rate),
+                None => Refresh::Unknown,
+            };
+
+            if let Some(last_sequence) = self.last_sequence {
+                let delta = sequence as f64 - last_sequence as f64;
                 tracy_client::Client::running()
                     .unwrap()
-                    .message(&message, 0);
+                    .plot(self.sequence_delta_plot_name, delta);
+            }
+            self.last_sequence = Some(sequence);
 
-                let (clock, flags) = if let Some(tp) = presentation_time {
-                    (
-                        tp.into(),
-                        wp_presentation_feedback::Kind::Vsync
-                            | wp_presentation_feedback::Kind::HwClock
-                            | wp_presentation_feedback::Kind::HwCompletion,
-                    )
-                } else {
-                    (
-                        now,
-                        wp_presentation_feedback::Kind::Vsync
-                            | wp_presentation_feedback::Kind::HwCompletion,
-                    )
-                };
+            feedback.presented(clock, refresh, sequence as u64, flags);
 
-                let rate = self
-                    .output
-                    .current_mode()
-                    .map(|mode| Duration::from_secs_f64(1_000.0 / mode.refresh as f64));
-                let refresh = match rate {
-                    Some(rate)
-                        if self
-                            .compositor
-                            .as_ref()
-                            .is_some_and(|comp| comp.with_compositor(|c| c.vrr_enabled())) =>
-                    {
-                        Refresh::Variable(rate)
-                    }
-                    Some(rate) => Refresh::Fixed(rate),
-                    None => Refresh::Unknown,
-                };
+            self.timings.presented(clock);
 
-                if let Some(last_sequence) = self.last_sequence {
-                    let delta = sequence as f64 - last_sequence as f64;
-                    tracy_client::Client::running()
-                        .unwrap()
-                        .plot(self.sequence_delta_plot_name, delta);
-                }
-                self.last_sequence = Some(sequence);
-
-                feedback.presented(clock, refresh, sequence as u64, flags);
-
-                self.timings.presented(clock);
-
-                while let Ok(pending_image_copy_data) = frames.recv() {
-                    pending_image_copy_data.send_success_when_ready(
-                        self.output.current_transform(),
-                        &self.loop_handle,
-                        clock,
-                    );
-                }
+            while let Ok(pending_image_copy_data) = frames.recv() {
+                pending_image_copy_data.send_success_when_ready(
+                    self.output.current_transform(),
+                    &self.loop_handle,
+                    clock,
+                );
             }
         }
 
@@ -1077,11 +1076,11 @@ impl SurfaceThreadState {
         // we can't use the elements after `compositor.render_frame`,
         // so let's collect everything we need for screencopy now
         let mut has_cursor_mode_none = false;
-        let frames = self
-            .mirroring
-            .is_none()
-            .then(|| take_screencopy_frames(&self.output, &elements, &mut has_cursor_mode_none))
-            .unwrap_or_default();
+        let frames = if self.mirroring.is_none() {
+            take_screencopy_frames(&self.output, &elements, &mut has_cursor_mode_none)
+        } else {
+            Default::default()
+        };
 
         // actual rendering
         let source_output = self
@@ -1312,10 +1311,10 @@ impl SurfaceThreadState {
                     None
                 };
 
-                if frame_result.needs_sync() {
-                    if let PrimaryPlaneElement::Swapchain(elem) = &frame_result.primary_element {
-                        elem.sync.wait()?;
-                    }
+                if frame_result.needs_sync()
+                    && let PrimaryPlaneElement::Swapchain(elem) = &frame_result.primary_element
+                {
+                    elem.sync.wait()?;
                 }
 
                 match compositor.queue_frame(feedback) {

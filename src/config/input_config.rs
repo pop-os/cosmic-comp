@@ -142,70 +142,70 @@ pub fn update_device(
         );
     }
     if let Some((accel, is_default)) = config!(|x| x.acceleration.as_ref()) {
-        if let Some(profile) = accel.profile {
-            if let Err(err) = device.config_accel_set_profile(profile) {
-                config_set_error(device, "acceleration profile", profile, err, is_default);
-            }
+        if let Some(profile) = accel.profile
+            && let Err(err) = device.config_accel_set_profile(profile)
+        {
+            config_set_error(device, "acceleration profile", profile, err, is_default);
         }
         if let Err(err) = device.config_accel_set_speed(accel.speed) {
             config_set_error(device, "acceleration speed", accel.speed, err, is_default);
         }
     }
-    if let Some((matrix, is_default)) = config!(|x| x.calibration) {
-        if let Err(err) = device.config_calibration_set_matrix(matrix) {
-            config_set_error(device, "calibration matrix", matrix, err, is_default);
-        }
+    if let Some((matrix, is_default)) = config!(|x| x.calibration)
+        && let Err(err) = device.config_calibration_set_matrix(matrix)
+    {
+        config_set_error(device, "calibration matrix", matrix, err, is_default);
     }
-    if let Some((method, is_default)) = config!(|x| x.click_method) {
-        if let Err(err) = device.config_click_set_method(method) {
-            config_set_error(device, "click method", method, err, is_default);
-        }
+    if let Some((method, is_default)) = config!(|x| x.click_method)
+        && let Err(err) = device.config_click_set_method(method)
+    {
+        config_set_error(device, "click method", method, err, is_default);
     }
-    if let Some((dwt, is_default)) = config!(|x| x.disable_while_typing) {
-        if let Err(err) = device.config_dwt_set_enabled(dwt) {
-            config_set_error(device, "disable-while-typing", dwt, err, is_default);
-        }
+    if let Some((dwt, is_default)) = config!(|x| x.disable_while_typing)
+        && let Err(err) = device.config_dwt_set_enabled(dwt)
+    {
+        config_set_error(device, "disable-while-typing", dwt, err, is_default);
     }
-    if let Some((left, is_default)) = config!(|x| x.left_handed) {
-        if let Err(err) = device.config_left_handed_set(left) {
-            config_set_error(device, "left-handed", left, err, is_default);
-        }
+    if let Some((left, is_default)) = config!(|x| x.left_handed)
+        && let Err(err) = device.config_left_handed_set(left)
+    {
+        config_set_error(device, "left-handed", left, err, is_default);
     }
-    if let Some((middle, is_default)) = config!(|x| x.middle_button_emulation) {
-        if let Err(err) = device.config_middle_emulation_set_enabled(middle) {
-            config_set_error(device, "middle-button-emulation", middle, err, is_default);
-        }
+    if let Some((middle, is_default)) = config!(|x| x.middle_button_emulation)
+        && let Err(err) = device.config_middle_emulation_set_enabled(middle)
+    {
+        config_set_error(device, "middle-button-emulation", middle, err, is_default);
     }
-    if let Some((angle, is_default)) = config!(|x| x.rotation_angle) {
-        if let Err(err) = device.config_rotation_set_angle(angle) {
-            config_set_error(device, "rotation-angle", angle, err, is_default);
-        }
+    if let Some((angle, is_default)) = config!(|x| x.rotation_angle)
+        && let Err(err) = device.config_rotation_set_angle(angle)
+    {
+        config_set_error(device, "rotation-angle", angle, err, is_default);
     }
     if let Some((scroll, is_default)) = config!(|x| x.scroll_config.as_ref()) {
-        if let Some(method) = scroll.method {
-            if let Err(err) = device.config_scroll_set_method(method) {
-                config_set_error(device, "scroll method", scroll, err, is_default);
-            }
+        if let Some(method) = scroll.method
+            && let Err(err) = device.config_scroll_set_method(method)
+        {
+            config_set_error(device, "scroll method", scroll, err, is_default);
         }
-        if let Some(natural) = scroll.natural_scroll {
-            if let Err(err) = device.config_scroll_set_natural_scroll_enabled(natural) {
-                config_set_error(device, "natural scrolling", natural, err, is_default);
-            }
+        if let Some(natural) = scroll.natural_scroll
+            && let Err(err) = device.config_scroll_set_natural_scroll_enabled(natural)
+        {
+            config_set_error(device, "natural scrolling", natural, err, is_default);
         }
-        if let Some(button) = scroll.scroll_button {
-            if let Err(err) = device.config_scroll_set_button(button) {
-                config_set_error(device, "scroll button", button, err, is_default);
-            }
+        if let Some(button) = scroll.scroll_button
+            && let Err(err) = device.config_scroll_set_button(button)
+        {
+            config_set_error(device, "scroll button", button, err, is_default);
         }
     }
     if let Some((tap, is_default)) = config!(|x| x.tap_config.as_ref()) {
         if let Err(err) = device.config_tap_set_enabled(tap.enabled) {
             config_set_error(device, "tap-to-click", tap.enabled, err, is_default);
         }
-        if let Some(button_map) = tap.button_map {
-            if let Err(err) = device.config_tap_set_button_map(button_map) {
-                config_set_error(device, "button map", button_map, err, is_default);
-            }
+        if let Some(button_map) = tap.button_map
+            && let Err(err) = device.config_tap_set_button_map(button_map)
+        {
+            config_set_error(device, "button map", button_map, err, is_default);
         }
         if let Err(err) = device.config_tap_set_drag_enabled(tap.drag) {
             config_set_error(device, "tap-drag", tap.drag, err, is_default);

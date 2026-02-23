@@ -58,13 +58,13 @@ impl OutputPowerState {
         let mut output_powers = mem::take(&mut state.output_power_state().output_powers);
         for (output_power, old_mode) in output_powers.iter_mut() {
             let data = output_power.data::<OutputPowerData>().unwrap();
-            if let Some(output) = data.output.upgrade() {
-                if let Some(on) = state.get_dpms(&output) {
-                    let mode = output_power_mode(on);
-                    if mode != *old_mode {
-                        output_power.mode(mode);
-                        *old_mode = mode;
-                    }
+            if let Some(output) = data.output.upgrade()
+                && let Some(on) = state.get_dpms(&output)
+            {
+                let mode = output_power_mode(on);
+                if mode != *old_mode {
+                    output_power.mode(mode);
+                    *old_mode = mode;
                 }
             }
         }
