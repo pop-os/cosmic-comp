@@ -1142,11 +1142,7 @@ impl Workspace {
                     std::mem::drop(state);
                     self.floating_layer.map_maximized(window, geometry, true);
                 } else if let Some(corners) = previous.was_snapped {
-                    *window.floating_tiled.lock().unwrap() = Some(corners);
-                    window.set_tiled(true);
-                    let snapped_geo = self.floating_layer.snapped_geometry(&corners);
-                    window.set_geometry(snapped_geo.to_global(&self.output));
-                    window.configure();
+                    self.floating_layer.snap_to_corner(&window, &corners);
                 }
 
                 None
