@@ -637,7 +637,7 @@ pub fn window_from_handle<W: Window + 'static>(handle: ZcosmicToplevelHandleV1) 
 
 pub fn window_from_ext<'a, W: Window + 'static, D>(
     state: &'a D,
-    handle: &ForeignToplevelHandle,
+    handle: ForeignToplevelHandle,
 ) -> Option<&'a W>
 where
     D: ToplevelInfoHandler<Window = W>,
@@ -662,7 +662,7 @@ where
     D: ToplevelInfoHandler<Window = W>,
 {
     let handle = ForeignToplevelHandle::from_resource(foreign_toplevel)?;
-    window_from_ext(state, &handle)
+    window_from_ext(state, handle)
 }
 
 macro_rules! delegate_toplevel_info {
