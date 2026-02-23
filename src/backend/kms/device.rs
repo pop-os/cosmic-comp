@@ -13,7 +13,6 @@ use crate::{
 
 use anyhow::{Context, Result};
 use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
-use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
@@ -37,7 +36,7 @@ use smithay::{
         calloop::{LoopHandle, RegistrationToken},
         drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
         gbm::BufferObjectFlags as GbmBufferFlags,
-        rustix::fs::OFlags,
+        rustix::fs::{Dev, OFlags},
         wayland_server::DisplayHandle,
     },
     utils::{Clock, DevPath, DeviceFd, Monotonic, Point, Transform},
@@ -175,7 +174,7 @@ pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
 impl State {
     pub fn device_added(
         &mut self,
-        dev: dev_t,
+        dev: Dev,
         path: &Path,
         dh: &DisplayHandle,
     ) -> Result<Vec<Output>> {
@@ -399,7 +398,7 @@ impl State {
         Ok(wl_outputs)
     }
 
-    pub fn device_changed(&mut self, dev: dev_t) -> Result<Vec<Output>> {
+    pub fn device_changed(&mut self, dev: Dev) -> Result<Vec<Output>> {
         if !self.backend.kms().session.is_active() {
             return Ok(Vec::new());
         }
@@ -490,7 +489,7 @@ impl State {
         Ok(outputs_added)
     }
 
-    pub fn device_removed(&mut self, dev: dev_t, dh: &DisplayHandle) -> Result<()> {
+    pub fn device_removed(&mut self, dev: Dev, dh: &DisplayHandle) -> Result<()> {
         let backend = self.backend.kms();
         // we can't use DrmNode::from_node_id, because that assumes the node is still on sysfs
         let drm_node = backend
