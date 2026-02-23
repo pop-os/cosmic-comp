@@ -174,8 +174,8 @@ impl State {
                     *current_config = backup;
                 }
             }
-            if !test_only {
-                if let Err(err) = backend.apply_config_for_outputs(
+            if !test_only
+                && let Err(err) = backend.apply_config_for_outputs(
                     false,
                     &self.common.event_loop_handle,
                     self.common.config.dynamic_conf.screen_filter(),
@@ -184,9 +184,9 @@ impl State {
                     &self.common.xdg_activation_state,
                     self.common.startup_done.clone(),
                     &self.common.clock,
-                ) {
-                    error!("Failed to reset output config: {:?}", err);
-                }
+                )
+            {
+                error!("Failed to reset output config: {:?}", err);
             }
             return false;
         }

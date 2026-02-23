@@ -487,11 +487,9 @@ impl Workspace {
                 .unwrap()
                 .lock()
                 .unwrap();
-            let move_mapped = if let Some(move_grab_state) = &*move_grab_state {
-                Some(move_grab_state.element())
-            } else {
-                None
-            };
+            let move_mapped = (*move_grab_state)
+                .as_ref()
+                .map(|move_grab_state| move_grab_state.element());
 
             let mapped = || {
                 self.floating_layer
@@ -640,7 +638,7 @@ impl Workspace {
             })));
         }
 
-        let was_snapped = mapped.floating_tiled.lock().unwrap().clone();
+        let was_snapped = *mapped.floating_tiled.lock().unwrap();
         // unmaximize_request might have triggered a `floating_layer.refresh()`,
         // which may have already removed a non-alive surface.
         if let Some(floating_geometry) = self.floating_layer.unmap(mapped, None).or(was_maximized) {
@@ -695,18 +693,18 @@ impl Workspace {
 
         let mapped = self.element_for_surface(surface)?;
         let maybe_stack = mapped.stack_ref().filter(|s| s.len() > 1);
-        if let Some(stack) = maybe_stack {
-            if stack.len() > 1 {
-                let idx = stack.surfaces().position(|s| &s == surface);
-                let layer = if self.is_tiled(surface) {
-                    ManagedLayer::Tiling
-                } else {
-                    ManagedLayer::Floating
-                };
-                return idx
-                    .and_then(|idx| stack.remove_idx(idx))
-                    .map(|s| (s, layer.into()));
-            }
+        if let Some(stack) = maybe_stack
+            && stack.len() > 1
+        {
+            let idx = stack.surfaces().position(|s| &s == surface);
+            let layer = if self.is_tiled(surface) {
+                ManagedLayer::Tiling
+            } else {
+                ManagedLayer::Floating
+            };
+            return idx
+                .and_then(|idx| stack.remove_idx(idx))
+                .map(|s| (s, layer.into()));
         }
 
         // we know mapped is no stack with more than one element now,
@@ -774,25 +772,25 @@ impl Workspace {
         let stack = self.focus_stack.get(seat);
         let last_focused = stack.last();
 
-        if let Some(fullscreen) = self.fullscreen.as_ref() {
-            if last_focused.is_some_and(
+        if let Some(fullscreen) = self.fullscreen.as_ref()
+            && last_focused.is_some_and(
                 |t| matches!(t, FocusTarget::Fullscreen(f) if f == &fullscreen.surface),
-            ) && !fullscreen.is_animating()
-            {
-                let geometry = self.fullscreen_geometry().unwrap();
-                return fullscreen_element_under(fullscreen, geometry);
-            }
+            )
+            && !fullscreen.is_animating()
+        {
+            let geometry = self.fullscreen_geometry().unwrap();
+            return fullscreen_element_under(fullscreen, geometry);
         }
 
         self.floating_layer
             .popup_element_under(location)
             .or_else(|| self.tiling_layer.popup_element_under(location))
             .or_else(|| {
-                if last_focused.is_none_or(|t| !matches!(t, FocusTarget::Fullscreen(_))) {
-                    if let Some(fullscreen) = self.fullscreen.as_ref() {
-                        let geometry = self.fullscreen_geometry().unwrap();
-                        return fullscreen_element_under(fullscreen, geometry);
-                    }
+                if last_focused.is_none_or(|t| !matches!(t, FocusTarget::Fullscreen(_)))
+                    && let Some(fullscreen) = self.fullscreen.as_ref()
+                {
+                    let geometry = self.fullscreen_geometry().unwrap();
+                    return fullscreen_element_under(fullscreen, geometry);
                 }
                 None
             })
@@ -824,25 +822,25 @@ impl Workspace {
         let stack = self.focus_stack.get(seat);
         let last_focused = stack.last();
 
-        if let Some(fullscreen) = self.fullscreen.as_ref() {
-            if last_focused.is_some_and(
+        if let Some(fullscreen) = self.fullscreen.as_ref()
+            && last_focused.is_some_and(
                 |t| matches!(t, FocusTarget::Fullscreen(f) if f == &fullscreen.surface),
-            ) && !fullscreen.is_animating()
-            {
-                let geometry = self.fullscreen_geometry().unwrap();
-                return fullscreen_element_under(fullscreen, geometry);
-            }
+            )
+            && !fullscreen.is_animating()
+        {
+            let geometry = self.fullscreen_geometry().unwrap();
+            return fullscreen_element_under(fullscreen, geometry);
         }
 
         self.floating_layer
             .toplevel_element_under(location)
             .or_else(|| self.tiling_layer.toplevel_element_under(location))
             .or_else(|| {
-                if last_focused.is_none_or(|t| !matches!(t, FocusTarget::Fullscreen(_))) {
-                    if let Some(fullscreen) = self.fullscreen.as_ref() {
-                        let geometry = self.fullscreen_geometry().unwrap();
-                        return fullscreen_element_under(fullscreen, geometry);
-                    }
+                if last_focused.is_none_or(|t| !matches!(t, FocusTarget::Fullscreen(_)))
+                    && let Some(fullscreen) = self.fullscreen.as_ref()
+                {
+                    let geometry = self.fullscreen_geometry().unwrap();
+                    return fullscreen_element_under(fullscreen, geometry);
                 }
                 None
             })
@@ -1071,7 +1069,7 @@ impl Workspace {
         mapped.set_minimized(true);
         mapped.configure();
 
-        let was_snapped = mapped.floating_tiled.lock().unwrap().clone();
+        let was_snapped = *mapped.floating_tiled.lock().unwrap();
         if let Some(geometry) = self.floating_layer.unmap(&mapped, Some(to)) {
             return Some(MinimizedWindow::Floating {
                 window: mapped,
