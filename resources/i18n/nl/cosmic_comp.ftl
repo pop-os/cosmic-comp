@@ -1,7 +1,7 @@
 a11y-zoom-move-continuously = Aanzicht met de cursor mee laten bewegen
 a11y-zoom-move-onedge = Aanzicht verplaatst zich pas als de cursor een schermrand raakt
 a11y-zoom-move-centered = Aanzicht houdt de cursor gecentreerd
-a11y-zoom-settings = Instellingen van het vergrootglas…
+a11y-zoom-settings = Vergrootglasinstellingen…
 grow-window = Vergroten
 shrink-window = Verkleinen
 swap-windows = Vensters omwisselen
