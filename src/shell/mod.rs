@@ -2596,11 +2596,7 @@ impl Shell {
                         true,
                     );
                 } else if let Some(corners) = was_snapped {
-                    *window.floating_tiled.lock().unwrap() = Some(corners);
-                    window.set_tiled(true);
-                    let snapped_geo = workspace.floating_layer.snapped_geometry(&corners);
-                    window.set_geometry(snapped_geo.to_global(&workspace.output));
-                    window.configure();
+                    workspace.floating_layer.snap_to_corner(&window, &corners);
                 }
             }
             Some(FullscreenRestoreState::Tiling {
@@ -3371,11 +3367,7 @@ impl Shell {
                     .floating_layer
                     .map_maximized(mapped.clone(), geometry, false);
             } else if let Some(corners) = was_snapped {
-                *mapped.floating_tiled.lock().unwrap() = Some(corners);
-                mapped.set_tiled(true);
-                let snapped_geo = to_workspace.floating_layer.snapped_geometry(&corners);
-                mapped.set_geometry(snapped_geo.to_global(&to_workspace.output));
-                mapped.configure();
+                to_workspace.floating_layer.snap_to_corner(mapped, &corners);
             }
         } else {
             for mapped in to_workspace
