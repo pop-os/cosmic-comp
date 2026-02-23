@@ -130,7 +130,7 @@ pub fn setup_socket(handle: LoopHandle<State>, common: &Common) -> Result<()> {
                         stream.read_bytes = 0;
                         match std::str::from_utf8(&stream.buffer) {
                             Ok(message) => {
-                                match serde_json::from_str::<'_, Message>(&message) {
+                                match serde_json::from_str::<'_, Message>(message) {
                                     Ok(Message::SetEnv { .. }) => warn!("Got SetEnv from session? What is this?"),
                                     _ => warn!("Unknown session socket message, are you using incompatible cosmic-session and cosmic-comp versions?"),
                                 };

@@ -32,17 +32,17 @@ pub fn display_configuration(
         .iter()
         .flat_map(|conn| device.get_connector(*conn, true).ok())
     {
-        if let Some(enc) = conn.current_encoder() {
-            if let Some(crtc) = device.get_encoder(enc)?.crtc() {
-                // If is is connected we found a mapping
-                if conn.state() == ConnectorState::Connected {
-                    map.insert(conn.handle(), Some(crtc));
-                // If not, the user just unplugged something,
-                // or the drm master did not cleanup?
-                // Well, I guess we cleanup after them.
-                } else {
-                    cleanup.push(crtc);
-                }
+        if let Some(enc) = conn.current_encoder()
+            && let Some(crtc) = device.get_encoder(enc)?.crtc()
+        {
+            // If is is connected we found a mapping
+            if conn.state() == ConnectorState::Connected {
+                map.insert(conn.handle(), Some(crtc));
+            // If not, the user just unplugged something,
+            // or the drm master did not cleanup?
+            // Well, I guess we cleanup after them.
+            } else {
+                cleanup.push(crtc);
             }
         }
     }
@@ -81,12 +81,11 @@ pub fn display_configuration(
             .iter()
             .flat_map(|conn| device.get_connector(*conn, false).ok())
             .filter(|conn| {
-                if let Some(enc) = conn.current_encoder() {
-                    if let Ok(enc) = device.get_encoder(enc) {
-                        if let Some(crtc) = enc.crtc() {
-                            return cleanup.contains(&crtc);
-                        }
-                    }
+                if let Some(enc) = conn.current_encoder()
+                    && let Ok(enc) = device.get_encoder(enc)
+                    && let Some(crtc) = enc.crtc()
+                {
+                    return cleanup.contains(&crtc);
                 }
                 false
             })

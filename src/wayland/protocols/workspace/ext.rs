@@ -152,18 +152,17 @@ where
                     .iter()
                     .find(|g| g.ext_instances.contains(obj))
                     .map(|g| g.id)
+                    && let Ok(manager) = data.manager.upgrade()
                 {
-                    if let Ok(manager) = data.manager.upgrade() {
-                        let mut state = manager
-                            .data::<WorkspaceManagerData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::Create {
-                            in_group: WorkspaceGroupHandle { id },
-                            name: workspace,
-                        });
-                    }
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::Create {
+                        in_group: WorkspaceGroupHandle { id },
+                        name: workspace,
+                    });
                 }
             }
             ext_workspace_group_handle_v1::Request::Destroy => {
@@ -204,68 +203,62 @@ where
             ext_workspace_handle_v1::Request::Activate => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(obj)
+                    && let Ok(manager) = data.manager.upgrade()
                 {
-                    if let Ok(manager) = data.manager.upgrade() {
-                        let mut state = manager
-                            .data::<WorkspaceManagerData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::Activate(workspace_handle));
-                    }
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::Activate(workspace_handle));
                 }
             }
             ext_workspace_handle_v1::Request::Deactivate => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(obj)
+                    && let Ok(manager) = data.manager.upgrade()
                 {
-                    if let Ok(manager) = data.manager.upgrade() {
-                        let mut state = manager
-                            .data::<WorkspaceManagerData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::Deactivate(workspace_handle));
-                    }
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::Deactivate(workspace_handle));
                 }
             }
             ext_workspace_handle_v1::Request::Remove => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(obj)
+                    && let Ok(manager) = data.manager.upgrade()
                 {
-                    if let Ok(manager) = data.manager.upgrade() {
-                        let mut state = manager
-                            .data::<WorkspaceManagerData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::Remove(workspace_handle));
-                    }
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::Remove(workspace_handle));
                 }
             }
             ext_workspace_handle_v1::Request::Assign { workspace_group } => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(obj)
-                {
-                    if let Some(group_id) = state
+                    && let Some(group_id) = state
                         .workspace_state()
                         .groups
                         .iter()
                         .find(|g| g.ext_instances.contains(&workspace_group))
                         .map(|g| g.id)
-                    {
-                        if let Ok(manager) = data.manager.upgrade() {
-                            let mut state = manager
-                                .data::<WorkspaceManagerData>()
-                                .unwrap()
-                                .lock()
-                                .unwrap();
-                            state.requests.push(Request::Assign {
-                                workspace: workspace_handle,
-                                group: WorkspaceGroupHandle { id: group_id },
-                            });
-                        }
-                    }
+                    && let Ok(manager) = data.manager.upgrade()
+                {
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::Assign {
+                        workspace: workspace_handle,
+                        group: WorkspaceGroupHandle { id: group_id },
+                    });
                 }
             }
             ext_workspace_handle_v1::Request::Destroy => {
@@ -491,10 +484,10 @@ where
         changed = true;
     }
 
-    if handle_state.ext_id.is_none() {
-        if let Some(id) = workspace.ext_id.clone() {
-            instance.id(id);
-        }
+    if handle_state.ext_id.is_none()
+        && let Some(id) = workspace.ext_id.clone()
+    {
+        instance.id(id);
     }
 
     if let Some(cosmic_v2_handle) = handle_state

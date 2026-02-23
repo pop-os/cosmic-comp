@@ -94,11 +94,10 @@ where
                         .iter()
                         .flat_map(|g| &g.workspaces)
                         .find(|w| w.ext_instances.contains(&workspace))
+                        && let Ok(ext_mngr) = data.manager.upgrade()
                     {
-                        if let Ok(ext_mngr) = data.manager.upgrade() {
-                            send_workspace_to_client(&cosmic_workspace, workspace);
-                            ext_mngr.done();
-                        }
+                        send_workspace_to_client(&cosmic_workspace, workspace);
+                        ext_mngr.done();
                     }
                 }
             }
@@ -128,20 +127,18 @@ where
             zcosmic_workspace_handle_v2::Request::Rename { name } => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
-                {
-                    if let Ok(manager) =
+                    && let Ok(manager) =
                         workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
-                    {
-                        let mut state = manager
-                            .data::<WorkspaceManagerData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::Rename {
-                            workspace: workspace_handle,
-                            name,
-                        });
-                    }
+                {
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::Rename {
+                        workspace: workspace_handle,
+                        name,
+                    });
                 }
             }
             zcosmic_workspace_handle_v2::Request::SetTilingState {
@@ -149,58 +146,52 @@ where
             } => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
-                {
-                    if let Ok(manager) =
+                    && let Ok(manager) =
                         workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
-                    {
-                        let mut state = manager
-                            .data::<WorkspaceManagerData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::SetTilingState {
-                            workspace: workspace_handle,
-                            state: tiling_state,
-                        });
-                    }
+                {
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::SetTilingState {
+                        workspace: workspace_handle,
+                        state: tiling_state,
+                    });
                 }
             }
             zcosmic_workspace_handle_v2::Request::Pin => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
-                {
-                    if let Ok(manager) =
+                    && let Ok(manager) =
                         workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
-                    {
-                        let mut state = manager
-                            .data::<WorkspaceManagerData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::SetPin {
-                            workspace: workspace_handle,
-                            pinned: true,
-                        });
-                    }
+                {
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::SetPin {
+                        workspace: workspace_handle,
+                        pinned: true,
+                    });
                 }
             }
             zcosmic_workspace_handle_v2::Request::Unpin => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
-                {
-                    if let Ok(manager) =
+                    && let Ok(manager) =
                         workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
-                    {
-                        let mut state = manager
-                            .data::<WorkspaceManagerData>()
-                            .unwrap()
-                            .lock()
-                            .unwrap();
-                        state.requests.push(Request::SetPin {
-                            workspace: workspace_handle,
-                            pinned: false,
-                        });
-                    }
+                {
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::SetPin {
+                        workspace: workspace_handle,
+                        pinned: false,
+                    });
                 }
             }
             zcosmic_workspace_handle_v2::Request::MoveBefore {
@@ -209,26 +200,22 @@ where
             } => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
-                {
-                    if let Some(other_workspace) = state
+                    && let Some(other_workspace) = state
                         .workspace_state()
                         .get_ext_workspace_handle(&other_workspace)
-                    {
-                        if let Ok(manager) =
-                            workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
-                        {
-                            let mut state = manager
-                                .data::<WorkspaceManagerData>()
-                                .unwrap()
-                                .lock()
-                                .unwrap();
-                            state.requests.push(Request::MoveBefore {
-                                workspace: workspace_handle,
-                                other_workspace,
-                                axis,
-                            });
-                        }
-                    }
+                    && let Ok(manager) =
+                        workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
+                {
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::MoveBefore {
+                        workspace: workspace_handle,
+                        other_workspace,
+                        axis,
+                    });
                 }
             }
             zcosmic_workspace_handle_v2::Request::MoveAfter {
@@ -237,26 +224,22 @@ where
             } => {
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
-                {
-                    if let Some(other_workspace) = state
+                    && let Some(other_workspace) = state
                         .workspace_state()
                         .get_ext_workspace_handle(&other_workspace)
-                    {
-                        if let Ok(manager) =
-                            workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
-                        {
-                            let mut state = manager
-                                .data::<WorkspaceManagerData>()
-                                .unwrap()
-                                .lock()
-                                .unwrap();
-                            state.requests.push(Request::MoveAfter {
-                                workspace: workspace_handle,
-                                other_workspace,
-                                axis,
-                            });
-                        }
-                    }
+                    && let Ok(manager) =
+                        workspace.data::<WorkspaceData>().unwrap().manager.upgrade()
+                {
+                    let mut state = manager
+                        .data::<WorkspaceManagerData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    state.requests.push(Request::MoveAfter {
+                        workspace: workspace_handle,
+                        other_workspace,
+                        axis,
+                    });
                 }
             }
             zcosmic_workspace_handle_v2::Request::Destroy => {}

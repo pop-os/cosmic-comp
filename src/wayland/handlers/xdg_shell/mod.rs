@@ -45,12 +45,7 @@ impl XdgShellHandler for State {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
 
-        if shell
-            .pending_windows
-            .iter()
-            .find(|w| &w.surface == &surface)
-            .is_none()
-        {
+        if !shell.pending_windows.iter().any(|w| w.surface == surface) {
             let surface = CosmicSurface::from(surface);
             shell.pending_windows.push(PendingWindow {
                 surface,

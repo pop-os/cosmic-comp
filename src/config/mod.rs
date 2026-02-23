@@ -371,20 +371,20 @@ impl Config {
     }
 
     fn load_filter_state(path: &Option<PathBuf>) -> ScreenFilter {
-        if let Some(path) = path.as_ref() {
-            if path.exists() {
-                match ron::de::from_reader::<_, ScreenFilter>(
-                    OpenOptions::new().read(true).open(path).unwrap(),
-                ) {
-                    Ok(config) => return config,
-                    Err(err) => {
-                        warn!(?err, "Failed to read screen_filter state, resetting..");
-                        if let Err(err) = std::fs::remove_file(path) {
-                            error!(?err, "Failed to remove screen_filter state.");
-                        }
+        if let Some(path) = path.as_ref()
+            && path.exists()
+        {
+            match ron::de::from_reader::<_, ScreenFilter>(
+                OpenOptions::new().read(true).open(path).unwrap(),
+            ) {
+                Ok(config) => return config,
+                Err(err) => {
+                    warn!(?err, "Failed to read screen_filter state, resetting..");
+                    if let Err(err) = std::fs::remove_file(path) {
+                        error!(?err, "Failed to remove screen_filter state.");
                     }
-                };
-            }
+                }
+            };
         }
 
         ScreenFilter {

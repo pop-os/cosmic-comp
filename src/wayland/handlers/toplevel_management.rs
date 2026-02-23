@@ -113,22 +113,21 @@ impl ToplevelManagementHandler for State {
             // move pointer to window if it’s on a different monitor/output
             if seat.active_output() != *output
                 && self.common.config.cosmic_conf.cursor_follows_focus
+                && let Some(new_pos) = new_pos
             {
-                if let Some(new_pos) = new_pos {
-                    seat.set_active_output(output);
-                    if let Some(ptr) = seat.get_pointer() {
-                        let serial = SERIAL_COUNTER.next_serial();
-                        ptr.motion(
-                            self,
-                            None,
-                            &MotionEvent {
-                                location: new_pos.to_f64().as_logical(),
-                                serial,
-                                time: self.common.clock.now().as_millis(),
-                            },
-                        );
-                        ptr.frame(self);
-                    }
+                seat.set_active_output(output);
+                if let Some(ptr) = seat.get_pointer() {
+                    let serial = SERIAL_COUNTER.next_serial();
+                    ptr.motion(
+                        self,
+                        None,
+                        &MotionEvent {
+                            location: new_pos.to_f64().as_logical(),
+                            serial,
+                            time: self.common.clock.now().as_millis(),
+                        },
+                    );
+                    ptr.frame(self);
                 }
             }
 

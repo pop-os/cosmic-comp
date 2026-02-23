@@ -512,24 +512,24 @@ where
 impl State {
     pub fn process_x11_event(&mut self, event: InputEvent<X11Input>) {
         // here we can handle special cases for x11 inputs, like mapping them to windows
-        if let InputEvent::PointerMotionAbsolute { event } = &event {
-            if let Some(window) = event.window() {
-                let output = self
-                    .backend
-                    .x11()
-                    .surfaces
-                    .iter()
-                    .find(|surface| &surface.window == window.as_ref())
-                    .map(|surface| surface.output.clone())
-                    .unwrap();
+        if let InputEvent::PointerMotionAbsolute { event } = &event
+            && let Some(window) = event.window()
+        {
+            let output = self
+                .backend
+                .x11()
+                .surfaces
+                .iter()
+                .find(|surface| &surface.window == window.as_ref())
+                .map(|surface| surface.output.clone())
+                .unwrap();
 
-                let device = event.device();
-                for seat in self.common.shell.read().seats.iter() {
-                    let devices = seat.user_data().get::<Devices>().unwrap();
-                    if devices.has_device(&device) {
-                        seat.set_active_output(&output);
-                        break;
-                    }
+            let device = event.device();
+            for seat in self.common.shell.read().seats.iter() {
+                let devices = seat.user_data().get::<Devices>().unwrap();
+                if devices.has_device(&device) {
+                    seat.set_active_output(&output);
+                    break;
                 }
             }
         };

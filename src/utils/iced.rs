@@ -436,13 +436,13 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             )
             .1;
 
-        if let Some(action) = actions {
-            if let Some(t) = into_stream(action) {
-                let _ = self.scheduler.schedule(t.into_future().map(|f| match f.0 {
-                    Some(Action::Output(msg)) => Some(msg),
-                    _ => None,
-                }));
-            }
+        if let Some(action) = actions
+            && let Some(t) = into_stream(action)
+        {
+            let _ = self.scheduler.schedule(t.into_future().map(|f| match f.0 {
+                Some(Action::Output(msg)) => Some(msg),
+                _ => None,
+            }));
         }
     }
 }

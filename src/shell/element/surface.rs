@@ -697,15 +697,13 @@ impl CosmicSurface {
                         .primary_scanout_feedback
                         .as_ref()
                         .unwrap_or(&feedback.render_feedback)
+                } else if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
+                    feedback
+                        .overlay_scanout_feedback
+                        .as_ref()
+                        .unwrap_or(&feedback.render_feedback)
                 } else {
-                    if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
-                        feedback
-                            .overlay_scanout_feedback
-                            .as_ref()
-                            .unwrap_or(&feedback.render_feedback)
-                    } else {
-                        &feedback.render_feedback
-                    }
+                    &feedback.render_feedback
                 }
             })
     }
@@ -987,6 +985,6 @@ fn with_toplevel_state<T, F: FnOnce(Option<&smithay::wayland::shell::xdg::Toplev
     if pending {
         toplevel.with_pending_state(|pending| cb(Some(pending)))
     } else {
-        toplevel.with_committed_state(|committed| cb(committed))
+        toplevel.with_committed_state(cb)
     }
 }

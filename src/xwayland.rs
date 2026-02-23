@@ -85,10 +85,10 @@ fn xrdb_thread(rx: Receiver<(String, u32)>, display: u32) {
                 "Xcursor.theme: {}\nXcursor.size: {}\n",
                 cursor_theme, cursor_size,
             );
-            if let Some(mut stdin) = child.stdin.take() {
-                if let Err(err) = stdin.write_all(resources.as_bytes()) {
-                    warn!("Failed to update xresources: {}", err);
-                }
+            if let Some(mut stdin) = child.stdin.take()
+                && let Err(err) = stdin.write_all(resources.as_bytes())
+            {
+                warn!("Failed to update xresources: {}", err);
             }
             match child.wait() {
                 Ok(code) if code.success() => {}
@@ -346,25 +346,23 @@ impl Common {
                 self.xwayland_reset_eavesdropping(serial);
 
                 let xstate = self.xwayland_state.as_mut().unwrap();
-                if let Some(mime_types) = xstate.clipboard_selection_dirty.take() {
-                    if let Err(err) = xstate
+                if let Some(mime_types) = xstate.clipboard_selection_dirty.take()
+                    && let Err(err) = xstate
                         .xwm
                         .as_mut()
                         .unwrap()
                         .new_selection(SelectionTarget::Clipboard, Some(mime_types))
-                    {
-                        warn!(?err, "Failed to set Xwayland clipboard selection.");
-                    }
+                {
+                    warn!(?err, "Failed to set Xwayland clipboard selection.");
                 }
-                if let Some(mime_types) = xstate.primary_selection_dirty.take() {
-                    if let Err(err) = xstate
+                if let Some(mime_types) = xstate.primary_selection_dirty.take()
+                    && let Err(err) = xstate
                         .xwm
                         .as_mut()
                         .unwrap()
                         .new_selection(SelectionTarget::Primary, Some(mime_types))
-                    {
-                        warn!(?err, "Failed to set Xwayland clipboard selection.");
-                    }
+                {
+                    warn!(?err, "Failed to set Xwayland clipboard selection.");
                 }
             }
         }
@@ -650,16 +648,15 @@ impl Common {
             }
             XwaylandDescaling::Fractional => {
                 let shell = self.shell.read();
-                let val =
-                    if let Some(output) = shell.outputs().find(|o| o.config().xwayland_primary) {
-                        output.current_scale().fractional_scale().max(1f64)
-                    } else {
-                        shell
-                            .outputs()
-                            .map(|o| o.current_scale().fractional_scale())
-                            .fold(1f64, |acc, val| acc.max(val))
-                    };
-                val
+
+                if let Some(output) = shell.outputs().find(|o| o.config().xwayland_primary) {
+                    output.current_scale().fractional_scale().max(1f64)
+                } else {
+                    shell
+                        .outputs()
+                        .map(|o| o.current_scale().fractional_scale())
+                        .fold(1f64, |acc, val| acc.max(val))
+                }
             }
         };
         let (_, cursor_size) = load_cursor_env();
@@ -710,10 +707,14 @@ impl Common {
                 None
             };
 
-            if let Err(_) = xwayland.xrdb_thread.send((
-                cosmic::icon_theme::default(),
-                (new_scale * cursor_size as f64).round() as u32,
-            )) {
+            if xwayland
+                .xrdb_thread
+                .send((
+                    cosmic::icon_theme::default(),
+                    (new_scale * cursor_size as f64).round() as u32,
+                ))
+                .is_err()
+            {
                 warn!("xrdb thread died");
             }
 
@@ -756,14 +757,13 @@ impl Common {
             }
         }
 
-        if let Some(xstate) = self.xwayland_state.as_mut() {
-            if let Some(xwm) = xstate.xwm.as_mut() {
-                if let Err(err) = xwm.set_randr_primary_output(xwayland_primary_output.as_ref()) {
-                    warn!("Failed to set xwayland primary output: {}", err);
-                    return;
-                };
-            }
-        }
+        if let Some(xstate) = self.xwayland_state.as_mut()
+            && let Some(xwm) = xstate.xwm.as_mut()
+            && let Err(err) = xwm.set_randr_primary_output(xwayland_primary_output.as_ref())
+        {
+            warn!("Failed to set xwayland primary output: {}", err);
+            return;
+        };
 
         self.output_configuration_state.update();
     }
@@ -808,12 +808,7 @@ impl XwmHandler for State {
                 *context,
             );
         }
-        if shell
-            .pending_windows
-            .iter()
-            .find(|w| w.surface == window)
-            .is_none()
-        {
+        if !shell.pending_windows.iter().any(|w| w.surface == window) {
             let surface = CosmicSurface::from(window);
             shell.pending_windows.push(PendingWindow {
                 surface,
@@ -835,17 +830,14 @@ impl XwmHandler for State {
             if let std::collections::hash_map::Entry::Vacant(e) = shell
                 .pending_activations
                 .entry(crate::shell::ActivationKey::X11(surface.window_id()))
+                && let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id())
+                && let Some(context) = self
+                    .common
+                    .xdg_activation_state
+                    .data_for_token(&XdgActivationToken::from(startup_id))
+                    .and_then(|data| data.user_data.get::<ActivationContext>())
             {
-                if let Some(startup_id) = window.x11_surface().and_then(|x| x.startup_id()) {
-                    if let Some(context) = self
-                        .common
-                        .xdg_activation_state
-                        .data_for_token(&XdgActivationToken::from(startup_id))
-                        .and_then(|data| data.user_data.get::<ActivationContext>())
-                    {
-                        e.insert(*context);
-                    }
-                }
+                e.insert(*context);
             }
             let res = shell.map_window(
                 &window,
@@ -881,11 +873,10 @@ impl XwmHandler for State {
             let seat = shell.seats.last_active().clone();
             if let Some(pending) =
                 shell.unmap_surface(&window, &seat, &mut self.common.toplevel_info_state)
-                && shell
+                && !shell
                     .pending_windows
                     .iter()
-                    .find(|w| &w.surface == &pending.surface)
-                    .is_none()
+                    .any(|w| w.surface == pending.surface)
             {
                 shell.pending_windows.push(pending);
             }

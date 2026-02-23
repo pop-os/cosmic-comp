@@ -79,14 +79,12 @@ impl DmabufHandler for State {
                 feedback
                     .primary_scanout_feedback
                     .unwrap_or(feedback.render_feedback)
+            } else if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
+                feedback
+                    .overlay_scanout_feedback
+                    .unwrap_or(feedback.render_feedback)
             } else {
-                if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
-                    feedback
-                        .overlay_scanout_feedback
-                        .unwrap_or(feedback.render_feedback)
-                } else {
-                    feedback.render_feedback
-                }
+                feedback.render_feedback
             }
         }))
     }

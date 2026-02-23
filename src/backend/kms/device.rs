@@ -204,20 +204,20 @@ impl State {
                 }
             }
         }
-        if let Some(blocklist) = dev_list_var("COSMIC_DRM_BLOCK_DEVICES") {
-            if let Ok(node) = DrmNode::from_dev_id(dev) {
-                let node = node
-                    .node_with_type(NodeType::Render)
-                    .and_then(|res| res.ok())
-                    .unwrap_or(node);
-                for ident in blocklist {
-                    if ident.matches(&node) {
-                        info!(
-                            "Skipping device {} due to COSMIC_DRM_BLOCK_DEVICE list.",
-                            path.display()
-                        );
-                        return Ok(Vec::new());
-                    }
+        if let Some(blocklist) = dev_list_var("COSMIC_DRM_BLOCK_DEVICES")
+            && let Ok(node) = DrmNode::from_dev_id(dev)
+        {
+            let node = node
+                .node_with_type(NodeType::Render)
+                .and_then(|res| res.ok())
+                .unwrap_or(node);
+            for ident in blocklist {
+                if ident.matches(&node) {
+                    info!(
+                        "Skipping device {} due to COSMIC_DRM_BLOCK_DEVICE list.",
+                        path.display()
+                    );
+                    return Ok(Vec::new());
                 }
             }
         }
@@ -271,10 +271,10 @@ impl State {
                 notifier,
                 move |event, metadata, state: &mut State| match event {
                     DrmEvent::VBlank(crtc) => {
-                        if let Some(device) = state.backend.kms().drm_devices.get_mut(&drm_node) {
-                            if let Some(surface) = device.inner.surfaces.get_mut(&crtc) {
-                                surface.on_vblank(metadata.take());
-                            }
+                        if let Some(device) = state.backend.kms().drm_devices.get_mut(&drm_node)
+                            && let Some(surface) = device.inner.surfaces.get_mut(&crtc)
+                        {
+                            surface.on_vblank(metadata.take());
                         }
                     }
                     DrmEvent::Error(err) => {
@@ -676,10 +676,10 @@ impl LockedDevice<'_> {
 
                 let mut compositor = compositor.lock().unwrap();
                 compositor.render_frame(renderer, &elements, CLEAR_COLOR, FrameFlags::empty())?;
-                if let Err(err) = compositor.commit_frame() {
-                    if !matches!(err, FrameError::EmptyFrame) {
-                        return Err(err.into());
-                    }
+                if let Err(err) = compositor.commit_frame()
+                    && !matches!(err, FrameError::EmptyFrame)
+                {
+                    return Err(err.into());
                 }
             }
         }

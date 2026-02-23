@@ -561,18 +561,16 @@ pub fn render_window_to_buffer(
         let pointer = seat.get_pointer().unwrap();
         let pointer_loc = pointer.current_location().to_i32_round().as_global();
         let mut location = None;
-        if let Some(element) = shell.element_for_surface(toplevel) {
-            if element.has_active_window(toplevel) {
-                if let Some(workspace) = shell.space_for(element) {
-                    if let Some(geometry) = workspace.element_geometry(element) {
-                        let mut surface_geo = element.active_window_geometry().as_local();
-                        surface_geo.loc += geometry.loc;
-                        let global_geo = surface_geo.to_global(workspace.output());
-                        if global_geo.contains(pointer_loc) {
-                            location = Some((pointer_loc - global_geo.loc).as_logical().to_f64());
-                        }
-                    }
-                }
+        if let Some(element) = shell.element_for_surface(toplevel)
+            && element.has_active_window(toplevel)
+            && let Some(workspace) = shell.space_for(element)
+            && let Some(geometry) = workspace.element_geometry(element)
+        {
+            let mut surface_geo = element.active_window_geometry().as_local();
+            surface_geo.loc += geometry.loc;
+            let global_geo = surface_geo.to_global(workspace.output());
+            if global_geo.contains(pointer_loc) {
+                location = Some((pointer_loc - global_geo.loc).as_logical().to_f64());
             }
         };
         std::mem::drop(shell);
@@ -604,19 +602,17 @@ pub fn render_window_to_buffer(
 
             // TODO cosmic-workspaces wants to omit, but metadata cursor capture in portal should
             // still include dnd surface in window capture buffer?
-            if draw_cursor {
-                if let Some(dnd_icon) = get_dnd_icon(&seat) {
-                    elements.extend(
-                        cursor::draw_dnd_icon(
-                            renderer,
-                            &dnd_icon.surface,
-                            (location + dnd_icon.offset.to_f64()).to_i32_round(),
-                            1.0,
-                        )
-                        .into_iter()
-                        .map(WindowCaptureElement::from),
-                    );
-                }
+            if draw_cursor && let Some(dnd_icon) = get_dnd_icon(&seat) {
+                elements.extend(
+                    cursor::draw_dnd_icon(
+                        renderer,
+                        &dnd_icon.surface,
+                        (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                        1.0,
+                    )
+                    .into_iter()
+                    .map(WindowCaptureElement::from),
+                );
             }
         }
 
