@@ -906,6 +906,7 @@ impl State {
                     TilingZone::BottomLeft => TiledCorners::BottomLeft,
                     TilingZone::Left => TiledCorners::Left,
                     TilingZone::TopLeft => TiledCorners::TopLeft,
+                    TilingZone::Center => TiledCorners::Center,
                 };
 
                 let mut shell = self.common.shell.write();

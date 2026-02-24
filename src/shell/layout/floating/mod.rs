@@ -177,6 +177,7 @@ pub enum TiledCorners {
     BottomLeft,
     Left,
     TopLeft,
+    Center,
 }
 
 impl TiledCorners {
@@ -255,6 +256,16 @@ impl TiledCorners {
                 )),
                 Size::from((
                     output_geometry.size.w / 2 - inner * 3 / 2,
+                    output_geometry.size.h - inner * 2,
+                )),
+            ),
+            TiledCorners::Center => (
+                Point::from((
+                    output_geometry.loc.x + output_geometry.size.w / 4 + inner,
+                    output_geometry.loc.y + inner,
+                )),
+                Size::from((
+                    output_geometry.size.w / 2 - inner * 2,
                     output_geometry.size.h - inner * 2,
                 )),
             ),
@@ -1243,7 +1254,8 @@ impl FloatingLayout {
                     (Direction::Up, Some(TiledCorners::Bottom))
                     | (Direction::Down, Some(TiledCorners::Top))
                     | (Direction::Left, Some(TiledCorners::Right))
-                    | (Direction::Right, Some(TiledCorners::Left)) => {
+                    | (Direction::Right, Some(TiledCorners::Left))
+                    | (Direction::Up, Some(TiledCorners::Center)) => {
                         std::mem::drop(tiled_state);
 
                         let mut maximized_state = element.maximized_state.lock().unwrap();
@@ -1256,6 +1268,11 @@ impl FloatingLayout {
                         self.map_maximized(element.clone(), start_rectangle, true);
                         return MoveResult::Done;
                     }
+
+                    // center transitions
+                    (Direction::Left, Some(TiledCorners::Center)) => TiledCorners::Left,
+                    (Direction::Right, Some(TiledCorners::Center)) => TiledCorners::Right,
+                    (Direction::Down, Some(TiledCorners::Center)) => TiledCorners::Bottom,
 
                     // figure out if we need to quater tile
                     (Direction::Up, Some(TiledCorners::Left))
