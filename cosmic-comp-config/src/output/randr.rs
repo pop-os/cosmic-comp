@@ -74,6 +74,7 @@ impl From<CompList> for cosmic_randr_shell::List {
                 // XXX no physical output size in the config
                 physical: (0, 0),
                 adaptive_sync_availability: None,
+                serial_number: String::new(),
             });
         }
 

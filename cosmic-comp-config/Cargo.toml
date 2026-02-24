@@ -16,6 +16,6 @@ tracing = { version = "0.1.44", features = [
 ], optional = true }
 
 [features]
-default = []
+default = ["output", "randr"]
 output = ["ron", "tracing"]
 randr = ["cosmic-randr-shell", "output"]
