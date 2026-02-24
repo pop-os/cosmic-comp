@@ -3128,7 +3128,18 @@ impl Shell {
         let from_workspace = self.workspaces.space_for_handle_mut(from).unwrap(); // checked above
 
         let is_minimized = window.is_minimized();
-        let mut window_state = from_workspace.unmap_surface(window)?.1;
+        let is_fullscreen = from_workspace.get_fullscreen().is_some_and(|f| f == window);
+        let mut window_state = if is_fullscreen {
+            let (previous_state, previous_geometry) = from_workspace.take_fullscreen().unwrap();
+            WorkspaceRestoreData::Fullscreen(previous_state.zip(previous_geometry).map(
+                |(previous_state, previous_geometry)| FullscreenRestoreData {
+                    previous_state,
+                    previous_geometry,
+                },
+            ))
+        } else {
+            from_workspace.unmap_surface(window)?.1
+        };
 
         toplevel_leave_workspace(window, from);
         if from_output != to_output {
