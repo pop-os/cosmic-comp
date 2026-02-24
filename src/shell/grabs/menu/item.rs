@@ -52,13 +52,13 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         state: &mut Tree,
         renderer: &cosmic::Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         let state = &mut state.children[0];
-        let node = self.elem.as_widget().layout(state, renderer, limits);
+        let node = self.elem.as_widget_mut().layout(state, renderer, limits);
         layout::Node::with_children(node.size(), vec![node])
     }
 
@@ -81,6 +81,7 @@ where
 
         renderer.fill_quad(
             Quad {
+                snap: true,
                 bounds: layout.bounds(),
                 border: Border {
                     radius: styling.border_radius,
@@ -128,7 +129,7 @@ where
     }
 
     fn operate(
-        &self,
+        &mut self,
         state: &mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
@@ -137,21 +138,21 @@ where
         let state = &mut state.children[0];
         let layout = layout.children().next().unwrap();
         self.elem
-            .as_widget()
+            .as_widget_mut()
             .operate(state, layout, renderer, operation)
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         state: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &cosmic::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         let mut bounds = layout.bounds();
 
         // fix padding 1 and event... don't ask.
@@ -180,9 +181,9 @@ where
 
         let state = &mut state.children[0];
         let layout = layout.children().next().unwrap();
-        self.elem.as_widget_mut().on_event(
+        self.elem.as_widget_mut().update(
             state, event, layout, cursor, renderer, clipboard, shell, viewport,
-        )
+        );
     }
 
     fn mouse_interaction(
@@ -203,15 +204,16 @@ where
     fn overlay<'b>(
         &'b mut self,
         state: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &cosmic::Renderer,
+        viewport: &Rectangle,
         translation: cosmic::iced::Vector,
     ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
         let state = &mut state.children[0];
         let layout = layout.children().next().unwrap();
         self.elem
             .as_widget_mut()
-            .overlay(state, layout, renderer, translation)
+            .overlay(state, layout, renderer, viewport, translation)
     }
 }
 

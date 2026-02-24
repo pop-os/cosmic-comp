@@ -18,11 +18,7 @@ use cosmic::{
         window::Event as WindowEvent,
     },
     iced_core::{Color, Length, Pixels, clipboard::Null as NullClipboard, id::Id, renderer::Style},
-    iced_runtime::{
-        Action, Debug,
-        program::{Program as IcedProgram, State},
-        task::into_stream,
-    },
+    iced_runtime::{Action, task::into_stream},
 };
 use iced_tiny_skia::{
     Layer,
@@ -66,6 +62,8 @@ use smithay::{
     },
 };
 
+use crate::utils::state::State;
+
 static ID: LazyLock<Id> = LazyLock::new(|| Id::new("Program"));
 
 pub struct IcedElement<P: Program + Send + 'static>(pub(crate) Arc<Mutex<IcedElementInternal<P>>>);
@@ -96,6 +94,26 @@ impl<P: Program + Send + 'static> Eq for IcedElement<P> {}
 impl<P: Program + Send + 'static> Hash for IcedElement<P> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         (Arc::as_ptr(&self.0) as usize).hash(state)
+    }
+}
+
+pub trait IcedProgram {
+    type Message: std::fmt::Debug + Send;
+    fn update(&mut self, _message: Self::Message) -> Task<Self::Message> {
+        Task::none()
+    }
+    fn view(&self) -> cosmic::Element<'_, Self::Message>;
+
+    fn background_color(&self) -> Color {
+        Color::TRANSPARENT
+    }
+
+    fn foreground(
+        &self,
+        _pixels: &mut tiny_skia::PixmapMut<'_>,
+        _damage: &[Rectangle<i32, BufferCoords>],
+        _scale: f32,
+    ) {
     }
 }
 
@@ -135,8 +153,6 @@ struct ProgramWrapper<P: Program> {
 
 impl<P: Program> IcedProgram for ProgramWrapper<P> {
     type Message = <P as Program>::Message;
-    type Renderer = cosmic::Renderer;
-    type Theme = cosmic::Theme;
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         let last_seat = self.last_seat.lock().unwrap();
@@ -165,7 +181,6 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     theme: Theme,
     renderer: cosmic::Renderer,
     state: State<ProgramWrapper<P>>,
-    debug: Debug,
 
     // futures
     handle: LoopHandle<'static, crate::state::State>,
@@ -189,7 +204,6 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             tracing::warn!("Missing force_update call");
         }
         let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
-        let mut debug = Debug::new();
         let state = State::new(
             ID.clone(),
             ProgramWrapper {
@@ -199,7 +213,6 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             },
             IcedSize::new(self.size.w as f32, self.size.h as f32),
             &mut renderer,
-            &mut debug,
         );
 
         IcedElementInternal {
@@ -214,7 +227,6 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             theme: self.theme.clone(),
             renderer,
             state,
-            debug,
             handle,
             scheduler,
             executor_token,
@@ -240,7 +252,6 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
             .field("theme", &"...")
             .field("renderer", &"...")
             .field("state", &"...")
-            .field("debug", &self.debug)
             .field("handle", &self.handle)
             .field("scheduler", &self.scheduler)
             .field("executor_token", &self.executor_token)
@@ -265,7 +276,6 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         let size = size.into();
         let last_seat = Arc::new(Mutex::new(None));
         let mut renderer = cosmic::Renderer::new(cosmic::font::default(), Pixels(16.0));
-        let mut debug = Debug::new();
 
         let state = State::new(
             ID.clone(),
@@ -276,7 +286,6 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             },
             IcedSize::new(size.w as f32, size.h as f32),
             &mut renderer,
-            &mut debug,
         );
 
         let (executor, scheduler) = calloop::futures::executor().expect("Out of file descriptors");
@@ -299,7 +308,6 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             theme,
             renderer,
             state,
-            debug,
             handle,
             scheduler,
             executor_token,
@@ -317,14 +325,16 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn minimum_size(&self) -> Size<i32, Logical> {
         let internal = self.0.lock().unwrap();
-        let element = internal.state.program().program.view();
+        let mut element = internal.state.program().program.view();
+
+        let mut tree = Tree::new(element.as_widget());
         let node = element
-            .as_widget()
+            .as_widget_mut()
             .layout(
                 // TODO Avoid creating a new tree here?
-                &mut Tree::new(element.as_widget()),
+                &mut tree,
                 &internal.renderer,
-                &Limits::new(IcedSize::ZERO, IcedSize::INFINITY)
+                &Limits::new(IcedSize::ZERO, IcedSize::INFINITE)
                     .width(Length::Shrink)
                     .height(Length::Shrink),
             )
@@ -432,7 +442,6 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
                     text_color: self.theme.cosmic().on_bg_color().into(),
                 },
                 &mut NullClipboard,
-                &mut self.debug,
             )
             .1;
 
@@ -922,7 +931,6 @@ where
             if size.w > 0 && size.h > 0 {
                 let state_ref = &internal_ref.state;
                 let mut clip_mask = tiny_skia::Mask::new(size.w as u32, size.h as u32).unwrap();
-                let overlay = internal_ref.debug.overlay();
                 let theme = &internal_ref.theme;
 
                 _ = buffer.render().draw(|buf| {
@@ -977,7 +985,6 @@ where
                             &viewport,
                             &damage,
                             background_color,
-                            &overlay,
                         );
                     }
 

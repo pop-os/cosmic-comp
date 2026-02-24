@@ -1303,7 +1303,7 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 .height(Length::Fill)
                 .width(Length::Fill),
             ),
-            iced_widget::horizontal_space()
+            iced_widget::space::horizontal()
                 .width(Length::Fixed(0.0))
                 .apply(iced_widget::container)
                 .padding([64, 24])
@@ -1345,6 +1345,7 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 };
 
                 iced_widget::container::Style {
+snap: true,
                     icon_color: Some(cosmic_theme.background.on.into()),
                     text_color: Some(cosmic_theme.background.on.into()),
                     background: Some(Background::Color(background.into())),

@@ -6,7 +6,7 @@ use crate::{
 use calloop::LoopHandle;
 use cosmic::{
     Apply,
-    iced::widget::{container, horizontal_space, row},
+    iced::widget::{container, row, space},
     iced_core::{Alignment, Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, text},
@@ -34,7 +34,7 @@ impl Program for SwapIndicatorInternal {
                 .prefer_svg(true)
                 .icon()
                 .into(),
-            horizontal_space().width(16).into(),
+            space::horizontal().width(16).into(),
             text::title3(fl!("swap-windows")).into(),
         ])
         .align_y(Alignment::Center)
@@ -44,6 +44,7 @@ impl Program for SwapIndicatorInternal {
         .padding(16)
         .apply(container)
         .class(theme::Container::custom(|theme| container::Style {
+            snap: true,
             icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),

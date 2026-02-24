@@ -514,6 +514,7 @@ impl Program for ZoomProgram {
             let cosmic = theme.cosmic();
             let component = &cosmic.background.component;
             iced_widget::container::Style {
+                snap: true,
                 icon_color: Some(component.on.into()),
                 text_color: Some(component.on.into()),
                 background: Some(Background::Color(component.base.into())),
