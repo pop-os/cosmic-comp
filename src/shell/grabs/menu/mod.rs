@@ -13,7 +13,7 @@ use cosmic::{
     iced_core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
     iced_widget::{self, Column, Row, text::Style as TextStyle},
     theme,
-    widget::{button, divider, horizontal_space, icon::from_name, text},
+    widget::{button, divider, icon::from_name, space, text},
 };
 use smithay::{
     backend::{
@@ -392,7 +392,7 @@ impl Program for ContextMenu {
             match item {
                 Item::Separator => divider::horizontal::light().into(),
                 Item::Submenu { title, .. } => Row::with_children(vec![
-                    horizontal_space().width(16).into(),
+                    space::horizontal().width(16).into(),
                     text::body(title).width(mode).into(),
                     from_name("go-next-symbolic")
                         .size(16)
@@ -425,7 +425,7 @@ impl Program for ContextMenu {
                                 }))
                                 .into()
                         } else {
-                            horizontal_space().width(16).into()
+                            space::horizontal().width(16).into()
                         },
                         text::body(title)
                             .width(mode)
@@ -441,7 +441,7 @@ impl Program for ContextMenu {
                                 theme::Text::Default
                             })
                             .into(),
-                        horizontal_space().width(16).into(),
+                        space::horizontal().width(16).into(),
                     ];
                     if let Some(shortcut) = shortcut.as_ref() {
                         components.push(
@@ -479,6 +479,7 @@ impl Program for ContextMenu {
             let cosmic = theme.cosmic();
             let component = &cosmic.background.component;
             iced_widget::container::Style {
+                snap: true,
                 icon_color: Some(cosmic.accent.base.into()),
                 text_color: Some(component.on.into()),
                 background: Some(Background::Color(component.base.into())),

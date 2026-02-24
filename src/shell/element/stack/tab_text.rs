@@ -78,10 +78,10 @@ impl TabText {
         <cosmic::Renderer as TextRenderer>::Paragraph::with_text(Text {
             content: &self.text,
             size: cosmic::iced_core::Pixels(self.font_size),
-            bounds: Size::INFINITY,
+            bounds: Size::INFINITE,
             font: self.font,
-            horizontal_alignment: alignment::Horizontal::Left,
-            vertical_alignment: alignment::Vertical::Center,
+            align_x: cosmic::iced_core::text::Alignment::Left,
+            align_y: alignment::Vertical::Center,
             shaping: Shaping::Advanced,
             line_height: LineHeight::default(),
             wrapping: Wrapping::None,
@@ -107,7 +107,7 @@ impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
         Size::new(self.width, self.height)
     }
 
-    fn layout(&self, tree: &mut Tree, _renderer: &cosmic::Renderer, limits: &Limits) -> Node {
+    fn layout(&mut self, tree: &mut Tree, _renderer: &cosmic::Renderer, limits: &Limits) -> Node {
         let state = tree.state.downcast_mut::<LocalState>();
         let text_bounds = state.paragraph.min_bounds();
         state.overflowed = limits.max().width < text_bounds.width;
@@ -166,6 +166,7 @@ impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
 
             renderer.fill_quad(
                 renderer::Quad {
+                    snap: true,
                     bounds: Rectangle {
                         x: (bounds.x + bounds.width - 24.).max(bounds.x),
                         width: 24.0_f32.min(bounds.width),

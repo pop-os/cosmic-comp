@@ -12,7 +12,7 @@ use cosmic::{
     },
     iced_core::{Background, Border, Color, Length},
     theme,
-    widget::{horizontal_space, icon::from_name, text},
+    widget::{icon::from_name, space, text},
 };
 use smithay::utils::{Logical, Size};
 
@@ -38,7 +38,7 @@ impl Program for StackHoverInternal {
                 .prefer_svg(true)
                 .icon()
                 .into(),
-            horizontal_space().width(16).into(),
+            space::horizontal().width(16).into(),
             text::title3(fl!("stack-windows")).into(),
         ])
         .align_y(Alignment::Center)
@@ -48,6 +48,7 @@ impl Program for StackHoverInternal {
         .padding(16)
         .apply(container)
         .class(theme::Container::custom(|theme| container::Style {
+            snap: true,
             icon_color: Some(Color::from(theme.cosmic().accent.on)),
             text_color: Some(Color::from(theme.cosmic().accent.on)),
             background: Some(Background::Color(theme.cosmic().accent_color().into())),

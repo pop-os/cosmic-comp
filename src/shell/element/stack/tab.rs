@@ -30,19 +30,19 @@ impl From<TabRuleTheme> for theme::Rule {
         match theme {
             TabRuleTheme::ActiveActivated => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().accent_color().into(),
-                width: 4,
+                snap: true,
                 radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
             TabRuleTheme::ActiveDeactivated => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().palette.neutral_5.into(),
-                width: 4,
+                snap: true,
                 radius: 0.0.into(),
                 fill_mode: FillMode::Full,
             }),
             TabRuleTheme::Default => Self::custom(|theme| widget::rule::Style {
                 color: theme.cosmic().palette.neutral_5.into(),
-                width: 4,
+                snap: true,
                 radius: 8.0.into(),
                 fill_mode: FillMode::Padded(4),
             }),
@@ -62,6 +62,7 @@ impl From<TabBackgroundTheme> for theme::Container<'_> {
         match background_theme {
             TabBackgroundTheme::ActiveActivated => {
                 Self::custom(move |theme| widget::container::Style {
+                    snap: true,
                     icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     background: Some(Background::Color(
@@ -77,6 +78,7 @@ impl From<TabBackgroundTheme> for theme::Container<'_> {
             }
             TabBackgroundTheme::ActiveDeactivated => {
                 Self::custom(move |theme| widget::container::Style {
+                    snap: true,
                     icon_color: None,
                     text_color: None,
                     background: Some(Background::Color(
@@ -186,7 +188,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
         }
 
         let items = vec![
-            widget::vertical_rule(4).class(self.rule_theme).into(),
+            widget::rule::vertical(4).class(self.rule_theme).into(),
             self.app_icon
                 .clone()
                 .apply(widget::container)
@@ -262,7 +264,7 @@ where
         Size::new(Length::Fill, Length::Fill)
     }
 
-    fn layout(&self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
         let min_size = Size {
             height: TAB_HEIGHT as f32,
             width: if self.active {
@@ -295,74 +297,68 @@ where
             8.,
             cosmic::iced::Alignment::Center,
             if size.width >= CLOSE_BREAKPOINT as f32 {
-                &self.elements
+                &mut self.elements
             } else if size.width >= TEXT_BREAKPOINT as f32 {
-                &self.elements[0..3]
+                &mut self.elements[0..3]
             } else {
-                &self.elements[0..2]
+                &mut self.elements[0..2]
             },
             &mut tree.children,
         )
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &cosmic::Renderer,
         operation: &mut dyn Operation<()>,
     ) {
-        operation.container(None, layout.bounds(), &mut |operation| {
+        operation.container(None, layout.bounds());
+        operation.traverse(&mut |operation| {
             self.elements
-                .iter()
+                .iter_mut()
                 .zip(&mut tree.children)
                 .zip(layout.children())
                 .for_each(|((child, state), layout)| {
                     child
-                        .as_widget()
+                        .as_widget_mut()
                         .operate(state, layout, renderer, operation);
                 });
         });
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: event::Event,
+        event: &event::Event,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         renderer: &cosmic::Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> event::Status {
+    ) {
         let status = self
             .elements
             .iter_mut()
             .zip(&mut tree.children)
             .zip(layout.children())
             .map(|((child, state), layout)| {
-                child.as_widget_mut().on_event(
-                    state,
-                    event.clone(),
-                    layout,
-                    cursor,
-                    renderer,
-                    clipboard,
-                    shell,
-                    viewport,
+                child.as_widget_mut().update(
+                    state, event, layout, cursor, renderer, clipboard, shell, viewport,
                 )
-            })
-            .fold(event::Status::Ignored, event::Status::merge);
+            });
 
-        if status == event::Status::Ignored && cursor.is_over(layout.bounds()) {
+        if !shell.is_event_captured() && cursor.is_over(layout.bounds()) {
             if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
             ) {
                 if let Some(message) = self.press_message.clone() {
                     shell.publish(message);
-                    return event::Status::Captured;
+                    shell.capture_event();
+                    return;
                 }
             }
             if matches!(
@@ -371,7 +367,8 @@ where
             ) {
                 if let Some(message) = self.right_click_message.clone() {
                     shell.publish(message);
-                    return event::Status::Captured;
+                    shell.capture_event();
+                    return;
                 }
             }
             if matches!(
@@ -379,11 +376,10 @@ where
                 event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             ) {
                 shell.publish(Message::activate(self.idx));
-                return event::Status::Captured;
+                shell.capture_event();
+                return;
             }
         }
-
-        status
     }
 
     fn mouse_interaction(
@@ -447,10 +443,18 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &cosmic::Renderer,
+        viewport: &Rectangle,
         translation: cosmic::iced::Vector,
     ) -> Option<overlay::Element<'b, Message, cosmic::Theme, cosmic::Renderer>> {
-        overlay::from_children(&mut self.elements, tree, layout, renderer, translation)
+        overlay::from_children(
+            &mut self.elements,
+            tree,
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }

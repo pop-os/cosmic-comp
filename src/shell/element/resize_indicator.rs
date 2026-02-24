@@ -12,7 +12,7 @@ use cosmic::{
     Apply,
     iced::{
         Alignment,
-        widget::{column, container, horizontal_space, row, vertical_space},
+        widget::{column, container, row, space},
     },
     iced_core::{Background, Border, Color, Length},
     theme,
@@ -70,6 +70,7 @@ impl Program for ResizeIndicatorInternal {
         let edges = self.edges.lock().unwrap();
         let icon_container_style = || {
             theme::Container::custom(|theme| container::Style {
+                snap: true,
                 icon_color: Some(Color::from(theme.cosmic().accent.on)),
                 text_color: Some(Color::from(theme.cosmic().accent.on)),
                 background: Some(Background::Color(theme.cosmic().accent_color().into())),
@@ -99,7 +100,7 @@ impl Program for ResizeIndicatorInternal {
                 .center_x(Length::Fill)
                 .into()
             } else {
-                vertical_space().height(36).into()
+                space::vertical().height(36).into()
             },
             row(vec![
                 if edges.contains(ResizeEdge::LEFT) {
@@ -118,12 +119,12 @@ impl Program for ResizeIndicatorInternal {
                     .center_y(Length::Fill)
                     .into()
                 } else {
-                    horizontal_space().width(36).into()
+                    space::horizontal().width(36).into()
                 },
                 row(vec![
                     text::heading(&self.shortcut1).into(),
                     text::body(fl!("grow-window")).into(),
-                    horizontal_space().width(40).into(),
+                    space::horizontal().width(40).into(),
                     text::heading(&self.shortcut2).into(),
                     text::body(fl!("shrink-window")).into(),
                 ])
@@ -155,7 +156,7 @@ impl Program for ResizeIndicatorInternal {
                     .center_y(Length::Fill)
                     .into()
                 } else {
-                    horizontal_space().width(36).into()
+                    space::horizontal().width(36).into()
                 },
             ])
             .width(Length::Fill)
@@ -177,7 +178,7 @@ impl Program for ResizeIndicatorInternal {
                 .center_x(Length::Fill)
                 .into()
             } else {
-                vertical_space().height(36).into()
+                space::vertical().height(36).into()
             },
         ])
         .into()

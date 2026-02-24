@@ -20,14 +20,18 @@ cosmic-comp-config = { path = "cosmic-comp-config", features = [
 cosmic-config = { git = "https://github.com/pop-os/libcosmic/", features = [
     "calloop",
     "macro",
-] }
+], branch = "iced-rebase" }
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "160b086", default-features = false, features = [
     "server",
 ] }
-cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
+cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", branch = "iced-rebase" }
 cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
     "greeter",
-] }
+], branch = "iced-rebase" }
+# cosmic-settings-config = { path = "../cosmic-settings-daemon/config" }
+# cosmic-settings-daemon-config = { path = "../cosmic-settings-daemon/cosmic-settings-daemon-config", features = [
+#     "greeter",
+# ] }
 cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = [
     "shape-run-cache",
 ] }
@@ -39,11 +43,11 @@ i18n-embed = { version = "0.16", features = [
     "desktop-requester",
 ] }
 i18n-embed-fl = "0.10"
-iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic/" }
+iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic", branch = "iced-rebase" }
 indexmap = "2.13"
 keyframe = "1.1.1"
 libc = "0.2.182"
-libcosmic = { git = "https://github.com/pop-os/libcosmic/", default-features = false }
+libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false, branch = "iced-rebase" }
 libsystemd = { version = "0.7", optional = true }
 log-panics = { version = "2", features = ["with-backtrace"] }
 ordered-float = "5.1"
