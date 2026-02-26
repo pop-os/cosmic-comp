@@ -1591,29 +1591,6 @@ impl FloatingLayout {
             }
 
             if focused == Some(elem) && !elem.is_maximized(false) {
-                if let Some((mode, resize)) = resize_indicator.as_mut() {
-                    let mut resize_geometry = geometry;
-                    resize_geometry.loc -= (18, 18).into();
-                    resize_geometry.size += (36, 36).into();
-
-                    resize.resize(resize_geometry.size.as_logical());
-                    resize.output_enter(output, Rectangle::default() /* unused */);
-                    window_elements = resize
-                        .render_elements::<CosmicWindowRenderElement<R>>(
-                            renderer,
-                            resize_geometry
-                                .loc
-                                .as_logical()
-                                .to_physical_precise_round(output_scale),
-                            output_scale.into(),
-                            alpha * mode.alpha().unwrap_or(1.0),
-                        )
-                        .into_iter()
-                        .map(CosmicMappedRenderElement::Window)
-                        .chain(window_elements.into_iter())
-                        .collect();
-                }
-
                 let active_window_hint = crate::theme::active_window_hint(theme);
                 let radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
                 if indicator_thickness > 0 {
@@ -1632,6 +1609,28 @@ impl FloatingLayout {
                         ],
                     );
                     window_elements.insert(0, element.into());
+                }
+
+                if let Some((mode, resize)) = resize_indicator.as_mut() {
+                    let mut resize_geometry = geometry;
+                    resize_geometry.loc -= (18, 18).into();
+                    resize_geometry.size += (36, 36).into();
+
+                    resize.resize(resize_geometry.size.as_logical());
+                    resize.output_enter(output, Rectangle::default() /* unused */);
+                    let resize_elements = resize
+                        .render_elements::<CosmicWindowRenderElement<R>>(
+                            renderer,
+                            resize_geometry
+                                .loc
+                                .as_logical()
+                                .to_physical_precise_round(output_scale),
+                            output_scale.into(),
+                            alpha * mode.alpha().unwrap_or(1.0),
+                        )
+                        .into_iter()
+                        .map(CosmicMappedRenderElement::Window);
+                    window_elements = resize_elements.chain(window_elements).collect();
                 }
             }
 
