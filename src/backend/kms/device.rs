@@ -994,7 +994,7 @@ fn populate_modes(
     position: (u32, u32),
 ) -> Result<()> {
     let conn_info = drm.get_connector(conn, false)?;
-    let max_bpc = drm_helpers::get_max_bpc(drm, conn)?.map(|(_val, range)| range.end.min(16));
+    let max_bpc = drm_helpers::get_max_bpc(drm, conn)?.map(|(_val, range)| range.end.min(10));
     let Some(mode) = conn_info
         .modes()
         .iter()
