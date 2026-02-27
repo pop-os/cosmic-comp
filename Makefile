@@ -53,14 +53,14 @@ install:
 	install -Dm0644 "data/tiling-exceptions.ron" "$(TILING_EXCEPTIONS_CONF)"
 
 install-bare-session: install
-	install -Dm0644 "data/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
-	install -Dm0644 "data/cosmic-session.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-session.target"
-	install -Dm0644 "data/cosmic-session-pre.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-session-pre.target"
+	install -Dm0644 "data/cosmic-comp.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic-comp.desktop"
+	install -Dm0644 "data/cosmic-comp-session.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp-session.target"
+	install -Dm0644 "data/cosmic-comp-session-pre.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp-session-pre.target"
 	install -Dm0644 "data/cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp.service"
-	install -Dm0755 "data/cosmic-service" "$(DESTDIR)/$(bindir)/cosmic-service"
+	install -Dm0755 "data/cosmic-comp-service" "$(DESTDIR)/$(bindir)/cosmic-comp-service"
 
 uninstall:
 	rm "$(TARGET_BIN)" "$(KEYBINDINGS_CONF)"
 
 uninstall-bare-session:
-	rm "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
+	rm "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic-comp.desktop"
