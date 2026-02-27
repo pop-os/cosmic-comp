@@ -919,18 +919,18 @@ impl State {
                             .enable_mouse_zoom_shortcuts
                     {
                         seat.modifiers_shortcut_queue().clear();
-                        if let Some(mut percentage) = event
+                        if let Some(percentage) = event
                             .amount_v120(Axis::Vertical)
                             .map(|val| val / 120.)
                             .or_else(|| event.amount(Axis::Vertical))
                             .map(|val| val * scroll_factor)
                         {
-                            if event.source() == AxisSource::Wheel {
-                                percentage *= 5.;
-                            }
-
-                            let change = -(percentage / 100.);
-                            self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
+                            let change = -((percentage
+                                * self.common.config.cosmic_conf.accessibility_zoom.increment
+                                    as f64)
+                                / 100.);
+                                
+                             self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
                         }
                     } else {
                         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
