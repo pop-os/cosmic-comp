@@ -346,6 +346,30 @@ pub struct RestoreTilingState {
     pub sizes: Vec<i32>,
 }
 
+#[derive(Default)]
+pub struct ResizeTarget {
+    pub left_node_idx: Option<(NodeId, usize)>, // node ID of group, and the child inside index inside it to resize
+    pub up_node_idx: Option<(NodeId, usize)>,
+}
+
+impl ResizeTarget {
+    pub fn new_horizonital(group: NodeId, child_idx: usize) -> Self {
+        Self {
+            left_node_idx: Some((group, child_idx)),
+            up_node_idx: None,
+        }
+    }
+    pub fn new_vertical(group: NodeId, child_idx: usize) -> Self {
+        Self {
+            left_node_idx: None,
+            up_node_idx: Some((group, child_idx)),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.left_node_idx.is_none() && self.up_node_idx.is_none()
+    }
+}
+
 impl TilingLayout {
     pub fn new(
         theme: cosmic::Theme,
@@ -2481,41 +2505,78 @@ impl TilingLayout {
         edges
     }
 
-    pub fn resize_request(
-        &self,
-        mut node_id: NodeId,
-        edge: ResizeEdge,
-    ) -> Option<(NodeId, usize, Orientation)> {
+    pub fn resize_request(&self, window_node_id: NodeId, edge: ResizeEdge) -> ResizeTarget {
         let tree = self.tree();
+        // need to find two NodeIds and associated index
+        // that indicate the groups and then the index that needs to be resized inside each one
+        // the one that's closer to the root is the "upper" one, and the one closer to the hovered window is the "lower" one
 
-        while let Some(group_id) = tree.get(&node_id).unwrap().parent().cloned() {
-            let orientation = tree.get(&group_id).unwrap().data().orientation();
-            let node_idx = tree
-                .children_ids(&group_id)
+        let mut try_lower_node_id = window_node_id;
+        while let Some(try_lower_group_id) = tree.get(&try_lower_node_id).unwrap().parent().cloned()
+        {
+            let orientation = tree.get(&try_lower_group_id).unwrap().data().orientation();
+            let lower_node_idx_in_group = tree
+                .children_ids(&try_lower_group_id)
                 .unwrap()
-                .position(|id| id == &node_id)
+                .position(|id| id == &try_lower_node_id)
                 .unwrap();
-            let total = tree.children_ids(&group_id).unwrap().count();
-            if orientation == Orientation::Vertical {
-                if node_idx > 0 && edge.contains(ResizeEdge::LEFT) {
-                    return Some((group_id, node_idx - 1, orientation));
+            let lower_total = tree.children_ids(&try_lower_group_id).unwrap().count();
+
+            if let Some(left_up_idx) =
+                resize_edge_to_left_up_idx(orientation, lower_node_idx_in_group, lower_total, edge)
+            {
+                let lower_node_idx = Some((try_lower_group_id.clone(), left_up_idx)); // found a lower group id!
+
+                // need to find closest parent that
+                // 1. is the opposite orientation as the lower group we found
+                // 2. can be resized in the direction we want
+                let mut try_upper_node_id = try_lower_group_id;
+                let mut parent_left_up_node_idx = None;
+                while let Some(try_upper_group_id) =
+                    tree.get(&try_upper_node_id).unwrap().parent().cloned()
+                {
+                    // ensure meets condition (1)
+                    if tree.get(&try_upper_group_id).unwrap().data().orientation() != orientation {
+                        let upper_node_idx_in_group = tree
+                            .children_ids(&try_upper_group_id)
+                            .unwrap()
+                            .position(|id| id == &try_upper_node_id)
+                            .unwrap();
+                        let upper_total = tree.children_ids(&try_upper_group_id).unwrap().count();
+
+                        // ensure meets condition (2)
+                        if let Some(idx) = resize_edge_to_left_up_idx(
+                            !orientation,
+                            upper_node_idx_in_group,
+                            upper_total,
+                            edge,
+                        ) {
+                            parent_left_up_node_idx = Some((try_upper_group_id.clone(), idx)); // found an upper group id!
+                            break;
+                        }
+                    }
+                    try_upper_node_id = try_upper_group_id;
                 }
-                if node_idx < total - 1 && edge.contains(ResizeEdge::RIGHT) {
-                    return Some((group_id, node_idx, orientation));
-                }
-            } else {
-                if node_idx > 0 && edge.contains(ResizeEdge::TOP) {
-                    return Some((group_id, node_idx - 1, orientation));
-                }
-                if node_idx < total - 1 && edge.contains(ResizeEdge::BOTTOM) {
-                    return Some((group_id, node_idx, orientation));
-                }
+
+                return match orientation {
+                    Orientation::Horizontal => ResizeTarget {
+                        left_node_idx: parent_left_up_node_idx,
+                        up_node_idx: lower_node_idx,
+                    },
+                    Orientation::Vertical => ResizeTarget {
+                        left_node_idx: lower_node_idx,
+                        up_node_idx: parent_left_up_node_idx,
+                    },
+                };
             }
 
-            node_id = group_id;
+            try_lower_node_id = try_lower_group_id;
         }
 
-        None
+        ResizeTarget {
+            left_node_idx: None,
+            up_node_idx: None,
+        }
     }
 
     pub fn resize(
@@ -5894,4 +5955,29 @@ fn scale_to_center<C>(
                 .into(),
         )
     }
+}
+
+fn resize_edge_to_left_up_idx(
+    orientation: Orientation,
+    node_idx: usize,
+    total: usize,
+    edge: ResizeEdge,
+) -> Option<usize> {
+    if orientation == Orientation::Vertical {
+        if node_idx > 0 && edge.contains(ResizeEdge::LEFT) {
+            return Some(node_idx - 1);
+        }
+        if node_idx < total - 1 && edge.contains(ResizeEdge::RIGHT) {
+            return Some(node_idx);
+        }
+    } else {
+        if node_idx > 0 && edge.contains(ResizeEdge::TOP) {
+            return Some(node_idx - 1);
+        }
+        if node_idx < total - 1 && edge.contains(ResizeEdge::BOTTOM) {
+            return Some(node_idx);
+        }
+    }
+
+    None
 }
