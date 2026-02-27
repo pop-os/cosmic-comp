@@ -73,6 +73,7 @@ impl State {
                         &self.common.config,
                         self.common.event_loop_handle.clone(),
                     );
+                    shell.set_window_switcher_binding(None);
                 }
                 let pointer = seat.get_pointer().unwrap();
                 let keyboard = seat.get_keyboard().unwrap();
@@ -1002,6 +1003,34 @@ impl State {
 
             // Gets the configured command for a given system action.
             Action::System(system) => {
+                // Track the triggering binding for the window switcher so
+                // modifier-release can dismiss it even for custom shortcuts.
+                if matches!(
+                    system,
+                    shortcuts::action::System::WindowSwitcher
+                        | shortcuts::action::System::WindowSwitcherPrevious
+                ) {
+                    let mods = &pattern.modifiers;
+                    // For custom modifiers (not Alt/Super), cosmic-launcher does
+                    // not know when to confirm the selection, so cosmic-comp
+                    // tracks the cycle index itself and focuses the window
+                    // directly on modifier release.
+                    // Native Alt/Super bindings are handled entirely by
+                    // cosmic-launcher, so we do not track state for them.
+                    if !mods.alt && !mods.logo {
+                        let forward =
+                            matches!(system, shortcuts::action::System::WindowSwitcher);
+                        let output = seat.active_output();
+                        let mut shell = self.common.shell.write();
+                        let len = shell
+                            .active_space(&output)
+                            .map(|ws| ws.focus_stack.get(seat).iter().count())
+                            .unwrap_or(1)
+                            .max(1);
+                        shell.advance_window_switcher(forward, len);
+                        shell.set_window_switcher_binding(Some(pattern.clone()));
+                    }
+                }
                 if let Some(command) = self.common.config.system_actions.get(&system) {
                     self.spawn_command(command.clone());
                 }
