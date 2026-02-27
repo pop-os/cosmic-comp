@@ -505,11 +505,13 @@ impl WorkspaceSet {
             return Err(InvalidWorkspaceIndex);
         }
 
-        // Animate if workspaces overview isn't open
+        // Animate if not disabled, and workspaces overview isn't open
         let layer_map = layer_map_for_output(&self.output);
-        let animate = !layer_map
+        let workspaces_overview_not_open = !layer_map
             .layers()
             .any(|l| l.namespace() == WORKSPACE_OVERVIEW_NAMESPACE);
+        let animate =
+            workspaces_overview_not_open && !self.appearance.disable_workspace_switch_animation;
 
         if self.active != idx {
             let old_active = self.active;
