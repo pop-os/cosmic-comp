@@ -270,10 +270,10 @@ impl State {
     pub fn cleanup_old_animations(&mut self) {
         let start_time = Instant::now();
 
-        if let Some(animation) = self.scroll_animation.as_ref() {
-            if start_time.duration_since(animation.start_time) > SCROLL_ANIMATION_DURATION {
-                self.scroll_animation.take();
-            }
+        if let Some(animation) = self.scroll_animation.as_ref()
+            && start_time.duration_since(animation.start_time) > SCROLL_ANIMATION_DURATION
+        {
+            self.scroll_animation.take();
         }
 
         Self::discard_expired_tab_animations(&mut self.tab_animations, start_time);

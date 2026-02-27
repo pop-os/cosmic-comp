@@ -103,10 +103,10 @@ pub fn init_backend_auto(
             }
         }
 
-        if let Some(inverted) = greeter_state.invert_colors {
-            if inverted != state.a11y_state().screen_inverted() {
-                state.request_screen_invert(inverted);
-            }
+        if let Some(inverted) = greeter_state.invert_colors
+            && inverted != state.a11y_state().screen_inverted()
+        {
+            state.request_screen_invert(inverted);
         }
 
         if state

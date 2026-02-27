@@ -238,10 +238,9 @@ impl Shell {
                 .user_data()
                 .get::<PopupGrabData>()
                 .and_then(|x| x.take())
+                && !popup_grab.has_ended()
             {
-                if !popup_grab.has_ended() {
-                    popup_grab.ungrab(PopupUngrabStrategy::All);
-                }
+                popup_grab.ungrab(PopupUngrabStrategy::All);
             }
         }
     }
@@ -501,31 +500,28 @@ impl Common {
                         trace!("Wrong Window, focus fixup");
                     }
                 } else {
-                    if let KeyboardFocusTarget::Popup(_) = target {
-                        if let Some(popup_grab) = seat
+                    if let KeyboardFocusTarget::Popup(_) = target
+                        && let Some(popup_grab) = seat
                             .user_data()
                             .get::<PopupGrabData>()
                             .and_then(|x| x.take())
-                        {
-                            if !popup_grab.has_ended() {
-                                if let Some(new) = popup_grab.current_grab() {
-                                    trace!("restore focus to previous popup grab");
-                                    std::mem::drop(shell);
-                                    // TODO: verify whether cursor should be updated at end of popup grab
-                                    update_focus_state(
-                                        seat,
-                                        Some(&new),
-                                        state,
-                                        Some(SERIAL_COUNTER.next_serial()),
-                                        false,
-                                    );
-                                    seat.user_data()
-                                        .get_or_insert::<PopupGrabData, _>(PopupGrabData::default)
-                                        .set(Some(popup_grab));
-                                    continue;
-                                }
-                            }
-                        }
+                        && !popup_grab.has_ended()
+                        && let Some(new) = popup_grab.current_grab()
+                    {
+                        trace!("restore focus to previous popup grab");
+                        std::mem::drop(shell);
+                        // TODO: verify whether cursor should be updated at end of popup grab
+                        update_focus_state(
+                            seat,
+                            Some(&new),
+                            state,
+                            Some(SERIAL_COUNTER.next_serial()),
+                            false,
+                        );
+                        seat.user_data()
+                            .get_or_insert::<PopupGrabData, _>(PopupGrabData::default)
+                            .set(Some(popup_grab));
+                        continue;
                     }
                     trace!("Surface dead, focus fixup");
                 }
@@ -547,10 +543,9 @@ impl Common {
                     .user_data()
                     .get::<PopupGrabData>()
                     .and_then(|x| x.take())
+                    && !popup_grab.has_ended()
                 {
-                    if !popup_grab.has_ended() {
-                        popup_grab.ungrab(PopupUngrabStrategy::All);
-                    }
+                    popup_grab.ungrab(PopupUngrabStrategy::All);
                 }
 
                 // update keyboard focus
@@ -682,12 +677,12 @@ fn update_focus_target(
     } else {
         let workspace = shell.active_space(output).unwrap();
 
-        if let Some(Trigger::KeyboardSwap(_, desc)) = shell.overview_mode().0.active_trigger() {
-            if workspace.handle == desc.handle && workspace.tiling_layer.has_node(&desc.node) {
-                if let Some(focus) = workspace.tiling_layer.node_desc_to_focus(desc) {
-                    return Some(focus);
-                }
-            }
+        if let Some(Trigger::KeyboardSwap(_, desc)) = shell.overview_mode().0.active_trigger()
+            && workspace.handle == desc.handle
+            && workspace.tiling_layer.has_node(&desc.node)
+            && let Some(focus) = workspace.tiling_layer.node_desc_to_focus(desc)
+        {
+            return Some(focus);
         }
 
         workspace

@@ -603,10 +603,10 @@ impl CosmicStack {
             let previous = p.previous_keyboard.swap(active, Ordering::SeqCst);
             if previous != active || p.reenter.swap(false, Ordering::SeqCst) {
                 let windows = p.windows.lock().unwrap();
-                if let Some(previous_surface) = windows.get(previous) {
-                    if previous != active {
-                        KeyboardTarget::leave(previous_surface, seat, data, serial);
-                    }
+                if let Some(previous_surface) = windows.get(previous)
+                    && previous != active
+                {
+                    KeyboardTarget::leave(previous_surface, seat, data, serial);
                 }
                 KeyboardTarget::enter(
                     &windows[active],
@@ -686,15 +686,15 @@ impl CosmicStack {
             if tiled && !appearance.shadow_tiled_windows {
                 return None;
             }
-            let radii = round
-                .then(|| {
-                    theme
-                        .cosmic()
-                        .radius_s()
-                        .map(|x| if x < 4.0 { x } else { x + 4.0 })
-                        .map(|x| (x * scale as f32).round() as u8)
-                })
-                .unwrap_or([0, 0, 0, 0]);
+            let radii = if round {
+                theme
+                    .cosmic()
+                    .radius_s()
+                    .map(|x| if x < 4.0 { x } else { x + 4.0 })
+                    .map(|x| (x * scale as f32).round() as u8)
+            } else {
+                [0, 0, 0, 0]
+            };
 
             let mut geo = SpaceElement::geometry(&windows[active]).to_f64();
             geo.size.h += TAB_HEIGHT as f64;
@@ -858,37 +858,35 @@ impl CosmicStack {
         if let Some(dragged_out) = self
             .0
             .with_program(|p| p.potential_drag.lock().unwrap().take())
-        {
-            if let Some(surface) = self
+            && let Some(surface) = self
                 .0
                 .with_program(|p| p.windows.lock().unwrap().get(dragged_out).cloned())
-            {
-                let seat = seat.clone();
-                surface.try_force_undecorated(false);
-                surface.send_configure();
-                if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
-                    let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                        let res = state.common.shell.write().move_request(
-                            &surface,
-                            &seat,
-                            serial,
-                            ReleaseMode::NoMouseButtons,
-                            true,
-                            &state.common.config,
-                            &state.common.event_loop_handle,
-                            false,
-                        );
-                        if let Some((grab, focus)) = res {
-                            if grab.is_touch_grab() {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial);
-                            } else {
-                                seat.get_pointer()
-                                    .unwrap()
-                                    .set_grab(state, grab, serial, focus);
-                            }
+        {
+            let seat = seat.clone();
+            surface.try_force_undecorated(false);
+            surface.send_configure();
+            if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
+                let _ = data.common.event_loop_handle.insert_idle(move |state| {
+                    let res = state.common.shell.write().move_request(
+                        &surface,
+                        &seat,
+                        serial,
+                        ReleaseMode::NoMouseButtons,
+                        true,
+                        &state.common.config,
+                        &state.common.event_loop_handle,
+                        false,
+                    );
+                    if let Some((grab, focus)) = res {
+                        if grab.is_touch_grab() {
+                            seat.get_touch().unwrap().set_grab(state, grab, serial);
+                        } else {
+                            seat.get_pointer()
+                                .unwrap()
+                                .set_grab(state, grab, serial, focus);
                         }
-                    });
-                }
+                    }
+                });
             }
         }
     }
@@ -1152,46 +1150,45 @@ impl Program for CosmicStackInternal {
                 }
             }
             Message::TabMenu(idx) => {
-                if let Some((seat, serial)) = last_seat.cloned() {
-                    if let Some(surface) = self.windows.lock().unwrap()[idx]
+                if let Some((seat, serial)) = last_seat.cloned()
+                    && let Some(surface) = self.windows.lock().unwrap()[idx]
                         .wl_surface()
                         .map(Cow::into_owned)
-                    {
-                        loop_handle.insert_idle(move |state| {
-                            let shell = state.common.shell.read();
-                            if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
-                                if let Some(workspace) = shell.space_for(&mapped) {
-                                    let Some(elem_geo) = workspace.element_geometry(&mapped) else {
-                                        return;
-                                    };
-                                    let position = elem_geo.loc.to_global(&workspace.output);
+                {
+                    loop_handle.insert_idle(move |state| {
+                        let shell = state.common.shell.read();
+                        if let Some(mapped) = shell.element_for_surface(&surface).cloned()
+                            && let Some(workspace) = shell.space_for(&mapped)
+                        {
+                            let Some(elem_geo) = workspace.element_geometry(&mapped) else {
+                                return;
+                            };
+                            let position = elem_geo.loc.to_global(&workspace.output);
 
-                                    let mut cursor = seat
-                                        .get_pointer()
-                                        .unwrap()
-                                        .current_location()
-                                        .to_i32_round();
-                                    cursor.y -= TAB_HEIGHT;
-                                    let res = shell.menu_request(
-                                        &surface,
-                                        &seat,
-                                        serial,
-                                        cursor - position.as_logical(),
-                                        false,
-                                        &state.common.config,
-                                        &state.common.event_loop_handle,
-                                    );
+                            let mut cursor = seat
+                                .get_pointer()
+                                .unwrap()
+                                .current_location()
+                                .to_i32_round();
+                            cursor.y -= TAB_HEIGHT;
+                            let res = shell.menu_request(
+                                &surface,
+                                &seat,
+                                serial,
+                                cursor - position.as_logical(),
+                                false,
+                                &state.common.config,
+                                &state.common.event_loop_handle,
+                            );
 
-                                    std::mem::drop(shell);
-                                    if let Some((grab, focus)) = res {
-                                        seat.get_pointer()
-                                            .unwrap()
-                                            .set_grab(state, grab, serial, focus);
-                                    }
-                                }
+                            std::mem::drop(shell);
+                            if let Some((grab, focus)) = res {
+                                seat.get_pointer()
+                                    .unwrap()
+                                    .set_grab(state, grab, serial, focus);
                             }
-                        });
-                    }
+                        }
+                    });
                 }
             }
             _ => unreachable!(),
@@ -1699,37 +1696,35 @@ impl PointerTarget<State> for CosmicStack {
         if let Some(dragged_out) = self
             .0
             .with_program(|p| p.potential_drag.lock().unwrap().take())
-        {
-            if let Some(surface) = self
+            && let Some(surface) = self
                 .0
                 .with_program(|p| p.windows.lock().unwrap().get(dragged_out).cloned())
-            {
-                let seat = seat.clone();
-                surface.try_force_undecorated(false);
-                surface.send_configure();
-                if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
-                    let _ = data.common.event_loop_handle.insert_idle(move |state| {
-                        let res = state.common.shell.write().move_request(
-                            &surface,
-                            &seat,
-                            serial,
-                            ReleaseMode::NoMouseButtons,
-                            true,
-                            &state.common.config,
-                            &state.common.event_loop_handle,
-                            false,
-                        );
-                        if let Some((grab, focus)) = res {
-                            if grab.is_touch_grab() {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial);
-                            } else {
-                                seat.get_pointer()
-                                    .unwrap()
-                                    .set_grab(state, grab, serial, focus);
-                            }
+        {
+            let seat = seat.clone();
+            surface.try_force_undecorated(false);
+            surface.send_configure();
+            if let Some(surface) = surface.wl_surface().map(Cow::into_owned) {
+                let _ = data.common.event_loop_handle.insert_idle(move |state| {
+                    let res = state.common.shell.write().move_request(
+                        &surface,
+                        &seat,
+                        serial,
+                        ReleaseMode::NoMouseButtons,
+                        true,
+                        &state.common.config,
+                        &state.common.event_loop_handle,
+                        false,
+                    );
+                    if let Some((grab, focus)) = res {
+                        if grab.is_touch_grab() {
+                            seat.get_touch().unwrap().set_grab(state, grab, serial);
+                        } else {
+                            seat.get_pointer()
+                                .unwrap()
+                                .set_grab(state, grab, serial, focus);
                         }
-                    });
-                }
+                    }
+                });
             }
         }
     }

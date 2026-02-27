@@ -576,10 +576,8 @@ impl CosmicWindow {
                 *conf = *appearance;
                 if appearance.clip_floating_windows {
                     p.window.set_tiled(true);
-                } else {
-                    if !p.tiled.load(Ordering::Acquire) {
-                        p.window.set_tiled(false);
-                    }
+                } else if !p.tiled.load(Ordering::Acquire) {
+                    p.window.set_tiled(false);
                 }
                 p.window.send_configure();
             }
@@ -633,8 +631,8 @@ impl CosmicWindow {
                 && !p.window.is_maximized(false);
             let round =
                 (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
-            let radii = round
-                .then(|| {
+            let radii = if round {
+                {
                     p.theme
                         .lock()
                         .unwrap()
@@ -642,8 +640,10 @@ impl CosmicWindow {
                         .radius_s()
                         .map(|x| if x < 4.0 { x } else { x + 4.0 })
                         .map(|x| x.round() as u8)
-                })
-                .unwrap_or([0; 4]);
+                }
+            } else {
+                [0; 4]
+            };
 
             match (has_ssd, clip) {
                 (has_ssd, true) => {
@@ -698,30 +698,30 @@ impl Program for CosmicWindowInternal {
     ) -> Task<Self::Message> {
         match message {
             Message::DragStart => {
-                if let Some((seat, serial)) = last_seat.cloned() {
-                    if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
-                        loop_handle.insert_idle(move |state| {
-                            let res = state.common.shell.write().move_request(
-                                &surface,
-                                &seat,
-                                serial,
-                                ReleaseMode::NoMouseButtons,
-                                false,
-                                &state.common.config,
-                                &state.common.event_loop_handle,
-                                false,
-                            );
-                            if let Some((grab, focus)) = res {
-                                if grab.is_touch_grab() {
-                                    seat.get_touch().unwrap().set_grab(state, grab, serial);
-                                } else {
-                                    seat.get_pointer()
-                                        .unwrap()
-                                        .set_grab(state, grab, serial, focus);
-                                }
+                if let Some((seat, serial)) = last_seat.cloned()
+                    && let Some(surface) = self.window.wl_surface().map(Cow::into_owned)
+                {
+                    loop_handle.insert_idle(move |state| {
+                        let res = state.common.shell.write().move_request(
+                            &surface,
+                            &seat,
+                            serial,
+                            ReleaseMode::NoMouseButtons,
+                            false,
+                            &state.common.config,
+                            &state.common.event_loop_handle,
+                            false,
+                        );
+                        if let Some((grab, focus)) = res {
+                            if grab.is_touch_grab() {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial);
+                            } else {
+                                seat.get_pointer()
+                                    .unwrap()
+                                    .set_grab(state, grab, serial, focus);
                             }
-                        });
-                    }
+                        }
+                    });
                 }
             }
             Message::Minimize => {
@@ -745,50 +745,50 @@ impl Program for CosmicWindowInternal {
             }
             Message::Close => self.window.close(),
             Message::Menu => {
-                if let Some((seat, serial)) = last_seat.cloned() {
-                    if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
-                        loop_handle.insert_idle(move |state| {
-                            let shell = state.common.shell.read();
-                            if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
-                                let position = if let Some((output, set)) =
-                                    shell.workspaces.sets.iter().find(|(_, set)| {
-                                        set.sticky_layer.mapped().any(|m| m == &mapped)
-                                    }) {
-                                    set.sticky_layer
-                                        .element_geometry(&mapped)
-                                        .unwrap()
-                                        .loc
-                                        .to_global(output)
-                                } else if let Some(workspace) = shell.space_for(&mapped) {
-                                    let Some(elem_geo) = workspace.element_geometry(&mapped) else {
-                                        return;
-                                    };
-                                    elem_geo.loc.to_global(&workspace.output)
-                                } else {
+                if let Some((seat, serial)) = last_seat.cloned()
+                    && let Some(surface) = self.window.wl_surface().map(Cow::into_owned)
+                {
+                    loop_handle.insert_idle(move |state| {
+                        let shell = state.common.shell.read();
+                        if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
+                            let position = if let Some((output, set)) =
+                                shell.workspaces.sets.iter().find(|(_, set)| {
+                                    set.sticky_layer.mapped().any(|m| m == &mapped)
+                                }) {
+                                set.sticky_layer
+                                    .element_geometry(&mapped)
+                                    .unwrap()
+                                    .loc
+                                    .to_global(output)
+                            } else if let Some(workspace) = shell.space_for(&mapped) {
+                                let Some(elem_geo) = workspace.element_geometry(&mapped) else {
                                     return;
                                 };
+                                elem_geo.loc.to_global(&workspace.output)
+                            } else {
+                                return;
+                            };
 
-                                let pointer = seat.get_pointer().unwrap();
-                                let mut cursor = pointer.current_location().to_i32_round();
-                                cursor.y -= SSD_HEIGHT;
+                            let pointer = seat.get_pointer().unwrap();
+                            let mut cursor = pointer.current_location().to_i32_round();
+                            cursor.y -= SSD_HEIGHT;
 
-                                let res = shell.menu_request(
-                                    &surface,
-                                    &seat,
-                                    serial,
-                                    cursor - position.as_logical(),
-                                    false,
-                                    &state.common.config,
-                                    &state.common.event_loop_handle,
-                                );
+                            let res = shell.menu_request(
+                                &surface,
+                                &seat,
+                                serial,
+                                cursor - position.as_logical(),
+                                false,
+                                &state.common.config,
+                                &state.common.event_loop_handle,
+                            );
 
-                                std::mem::drop(shell);
-                                if let Some((grab, focus)) = res {
-                                    pointer.set_grab(state, grab, serial, focus);
-                                }
+                            std::mem::drop(shell);
+                            if let Some((grab, focus)) = res {
+                                pointer.set_grab(state, grab, serial, focus);
                             }
-                        });
-                    }
+                        }
+                    });
                 }
             }
         }

@@ -453,53 +453,51 @@ impl TilingLayout {
             mut sizes,
         }) = tiling_state
         {
-            if let Some(node) = parent.as_ref().and_then(|parent| tree.get_mut(parent).ok()) {
-                if let Data::Group {
+            if let Some(node) = parent.as_ref().and_then(|parent| tree.get_mut(parent).ok())
+                && let Data::Group {
                     orientation: current_orientation,
                     sizes: current_sizes,
                     ..
                 } = node.data_mut()
-                {
-                    let parent_id = parent.unwrap();
+            {
+                let parent_id = parent.unwrap();
 
-                    if *current_orientation == orientation && sizes.len() == current_sizes.len() + 1
-                    {
-                        let previous_length: i32 = sizes.iter().copied().sum();
-                        let new_length: i32 = current_sizes.iter().copied().sum();
-                        if previous_length != new_length {
-                            // rescale sizes
-                            sizes.iter_mut().for_each(|len| {
-                                *len = (((*len as f64) / (previous_length as f64))
-                                    * (new_length as f64))
-                                    .round() as i32;
-                            });
-                            let sum: i32 = sizes.iter().sum();
+                if *current_orientation == orientation && sizes.len() == current_sizes.len() + 1 {
+                    let previous_length: i32 = sizes.iter().copied().sum();
+                    let new_length: i32 = current_sizes.iter().copied().sum();
+                    if previous_length != new_length {
+                        // rescale sizes
+                        sizes.iter_mut().for_each(|len| {
+                            *len = (((*len as f64) / (previous_length as f64))
+                                * (new_length as f64))
+                                .round() as i32;
+                        });
+                        let sum: i32 = sizes.iter().sum();
 
-                            // fix rounding issues
-                            if sum != new_length {
-                                let diff = new_length - sum;
-                                *sizes.last_mut().unwrap() += diff;
-                            }
+                        // fix rounding issues
+                        if sum != new_length {
+                            let diff = new_length - sum;
+                            *sizes.last_mut().unwrap() += diff;
                         }
                     }
-
-                    *current_sizes = sizes;
-                    let new_node = Node::new(Data::Mapped {
-                        mapped: window.clone(),
-                        last_geometry: Rectangle::from_size((100, 100).into()),
-                        minimize_rect: from,
-                    });
-                    let new_id = tree
-                        .insert(new_node, InsertBehavior::UnderNode(&parent_id))
-                        .unwrap();
-                    tree.make_nth_sibling(&new_id, idx).unwrap();
-                    *window.tiling_node_id.lock().unwrap() = Some(new_id);
-
-                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-                    self.queue
-                        .push_tree(tree, MINIMIZE_ANIMATION_DURATION, blocker);
-                    return;
                 }
+
+                *current_sizes = sizes;
+                let new_node = Node::new(Data::Mapped {
+                    mapped: window.clone(),
+                    last_geometry: Rectangle::from_size((100, 100).into()),
+                    minimize_rect: from,
+                });
+                let new_id = tree
+                    .insert(new_node, InsertBehavior::UnderNode(&parent_id))
+                    .unwrap();
+                tree.make_nth_sibling(&new_id, idx).unwrap();
+                *window.tiling_node_id.lock().unwrap() = Some(new_id);
+
+                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                self.queue
+                    .push_tree(tree, MINIMIZE_ANIMATION_DURATION, blocker);
+                return;
             }
 
             if sibling
@@ -1415,8 +1413,8 @@ impl TilingLayout {
         let tiling_node_id = mapped.tiling_node_id.lock().unwrap().as_ref().cloned();
         let gaps = self.gaps();
 
-        if let Some(node_id) = tiling_node_id {
-            if self
+        if let Some(node_id) = tiling_node_id
+            && self
                 .queue
                 .trees
                 .back()
@@ -1425,21 +1423,20 @@ impl TilingLayout {
                 .get(&node_id)
                 .map(|node| node.data().is_mapped(Some(mapped)))
                 .unwrap_or(false)
-            {
-                let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
+        {
+            let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
-                TilingLayout::unmap_internal(&mut tree, &node_id);
+            TilingLayout::unmap_internal(&mut tree, &node_id);
 
-                let duration = if minimizing {
-                    MINIMIZE_ANIMATION_DURATION
-                } else {
-                    ANIMATION_DURATION
-                };
-                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-                self.queue.push_tree(tree, duration, blocker);
+            let duration = if minimizing {
+                MINIMIZE_ANIMATION_DURATION
+            } else {
+                ANIMATION_DURATION
+            };
+            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+            self.queue.push_tree(tree, duration, blocker);
 
-                return true;
-            }
+            return true;
         }
         false
     }
@@ -1743,7 +1740,7 @@ impl TilingLayout {
                         _ => {
                             // we want the middle
                             let group_len = tree.get(&next_child_id).unwrap().data().len();
-                            if group_len % 2 == 0 {
+                            if group_len.is_multiple_of(2) {
                                 tree.make_nth_sibling(&node_id, group_len / 2).unwrap();
                                 tree.get_mut(&next_child_id)
                                     .unwrap()
@@ -1966,8 +1963,8 @@ impl TilingLayout {
             if focus_subtree.is_some() {
                 let mut node_id = focus_subtree;
                 while node_id.is_some() {
-                    if let Some(desc) = swap_desc.as_ref() {
-                        if let Some(replacement_id) = tree
+                    if let Some(desc) = swap_desc.as_ref()
+                        && let Some(replacement_id) = tree
                             .ancestor_ids(node_id.unwrap())
                             .unwrap()
                             .find(|anchestor| *anchestor == &desc.node)
@@ -1976,31 +1973,30 @@ impl TilingLayout {
                                     .unwrap()
                                     .find(|child| *child == &desc.node)
                             })
-                        {
-                            return match tree.get(replacement_id).unwrap().data() {
-                                Data::Group { alive, .. } => {
-                                    FocusResult::Some(KeyboardFocusTarget::Group(WindowGroup {
-                                        node: replacement_id.clone(),
-                                        alive: Arc::downgrade(alive),
-                                        focus_stack: tree
-                                            .children_ids(replacement_id)
-                                            .unwrap()
-                                            .cloned()
-                                            .collect(),
-                                    }))
+                    {
+                        return match tree.get(replacement_id).unwrap().data() {
+                            Data::Group { alive, .. } => {
+                                FocusResult::Some(KeyboardFocusTarget::Group(WindowGroup {
+                                    node: replacement_id.clone(),
+                                    alive: Arc::downgrade(alive),
+                                    focus_stack: tree
+                                        .children_ids(replacement_id)
+                                        .unwrap()
+                                        .cloned()
+                                        .collect(),
+                                }))
+                            }
+                            Data::Mapped { mapped, .. } => {
+                                if mapped.is_stack()
+                                    && desc.stack_window.is_none()
+                                    && replacement_id == &desc.node
+                                {
+                                    mapped.stack_ref().unwrap().focus_stack();
                                 }
-                                Data::Mapped { mapped, .. } => {
-                                    if mapped.is_stack()
-                                        && desc.stack_window.is_none()
-                                        && replacement_id == &desc.node
-                                    {
-                                        mapped.stack_ref().unwrap().focus_stack();
-                                    }
-                                    FocusResult::Some(KeyboardFocusTarget::Element(mapped.clone()))
-                                }
-                                _ => unreachable!(),
-                            };
-                        }
+                                FocusResult::Some(KeyboardFocusTarget::Element(mapped.clone()))
+                            }
+                            _ => unreachable!(),
+                        };
                     }
 
                     match tree.get(node_id.unwrap()).unwrap().data() {
@@ -2099,40 +2095,38 @@ impl TilingLayout {
         };
 
         let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
-        if let Some((last_active, _)) = TilingLayout::currently_focused_node(&tree, target) {
-            if let Some(group) = tree.get(&last_active).unwrap().parent().cloned() {
-                if let &mut Data::Group {
-                    ref mut orientation,
-                    ref mut sizes,
-                    ref last_geometry,
-                    ..
-                } = tree.get_mut(&group).unwrap().data_mut()
-                {
-                    let previous_length = match orientation {
-                        Orientation::Horizontal => last_geometry.size.h,
-                        Orientation::Vertical => last_geometry.size.w,
-                    };
-                    let new_orientation = new_orientation.unwrap_or(!*orientation);
-                    let new_length = match new_orientation {
-                        Orientation::Horizontal => last_geometry.size.h,
-                        Orientation::Vertical => last_geometry.size.w,
-                    };
+        if let Some((last_active, _)) = TilingLayout::currently_focused_node(&tree, target)
+            && let Some(group) = tree.get(&last_active).unwrap().parent().cloned()
+            && let &mut Data::Group {
+                ref mut orientation,
+                ref mut sizes,
+                ref last_geometry,
+                ..
+            } = tree.get_mut(&group).unwrap().data_mut()
+        {
+            let previous_length = match orientation {
+                Orientation::Horizontal => last_geometry.size.h,
+                Orientation::Vertical => last_geometry.size.w,
+            };
+            let new_orientation = new_orientation.unwrap_or(!*orientation);
+            let new_length = match new_orientation {
+                Orientation::Horizontal => last_geometry.size.h,
+                Orientation::Vertical => last_geometry.size.w,
+            };
 
-                    sizes.iter_mut().for_each(|len| {
-                        *len = (((*len as f64) / (previous_length as f64)) * (new_length as f64))
-                            .round() as i32;
-                    });
-                    let sum: i32 = sizes.iter().sum();
-                    if sum < new_length {
-                        *sizes.last_mut().unwrap() += new_length - sum;
-                    }
-
-                    *orientation = new_orientation;
-
-                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-                    self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
-                }
+            sizes.iter_mut().for_each(|len| {
+                *len = (((*len as f64) / (previous_length as f64)) * (new_length as f64)).round()
+                    as i32;
+            });
+            let sum: i32 = sizes.iter().sum();
+            if sum < new_length {
+                *sizes.last_mut().unwrap() += new_length - sum;
             }
+
+            *orientation = new_orientation;
+
+            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+            self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
         }
     }
 
@@ -3372,21 +3366,20 @@ impl TilingLayout {
             if matches!(
                 overview.active_trigger(),
                 Some(Trigger::Pointer(_) | Trigger::Touch(_))
-            ) {
-                if location_f64.is_some() {
-                    let mut tree = tree.copy_clone();
-                    tree.insert(
-                        Node::new(Data::Placeholder {
-                            id: Id::new(),
-                            last_geometry: Rectangle::from_size((100, 100).into()),
-                            type_: PlaceholderType::DropZone,
-                        }),
-                        InsertBehavior::AsRoot,
-                    )
-                    .unwrap();
-                    let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
-                    self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
-                }
+            ) && location_f64.is_some()
+            {
+                let mut tree = tree.copy_clone();
+                tree.insert(
+                    Node::new(Data::Placeholder {
+                        id: Id::new(),
+                        last_geometry: Rectangle::from_size((100, 100).into()),
+                        type_: PlaceholderType::DropZone,
+                    }),
+                    InsertBehavior::AsRoot,
+                )
+                .unwrap();
+                let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+                self.queue.push_tree(tree, ANIMATION_DURATION, blocker);
             }
             return;
         };
@@ -4627,62 +4620,62 @@ where
                     geo.loc += (gap, gap).into();
                     geo.size -= (gap * 2, gap * 2).into();
 
-                    if mouse_tiling.is_some() {
-                        if let Some(PillIndicator::Outer(direction)) = pill_indicator {
-                            let (pill_geo, remaining_geo) = match direction {
-                                Direction::Left => (
-                                    Rectangle::new(
-                                        (geo.loc.x, geo.loc.y).into(),
-                                        (16, geo.size.h).into(),
-                                    ),
-                                    Rectangle::new(
-                                        (geo.loc.x + 48, geo.loc.y).into(),
-                                        (geo.size.w - 48, geo.size.h).into(),
-                                    ),
+                    if mouse_tiling.is_some()
+                        && let Some(PillIndicator::Outer(direction)) = pill_indicator
+                    {
+                        let (pill_geo, remaining_geo) = match direction {
+                            Direction::Left => (
+                                Rectangle::new(
+                                    (geo.loc.x, geo.loc.y).into(),
+                                    (16, geo.size.h).into(),
                                 ),
-                                Direction::Up => (
-                                    Rectangle::new(
-                                        (geo.loc.x, geo.loc.y).into(),
-                                        (geo.size.w, 16).into(),
-                                    ),
-                                    Rectangle::new(
-                                        (geo.loc.x, geo.loc.y + 48).into(),
-                                        (geo.size.w, geo.size.h - 48).into(),
-                                    ),
+                                Rectangle::new(
+                                    (geo.loc.x + 48, geo.loc.y).into(),
+                                    (geo.size.w - 48, geo.size.h).into(),
                                 ),
-                                Direction::Right => (
-                                    Rectangle::new(
-                                        (geo.loc.x + geo.size.w - 16, geo.loc.y).into(),
-                                        (16, geo.size.h).into(),
-                                    ),
-                                    Rectangle::new(geo.loc, (geo.size.w - 48, geo.size.h).into()),
+                            ),
+                            Direction::Up => (
+                                Rectangle::new(
+                                    (geo.loc.x, geo.loc.y).into(),
+                                    (geo.size.w, 16).into(),
                                 ),
-                                Direction::Down => (
-                                    Rectangle::new(
-                                        (geo.loc.x, geo.loc.y + geo.size.h - 16).into(),
-                                        (geo.size.w, 16).into(),
-                                    ),
-                                    Rectangle::new(geo.loc, (geo.size.w, geo.size.h - 48).into()),
+                                Rectangle::new(
+                                    (geo.loc.x, geo.loc.y + 48).into(),
+                                    (geo.size.w, geo.size.h - 48).into(),
                                 ),
-                            };
-
-                            if let Some(renderer) = renderer.as_mut() {
-                                elements.push(
-                                    BackdropShader::element(
-                                        *renderer,
-                                        backdrop_id.clone(),
-                                        pill_geo,
-                                        8.,
-                                        alpha * 0.4,
-                                        group_color,
-                                    )
-                                    .into(),
-                                );
-                            }
-
-                            geo = remaining_geo;
+                            ),
+                            Direction::Right => (
+                                Rectangle::new(
+                                    (geo.loc.x + geo.size.w - 16, geo.loc.y).into(),
+                                    (16, geo.size.h).into(),
+                                ),
+                                Rectangle::new(geo.loc, (geo.size.w - 48, geo.size.h).into()),
+                            ),
+                            Direction::Down => (
+                                Rectangle::new(
+                                    (geo.loc.x, geo.loc.y + geo.size.h - 16).into(),
+                                    (geo.size.w, 16).into(),
+                                ),
+                                Rectangle::new(geo.loc, (geo.size.w, geo.size.h - 48).into()),
+                            ),
                         };
-                    }
+
+                        if let Some(renderer) = renderer.as_mut() {
+                            elements.push(
+                                BackdropShader::element(
+                                    *renderer,
+                                    backdrop_id.clone(),
+                                    pill_geo,
+                                    8.,
+                                    alpha * 0.4,
+                                    group_color,
+                                )
+                                .into(),
+                            );
+                        }
+
+                        geo = remaining_geo;
+                    };
 
                     if matches!(swap_desc, Some(ref desc) if desc.node == node_id) {
                         if let Some(renderer) = renderer.as_mut() {
@@ -4759,35 +4752,35 @@ where
                                     (geo.loc.x, geo.loc.y + previous).into(),
                                     (geo.size.w, *size).into(),
                                 );
-                                if mouse_tiling.is_some() {
-                                    if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator {
-                                        if *pill_idx == idx {
-                                            geo.size.h -= 32;
+                                if mouse_tiling.is_some()
+                                    && let Some(PillIndicator::Inner(pill_idx)) = pill_indicator
+                                {
+                                    if *pill_idx == idx {
+                                        geo.size.h -= 32;
+                                    }
+                                    if idx
+                                        .checked_sub(1)
+                                        .map(|idx| idx == *pill_idx)
+                                        .unwrap_or(false)
+                                    {
+                                        if let Some(renderer) = renderer.as_mut() {
+                                            elements.push(
+                                                BackdropShader::element(
+                                                    *renderer,
+                                                    backdrop_id.clone(),
+                                                    Rectangle::new(
+                                                        (geo.loc.x, geo.loc.y - 8).into(),
+                                                        (geo.size.w, 16).into(),
+                                                    ),
+                                                    8.,
+                                                    alpha * 0.4,
+                                                    group_color,
+                                                )
+                                                .into(),
+                                            );
                                         }
-                                        if idx
-                                            .checked_sub(1)
-                                            .map(|idx| idx == *pill_idx)
-                                            .unwrap_or(false)
-                                        {
-                                            if let Some(renderer) = renderer.as_mut() {
-                                                elements.push(
-                                                    BackdropShader::element(
-                                                        *renderer,
-                                                        backdrop_id.clone(),
-                                                        Rectangle::new(
-                                                            (geo.loc.x, geo.loc.y - 8).into(),
-                                                            (geo.size.w, 16).into(),
-                                                        ),
-                                                        8.,
-                                                        alpha * 0.4,
-                                                        group_color,
-                                                    )
-                                                    .into(),
-                                                );
-                                            }
-                                            geo.loc.y += 32;
-                                            geo.size.h -= 32;
-                                        }
+                                        geo.loc.y += 32;
+                                        geo.size.h -= 32;
                                     }
                                 }
                                 stack.push((geo, depth + 1));
@@ -4801,35 +4794,35 @@ where
                                     (geo.loc.x + previous, geo.loc.y).into(),
                                     (*size, geo.size.h).into(),
                                 );
-                                if mouse_tiling.is_some() {
-                                    if let Some(PillIndicator::Inner(pill_idx)) = pill_indicator {
-                                        if *pill_idx == idx {
-                                            geo.size.w -= 32;
+                                if mouse_tiling.is_some()
+                                    && let Some(PillIndicator::Inner(pill_idx)) = pill_indicator
+                                {
+                                    if *pill_idx == idx {
+                                        geo.size.w -= 32;
+                                    }
+                                    if idx
+                                        .checked_sub(1)
+                                        .map(|idx| idx == *pill_idx)
+                                        .unwrap_or(false)
+                                    {
+                                        if let Some(renderer) = renderer.as_mut() {
+                                            elements.push(
+                                                BackdropShader::element(
+                                                    *renderer,
+                                                    backdrop_id.clone(),
+                                                    Rectangle::new(
+                                                        (geo.loc.x - 8, geo.loc.y).into(),
+                                                        (16, geo.size.h).into(),
+                                                    ),
+                                                    8.,
+                                                    alpha * 0.4,
+                                                    group_color,
+                                                )
+                                                .into(),
+                                            );
                                         }
-                                        if idx
-                                            .checked_sub(1)
-                                            .map(|idx| idx == *pill_idx)
-                                            .unwrap_or(false)
-                                        {
-                                            if let Some(renderer) = renderer.as_mut() {
-                                                elements.push(
-                                                    BackdropShader::element(
-                                                        *renderer,
-                                                        backdrop_id.clone(),
-                                                        Rectangle::new(
-                                                            (geo.loc.x - 8, geo.loc.y).into(),
-                                                            (16, geo.size.h).into(),
-                                                        ),
-                                                        8.,
-                                                        alpha * 0.4,
-                                                        group_color,
-                                                    )
-                                                    .into(),
-                                                );
-                                            }
-                                            geo.loc.x += 32;
-                                            geo.size.w -= 32;
-                                        }
+                                        geo.loc.x += 32;
+                                        geo.size.w -= 32;
                                     }
                                 }
                                 stack.push((geo, depth + 1));
@@ -5103,10 +5096,7 @@ where
         },
     );
 
-    shadow_elements
-        .into_iter()
-        .chain(elements.into_iter())
-        .collect()
+    shadow_elements.into_iter().chain(elements).collect()
 }
 
 fn render_old_tree(
@@ -5519,21 +5509,20 @@ where
                                         .unwrap_or(false)
                                 })
                                 .unwrap_or(false))
+                        && let Some(swap) = swap_indicator.as_ref()
                     {
-                        if let Some(swap) = swap_indicator.as_ref() {
-                            swap.resize(geo.size.as_logical());
-                            swap.output_enter(output, output_geo.as_logical());
-                            swap_elements.extend(
-                                swap.render_elements::<CosmicWindowRenderElement<R>>(
-                                    renderer,
-                                    geo.loc.as_logical().to_physical_precise_round(output_scale),
-                                    output_scale.into(),
-                                    alpha * overview.0.alpha().unwrap_or(1.0),
-                                )
-                                .into_iter()
-                                .map(CosmicMappedRenderElement::from),
-                            );
-                        }
+                        swap.resize(geo.size.as_logical());
+                        swap.output_enter(output, output_geo.as_logical());
+                        swap_elements.extend(
+                            swap.render_elements::<CosmicWindowRenderElement<R>>(
+                                renderer,
+                                geo.loc.as_logical().to_physical_precise_round(output_scale),
+                                output_scale.into(),
+                                alpha * overview.0.alpha().unwrap_or(1.0),
+                            )
+                            .into_iter()
+                            .map(CosmicMappedRenderElement::from),
+                        );
                     }
                 }
 
@@ -5717,7 +5706,7 @@ where
         .into_iter()
         .flatten()
         .chain(swap_elements)
-        .chain(indicators.into_iter().map(Into::into))
+        .chain(indicators)
         .chain(window_elements)
         .chain(animating_window_elements)
         .chain(shadow_elements)
@@ -5859,10 +5848,10 @@ fn render_new_tree(
                 (new_geo, percentage, false)
             };
 
-            if let Data::Mapped { mapped, .. } = data {
-                if mapped.is_maximized(false) {
-                    return;
-                }
+            if let Data::Mapped { mapped, .. } = data
+                && mapped.is_maximized(false)
+            {
+                return;
             }
             processor(node_id, data, geo, original_geo, alpha, animating)
         });

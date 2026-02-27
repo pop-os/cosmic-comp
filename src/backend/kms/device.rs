@@ -13,7 +13,6 @@ use crate::{
 
 use anyhow::{Context, Result};
 use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
-use libc::dev_t;
 use smithay::{
     backend::{
         allocator::{
@@ -37,7 +36,7 @@ use smithay::{
         calloop::{LoopHandle, RegistrationToken},
         drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
         gbm::BufferObjectFlags as GbmBufferFlags,
-        rustix::fs::OFlags,
+        rustix::fs::{Dev, OFlags},
         wayland_server::DisplayHandle,
     },
     utils::{Clock, DevPath, DeviceFd, Monotonic, Point, Transform},
@@ -175,7 +174,7 @@ pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
 impl State {
     pub fn device_added(
         &mut self,
-        dev: dev_t,
+        dev: Dev,
         path: &Path,
         dh: &DisplayHandle,
     ) -> Result<Vec<Output>> {
@@ -205,20 +204,20 @@ impl State {
                 }
             }
         }
-        if let Some(blocklist) = dev_list_var("COSMIC_DRM_BLOCK_DEVICES") {
-            if let Ok(node) = DrmNode::from_dev_id(dev) {
-                let node = node
-                    .node_with_type(NodeType::Render)
-                    .and_then(|res| res.ok())
-                    .unwrap_or(node);
-                for ident in blocklist {
-                    if ident.matches(&node) {
-                        info!(
-                            "Skipping device {} due to COSMIC_DRM_BLOCK_DEVICE list.",
-                            path.display()
-                        );
-                        return Ok(Vec::new());
-                    }
+        if let Some(blocklist) = dev_list_var("COSMIC_DRM_BLOCK_DEVICES")
+            && let Ok(node) = DrmNode::from_dev_id(dev)
+        {
+            let node = node
+                .node_with_type(NodeType::Render)
+                .and_then(|res| res.ok())
+                .unwrap_or(node);
+            for ident in blocklist {
+                if ident.matches(&node) {
+                    info!(
+                        "Skipping device {} due to COSMIC_DRM_BLOCK_DEVICE list.",
+                        path.display()
+                    );
+                    return Ok(Vec::new());
                 }
             }
         }
@@ -272,10 +271,10 @@ impl State {
                 notifier,
                 move |event, metadata, state: &mut State| match event {
                     DrmEvent::VBlank(crtc) => {
-                        if let Some(device) = state.backend.kms().drm_devices.get_mut(&drm_node) {
-                            if let Some(surface) = device.inner.surfaces.get_mut(&crtc) {
-                                surface.on_vblank(metadata.take());
-                            }
+                        if let Some(device) = state.backend.kms().drm_devices.get_mut(&drm_node)
+                            && let Some(surface) = device.inner.surfaces.get_mut(&crtc)
+                        {
+                            surface.on_vblank(metadata.take());
                         }
                     }
                     DrmEvent::Error(err) => {
@@ -399,7 +398,7 @@ impl State {
         Ok(wl_outputs)
     }
 
-    pub fn device_changed(&mut self, dev: dev_t) -> Result<Vec<Output>> {
+    pub fn device_changed(&mut self, dev: Dev) -> Result<Vec<Output>> {
         if !self.backend.kms().session.is_active() {
             return Ok(Vec::new());
         }
@@ -490,7 +489,7 @@ impl State {
         Ok(outputs_added)
     }
 
-    pub fn device_removed(&mut self, dev: dev_t, dh: &DisplayHandle) -> Result<()> {
+    pub fn device_removed(&mut self, dev: Dev, dh: &DisplayHandle) -> Result<()> {
         let backend = self.backend.kms();
         // we can't use DrmNode::from_node_id, because that assumes the node is still on sysfs
         let drm_node = backend
@@ -677,10 +676,10 @@ impl LockedDevice<'_> {
 
                 let mut compositor = compositor.lock().unwrap();
                 compositor.render_frame(renderer, &elements, CLEAR_COLOR, FrameFlags::empty())?;
-                if let Err(err) = compositor.commit_frame() {
-                    if !matches!(err, FrameError::EmptyFrame) {
-                        return Err(err.into());
-                    }
+                if let Err(err) = compositor.commit_frame()
+                    && !matches!(err, FrameError::EmptyFrame)
+                {
+                    return Err(err.into());
                 }
             }
         }

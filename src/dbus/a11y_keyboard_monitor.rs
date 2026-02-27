@@ -19,7 +19,7 @@ use zbus::{
 
 use super::name_owners::NameOwners;
 
-static ALLOWED_NAMES: &'static [WellKnownName] = &[WellKnownName::from_static_str_unchecked(
+static ALLOWED_NAMES: &[WellKnownName] = &[WellKnownName::from_static_str_unchecked(
     "org.gnome.Orca.KeyboardMonitor",
 )];
 

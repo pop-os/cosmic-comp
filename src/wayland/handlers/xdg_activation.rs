@@ -213,7 +213,7 @@ impl State {
                 None,
                 false,
             );
-        } else if let Some((workspace, _)) = shell.workspace_for_surface(&surface) {
+        } else if let Some((workspace, _)) = shell.workspace_for_surface(surface) {
             let current_workspace = shell.active_space(&current_output).unwrap();
             if workspace == current_workspace.handle {
                 let Some(target) = shell

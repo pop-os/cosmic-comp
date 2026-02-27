@@ -124,16 +124,16 @@ impl OverlapNotifyState {
                                         })
                                 })
                         {
-                            if let Some(window_geo) = window.global_geometry() {
-                                if let Some(intersection) = layer_geo.intersection(window_geo) {
-                                    // relative to layer location
-                                    let region = Rectangle::new(
-                                        intersection.loc - layer_geo.loc,
-                                        intersection.size,
-                                    )
-                                    .as_logical();
-                                    new_snapshot.add_toplevel(window, region);
-                                }
+                            if let Some(window_geo) = window.global_geometry()
+                                && let Some(intersection) = layer_geo.intersection(window_geo)
+                            {
+                                // relative to layer location
+                                let region = Rectangle::new(
+                                    intersection.loc - layer_geo.loc,
+                                    intersection.size,
+                                )
+                                .as_logical();
+                                new_snapshot.add_toplevel(window, region);
                             }
                         }
 
@@ -238,16 +238,15 @@ impl LayerOverlapNotificationDataInternal {
             .collect::<Vec<_>>();
 
         for toplevel in self.last_snapshot.toplevel_overlaps.keys() {
-            if !new_snapshot.toplevel_overlaps.contains_key(toplevel) {
-                if let Ok(toplevel) = toplevel.upgrade() {
-                    if let Some(client) = toplevel.client() {
-                        for notification in notifications
-                            .iter()
-                            .filter(|n| n.client().is_some_and(|c| c == client))
-                        {
-                            notification.toplevel_leave(&toplevel);
-                        }
-                    }
+            if !new_snapshot.toplevel_overlaps.contains_key(toplevel)
+                && let Ok(toplevel) = toplevel.upgrade()
+                && let Some(client) = toplevel.client()
+            {
+                for notification in notifications
+                    .iter()
+                    .filter(|n| n.client().is_some_and(|c| c == client))
+                {
+                    notification.toplevel_leave(&toplevel);
                 }
             }
         }
@@ -257,22 +256,20 @@ impl LayerOverlapNotificationDataInternal {
                 .toplevel_overlaps
                 .get(toplevel)
                 .is_some_and(|old_overlap| old_overlap == overlap)
+                && let Ok(toplevel) = toplevel.upgrade()
+                && let Some(client) = toplevel.client()
             {
-                if let Ok(toplevel) = toplevel.upgrade() {
-                    if let Some(client) = toplevel.client() {
-                        for notification in notifications
-                            .iter()
-                            .filter(|n| n.client().is_some_and(|c| c == client))
-                        {
-                            notification.toplevel_enter(
-                                &toplevel,
-                                overlap.loc.x,
-                                overlap.loc.y,
-                                overlap.size.w,
-                                overlap.size.h,
-                            );
-                        }
-                    }
+                for notification in notifications
+                    .iter()
+                    .filter(|n| n.client().is_some_and(|c| c == client))
+                {
+                    notification.toplevel_enter(
+                        &toplevel,
+                        overlap.loc.x,
+                        overlap.loc.y,
+                        overlap.size.w,
+                        overlap.size.h,
+                    );
                 }
             }
         }

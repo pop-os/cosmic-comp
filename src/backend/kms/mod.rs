@@ -226,14 +226,14 @@ fn determine_primary_gpu(
     drm_devices: &IndexMap<DrmNode, Device>,
     seat: String,
 ) -> Result<Option<DrmNode>> {
-    if let Some(device) = dev_var("COSMIC_RENDER_DEVICE") {
-        if let Some(node) = drm_devices.values().find_map(|dev| {
+    if let Some(device) = dev_var("COSMIC_RENDER_DEVICE")
+        && let Some(node) = drm_devices.values().find_map(|dev| {
             device
                 .matches(&dev.inner.render_node)
                 .then_some(dev.inner.render_node)
-        }) {
-            return Ok(Some(node));
-        }
+        })
+    {
+        return Ok(Some(node));
     }
 
     // try to find builtin display
@@ -252,13 +252,12 @@ fn determine_primary_gpu(
 
     // else try to find the boot gpu
     let boot = determine_boot_gpu(seat);
-    if let Some(boot) = boot {
-        if drm_devices
+    if let Some(boot) = boot
+        && drm_devices
             .values()
             .any(|dev| dev.inner.render_node == boot)
-        {
-            return Ok(Some(boot));
-        }
+    {
+        return Ok(Some(boot));
     }
 
     // else just take the first
@@ -315,10 +314,9 @@ fn init_udev(
                     let backend = state.backend.kms();
                     if matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. })
                         && backend.primary_node.read().unwrap().is_none()
+                        && let Err(err) = state.backend.kms().select_primary_gpu(&dh)
                     {
-                        if let Err(err) = state.backend.kms().select_primary_gpu(&dh) {
-                            warn!("Failed to determine a new primary gpu: {}", err);
-                        }
+                        warn!("Failed to determine a new primary gpu: {}", err);
                     }
                 }
 
@@ -458,18 +456,17 @@ impl KmsState {
             if let Some(primary_node) = primary_node
                 .as_ref()
                 .and_then(|node| node.node_with_type(NodeType::Primary).and_then(|x| x.ok()))
+                && let Some(device) = self.drm_devices.get(&primary_node)
             {
-                if let Some(device) = self.drm_devices.get(&primary_node) {
-                    let import_device = device.drm.device().device_fd().clone();
-                    if supports_syncobj_eventfd(&import_device) {
-                        if let Some(state) = self.syncobj_state.as_mut() {
-                            state.update_device(import_device);
-                        } else {
-                            let syncobj_state = DrmSyncobjState::new::<State>(dh, import_device);
-                            self.syncobj_state = Some(syncobj_state);
-                        }
-                        return Ok(());
+                let import_device = device.drm.device().device_fd().clone();
+                if supports_syncobj_eventfd(&import_device) {
+                    if let Some(state) = self.syncobj_state.as_mut() {
+                        state.update_device(import_device);
+                    } else {
+                        let syncobj_state = DrmSyncobjState::new::<State>(dh, import_device);
+                        self.syncobj_state = Some(syncobj_state);
                     }
+                    return Ok(());
                 }
             }
 
@@ -935,15 +932,15 @@ impl KmsGuard<'_> {
                             compositor
                         };
 
-                        if let Some(bpc) = output_config.0.max_bpc {
-                            if let Err(err) = drm_helpers::set_max_bpc(drm.device(), conn, bpc) {
-                                warn!(
-                                    ?bpc,
-                                    ?err,
-                                    "Failed to set max_bpc on connector: {}",
-                                    surface.output.name()
-                                );
-                            }
+                        if let Some(bpc) = output_config.0.max_bpc
+                            && let Err(err) = drm_helpers::set_max_bpc(drm.device(), conn, bpc)
+                        {
+                            warn!(
+                                ?bpc,
+                                ?err,
+                                "Failed to set max_bpc on connector: {}",
+                                surface.output.name()
+                            );
                         }
 
                         let vrr = output_config.0.vrr;
