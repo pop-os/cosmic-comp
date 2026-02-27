@@ -1790,25 +1790,31 @@ impl State {
                 && handle.modified_sym() == Keysym::Caps_Lock
                 && (modifiers.serialized.locked & 2) != 0
             {
-                let serial = SERIAL_COUNTER.next_serial();
-                let time = self.common.clock.now().as_millis();
-                keyboard.input(
-                    self,
-                    event.key_code(),
-                    KeyState::Pressed,
-                    serial,
-                    time,
-                    |_, _, _| FilterResult::<()>::Forward,
-                );
-                let serial = SERIAL_COUNTER.next_serial();
-                keyboard.input(
-                    self,
-                    event.key_code(),
-                    KeyState::Released,
-                    serial,
-                    time,
-                    |_, _, _| FilterResult::<()>::Forward,
-                );
+                let seat = seat.clone();
+                let key_code = event.key_code();
+                self.common.event_loop_handle.insert_idle(move |state| {
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let time = state.common.clock.now().as_millis();
+                        keyboard.input(
+                            state,
+                            key_code,
+                            KeyState::Pressed,
+                            serial,
+                            time,
+                            |_, _, _| FilterResult::<()>::Forward,
+                        );
+                        let serial = SERIAL_COUNTER.next_serial();
+                        keyboard.input(
+                            state,
+                            key_code,
+                            KeyState::Released,
+                            serial,
+                            time,
+                            |_, _, _| FilterResult::<()>::Forward,
+                        );
+                    }
+                });
             }
         } else if event.state() == KeyState::Pressed
             && self
