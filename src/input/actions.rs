@@ -893,6 +893,26 @@ impl State {
                 }
             }
 
+            Action::TileWindow(zone) => {
+                use cosmic_settings_config::shortcuts::action::TilingZone;
+                use crate::shell::layout::floating::TiledCorners;
+
+                let corner = match zone {
+                    TilingZone::Top => TiledCorners::Top,
+                    TilingZone::TopRight => TiledCorners::TopRight,
+                    TilingZone::Right => TiledCorners::Right,
+                    TilingZone::BottomRight => TiledCorners::BottomRight,
+                    TilingZone::Bottom => TiledCorners::Bottom,
+                    TilingZone::BottomLeft => TiledCorners::BottomLeft,
+                    TilingZone::Left => TiledCorners::Left,
+                    TilingZone::TopLeft => TiledCorners::TopLeft,
+                    TilingZone::Center => TiledCorners::Center,
+                };
+
+                let mut shell = self.common.shell.write();
+                shell.tile_window(corner, seat);
+            }
+
             Action::Fullscreen => {
                 let Some(focused_output) = seat.focused_output() else {
                     return;

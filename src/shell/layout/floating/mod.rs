@@ -177,6 +177,7 @@ pub enum TiledCorners {
     BottomLeft,
     Left,
     TopLeft,
+    Center,
 }
 
 impl TiledCorners {
@@ -255,6 +256,16 @@ impl TiledCorners {
                 )),
                 Size::from((
                     output_geometry.size.w / 2 - inner * 3 / 2,
+                    output_geometry.size.h - inner * 2,
+                )),
+            ),
+            TiledCorners::Center => (
+                Point::from((
+                    output_geometry.loc.x + output_geometry.size.w / 4 + inner,
+                    output_geometry.loc.y + inner,
+                )),
+                Size::from((
+                    output_geometry.size.w / 2 - inner * 2,
                     output_geometry.size.h - inner * 2,
                 )),
             ),
@@ -1099,6 +1110,56 @@ impl FloatingLayout {
         self.toggle_stacking(&elem, focus_stack)
     }
 
+    pub fn tile_window(
+        &mut self,
+        window: &CosmicMapped,
+        corner: TiledCorners,
+        theme: &cosmic::Theme,
+    ) {
+        // Store previous geometry for animation
+        if let Some(geo) = self.space.element_geometry(window) {
+            let previous_geo = geo.as_local();
+
+            // Set the tiled corner state
+            *window.floating_tiled.lock().unwrap() = Some(corner);
+
+            // Clear any maximized state
+            *window.maximized_state.lock().unwrap() = None;
+
+            // Get output geometry for calculating new position
+            let output = self.space.outputs().next().unwrap().clone();
+            let layers = layer_map_for_output(&output);
+            let output_geometry = layers.non_exclusive_zone();
+
+            // Calculate new geometry based on corner
+            let gaps = (theme.cosmic().gaps.0 as i32, theme.cosmic().gaps.1 as i32);
+            let new_geo = corner.relative_geometry(output_geometry, gaps);
+
+            // Set window properties for tiled state
+            window.set_tiled(true);
+            window.set_maximized(false);
+            window.set_geometry(new_geo.to_global(&output));
+            window.configure();
+
+            window.moved_since_mapped.store(true, Ordering::SeqCst);
+
+            // Trigger animation
+            self.animations.insert(
+                window.clone(),
+                Animation::Tiled {
+                    start: Instant::now(),
+                    previous_geometry: previous_geo,
+                },
+            );
+            self.dirty.store(true, Ordering::SeqCst);
+
+            // Update space mapping
+            self.space
+                .map_element(window.clone(), new_geo.loc.as_logical(), true);
+            self.space.refresh();
+        }
+    }
+
     pub fn move_element(
         &mut self,
         direction: Direction,
@@ -1193,7 +1254,8 @@ impl FloatingLayout {
                     (Direction::Up, Some(TiledCorners::Bottom))
                     | (Direction::Down, Some(TiledCorners::Top))
                     | (Direction::Left, Some(TiledCorners::Right))
-                    | (Direction::Right, Some(TiledCorners::Left)) => {
+                    | (Direction::Right, Some(TiledCorners::Left))
+                    | (Direction::Up, Some(TiledCorners::Center)) => {
                         std::mem::drop(tiled_state);
 
                         let mut maximized_state = element.maximized_state.lock().unwrap();
@@ -1206,6 +1268,11 @@ impl FloatingLayout {
                         self.map_maximized(element.clone(), start_rectangle, true);
                         return MoveResult::Done;
                     }
+
+                    // center transitions
+                    (Direction::Left, Some(TiledCorners::Center)) => TiledCorners::Left,
+                    (Direction::Right, Some(TiledCorners::Center)) => TiledCorners::Right,
+                    (Direction::Down, Some(TiledCorners::Center)) => TiledCorners::Bottom,
 
                     // figure out if we need to quater tile
                     (Direction::Up, Some(TiledCorners::Left))
