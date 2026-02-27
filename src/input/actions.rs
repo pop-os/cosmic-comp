@@ -626,6 +626,11 @@ impl State {
 
                     if let Ok(Some((target, new_pos))) = res {
                         std::mem::drop(shell);
+
+                        if is_move_action {
+                            seat.set_active_output(&next_output);
+                        }
+
                         Shell::set_focus(self, Some(&target), seat, None, is_move_action);
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
