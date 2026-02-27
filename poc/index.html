@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="fr">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Rectangles (écrans) sur canvas</title>
+        <style>
+            html,
+            body {
+                height: 100%;
+                margin: 0;
+            }
+            canvas {
+                display: block;
+                background: #0b0d10;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="c"></canvas>
+
+        <script>
+            const canvas = document.getElementById("c");
+            const ctx = canvas.getContext("2d");
+
+            function resize() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                draw();
+            }
+            window.addEventListener("resize", resize);
+
+            // 3 rectangles "écrans" en coordonnées globales
+            // (x, y, w, h)
+            const outputs = [
+                { x: 140, y: 480, w: 480, h: 240 }, // écran 1
+                { x: 100, y: 0, w: 240, h: 480 }, // écran 1
+                { x: 140 + 480, y: 240 + 48, w: 480, h: 240 }, // écran 2 (collé à droite)
+                { x: 140 + 480, y: 480 + 48, w: 480, h: 240 }, // écran 2 (collé à droite)
+                { x: 140 + 960, y: 240 + 48, w: 480, h: 240 }, // écran 3 (collé en bas de l'écran 2)
+                { x: 140 + 960, y: 480 + 48, w: 480, h: 240 }, // écran 3 (collé en bas de
+                { x: 140 + 960 + 480, y: 480 + 48, w: 480, h: 240 }, // écran 3 (collé en bas de
+            ];
+
+            function drawGrid(step = 16) {
+                ctx.save();
+                ctx.globalAlpha = 0.25;
+                ctx.strokeStyle = "#2b2f36";
+                ctx.lineWidth = 1;
+
+                for (let x = 0; x <= canvas.width; x += step) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, canvas.height);
+                    ctx.stroke();
+                }
+                for (let y = 0; y <= canvas.height; y += step) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(canvas.width, y);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            function getEdgeStart(edge) {
+                return edge.index % 2 === 0
+                    ? { x: edge.start, y: edge.pos }
+                    : { x: edge.pos, y: edge.start };
+            }
+
+            function getEdgeEnd(edge) {
+                return edge.index % 2 === 0
+                    ? { x: edge.end, y: edge.pos }
+                    : { x: edge.pos, y: edge.end };
+            }
+
+            function pointsEqual(point1, point2) {
+                return point1.x === point2.x && point1.y === point2.y;
+            }
+
+            function calculateContour({
+                rectangles,
+                rectangleIndex = 0,
+                edgeIndex = 0,
+                contour = [],
+            }) {
+                const edge = rectangles[rectangleIndex][edgeIndex];
+                if (contour.length === 0) {
+                    contour.push(getEdgeStart(edge));
+                }
+
+                let crossingEdge = null;
+                for (const [idx, edges] of rectangles.entries()) {
+                    if (idx === rectangleIndex) continue;
+
+                    const testEdge = edges[(edgeIndex + 2) % 4];
+
+                    if (
+                        edge.pos === testEdge.pos &&
+                        Math.max(edge.start, edge.end) >=
+                            Math.min(testEdge.start, testEdge.end) &&
+                        Math.max(testEdge.start, testEdge.end) >=
+                            Math.min(edge.start, edge.end)
+                    ) {
+                        const end = testEdge.end;
+                        if (crossingEdge === null || end < crossingEdge.end) {
+                            crossingEdge = {
+                                end,
+                                index: testEdge.index,
+                                rectangleIndex: idx,
+                            };
+                        }
+                    }
+                }
+
+                if (crossingEdge !== null) {
+                    contour.push(
+                        getEdgeEnd({
+                            ...edge,
+                            end: crossingEdge.end,
+                        }),
+                    );
+
+                    return contour.concat(
+                        calculateContour({
+                            rectangles,
+                            rectangleIndex: crossingEdge.rectangleIndex,
+                            edgeIndex: (crossingEdge.index + 1) % 4,
+                            contour,
+                        }),
+                    );
+                } else {
+                    const point = getEdgeEnd(edge);
+                    contour.push(point);
+
+                    if (pointsEqual(point, contour[0])) {
+                        return contour;
+                    }
+
+                    return contour.concat(
+                        calculateContour({
+                            rectangles,
+                            rectangleIndex,
+                            edgeIndex: (edgeIndex + 1) % 4,
+                            contour,
+                        }),
+                    );
+                }
+            }
+
+            function calculateRectangles() {
+                const rectangles = outputs.map((output) => [
+                    {
+                        index: 0,
+                        start: output.x,
+                        end: output.x + output.w,
+                        pos: output.y,
+                    },
+                    {
+                        index: 1,
+                        start: output.y,
+                        end: output.y + output.h,
+                        pos: output.x + output.w,
+                    },
+                    {
+                        index: 2,
+                        start: output.x + output.w,
+                        end: output.x,
+                        pos: output.y + output.h,
+                    },
+                    {
+                        index: 3,
+                        start: output.y + output.h,
+                        end: output.y,
+                        pos: output.x,
+                    },
+                ]);
+
+                let index = 0;
+                do {
+                    const rectangle = rectangles[index];
+
+                    let sharedEdge = null;
+                    let i = 0;
+                    while (i < rectangles.length && sharedEdge === null) {
+                        if (i !== index) {
+                            edge = rectangle
+                                .filter((edge1, border) => {
+                                    const edge2 =
+                                        rectangles[i][(border + 2) % 4];
+                                    return (
+                                        edge1.pos === edge2.pos &&
+                                        edge1.start === edge2.end &&
+                                        edge1.end === edge2.start
+                                    );
+                                })
+                                .pop();
+                            if (edge) {
+                                sharedEdge = {
+                                    index: edge.index,
+                                    rectangleIndex: i,
+                                };
+                            }
+                        }
+
+                        i++;
+                    }
+
+                    if (sharedEdge) {
+                        const rect = rectangles[sharedEdge.rectangleIndex];
+
+                        rectangle[sharedEdge.index] = {
+                            ...rect[sharedEdge.index],
+                        };
+                        const b1 = (sharedEdge.index + 1) % 4;
+                        rectangle[b1] = {
+                            ...rect[b1],
+                            end: rectangle[b1].end,
+                        };
+                        const b2 = (sharedEdge.index + 3) % 4;
+                        rectangle[b2] = {
+                            ...rectangle[b2],
+                            end: rect[b2].end,
+                        };
+                        rectangles.splice(sharedEdge.rectangleIndex, 1);
+
+                        index = 0;
+                    } else {
+                        index++;
+                    }
+                } while (index < rectangles.length);
+
+                return rectangles;
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawGrid(16);
+
+                // Dessin des rectangles
+                ctx.font = "14px system-ui, sans-serif";
+                outputs.forEach((r, i) => {
+                    // remplissage
+                    ctx.fillStyle = "rgba(80, 160, 255, 0.18)";
+                    ctx.fillRect(r.x, r.y, r.w, r.h);
+
+                    // bordure
+                    ctx.strokeStyle = "#a8c7ff";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+                    // label
+                    ctx.fillStyle = "#e8eefc";
+                    ctx.fillText(
+                        `Output ${i + 1}  (${r.x},${r.y})  ${r.w}x${r.h}`,
+                        r.x + 10,
+                        r.y + 22,
+                    );
+                });
+
+                const rectangles = calculateRectangles();
+                rectangles.forEach((edges) => {
+                    ctx.strokeStyle = "#00c700";
+                    ctx.lineWidth = 6;
+                    ctx.strokeRect(
+                        edges[0].start,
+                        edges[0].pos,
+                        edges[2].start - edges[0].start,
+                        edges[2].pos - edges[0].pos,
+                    );
+                });
+
+                const points = calculateContour({
+                    rectangles,
+                });
+
+                ctx.beginPath();
+                ctx.strokeStyle = "#ff00ff";
+                ctx.lineWidth = 2;
+                ctx.moveTo(points[0].x, points[0].y);
+                points.forEach((point) => {
+                    ctx.lineTo(point.x, point.y);
+                });
+                ctx.stroke();
+
+                ctx.fillStyle = "red";
+                points.forEach((point) => {
+                    ctx.beginPath();
+                    ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+
+            resize();
+        </script>
+    </body>
+</html>
