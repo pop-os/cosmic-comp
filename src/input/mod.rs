@@ -164,6 +164,12 @@ impl State {
     where
         <B as InputBackend>::Device: 'static,
     {
+        crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
+        {
+            let seat = self.common.shell.read().seats.last_active().clone();
+            self.common.idle_notifier_state.notify_activity(&seat);
+        }
+
         use smithay::backend::input::Event;
         match event {
             InputEvent::DeviceAdded { device } => {
@@ -206,7 +212,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
 
                     let keycode = event.key_code();
@@ -304,7 +309,6 @@ impl State {
             InputEvent::PointerMotion { event, .. } => {
                 use smithay::backend::input::PointerMotionEvent;
 
-                crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -623,7 +627,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let output = seat.active_output();
                     let geometry = output.geometry();
@@ -690,7 +693,6 @@ impl State {
                 else {
                     return;
                 };
-                crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                 self.common.idle_notifier_state.notify_activity(&seat);
 
                 let current_focus = seat.get_keyboard().unwrap().current_focus();
@@ -910,7 +912,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
 
                     if seat.get_keyboard().unwrap().modifier_state().logo
@@ -981,7 +982,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
@@ -1008,7 +1008,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let mut activate_action: Option<SwipeAction> = None;
                     if let Some(ref mut gesture_state) = self.common.gesture_state {
@@ -1111,7 +1110,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     if let Some(ref gesture_state) = self.common.gesture_state {
                         match gesture_state.action {
@@ -1157,7 +1155,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
@@ -1180,7 +1177,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let pointer = seat.get_pointer().unwrap();
                     pointer.gesture_pinch_update(
@@ -1203,7 +1199,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
@@ -1226,7 +1221,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
@@ -1249,7 +1243,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
@@ -1265,7 +1258,6 @@ impl State {
             }
 
             InputEvent::TouchDown { event, .. } => {
-                crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1298,7 +1290,6 @@ impl State {
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
-                crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1329,7 +1320,6 @@ impl State {
                 }
             }
             InputEvent::TouchUp { event, .. } => {
-                crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                 let mut shell = self.common.shell.write();
                 if let Some(Trigger::Touch(slot)) = shell.overview_mode().0.active_trigger() {
                     if *slot == event.slot() {
@@ -1362,7 +1352,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let touch = seat.get_touch().unwrap();
                     touch.cancel(self);
@@ -1377,7 +1366,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let touch = seat.get_touch().unwrap();
                     touch.frame(self);
@@ -1385,7 +1373,6 @@ impl State {
             }
 
             InputEvent::TabletToolAxis { event, .. } => {
-                crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1451,7 +1438,6 @@ impl State {
                 }
             }
             InputEvent::TabletToolProximity { event, .. } => {
-                crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1515,7 +1501,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         match event.tip_state() {
@@ -1538,7 +1523,6 @@ impl State {
                     .for_device(&event.device())
                     .cloned();
                 if let Some(seat) = maybe_seat {
-                    crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
                     self.common.idle_notifier_state.notify_activity(&seat);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         tool.button(
