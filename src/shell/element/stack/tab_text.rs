@@ -142,7 +142,10 @@ impl<Message> Widget<Message, cosmic::Theme, cosmic::Renderer> for TabText {
         renderer.with_layer(bounds, |renderer| {
             renderer.fill_paragraph(
                 &state.paragraph,
-                Point::new(bounds.x, bounds.y + bounds.height / 2.0),
+                Point::new(
+                    bounds.x,
+                    bounds.y + bounds.height / 2.0 - state.paragraph.min_bounds().height / 2.0,
+                ),
                 style.text_color,
                 bounds,
             );
