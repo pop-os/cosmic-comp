@@ -15,9 +15,9 @@ use crate::{
     backend::{
         kms::render::gles::GbmGlowBackend,
         render::{
-            clipped_surface::{CLIPPING_SHADER, ClippingShader},
             element::DamageElement,
             shadow::{SHADOW_SHADER, ShadowShader},
+            wayland::clipped_surface::{CLIPPING_SHADER, ClippingShader},
         },
     },
     config::ScreenFilter,
@@ -80,10 +80,10 @@ use smithay::{
 use smithay_egui::EguiState;
 
 pub mod animations;
-pub mod clipped_surface;
 pub mod cursor;
 pub mod element;
 pub mod shadow;
+pub mod wayland;
 use self::element::{AsGlowRenderer, CosmicElement};
 
 use super::kms::Timings;
