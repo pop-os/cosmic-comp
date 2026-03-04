@@ -23,7 +23,7 @@ render_elements! {
     Wayland=WaylandSurfaceRenderElement<R>,
 }
 
-pub fn render_elements_from_surface_tree<R, E>(
+pub fn push_render_elements_from_surface_tree<R>(
     renderer: &mut R,
     main_surface: &wl_surface::WlSurface,
     location: impl Into<Point<i32, Physical>>,
@@ -33,17 +33,17 @@ pub fn render_elements_from_surface_tree<R, E>(
     should_clip: bool,
     radii: [u8; 4],
     kind: impl Into<KindEvaluation>,
-) -> Vec<E>
-where
+    push_above: &mut dyn FnMut(SurfaceRenderElement<R>),
+    mut push_below: Option<&mut dyn FnMut(SurfaceRenderElement<R>)>,
+) where
     R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
-    E: From<SurfaceRenderElement<R>>,
 {
     let location = location.into().to_f64();
     let geometry = geometry.into().to_f64();
     let scale = scale.into();
     let kind = kind.into();
-    let mut surfaces: Vec<E> = Vec::new();
+    let mut passed_main = false;
 
     compositor::with_surface_tree_downward(
         main_surface,
@@ -94,7 +94,13 @@ where
                             } else {
                                 surface.into()
                             };
-                            surfaces.push(elem.into());
+                            if let Some(push_below) = push_below.as_mut()
+                                && passed_main
+                            {
+                                push_below(elem);
+                            } else {
+                                push_above(elem);
+                            }
                         }
                         Ok(None) => {} // surface is not mapped
                         Err(err) => {
@@ -103,9 +109,11 @@ where
                     };
                 }
             }
+
+            if surface == main_surface {
+                passed_main = true;
+            }
         },
         |_, _, _| true,
     );
-
-    surfaces
 }

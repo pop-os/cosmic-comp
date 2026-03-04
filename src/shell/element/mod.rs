@@ -598,42 +598,38 @@ impl CosmicMapped {
         }
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
         scale: smithay::utils::Scale<f64>,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        C: From<CosmicMappedRenderElement<R>>,
     {
         match &self.element {
-            CosmicMappedInternal::Stack(s) => s
-                .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
-                    renderer,
-                    location,
-                    scale,
-                    alpha,
-                    scanout_node,
-                ),
-            CosmicMappedInternal::Window(w) => w
-                .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
-                    renderer,
-                    location,
-                    scale,
-                    alpha,
-                    scanout_node,
-                ),
+            CosmicMappedInternal::Stack(s) => s.push_popup_render_elements(
+                renderer,
+                location,
+                scale,
+                alpha,
+                scanout_node,
+                &mut |elem| push(elem.into()),
+            ),
+            CosmicMappedInternal::Window(w) => w.push_popup_render_elements(
+                renderer,
+                location,
+                scale,
+                alpha,
+                scanout_node,
+                &mut |elem| push(elem.into()),
+            ),
             _ => unreachable!(),
         }
-        .into_iter()
-        .map(C::from)
-        .collect()
     }
 
     pub fn shadow_render_element<R, C>(
@@ -680,7 +676,7 @@ impl CosmicMapped {
         }
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
@@ -689,15 +685,15 @@ impl CosmicMapped {
         alpha: f32,
         scanout_override: Option<bool>,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push_above: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+        push_below: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        C: From<CosmicMappedRenderElement<R>>,
     {
         #[cfg(feature = "debug")]
-        let mut elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
+        if let Some(debug) = self.debug.lock().unwrap().as_mut() {
             let window = self.active_window();
             let window_geo = window.geometry();
             let (min_size, max_size, size) = (
@@ -858,21 +854,15 @@ impl CosmicMapped {
                 scale.x,
                 0.8,
             ) {
-                Ok(element) => vec![CosmicMappedRenderElement::from(element)],
+                Ok(element) => push_above(element.into()),
                 Err(err) => {
                     debug!(?err, "Error rendering debug overlay.");
-                    Vec::new()
                 }
             }
-        } else {
-            Vec::new()
         };
-        #[cfg(not(feature = "debug"))]
-        let mut elements = Vec::new();
 
-        #[cfg_attr(not(feature = "debug"), allow(unused_mut))]
-        elements.extend(match &self.element {
-            CosmicMappedInternal::Stack(s) => s.render_elements::<R, CosmicMappedRenderElement<R>>(
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.push_render_elements(
                 renderer,
                 location,
                 max_size,
@@ -880,21 +870,22 @@ impl CosmicMapped {
                 alpha,
                 scanout_override,
                 scanout_node,
+                &mut |elem| push_above(elem.into()),
+                &mut |elem| push_below(elem.into()),
             ),
-            CosmicMappedInternal::Window(w) => w
-                .render_elements::<R, CosmicMappedRenderElement<R>>(
-                    renderer,
-                    location,
-                    max_size,
-                    scale,
-                    alpha,
-                    scanout_override,
-                    scanout_node,
-                ),
+            CosmicMappedInternal::Window(w) => w.push_render_elements(
+                renderer,
+                location,
+                max_size,
+                scale,
+                alpha,
+                scanout_override,
+                scanout_node,
+                &mut |elem| push_above(elem.into()),
+                &mut |elem| push_below(elem.into()),
+            ),
             _ => unreachable!(),
-        });
-
-        elements.into_iter().map(C::from).collect()
+        }
     }
 
     pub(crate) fn update_theme(&self, theme: cosmic::Theme) {

@@ -25,8 +25,8 @@ use smithay::{
         renderer::{
             ImportAll, ImportMem, Renderer,
             element::{
-                AsRenderElements, Element, Id as RendererId, Kind, RenderElement,
-                UnderlyingStorage, memory::MemoryRenderBufferRenderElement,
+                Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage,
+                memory::MemoryRenderBufferRenderElement,
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
@@ -348,18 +348,17 @@ impl CosmicWindow {
         self.0.loop_handle()
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        push: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+    ) where
+        R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicWindowRenderElement<R>>,
     {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));
 
@@ -370,17 +369,14 @@ impl CosmicWindow {
         };
 
         self.0.with_program(|p| {
-            p.window
-                .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
-                    renderer,
-                    window_loc,
-                    scale,
-                    alpha,
-                    scanout_node,
-                )
-                .into_iter()
-                .map(C::from)
-                .collect()
+            p.window.push_popup_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_node,
+                &mut |elem| push(elem.into()),
+            )
         })
     }
 
@@ -464,7 +460,7 @@ impl CosmicWindow {
         })
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
@@ -473,11 +469,11 @@ impl CosmicWindow {
         alpha: f32,
         scanout_override: Option<bool>,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push_above: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+        push_below: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicWindowRenderElement<R>>,
     {
         let (has_ssd, is_tiled, is_maximized, mut radii, appearance) = self.0.with_program(|p| {
             (
@@ -514,8 +510,6 @@ impl CosmicWindow {
             location
         };
 
-        let mut elements = Vec::new();
-
         let (mut geo, bg_divider) = self.0.with_program(|p| {
             (
                 SpaceElement::geometry(&p.window).to_f64(),
@@ -545,15 +539,15 @@ impl CosmicWindow {
                 scale.x,
                 [r, g, b],
             ));
-            elements.push(elem);
+            push_above(elem);
         }
 
-        if has_ssd {
-            radii[1] = 0;
-            radii[3] = 0;
-        }
-        elements.extend(self.0.with_program(|p| {
-            p.window.render_elements::<R, CosmicWindowRenderElement<R>>(
+        self.0.with_program(|p| {
+            if has_ssd {
+                radii[1] = 0;
+                radii[3] = 0;
+            }
+            p.window.push_render_elements(
                 renderer,
                 window_loc,
                 scale,
@@ -562,8 +556,10 @@ impl CosmicWindow {
                 scanout_node,
                 clip,
                 radii,
+                &mut |elem| push_above(elem.into()),
+                Some(&mut |elem| push_below(elem.into())),
             )
-        }));
+        });
 
         if has_ssd {
             let ssd_loc = location
@@ -571,12 +567,11 @@ impl CosmicWindow {
                     .0
                     .with_program(|p| p.window.geometry().loc)
                     .to_physical_precise_round(scale);
-            elements.extend(AsRenderElements::<R>::render_elements::<
-                CosmicWindowRenderElement<R>,
-            >(&self.0, renderer, ssd_loc, scale, alpha))
+            self.0
+                .push_render_elements(renderer, ssd_loc, scale, alpha, &mut |elem| {
+                    push_above(elem.into())
+                });
         }
-
-        elements.into_iter().map(C::from).collect()
     }
 
     pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
