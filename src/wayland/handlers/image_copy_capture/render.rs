@@ -9,8 +9,7 @@ use smithay::{
             buffer_dimensions, buffer_type,
             damage::{Error as DTError, OutputDamageTracker, RenderOutputResult},
             element::{
-                AsRenderElements, RenderElement,
-                surface::WaylandSurfaceRenderElement,
+                RenderElement,
                 utils::{Relocate, RelocateRenderElement},
             },
             gles::{GlesError, GlesRenderbuffer},
@@ -43,6 +42,7 @@ use crate::{
         CursorMode, ElementFilter, RendererRef, cursor,
         element::{AsGlowRenderer, CosmicElement, DamageElement},
         render_workspace,
+        wayland::SurfaceRenderElement,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{Common, KmsNodes, State},
@@ -486,8 +486,8 @@ pub fn render_workspace_to_buffer(
 }
 
 smithay::render_elements! {
-    pub WindowCaptureElement<R> where R: ImportAll + ImportMem;
-    WaylandElement=WaylandSurfaceRenderElement<R>,
+    pub WindowCaptureElement<R> where R: ImportAll + ImportMem + AsGlowRenderer;
+    WaylandElement=SurfaceRenderElement<R>,
     CursorElement=RelocateRenderElement<cursor::CursorRenderElement<R>>,
 }
 
@@ -616,14 +616,14 @@ pub fn render_window_to_buffer(
             }
         }
 
-        elements.extend(AsRenderElements::<R>::render_elements::<
-            WindowCaptureElement<R>,
-        >(
-            toplevel,
+        elements.extend(toplevel.render_elements::<R, WindowCaptureElement<R>>(
             renderer,
             (-geometry.loc.x, -geometry.loc.y).into(),
             Scale::from(1.0),
             1.0,
+            None,
+            false,
+            [0; 4],
         ));
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {

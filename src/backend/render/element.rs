@@ -1,5 +1,5 @@
 use crate::{
-    backend::render::GlMultiError,
+    backend::render::{GlMultiError, wayland::SurfaceRenderElement},
     shell::{CosmicMappedRenderElement, WorkspaceRenderElement},
 };
 
@@ -11,7 +11,6 @@ use smithay::{
         element::{
             Element, Id, Kind, RenderElement, UnderlyingStorage,
             memory::MemoryRenderBufferRenderElement,
-            surface::WaylandSurfaceRenderElement,
             utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
         },
         gles::{GlesError, element::TextureShaderElement},
@@ -35,7 +34,7 @@ where
         RelocateRenderElement<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>,
     ),
     Cursor(RescaleRenderElement<RelocateRenderElement<CursorRenderElement<R>>>),
-    Dnd(WaylandSurfaceRenderElement<R>),
+    Dnd(SurfaceRenderElement<R>),
     MoveGrab(RescaleRenderElement<CosmicMappedRenderElement<R>>),
     Postprocess(
         CropRenderElement<RelocateRenderElement<RescaleRenderElement<TextureShaderElement>>>,
