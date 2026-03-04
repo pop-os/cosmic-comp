@@ -19,6 +19,7 @@ use crate::{
             shadow::{SHADOW_SHADER, ShadowShader},
             wayland::{
                 SurfaceRenderElement,
+                blur_effect::BlurShaders,
                 clipped_surface::{CLIPPING_SHADER, ClippingShader},
                 push_render_elements_from_surface_tree,
             },
@@ -426,6 +427,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("geo_size", UniformType::_2f),
             UniformName::new("corner_radius", UniformType::_4f),
             UniformName::new("input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("noise", UniformType::_1f),
         ],
     )?;
     let shadow_shader = renderer.compile_custom_pixel_shader(
@@ -441,6 +443,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("window_corner_radius", UniformType::_4f),
         ],
     )?;
+    let blur_shaders = BlurShaders::compile(renderer)?;
 
     let egl_context = renderer.egl_context();
     egl_context
@@ -458,6 +461,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     egl_context
         .user_data()
         .insert_if_missing(|| ShadowShader(shadow_shader));
+    egl_context.user_data().insert_if_missing(|| blur_shaders);
 
     Ok(())
 }
