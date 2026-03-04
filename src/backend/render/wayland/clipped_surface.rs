@@ -111,6 +111,7 @@ where
                     transpose: false,
                 },
             ),
+            Uniform::new("noise", UniformValue::_1f(0.0)),
         ];
 
         Self {

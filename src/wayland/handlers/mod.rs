@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub mod a11y;
+pub mod background_effect;
 pub mod buffer;
 pub mod compositor;
 pub mod corner_radius;

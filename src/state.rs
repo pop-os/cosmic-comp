@@ -72,6 +72,7 @@ use smithay::{
     utils::{Clock, Monotonic, Point},
     wayland::{
         alpha_modifier::AlphaModifierState,
+        background_effect::BackgroundEffectState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
@@ -279,6 +280,7 @@ pub struct Common {
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
     pub dbus_state: DBusState,
+    pub background_effect_state: BackgroundEffectState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -683,6 +685,8 @@ impl State {
         SinglePixelBufferState::new::<Self>(dh);
         FixesState::new::<Self>(dh);
 
+        let background_effect_state = BackgroundEffectState::new::<Self>(dh);
+
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
         let idle_inhibiting_surfaces = HashSet::new();
@@ -786,6 +790,7 @@ impl State {
                 xdg_activation_state,
                 xdg_foreign_state,
                 workspace_state,
+                background_effect_state,
                 a11y_state,
                 xwayland_scale: None,
                 xwayland_state: None,
