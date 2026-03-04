@@ -12,13 +12,16 @@ use smithay::{
 use tracing::warn;
 
 use crate::backend::render::{
-    element::AsGlowRenderer, wayland::clipped_surface::ClippedSurfaceRenderElement,
+    element::AsGlowRenderer,
+    wayland::{blur_effect::BlurElement, clipped_surface::ClippedSurfaceRenderElement},
 };
 
+pub mod blur_effect;
 pub mod clipped_surface;
 
 render_elements! {
     pub SurfaceRenderElement<R> where R: AsGlowRenderer + ImportAll;
+    Blur=BlurElement,
     Clipped=ClippedSurfaceRenderElement<R>,
     Wayland=WaylandSurfaceRenderElement<R>,
 }
@@ -67,6 +70,7 @@ pub fn push_render_elements_from_surface_tree<R>(
             let mut location = *location;
             let kind = kind.eval(states);
             let data = states.data_map.get::<RendererSurfaceStateUserData>();
+            let mut blur = Ok(None);
 
             if let Some(data) = data {
                 let has_view = if let Some(view) = data.lock().unwrap().view() {
@@ -82,6 +86,9 @@ pub fn push_render_elements_from_surface_tree<R>(
                         renderer, surface, states, location, alpha, kind,
                     ) {
                         Ok(Some(surface)) => {
+                            blur = BlurElement::from_surface(
+                                renderer, states, geometry, scale.x, radii,
+                            );
                             let elem: SurfaceRenderElement<R> = if radii.iter().any(|r| *r != 0)
                                 && should_clip
                                 && ClippedSurfaceRenderElement::will_clip(
@@ -112,6 +119,16 @@ pub fn push_render_elements_from_surface_tree<R>(
 
             if surface == main_surface {
                 passed_main = true;
+            }
+
+            if let Ok(Some(elem)) = blur {
+                if let Some(push_below) = push_below.as_mut()
+                    && passed_main
+                {
+                    push_below(elem.into());
+                } else {
+                    push_above(elem.into());
+                }
             }
         },
         |_, _, _| true,
