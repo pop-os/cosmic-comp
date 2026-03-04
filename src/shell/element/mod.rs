@@ -1,5 +1,5 @@
 use crate::{
-    backend::render::element::{AsGlowRenderer, FromGlesError},
+    backend::render::element::AsGlowRenderer,
     state::State,
     utils::{iced::IcedElementInternal, prelude::*},
 };
@@ -1339,7 +1339,6 @@ impl<R> RenderElement<R> for CosmicMappedRenderElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: 'static,
-    R::Error: FromGlesError,
 {
     fn draw(
         &self,
@@ -1372,7 +1371,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
             CosmicMappedRenderElement::MovingStack(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
@@ -1394,7 +1393,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
             CosmicMappedRenderElement::Overlay(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
                 R::glow_frame_mut(frame),
@@ -1404,7 +1403,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
@@ -1420,7 +1419,7 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
@@ -1483,7 +1482,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicMappedRenderElement::MovingStack(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
@@ -1505,7 +1504,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicMappedRenderElement::Overlay(elem) => {
                 RenderElement::<GlowRenderer>::capture_framebuffer(
@@ -1515,7 +1514,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
@@ -1526,7 +1525,7 @@ where
                 RenderElement::<GlowRenderer>::capture_framebuffer(
                     elem, glow_frame, src, dst, cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
