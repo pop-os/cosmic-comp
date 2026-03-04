@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use calloop::LoopHandle;
+use smallvec::SmallVec;
 use smithay::{
     backend::{
         allocator::{Buffer, Fourcc, dmabuf::Dmabuf, format::get_transparent},
@@ -39,7 +40,8 @@ use tracing::warn;
 
 use crate::{
     backend::render::{
-        CursorMode, ElementFilter, RendererRef, cursor,
+        CursorMode, ElementFilter, RendererRef,
+        cursor::{self, CursorRenderElement},
         element::{AsGlowRenderer, CosmicElement, DamageElement},
         render_workspace,
         wayland::SurfaceRenderElement,
@@ -577,24 +579,23 @@ pub fn render_window_to_buffer(
 
         if let Some(location) = location {
             if draw_cursor {
-                elements.extend(
-                    cursor::draw_cursor(
-                        renderer,
-                        &seat,
-                        location,
-                        1.0.into(),
-                        1.0,
-                        common.clock.now(),
-                        true,
-                    )
-                    .into_iter()
-                    .map(|(elem, hotspot)| {
-                        WindowCaptureElement::CursorElement(RelocateRenderElement::from_element(
-                            elem,
-                            Point::from((-hotspot.x, -hotspot.y)),
-                            Relocate::Relative,
-                        ))
-                    }),
+                cursor::draw_cursor(
+                    renderer,
+                    &seat,
+                    location,
+                    1.0.into(),
+                    1.0,
+                    common.clock.now(),
+                    true,
+                    &mut |elem, hotspot| {
+                        elements.push(WindowCaptureElement::CursorElement(
+                            RelocateRenderElement::from_element(
+                                elem,
+                                Point::from((-hotspot.x, -hotspot.y)),
+                                Relocate::Relative,
+                            ),
+                        ));
+                    },
                 );
             }
 
@@ -602,21 +603,27 @@ pub fn render_window_to_buffer(
             // still include dnd surface in window capture buffer?
             if draw_cursor {
                 if let Some(dnd_icon) = get_dnd_icon(&seat) {
-                    elements.extend(
-                        cursor::draw_dnd_icon(
-                            renderer,
-                            &dnd_icon.surface,
-                            (location + dnd_icon.offset.to_f64()).to_i32_round(),
-                            1.0,
-                        )
-                        .into_iter()
-                        .map(WindowCaptureElement::from),
+                    cursor::draw_dnd_icon(
+                        renderer,
+                        &dnd_icon.surface,
+                        (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                        1.0,
+                        &mut |elem| {
+                            elements.push(
+                                RelocateRenderElement::from_element(
+                                    CursorRenderElement::Surface(elem),
+                                    Point::new(0, 0),
+                                    Relocate::Relative,
+                                )
+                                .into(),
+                            )
+                        },
                     );
                 }
             }
         }
 
-        elements.extend(toplevel.render_elements::<R, WindowCaptureElement<R>>(
+        toplevel.push_render_elements(
             renderer,
             (-geometry.loc.x, -geometry.loc.y).into(),
             Scale::from(1.0),
@@ -624,7 +631,9 @@ pub fn render_window_to_buffer(
             None,
             false,
             [0; 4],
-        ));
+            &mut |elem| elements.push(elem.into()),
+            None,
+        );
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
             let mut dmabuf_clone = dmabuf.clone();
@@ -786,7 +795,8 @@ pub fn render_cursor_to_buffer(
             .collect();
         dt.damage_output(age, &additional_damage_elements)?;
 
-        let elements = cursor::draw_cursor(
+        let mut elements = SmallVec::<[WindowCaptureElement<R>; 4]>::new_const();
+        cursor::draw_cursor(
             renderer,
             seat,
             Point::from((0.0, 0.0)),
@@ -794,11 +804,12 @@ pub fn render_cursor_to_buffer(
             1.0,
             common.clock.now(),
             true,
-        )
-        .into_iter()
-        .map(|(elem, _)| RelocateRenderElement::from_element(elem, (0, 0), Relocate::Relative))
-        .map(WindowCaptureElement::from)
-        .collect::<Vec<_>>();
+            &mut |elem, _| {
+                elements.push(
+                    RelocateRenderElement::from_element(elem, (0, 0), Relocate::Relative).into(),
+                )
+            },
+        );
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
             let mut dmabuf_clone = dmabuf.clone();

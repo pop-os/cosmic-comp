@@ -1,3 +1,4 @@
+use crate::backend::render::wayland::SurfaceRenderElement;
 use crate::shell::focus::FocusTarget;
 use crate::shell::layout::tiling::RestoreTilingState;
 use crate::wayland::handlers::xdg_activation::ActivationContext;
@@ -28,6 +29,7 @@ use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::Tiling
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smallvec::SmallVec;
 use smithay::backend::renderer::element::Kind;
 use smithay::output::WeakOutput;
 use smithay::utils::user_data::UserDataMap;
@@ -35,8 +37,7 @@ use smithay::{
     backend::renderer::{
         ImportAll, ImportMem, Renderer,
         element::{
-            Element, Id, RenderElement, surface::WaylandSurfaceRenderElement,
-            texture::TextureRenderElement, utils::RescaleRenderElement,
+            Element, Id, RenderElement, texture::TextureRenderElement, utils::RescaleRenderElement,
         },
         gles::GlesTexture,
         glow::GlowRenderer,
@@ -1515,8 +1516,8 @@ impl Workspace {
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         theme: &CosmicTheme,
-    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
-    where
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
+    ) where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -1524,16 +1525,16 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = Vec::default();
-
         let output_scale = self.output.current_scale().fractional_scale();
         let zone = {
             let layer_map = layer_map_for_output(&self.output);
             layer_map.non_exclusive_zone().as_local()
         };
         let focused = self.focus_stack.get(last_active_seat).last().cloned();
+        let fullscreen_focused = matches!(focused, Some(FocusTarget::Fullscreen(_)));
 
-        let mut fullscreen_elements = if let Some(fullscreen) = self.fullscreen.as_ref() {
+        let mut fullscreen_elements = SmallVec::<[WorkspaceRenderElement<R>; 2]>::new_const();
+        if let Some(fullscreen) = self.fullscreen.as_ref() {
             let fullscreen_geo = self.fullscreen_geometry().unwrap();
             let previous_geo = fullscreen
                 .previous_geometry
@@ -1592,29 +1593,27 @@ impl Workspace {
                 }
             };
 
-            fullscreen
-                .surface
-                .render_elements::<R, CosmicWindowRenderElement<R>>(
-                    renderer,
-                    render_loc,
-                    output_scale.into(),
-                    alpha,
-                    Some(true),
-                    false,
-                    [0; 4],
-                )
-                .into_iter()
-                .map(animation_rescale)
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-
-        if matches!(focused, Some(FocusTarget::Fullscreen(_))) {
-            elements.append(&mut fullscreen_elements);
+            let mut fullscreen_push = |elem: SurfaceRenderElement<R>| {
+                if fullscreen_focused {
+                    push(animation_rescale(elem.into()))
+                } else {
+                    fullscreen_elements.push(animation_rescale(elem.into()))
+                }
+            };
+            fullscreen.surface.push_render_elements(
+                renderer,
+                render_loc,
+                output_scale.into(),
+                alpha,
+                Some(true),
+                false,
+                [0, 0, 0, 0],
+                &mut fullscreen_push,
+                None,
+            );
         }
 
-        if !matches!(focused, Some(FocusTarget::Fullscreen(_)))
+        if !fullscreen_focused
             || self
                 .fullscreen
                 .as_ref()
@@ -1640,24 +1639,20 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            elements.extend(
-                self.floating_layer
-                    .render::<R>(
-                        renderer,
-                        focused.as_ref().and_then(|target| {
-                            if let FocusTarget::Window(mapped) = target {
-                                Some(mapped)
-                            } else {
-                                None
-                            }
-                        }),
-                        resize_indicator.clone(),
-                        indicator_thickness,
-                        alpha,
-                        theme,
-                    )
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+            self.floating_layer.render(
+                renderer,
+                focused.as_ref().and_then(|target| {
+                    if let FocusTarget::Window(mapped) = target {
+                        Some(mapped)
+                    } else {
+                        None
+                    }
+                }),
+                resize_indicator.clone(),
+                indicator_thickness,
+                alpha,
+                theme,
+                &mut |elem| push(elem.into()),
             );
 
             let alpha = match &overview.0 {
@@ -1674,23 +1669,19 @@ impl Workspace {
             };
 
             //tiling surfaces
-            elements.extend(
-                self.tiling_layer
-                    .render::<R>(
-                        renderer,
-                        render_focus.then_some(last_active_seat),
-                        zone,
-                        overview,
-                        resize_indicator,
-                        indicator_thickness,
-                        theme,
-                    )?
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+            self.tiling_layer.render(
+                renderer,
+                render_focus.then_some(last_active_seat),
+                zone,
+                overview,
+                resize_indicator,
+                indicator_thickness,
+                theme,
+                &mut |elem| push(elem.into()),
             );
 
             if let Some(alpha) = alpha {
-                elements.push(
+                push(
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
                         renderer,
                         self.backdrop_id.clone(),
@@ -1704,11 +1695,9 @@ impl Workspace {
             }
         }
 
-        if !matches!(focused, Some(FocusTarget::Fullscreen(_))) {
-            elements.extend(fullscreen_elements.into_iter());
+        for elem in fullscreen_elements {
+            push(elem);
         }
-
-        Ok(elements)
     }
 
     #[profiling::function]
@@ -1719,8 +1708,8 @@ impl Workspace {
         render_focus: bool,
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         theme: &CosmicTheme,
-    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
-    where
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
+    ) where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -1728,8 +1717,6 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = Vec::default();
-
         let output_scale = self.output.current_scale().fractional_scale();
         let zone = {
             let layer_map = layer_map_for_output(&self.output);
@@ -1780,17 +1767,12 @@ impl Workspace {
                 .as_logical()
                 .to_physical_precise_round(output_scale);
 
-            elements.extend(
-                fullscreen
-                    .surface
-                    .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
-                        renderer,
-                        render_loc,
-                        output_scale.into(),
-                        alpha,
-                    )
-                    .into_iter()
-                    .map(Into::into),
+            fullscreen.surface.push_popup_render_elements(
+                renderer,
+                render_loc,
+                output_scale.into(),
+                alpha,
+                &mut |elem| push(WorkspaceRenderElement::FullscreenPopup(elem.into())),
             );
         }
 
@@ -1821,29 +1803,19 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            elements.extend(
-                self.floating_layer
-                    .render_popups::<R>(renderer, alpha)
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
-            );
+            self.floating_layer
+                .render_popups(renderer, alpha, &mut |elem| push(elem.into()));
 
             //tiling surfaces
-            elements.extend(
-                self.tiling_layer
-                    .render_popups::<R>(
-                        renderer,
-                        render_focus.then_some(last_active_seat),
-                        zone,
-                        overview,
-                        theme,
-                    )?
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+            self.tiling_layer.render_popups(
+                renderer,
+                render_focus.then_some(last_active_seat),
+                zone,
+                overview,
+                theme,
+                &mut |elem| push(elem.into()),
             );
         }
-
-        Ok(elements)
     }
 }
 
@@ -1864,7 +1836,7 @@ where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: 'static,
 {
-    OverrideRedirect(WaylandSurfaceRenderElement<R>),
+    OverrideRedirect(SurfaceRenderElement<R>),
     Fullscreen(RescaleRenderElement<CosmicWindowRenderElement<R>>),
     FullscreenPopup(CosmicWindowRenderElement<R>),
     Window(CosmicMappedRenderElement<R>),
@@ -2102,13 +2074,13 @@ where
     }
 }
 
-impl<R> From<WaylandSurfaceRenderElement<R>> for WorkspaceRenderElement<R>
+impl<R> From<SurfaceRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: WaylandSurfaceRenderElement<R>) -> Self {
+    fn from(elem: SurfaceRenderElement<R>) -> Self {
         WorkspaceRenderElement::OverrideRedirect(elem)
     }
 }
