@@ -18,10 +18,7 @@ use cosmic::{
 use smithay::{
     backend::{
         input::{ButtonState, TouchSlot},
-        renderer::{
-            ImportMem, Renderer,
-            element::{AsRenderElements, memory::MemoryRenderBufferRenderElement},
-        },
+        renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
     },
     desktop::space::SpaceElement,
     input::{
@@ -65,29 +62,28 @@ pub struct MenuGrabState {
 pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
 impl MenuGrabState {
-    pub fn render<I, R>(&self, renderer: &mut R, output: &Output) -> Vec<I>
-    where
+    pub fn render<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+    ) where
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
-        I: From<MemoryRenderBufferRenderElement<R>>,
     {
         let scale = output.current_scale().fractional_scale();
-        self.elements
-            .lock()
-            .unwrap()
-            .iter()
-            .flat_map(|elem| {
-                elem.iced.render_elements(
-                    renderer,
-                    elem.position
-                        .to_local(output)
-                        .as_logical()
-                        .to_physical_precise_round(scale),
-                    scale.into(),
-                    1.0,
-                )
-            })
-            .collect()
+        for elem in self.elements.lock().unwrap().iter() {
+            elem.iced.push_render_elements(
+                renderer,
+                elem.position
+                    .to_local(output)
+                    .as_logical()
+                    .to_physical_precise_round(scale),
+                scale.into(),
+                1.0,
+                push,
+            )
+        }
     }
 
     pub fn is_in_screen_space(&self) -> bool {

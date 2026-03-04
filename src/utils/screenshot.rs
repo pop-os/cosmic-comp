@@ -14,7 +14,7 @@ use smithay::{
 use tracing::warn;
 
 use crate::{
-    backend::render::{RendererRef, element::AsGlowRenderer, wayland::SurfaceRenderElement},
+    backend::render::{RendererRef, element::AsGlowRenderer},
     shell::element::CosmicSurface,
     state::{State, advertised_node_for_surface},
 };
@@ -27,7 +27,8 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
         R::Error: Send + Sync + 'static,
     {
         let bbox = bbox_from_surface_tree(&window.wl_surface().unwrap(), (0, 0));
-        let elements = window.render_elements::<R, SurfaceRenderElement<R>>(
+        let mut elements = Vec::new();
+        window.push_render_elements(
             renderer,
             (-bbox.loc.x, -bbox.loc.y).into(),
             Scale::from(1.0),
@@ -35,6 +36,8 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             None,
             false,
             [0; 4],
+            &mut |elem| elements.push(elem),
+            None,
         );
 
         // TODO: 10-bit
