@@ -17,7 +17,11 @@ use crate::{
         render::{
             element::DamageElement,
             shadow::{SHADOW_SHADER, ShadowShader},
-            wayland::clipped_surface::{CLIPPING_SHADER, ClippingShader},
+            wayland::{
+                SurfaceRenderElement,
+                clipped_surface::{CLIPPING_SHADER, ClippingShader},
+                push_render_elements_from_surface_tree,
+            },
         },
     },
     config::ScreenFilter,
@@ -47,11 +51,10 @@ use smithay::{
         allocator::Fourcc,
         drm::{DrmDeviceFd, DrmNode},
         renderer::{
-            Color32F, ImportAll, Offscreen, Renderer, Texture, TextureFilter,
+            Color32F, Offscreen, Texture, TextureFilter,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
                 Element, Id, Kind, RenderElement, WeakId,
-                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
                 texture::{TextureRenderBuffer, TextureRenderElement},
                 utils::{
                     ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
@@ -68,6 +71,7 @@ use smithay::{
             sync::SyncPoint,
         },
     },
+    desktop::utils::bbox_from_surface_tree,
     input::Seat,
     output::{Output, OutputModeSource, OutputNoMode},
     utils::{
@@ -474,8 +478,8 @@ pub fn cursor_elements<'a, 'frame, R>(
     output: &Output,
     mode: CursorMode,
     exclude_dnd_icon: bool,
-) -> Vec<CosmicElement<R>>
-where
+    push: &mut dyn FnMut(CosmicElement<R>),
+) where
     R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -489,7 +493,6 @@ where
             )
         })
         .unwrap_or_else(|| ((0., 0.).into(), 1.));
-    let mut elements = Vec::new();
 
     for seat in seats {
         let pointer = match seat.get_pointer() {
@@ -499,19 +502,16 @@ where
         let location = pointer.current_location() - output.current_location().to_f64();
 
         if mode != CursorMode::None {
-            elements.extend(
-                cursor::draw_cursor(
-                    renderer,
-                    seat,
-                    location,
-                    scale.into(),
-                    zoom_scale,
-                    now,
-                    mode != CursorMode::NotDefault,
-                )
-                .into_iter()
-                .map(|(elem, hotspot)| {
-                    CosmicElement::Cursor(RescaleRenderElement::from_element(
+            cursor::draw_cursor(
+                renderer,
+                seat,
+                location,
+                scale.into(),
+                zoom_scale,
+                now,
+                mode != CursorMode::NotDefault,
+                &mut |elem, hotspot| {
+                    push(CosmicElement::Cursor(RescaleRenderElement::from_element(
                         RelocateRenderElement::from_element(
                             elem,
                             Point::from((-hotspot.x, -hotspot.y)),
@@ -522,63 +522,54 @@ where
                             .to_physical(output.current_scale().fractional_scale())
                             .to_i32_round(),
                         zoom_scale,
-                    ))
-                }),
+                    )))
+                },
             );
         }
 
         if !exclude_dnd_icon && let Some(dnd_icon) = get_dnd_icon(seat) {
-            elements.extend(
-                cursor::draw_dnd_icon(
-                    renderer,
-                    &dnd_icon.surface,
-                    (location + dnd_icon.offset.to_f64()).to_i32_round(),
-                    scale,
-                )
-                .into_iter()
-                .map(CosmicElement::Dnd),
+            cursor::draw_dnd_icon(
+                renderer,
+                &dnd_icon.surface,
+                (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                scale,
+                &mut |elem| push(CosmicElement::Dnd(elem)),
             );
         }
 
         let theme = theme.cosmic();
-        if let Some(grab_elements) = seat
+        if let Some(grab_state) = seat
             .user_data()
             .get::<SeatMoveGrabState>()
             .unwrap()
             .lock()
             .unwrap()
             .as_ref()
-            .map(|state| state.render::<CosmicMappedRenderElement<R>, R>(renderer, output, theme))
         {
-            elements.extend(grab_elements.into_iter().map(|elem| {
-                CosmicElement::MoveGrab(RescaleRenderElement::from_element(
+            grab_state.render(renderer, output, theme, &mut |elem| {
+                push(CosmicElement::MoveGrab(RescaleRenderElement::from_element(
                     elem,
                     focal_point
                         .as_logical()
                         .to_physical(output.current_scale().fractional_scale())
                         .to_i32_round(),
                     zoom_scale,
-                ))
-            }));
+                )));
+            })
         }
 
-        if let Some((grab_elements, should_scale)) = seat
+        if let Some(grab_state) = seat
             .user_data()
             .get::<SeatMenuGrabState>()
             .unwrap()
             .lock()
             .unwrap()
             .as_ref()
-            .map(|state| {
-                (
-                    state.render::<CosmicMappedRenderElement<R>, R>(renderer, output),
-                    !state.is_in_screen_space(),
-                )
-            })
         {
-            elements.extend(grab_elements.into_iter().map(|elem| {
-                CosmicElement::MoveGrab(RescaleRenderElement::from_element(
-                    elem,
+            let should_scale = !grab_state.is_in_screen_space();
+            grab_state.render(renderer, output, &mut |elem| {
+                push(CosmicElement::MoveGrab(RescaleRenderElement::from_element(
+                    elem.into(),
                     if should_scale {
                         focal_point
                             .as_logical()
@@ -588,12 +579,10 @@ where
                         Point::from((0, 0))
                     },
                     if should_scale { zoom_scale } else { 1.0 },
-                ))
-            }));
+                )));
+            })
         }
     }
-
-    elements
 }
 
 #[cfg(not(feature = "debug"))]
@@ -718,7 +707,7 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let mut elements = Vec::new();
+    let mut elements = Vec::<CosmicElement<R>>::new();
 
     let shell_ref = shell.read();
     let seats = shell_ref.seats.iter().cloned().collect::<Vec<_>>();
@@ -731,7 +720,7 @@ where
     // that is prone to deadlock with the main-thread on some grabs.
     std::mem::drop(shell_ref);
 
-    elements.extend(cursor_elements(
+    cursor_elements(
         renderer,
         seats.iter(),
         zoom_level,
@@ -740,7 +729,8 @@ where
         output,
         cursor_mode,
         element_filter == ElementFilter::ExcludeWorkspaceOverview,
-    ));
+        &mut |elem| elements.push(elem),
+    );
 
     let shell = shell.read();
     let overview = shell.overview_mode();
@@ -816,72 +806,81 @@ where
     render_input_order::<()>(&shell, output, previous, current, element_filter, |stage| {
         match stage {
             Stage::ZoomUI => {
-                elements.extend(ZoomState::render(renderer, output));
+                ZoomState::render(renderer, output, &mut |elem| {
+                    elements.push(CosmicElement::Zoom(elem))
+                });
             }
             Stage::SessionLock(lock_surface) => {
-                elements.extend(
-                    session_lock_elements(renderer, output, lock_surface)
-                        .into_iter()
-                        .map(Into::into)
-                        .flat_map(crop_to_output)
-                        .map(Into::into),
-                );
+                session_lock_elements(renderer, output, lock_surface, &mut |elem| {
+                    elements.extend(crop_to_output(elem.into()).map(Into::into))
+                })
             }
             Stage::LayerPopup {
                 popup, location, ..
             } => {
-                elements.extend(
-                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
-                        renderer,
-                        popup.wl_surface(),
-                        location
-                            .to_local(output)
-                            .as_logical()
-                            .to_physical_precise_round(scale),
-                        Scale::from(scale),
-                        1.0,
-                        FRAME_TIME_FILTER,
-                    )
-                    .into_iter()
-                    .flat_map(crop_to_output)
-                    .map(Into::into),
-                );
+                let mut geometry = popup.geometry().as_global();
+                geometry.loc += location;
+
+                push_render_elements_from_surface_tree(
+                    renderer,
+                    popup.wl_surface(),
+                    location
+                        .to_local(output)
+                        .as_logical()
+                        .to_physical_precise_round(scale),
+                    geometry.to_local(output).as_logical().to_f64(),
+                    Scale::from(scale),
+                    1.0,
+                    false,
+                    [0; 4],
+                    FRAME_TIME_FILTER,
+                    &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                    None,
+                )
             }
             Stage::LayerSurface { layer, location } => {
-                elements.extend(
-                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
-                        renderer,
-                        layer.wl_surface(),
-                        location
-                            .to_local(output)
-                            .as_logical()
-                            .to_physical_precise_round(scale),
-                        Scale::from(scale),
-                        1.0,
-                        FRAME_TIME_FILTER,
-                    )
-                    .into_iter()
-                    .flat_map(crop_to_output)
-                    .map(Into::into),
+                let mut geometry = layer.geometry().as_global();
+                geometry.loc += location;
+
+                push_render_elements_from_surface_tree(
+                    renderer,
+                    layer.wl_surface(),
+                    location
+                        .to_local(output)
+                        .as_logical()
+                        .to_physical_precise_round(scale),
+                    geometry.to_local(output).as_logical().to_f64(),
+                    Scale::from(scale),
+                    1.0,
+                    false,
+                    [0; 4],
+                    FRAME_TIME_FILTER,
+                    &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                    None,
                 );
             }
             Stage::OverrideRedirect { surface, location } => {
-                elements.extend(surface.wl_surface().into_iter().flat_map(|surface| {
-                    render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(
+                if let Some(wl_surface) = surface.wl_surface() {
+                    let mut geometry = surface.geometry().as_global();
+                    geometry.loc += location;
+
+                    push_render_elements_from_surface_tree(
                         renderer,
-                        &surface,
+                        &wl_surface,
                         location
                             .to_local(output)
                             .as_logical()
                             .to_physical_precise_round(scale),
+                        geometry.to_local(output).as_logical().to_f64(),
                         Scale::from(scale),
                         1.0,
+                        false,
+                        [0; 4],
                         FRAME_TIME_FILTER,
-                    )
-                    .into_iter()
-                    .flat_map(crop_to_output)
-                    .map(Into::into)
-                }));
+                        &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                        None,
+                    );
+                }
             }
             Stage::StickyPopups(layout) => {
                 let alpha = match &overview.0 {
@@ -902,14 +901,11 @@ where
                     OverviewMode::None => 1.0,
                 };
 
-                elements.extend(
-                    layout
-                        .render_popups(renderer, alpha)
-                        .into_iter()
-                        .map(Into::into)
-                        .flat_map(crop_to_output)
-                        .map(Into::into),
-                );
+                layout.render_popups(renderer, alpha, &mut |elem| {
+                    if let Some(elem) = crop_to_output(elem.into()) {
+                        elements.push(elem.into())
+                    }
+                });
             }
             Stage::Sticky(layout) => {
                 let alpha = match &overview.0 {
@@ -934,79 +930,63 @@ where
                     .then_some(last_active_seat)
                     .map(|seat| workspace.focus_stack.get(seat));
 
-                elements.extend(
-                    layout
-                        .render(
-                            renderer,
-                            current_focus.as_ref().and_then(|stack| {
-                                stack.last().and_then(|t| match t {
-                                    FocusTarget::Window(w) => Some(w),
-                                    _ => None,
-                                })
-                            }),
-                            resize_indicator.clone(),
-                            active_hint,
-                            alpha,
-                            theme.cosmic(),
-                        )
-                        .into_iter()
-                        .map(Into::into)
-                        .flat_map(crop_to_output)
-                        .map(Into::into),
-                )
+                layout.render(
+                    renderer,
+                    current_focus.as_ref().and_then(|stack| {
+                        stack.last().and_then(|t| match t {
+                            FocusTarget::Window(w) => Some(w),
+                            _ => None,
+                        })
+                    }),
+                    resize_indicator.clone(),
+                    active_hint,
+                    alpha,
+                    theme.cosmic(),
+                    &mut |elem| {
+                        if let Some(elem) = crop_to_output(elem.into()) {
+                            elements.push(elem.into())
+                        }
+                    },
+                );
             }
             Stage::WorkspacePopups { workspace, offset } => {
-                elements.extend(
-                    match workspace.render_popups(
-                        renderer,
-                        last_active_seat,
-                        !move_active && is_active_space,
-                        overview.clone(),
-                        theme.cosmic(),
-                    ) {
-                        Ok(elements) => {
-                            elements
-                                .into_iter()
-                                .flat_map(crop_to_output)
-                                .map(|element| {
-                                    CosmicElement::Workspace(RelocateRenderElement::from_element(
-                                        element,
-                                        offset.to_physical_precise_round(scale),
-                                        Relocate::Relative,
-                                    ))
-                                })
-                        }
-                        Err(_) => {
-                            return ControlFlow::Break(Err(OutputNoMode));
+                workspace.render_popups(
+                    renderer,
+                    last_active_seat,
+                    !move_active && is_active_space,
+                    overview.clone(),
+                    theme.cosmic(),
+                    &mut |elem| {
+                        if let Some(elem) = crop_to_output(elem) {
+                            elements.push(CosmicElement::Workspace(
+                                RelocateRenderElement::from_element(
+                                    elem,
+                                    offset.to_physical_precise_round(scale),
+                                    Relocate::Relative,
+                                ),
+                            ));
                         }
                     },
                 );
             }
             Stage::Workspace { workspace, offset } => {
-                elements.extend(
-                    match workspace.render(
-                        renderer,
-                        last_active_seat,
-                        !move_active && is_active_space,
-                        overview.clone(),
-                        resize_indicator.clone(),
-                        active_hint,
-                        theme.cosmic(),
-                    ) {
-                        Ok(elements) => {
-                            elements
-                                .into_iter()
-                                .flat_map(crop_to_output)
-                                .map(|element| {
-                                    CosmicElement::Workspace(RelocateRenderElement::from_element(
-                                        element,
-                                        offset.to_physical_precise_round(scale),
-                                        Relocate::Relative,
-                                    ))
-                                })
-                        }
-                        Err(_) => {
-                            return ControlFlow::Break(Err(OutputNoMode));
+                workspace.render(
+                    renderer,
+                    last_active_seat,
+                    !move_active && is_active_space,
+                    overview.clone(),
+                    resize_indicator.clone(),
+                    active_hint,
+                    theme.cosmic(),
+                    &mut |elem| {
+                        if let Some(elem) = crop_to_output(elem) {
+                            elements.push(CosmicElement::Workspace(
+                                RelocateRenderElement::from_element(
+                                    elem,
+                                    offset.to_physical_precise_round(scale),
+                                    Relocate::Relative,
+                                ),
+                            ));
                         }
                     },
                 );
@@ -1023,23 +1003,26 @@ fn session_lock_elements<R>(
     renderer: &mut R,
     output: &Output,
     lock_surface: Option<&LockSurface>,
-) -> Vec<WaylandSurfaceRenderElement<R>>
-where
-    R: Renderer + ImportAll,
+    push: &mut dyn FnMut(SurfaceRenderElement<R>),
+) where
+    R: AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
     if let Some(surface) = lock_surface {
         let scale = Scale::from(output.current_scale().fractional_scale());
-        render_elements_from_surface_tree(
+        push_render_elements_from_surface_tree(
             renderer,
             surface.wl_surface(),
             (0, 0),
+            bbox_from_surface_tree(surface.wl_surface(), (0, 0)).to_f64(),
             scale,
             1.0,
+            false,
+            [0; 4],
             FRAME_TIME_FILTER,
+            push,
+            None,
         )
-    } else {
-        Vec::new()
     }
 }
 
