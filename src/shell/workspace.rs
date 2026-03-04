@@ -1619,6 +1619,8 @@ impl Workspace {
                     output_scale.into(),
                     alpha,
                     Some(true),
+                    false,
+                    [0; 4],
                 )
                 .into_iter()
                 .map(animation_rescale)
