@@ -339,16 +339,16 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        let status = self
+        for ((child, state), layout) in self
             .elements
             .iter_mut()
             .zip(&mut tree.children)
             .zip(layout.children())
-            .map(|((child, state), layout)| {
-                child.as_widget_mut().update(
-                    state, event, layout, cursor, renderer, clipboard, shell, viewport,
-                )
-            });
+        {
+            child.as_widget_mut().update(
+                state, event, layout, cursor, renderer, clipboard, shell, viewport,
+            );
+        }
 
         if !shell.is_event_captured() && cursor.is_over(layout.bounds()) {
             if matches!(

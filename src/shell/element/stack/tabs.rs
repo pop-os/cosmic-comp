@@ -1,5 +1,3 @@
-use crate::backend::render::element;
-
 use super::tab::{MIN_ACTIVE_TAB_WIDTH, Tab, TabBackgroundTheme, TabMessage, TabRuleTheme};
 use cosmic::{
     Apply,
@@ -862,68 +860,66 @@ where
 
         let len = self.elements.len();
         if scrolling && cursor.position().is_some_and(|pos| pos.x < bounds.x) {
-            self.elements[0..2]
+            for ((child, state), layout) in self.elements[0..2]
                 .iter_mut()
                 .zip(&mut tree.children)
                 .zip(layout.children())
-                .map(|((child, state), layout)| {
-                    child.as_widget_mut().update(
-                        state,
-                        event,
-                        layout,
-                        cursor,
-                        renderer,
-                        clipboard,
-                        &mut internal_shell,
-                        viewport,
-                    )
-                });
+            {
+                child.as_widget_mut().update(
+                    state,
+                    event,
+                    layout,
+                    cursor,
+                    renderer,
+                    clipboard,
+                    &mut internal_shell,
+                    viewport,
+                );
+            }
         } else if scrolling
             && cursor
                 .position()
                 .is_some_and(|pos| pos.x >= bounds.x + bounds.width)
         {
-            self.elements[len - 3..len]
+            for ((child, state), layout) in self.elements[len - 3..len]
                 .iter_mut()
                 .zip(tree.children.iter_mut().skip(len - 3))
                 .zip(layout.children().skip(len - 3))
-                .map(|((child, state), layout)| {
-                    child.as_widget_mut().update(
-                        state,
-                        event,
-                        layout,
-                        cursor,
-                        renderer,
-                        clipboard,
-                        &mut internal_shell,
-                        viewport,
-                    )
-                });
+            {
+                child.as_widget_mut().update(
+                    state,
+                    event,
+                    layout,
+                    cursor,
+                    renderer,
+                    clipboard,
+                    &mut internal_shell,
+                    viewport,
+                )
+            }
         } else {
-            self.elements[2..len - 3]
+            for ((child, state), layout) in self.elements[2..len - 3]
                 .iter_mut()
                 .zip(tree.children.iter_mut().skip(2))
                 .zip(layout.children().skip(2))
-                .map(|((child, state), layout)| {
-                    let cursor = match cursor {
-                        mouse::Cursor::Available(point) => mouse::Cursor::Available(point + offset),
-                        mouse::Cursor::Unavailable => mouse::Cursor::Unavailable,
-                        mouse::Cursor::Levitating(point) => {
-                            mouse::Cursor::Levitating(point + offset)
-                        }
-                    };
+            {
+                let cursor = match cursor {
+                    mouse::Cursor::Available(point) => mouse::Cursor::Available(point + offset),
+                    mouse::Cursor::Unavailable => mouse::Cursor::Unavailable,
+                    mouse::Cursor::Levitating(point) => mouse::Cursor::Levitating(point + offset),
+                };
 
-                    child.as_widget_mut().update(
-                        state,
-                        event,
-                        layout,
-                        cursor,
-                        renderer,
-                        clipboard,
-                        &mut internal_shell,
-                        viewport,
-                    )
-                });
+                child.as_widget_mut().update(
+                    state,
+                    event,
+                    layout,
+                    cursor,
+                    renderer,
+                    clipboard,
+                    &mut internal_shell,
+                    viewport,
+                )
+            }
         };
 
         for mut message in messages {
