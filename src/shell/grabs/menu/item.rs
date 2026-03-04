@@ -2,7 +2,7 @@ use cosmic::{
     iced::Element,
     iced_core::{
         Background, Border, Clipboard, Color, Event, Layout, Length, Rectangle,
-        Renderer as IcedRenderer, Shell, Size, event, layout, mouse, overlay,
+        Renderer as IcedRenderer, Shell, Size, layout, mouse, overlay,
         renderer::{Quad, Style},
         widget::{Id, Tree, Widget, tree},
     },
