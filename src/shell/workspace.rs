@@ -2,10 +2,7 @@ use crate::shell::focus::FocusTarget;
 use crate::shell::layout::tiling::RestoreTilingState;
 use crate::wayland::handlers::xdg_activation::ActivationContext;
 use crate::{
-    backend::render::{
-        BackdropShader,
-        element::{AsGlowRenderer, FromGlesError},
-    },
+    backend::render::{BackdropShader, element::AsGlowRenderer},
     shell::{
         ANIMATION_DURATION, OverviewMode, SeatMoveGrabState,
         layout::{
@@ -2138,7 +2135,6 @@ impl<R> RenderElement<R> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: 'static,
-    R::Error: FromGlesError,
 {
     fn draw(
         &self,
@@ -2171,7 +2167,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
         }
     }
 
@@ -2218,7 +2214,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
