@@ -3,7 +3,7 @@
 use crate::{
     backend::render::{
         element::AsGlowRenderer,
-        wayland::{SurfaceRenderElement, render_elements_from_surface_tree},
+        wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
     },
     utils::prelude::*,
     wayland::handlers::compositor::FRAME_TIME_FILTER,
@@ -135,8 +135,8 @@ pub fn draw_surface_cursor<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
-where
+    push: &mut dyn FnMut(CursorRenderElement<R>, Point<i32, Physical>),
+) where
     R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
@@ -152,7 +152,7 @@ where
             .to_physical_precise_round(scale)
     });
 
-    render_elements_from_surface_tree(
+    push_render_elements_from_surface_tree(
         renderer,
         surface,
         location.to_physical(scale).to_i32_round(),
@@ -162,10 +162,9 @@ where
         false,
         [0; 4],
         Kind::Cursor,
-    )
-    .into_iter()
-    .map(|elem| (elem, h))
-    .collect()
+        &mut |elem| push(elem.into(), h),
+        None,
+    );
 }
 
 #[profiling::function]
@@ -174,8 +173,8 @@ pub fn draw_dnd_icon<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<SurfaceRenderElement<R>>
-where
+    push: &mut dyn FnMut(SurfaceRenderElement<R>),
+) where
     R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
@@ -186,7 +185,7 @@ where
         );
     }
     let scale = scale.into();
-    render_elements_from_surface_tree(
+    push_render_elements_from_surface_tree(
         renderer,
         surface,
         location.to_physical(scale).to_i32_round(),
@@ -196,7 +195,9 @@ where
         false,
         [0; 4],
         FRAME_TIME_FILTER,
-    )
+        push,
+        None,
+    );
 }
 
 pub type CursorState = Mutex<CursorStateInner>;
@@ -272,8 +273,8 @@ pub fn draw_cursor<R>(
     buffer_scale: f64,
     time: Time<Monotonic>,
     draw_default: bool,
-) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
-where
+    push: &mut dyn FnMut(CursorRenderElement<R>, Point<i32, Physical>),
+) where
     R: Renderer + ImportMem + ImportAll + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
 {
@@ -290,7 +291,7 @@ where
     });
     if let Some(current_cursor) = named_cursor {
         if !draw_default && current_cursor == CursorIcon::Default {
-            return Vec::new();
+            return;
         }
 
         let integer_scale = (scale.x.max(scale.y) * buffer_scale).ceil() as u32;
@@ -327,7 +328,7 @@ where
             );
         state.current_image = Some(frame);
 
-        return vec![(
+        push(
             CursorRenderElement::Static(
                 MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
@@ -341,10 +342,8 @@ where
                 .expect("Failed to import cursor bitmap"),
             ),
             hotspot.to_physical_precise_round(scale),
-        )];
+        );
     } else if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        return draw_surface_cursor(renderer, wl_surface, location, scale);
-    } else {
-        Vec::new()
+        draw_surface_cursor(renderer, wl_surface, location, scale, push);
     }
 }

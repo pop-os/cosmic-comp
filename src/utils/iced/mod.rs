@@ -35,7 +35,7 @@ use smithay::{
         renderer::{
             ImportMem, Renderer,
             element::{
-                AsRenderElements, Kind,
+                Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             },
         },
@@ -895,21 +895,18 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     }
 }
 
-impl<P, R> AsRenderElements<R> for IcedElement<P>
-where
-    P: Program + Send + 'static,
-    R: Renderer + ImportMem,
-    R::TextureId: Send + Clone + 'static,
-{
-    type RenderElement = MemoryRenderBufferRenderElement<R>;
-
-    fn render_elements<C: From<Self::RenderElement>>(
+impl<P: Program + Send + 'static> IcedElement<P> {
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         mut scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<C> {
+        push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+    ) where
+        R: Renderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier
         let internal_ref = &mut *internal;
@@ -1040,11 +1037,10 @@ where
                 Kind::Unspecified,
             ) {
                 Ok(buffer) => {
-                    return vec![C::from(buffer)];
+                    push(buffer);
                 }
                 Err(err) => tracing::warn!("What? {:?}", err),
             }
         }
-        Vec::new()
     }
 }

@@ -1,7 +1,7 @@
 use crate::{
     backend::render::{
         element::AsGlowRenderer,
-        wayland::{SurfaceRenderElement, render_elements_from_surface_tree},
+        wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
     },
     shell::focus::target::PointerFocusTarget,
     wayland::{
@@ -760,47 +760,46 @@ impl CosmicSurface {
         self.0.user_data()
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<C>
-    where
+        push: &mut dyn FnMut(SurfaceRenderElement<R>),
+    ) where
         R: Renderer + ImportAll + AsGlowRenderer,
         R::TextureId: Clone + 'static,
-        C: From<SurfaceRenderElement<R>>,
     {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 let surface = toplevel.wl_surface();
-                PopupManager::popups_for_surface(surface)
-                    .flat_map(move |(popup, popup_offset)| {
-                        let offset = (self.0.geometry().loc + popup_offset - popup.geometry().loc)
-                            .to_physical_precise_round(scale);
-                        let mut geometry = popup.geometry().to_f64();
-                        geometry.loc += location.to_f64().to_logical(scale) + popup_offset.to_f64();
+                for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
+                    let offset = (self.0.geometry().loc + popup_offset - popup.geometry().loc)
+                        .to_physical_precise_round(scale);
+                    let mut geometry = popup.geometry().to_f64();
+                    geometry.loc += location.to_f64().to_logical(scale) + popup_offset.to_f64();
 
-                        render_elements_from_surface_tree(
-                            renderer,
-                            popup.wl_surface(),
-                            location + offset,
-                            geometry,
-                            scale,
-                            alpha,
-                            false,
-                            [0; 4],
-                            FRAME_TIME_FILTER,
-                        )
-                    })
-                    .collect()
+                    push_render_elements_from_surface_tree(
+                        renderer,
+                        popup.wl_surface(),
+                        location + offset,
+                        geometry,
+                        scale,
+                        alpha,
+                        false,
+                        [0; 4],
+                        FRAME_TIME_FILTER,
+                        push,
+                        None,
+                    )
+                }
             }
-            WindowSurface::X11(_) => Vec::new(),
+            WindowSurface::X11(_) => {}
         }
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
@@ -809,11 +808,11 @@ impl CosmicSurface {
         scanout_override: Option<bool>,
         should_clip: bool,
         radii: [u8; 4],
-    ) -> Vec<C>
-    where
+        push_above: &mut dyn FnMut(SurfaceRenderElement<R>),
+        push_below: Option<&mut dyn FnMut(SurfaceRenderElement<R>)>,
+    ) where
         R: Renderer + ImportAll + AsGlowRenderer,
         R::TextureId: Clone + 'static,
-        C: From<SurfaceRenderElement<R>>,
     {
         let mut geometry = self.0.geometry().to_f64();
         geometry.loc += location.to_f64().to_logical(scale);
@@ -822,7 +821,7 @@ impl CosmicSurface {
             WindowSurface::Wayland(toplevel) => {
                 let surface = toplevel.wl_surface();
 
-                render_elements_from_surface_tree(
+                push_render_elements_from_surface_tree(
                     renderer,
                     surface,
                     location,
@@ -841,14 +840,16 @@ impl CosmicSurface {
                             .into()
                         })
                         .unwrap_or(FRAME_TIME_FILTER),
+                    push_above,
+                    push_below,
                 )
             }
             WindowSurface::X11(surface) => {
                 let Some(surface) = surface.wl_surface() else {
-                    return Vec::new();
+                    return;
                 };
 
-                render_elements_from_surface_tree(
+                push_render_elements_from_surface_tree(
                     renderer,
                     &surface,
                     location,
@@ -867,6 +868,8 @@ impl CosmicSurface {
                             .into()
                         })
                         .unwrap_or(FRAME_TIME_FILTER),
+                    push_above,
+                    push_below,
                 )
             }
         }
