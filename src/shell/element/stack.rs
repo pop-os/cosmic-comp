@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage, clipped_surface::ClippedSurfaceRenderElement,
-        cursor::CursorState, element::AsGlowRenderer, shadow::ShadowShader,
+        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
+        shadow::ShadowShader, wayland::SurfaceRenderElement,
     },
     hooks::{Decorations, HOOKS},
     shell::{
@@ -41,7 +41,6 @@ use smithay::{
             element::{
                 AsRenderElements, Element, Id as RendererId, Kind, RenderElement,
                 UnderlyingStorage, memory::MemoryRenderBufferRenderElement,
-                surface::WaylandSurfaceRenderElement,
             },
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
@@ -820,32 +819,16 @@ impl CosmicStack {
             });
 
             border.into_iter().chain(
-                windows[active]
-                    .render_elements::<R, WaylandSurfaceRenderElement<R>>(
-                        renderer,
-                        window_loc,
-                        scale,
-                        alpha,
-                        scanout_override,
-                        scanout_node,
-                    )
-                    .into_iter()
-                    .map(move |elem| {
-                        let radii = radii.map(|[a, _, c, _]| [a, 0, c, 0]);
-                        if radii.is_some_and(|radii| {
-                            ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radii)
-                        }) {
-                            CosmicStackRenderElement::Clipped(ClippedSurfaceRenderElement::new(
-                                renderer,
-                                elem,
-                                scale,
-                                geo,
-                                radii.unwrap(),
-                            ))
-                        } else {
-                            CosmicStackRenderElement::Window(elem)
-                        }
-                    }),
+                windows[active].render_elements::<R, CosmicStackRenderElement<R>>(
+                    renderer,
+                    window_loc,
+                    scale,
+                    alpha,
+                    scanout_override,
+                    scanout_node,
+                    radii.is_some(),
+                    radii.unwrap_or([0; 4]),
+                ),
             )
         }));
 
@@ -1885,8 +1868,7 @@ pub enum CosmicStackRenderElement<R: Renderer + ImportAll + ImportMem> {
     Header(MemoryRenderBufferRenderElement<R>),
     Shadow(PixelShaderElement),
     Border(PixelShaderElement),
-    Window(WaylandSurfaceRenderElement<R>),
-    Clipped(ClippedSurfaceRenderElement<R>),
+    Window(SurfaceRenderElement<R>),
 }
 
 impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R>>
@@ -1897,25 +1879,18 @@ impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R
     }
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<WaylandSurfaceRenderElement<R>>
+impl<R: Renderer + ImportAll + ImportMem> From<SurfaceRenderElement<R>>
     for CosmicStackRenderElement<R>
 {
-    fn from(value: WaylandSurfaceRenderElement<R>) -> Self {
+    fn from(value: SurfaceRenderElement<R>) -> Self {
         Self::Window(value)
-    }
-}
-
-impl<R: Renderer + ImportAll + ImportMem> From<ClippedSurfaceRenderElement<R>>
-    for CosmicStackRenderElement<R>
-{
-    fn from(value: ClippedSurfaceRenderElement<R>) -> Self {
-        Self::Clipped(value)
     }
 }
 
 impl<R> Element for CosmicStackRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R::TextureId: 'static,
 {
     fn id(&self) -> &RendererId {
         match self {
@@ -1923,7 +1898,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.id(),
             CosmicStackRenderElement::Border(elem) => elem.id(),
             CosmicStackRenderElement::Window(elem) => elem.id(),
-            CosmicStackRenderElement::Clipped(elem) => elem.id(),
         }
     }
 
@@ -1933,7 +1907,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.current_commit(),
             CosmicStackRenderElement::Border(elem) => elem.current_commit(),
             CosmicStackRenderElement::Window(elem) => elem.current_commit(),
-            CosmicStackRenderElement::Clipped(elem) => elem.current_commit(),
         }
     }
 
@@ -1943,7 +1916,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.src(),
             CosmicStackRenderElement::Border(elem) => elem.src(),
             CosmicStackRenderElement::Window(elem) => elem.src(),
-            CosmicStackRenderElement::Clipped(elem) => elem.src(),
         }
     }
 
@@ -1953,7 +1925,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Border(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Window(elem) => elem.geometry(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.geometry(scale),
         }
     }
 
@@ -1963,7 +1934,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.location(scale),
             CosmicStackRenderElement::Border(elem) => elem.location(scale),
             CosmicStackRenderElement::Window(elem) => elem.location(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.location(scale),
         }
     }
 
@@ -1973,7 +1943,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.transform(),
             CosmicStackRenderElement::Border(elem) => elem.transform(),
             CosmicStackRenderElement::Window(elem) => elem.transform(),
-            CosmicStackRenderElement::Clipped(elem) => elem.transform(),
         }
     }
 
@@ -1987,7 +1956,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Border(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Window(elem) => elem.damage_since(scale, commit),
-            CosmicStackRenderElement::Clipped(elem) => elem.damage_since(scale, commit),
         }
     }
 
@@ -1997,7 +1965,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Border(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Window(elem) => elem.opaque_regions(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.opaque_regions(scale),
         }
     }
 
@@ -2007,7 +1974,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.alpha(),
             CosmicStackRenderElement::Border(elem) => elem.alpha(),
             CosmicStackRenderElement::Window(elem) => elem.alpha(),
-            CosmicStackRenderElement::Clipped(elem) => elem.alpha(),
         }
     }
 
@@ -2017,7 +1983,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.kind(),
             CosmicStackRenderElement::Border(elem) => elem.kind(),
             CosmicStackRenderElement::Window(elem) => elem.kind(),
-            CosmicStackRenderElement::Clipped(elem) => elem.kind(),
         }
     }
 
@@ -2027,7 +1992,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Border(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Window(elem) => elem.is_framebuffer_effect(),
-            CosmicStackRenderElement::Clipped(elem) => elem.is_framebuffer_effect(),
         }
     }
 }
@@ -2039,7 +2003,7 @@ where
 {
     fn draw(
         &self,
-        frame: &mut <R>::Frame<'_, '_>,
+        frame: &mut R::Frame<'_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -2065,9 +2029,6 @@ where
             CosmicStackRenderElement::Window(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
-            CosmicStackRenderElement::Clipped(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions, cache)
-            }
         }
     }
 
@@ -2078,7 +2039,6 @@ where
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
             CosmicStackRenderElement::Window(elem) => elem.underlying_storage(renderer),
-            CosmicStackRenderElement::Clipped(elem) => elem.underlying_storage(renderer),
         }
     }
 
@@ -2104,9 +2064,6 @@ where
                 .map_err(R::from_gles_error)
             }
             CosmicStackRenderElement::Window(elem) => {
-                elem.capture_framebuffer(frame, src, dst, cache)
-            }
-            CosmicStackRenderElement::Clipped(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
         }
