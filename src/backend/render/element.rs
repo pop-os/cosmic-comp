@@ -1,4 +1,7 @@
-use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
+use crate::{
+    backend::render::GlMultiError,
+    shell::{CosmicMappedRenderElement, WorkspaceRenderElement},
+};
 
 #[cfg(feature = "debug")]
 use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
@@ -200,7 +203,6 @@ impl<R> RenderElement<R> for CosmicElement<R>
 where
     R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
     R::TextureId: 'static,
-    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn draw(
@@ -234,7 +236,7 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicElement::Zoom(elem) => elem.draw(frame, src, dst, damage, opaque_regions, cache),
             #[cfg(feature = "debug")]
@@ -249,7 +251,7 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
@@ -290,7 +292,7 @@ where
                 RenderElement::<GlowRenderer>::capture_framebuffer(
                     elem, glow_frame, src, dst, cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicElement::Zoom(elem) => elem.capture_framebuffer(frame, src, dst, cache),
             #[cfg(feature = "debug")]
@@ -299,7 +301,7 @@ where
                 RenderElement::<GlowRenderer>::capture_framebuffer(
                     elem, glow_frame, src, dst, cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
@@ -356,6 +358,7 @@ where
     fn glow_frame_mut<'a, 'frame, 'buffer>(
         frame: &'a mut Self::Frame<'frame, 'buffer>,
     ) -> &'a mut GlowFrame<'frame, 'buffer>;
+    fn from_gles_error(err: GlesError) -> Self::Error;
 }
 
 impl AsGlowRenderer for GlowRenderer {
@@ -375,6 +378,9 @@ impl AsGlowRenderer for GlowRenderer {
     ) -> &'a mut GlowFrame<'frame, 'buffer> {
         frame
     }
+    fn from_gles_error(err: GlesError) -> Self::Error {
+        err
+    }
 }
 
 impl AsGlowRenderer for GlMultiRenderer<'_> {
@@ -393,6 +399,9 @@ impl AsGlowRenderer for GlMultiRenderer<'_> {
         frame: &'b mut Self::Frame<'frame, 'buffer>,
     ) -> &'b mut GlowFrame<'frame, 'buffer> {
         frame.as_mut()
+    }
+    fn from_gles_error(err: GlesError) -> Self::Error {
+        GlMultiError::Render(err)
     }
 }
 
@@ -447,15 +456,5 @@ impl<R: Renderer> RenderElement<R> for DamageElement {
         _cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
         Ok(())
-    }
-}
-
-pub trait FromGlesError {
-    fn from_gles_error(err: GlesError) -> Self;
-}
-
-impl FromGlesError for GlesError {
-    fn from_gles_error(err: GlesError) -> Self {
-        err
     }
 }

@@ -42,7 +42,6 @@ use crate::{
 };
 
 use cosmic::Theme;
-use element::FromGlesError;
 use smithay::{
     backend::{
         allocator::{Fourcc, dmabuf::Dmabuf},
@@ -622,7 +621,6 @@ pub fn output_elements<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
-    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
@@ -649,7 +647,7 @@ where
                     ),
                     scale,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
                 .map_err(RenderError::Rendering)?
                 .into(),
             ]
@@ -720,7 +718,6 @@ pub fn workspace_elements<R>(
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
-    R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
@@ -1202,7 +1199,6 @@ where
         + Blit
         + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
-    R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
@@ -1507,7 +1503,6 @@ pub fn render_workspace<'d, R>(
 where
     R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
-    R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
