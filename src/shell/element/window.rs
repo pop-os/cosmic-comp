@@ -1,10 +1,7 @@
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage,
-        clipped_surface::ClippedSurfaceRenderElement,
-        cursor::CursorState,
-        element::{AsGlowRenderer, FromGlesError},
-        shadow::ShadowShader,
+        IndicatorShader, Key, Usage, clipped_surface::ClippedSurfaceRenderElement,
+        cursor::CursorState, element::AsGlowRenderer, shadow::ShadowShader,
     },
     hooks::{Decorations, HOOKS},
     shell::{
@@ -1385,7 +1382,6 @@ impl<R> RenderElement<R> for CosmicWindowRenderElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: 'static,
-    R::Error: FromGlesError,
 {
     fn draw(
         &self,
@@ -1410,7 +1406,7 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicWindowRenderElement::Window(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
@@ -1451,7 +1447,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicWindowRenderElement::Window(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)

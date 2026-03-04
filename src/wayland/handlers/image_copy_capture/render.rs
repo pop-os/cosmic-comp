@@ -41,7 +41,7 @@ use tracing::warn;
 use crate::{
     backend::render::{
         CursorMode, ElementFilter, RendererRef, cursor,
-        element::{AsGlowRenderer, CosmicElement, DamageElement, FromGlesError},
+        element::{AsGlowRenderer, CosmicElement, DamageElement},
         render_workspace,
     },
     shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
@@ -105,8 +105,7 @@ pub fn submit_buffer<R>(
     mut sync: SyncPoint,
 ) -> Result<Option<PendingImageCopyData>, R::Error>
 where
-    R: ExportMem,
-    R::Error: FromGlesError,
+    R: ExportMem + AsGlowRenderer,
 {
     let Some(damage) = damage else {
         frame.success(
@@ -164,7 +163,7 @@ where
 
             Ok(())
         })
-        .map_err(|err| R::Error::from_gles_error(GlesError::BufferAccessError(err)))
+        .map_err(|err| R::from_gles_error(GlesError::BufferAccessError(err)))
         .and_then(|x| x)
         {
             frame.fail(CaptureFailureReason::Unknown);
@@ -194,7 +193,6 @@ pub fn render_session<F, R>(
 ) -> Result<Option<PendingImageCopyData>, DTError<R::Error>>
 where
     R: AsGlowRenderer,
-    R::Error: FromGlesError,
     F: for<'d> FnOnce(
         &WlBuffer,
         &mut R,
@@ -321,7 +319,6 @@ pub fn render_workspace_to_buffer(
     where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
@@ -554,7 +551,6 @@ pub fn render_window_to_buffer(
     where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
@@ -789,7 +785,6 @@ pub fn render_cursor_to_buffer(
     where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
