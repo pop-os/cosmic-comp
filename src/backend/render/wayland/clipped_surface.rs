@@ -6,7 +6,7 @@ use cgmath::{Matrix3, Vector2};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::{
     backend::renderer::{
-        ImportAll, ImportMem, Renderer,
+        ImportAll, Renderer,
         element::{
             Element, Id, Kind, RenderElement, UnderlyingStorage,
             surface::WaylandSurfaceRenderElement,
@@ -19,7 +19,7 @@ use smithay::{
 
 use crate::backend::render::element::AsGlowRenderer;
 
-pub static CLIPPING_SHADER: &str = include_str!("./shaders/clipped_surface.frag");
+pub static CLIPPING_SHADER: &str = include_str!("../shaders/clipped_surface.frag");
 pub struct ClippingShader(pub GlesTexProgram);
 
 impl ClippingShader {
@@ -35,10 +35,7 @@ impl ClippingShader {
 }
 
 #[derive(Debug)]
-pub struct ClippedSurfaceRenderElement<R>
-where
-    R: Renderer + ImportAll + ImportMem,
-{
+pub struct ClippedSurfaceRenderElement<R: Renderer> {
     inner: WaylandSurfaceRenderElement<R>,
     program: GlesTexProgram,
     radius: [u8; 4],
@@ -48,7 +45,7 @@ where
 
 impl<R> ClippedSurfaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll,
 {
     pub fn new(
         renderer: &mut R,
@@ -174,7 +171,8 @@ where
 
 impl<R> Element for ClippedSurfaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + AsGlowRenderer,
+    R::TextureId: 'static,
 {
     fn id(&self) -> &Id {
         self.inner.id()
@@ -247,7 +245,7 @@ where
 
 impl<R> RenderElement<R> for ClippedSurfaceRenderElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    R: AsGlowRenderer + Renderer + ImportAll,
     R::TextureId: 'static,
 {
     fn draw(

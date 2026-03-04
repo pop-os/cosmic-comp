@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{utils::prelude::*, wayland::handlers::compositor::FRAME_TIME_FILTER};
+use crate::{
+    backend::render::{
+        element::AsGlowRenderer,
+        wayland::{SurfaceRenderElement, render_elements_from_surface_tree},
+    },
+    utils::prelude::*,
+    wayland::handlers::compositor::FRAME_TIME_FILTER,
+};
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -9,10 +16,10 @@ use smithay::{
             element::{
                 Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
         },
     },
+    desktop::utils::bbox_from_surface_tree,
     input::{
         Seat,
         pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
@@ -118,9 +125,9 @@ fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error
 }
 
 render_elements! {
-    pub CursorRenderElement<R> where R: ImportAll + ImportMem;
+    pub CursorRenderElement<R> where R: ImportAll + ImportMem + AsGlowRenderer;
     Static=MemoryRenderBufferRenderElement<R>,
-    Surface=WaylandSurfaceRenderElement<R>,
+    Surface=SurfaceRenderElement<R>,
 }
 
 pub fn draw_surface_cursor<R>(
@@ -130,7 +137,7 @@ pub fn draw_surface_cursor<R>(
     scale: impl Into<Scale<f64>>,
 ) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
 where
-    R: Renderer + ImportAll,
+    R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
     let scale = scale.into();
@@ -149,8 +156,11 @@ where
         renderer,
         surface,
         location.to_physical(scale).to_i32_round(),
+        bbox_from_surface_tree(surface, location.to_i32_round()).to_f64(),
         scale,
         1.0,
+        false,
+        [0; 4],
         Kind::Cursor,
     )
     .into_iter()
@@ -164,9 +174,9 @@ pub fn draw_dnd_icon<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<WaylandSurfaceRenderElement<R>>
+) -> Vec<SurfaceRenderElement<R>>
 where
-    R: Renderer + ImportAll,
+    R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
     if get_role(surface) != Some("dnd_icon") {
@@ -180,8 +190,11 @@ where
         renderer,
         surface,
         location.to_physical(scale).to_i32_round(),
+        bbox_from_surface_tree(surface, location.to_i32_round()).to_f64(),
         scale,
         1.0,
+        false,
+        [0; 4],
         FRAME_TIME_FILTER,
     )
 }
@@ -261,7 +274,7 @@ pub fn draw_cursor<R>(
     draw_default: bool,
 ) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
 where
-    R: Renderer + ImportMem + ImportAll,
+    R: Renderer + ImportMem + ImportAll + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
 {
     // draw the cursor as relevant
