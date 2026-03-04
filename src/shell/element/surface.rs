@@ -1,4 +1,8 @@
 use crate::{
+    backend::render::{
+        element::AsGlowRenderer,
+        wayland::{SurfaceRenderElement, render_elements_from_surface_tree},
+    },
     shell::focus::target::PointerFocusTarget,
     wayland::{
         handlers::compositor::frame_time_filter_fn, protocols::corner_radius::CacheableCorners,
@@ -18,12 +22,7 @@ use smithay::{
         drm::DrmNode,
         renderer::{
             ImportAll, Renderer,
-            element::{
-                AsRenderElements, Kind, RenderElementStates,
-                surface::{
-                    KindEvaluation, WaylandSurfaceRenderElement, render_elements_from_surface_tree,
-                },
-            },
+            element::{Kind, RenderElementStates, surface::KindEvaluation},
             utils::RendererSurfaceStateUserData,
         },
     },
@@ -869,9 +868,9 @@ impl CosmicSurface {
         scanout_node: Option<DrmNode>,
     ) -> Vec<C>
     where
-        R: Renderer + ImportAll,
+        R: Renderer + ImportAll + AsGlowRenderer,
         R::TextureId: Clone + 'static,
-        C: From<WaylandSurfaceRenderElement<R>>,
+        C: From<SurfaceRenderElement<R>>,
     {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
@@ -880,13 +879,18 @@ impl CosmicSurface {
                     .flat_map(move |(popup, popup_offset)| {
                         let offset = (self.0.geometry().loc + popup_offset - popup.geometry().loc)
                             .to_physical_precise_round(scale);
+                        let mut geometry = popup.geometry().to_f64();
+                        geometry.loc += location.to_f64().to_logical(scale) + popup_offset.to_f64();
 
                         render_elements_from_surface_tree(
                             renderer,
                             popup.wl_surface(),
                             location + offset,
+                            geometry,
                             scale,
                             alpha,
+                            false,
+                            [0; 4],
                             scanout_kind_eval(None, scanout_node),
                         )
                     })
@@ -904,12 +908,17 @@ impl CosmicSurface {
         alpha: f32,
         scanout_override: Option<bool>,
         scanout_node: Option<DrmNode>,
+        should_clip: bool,
+        radii: [u8; 4],
     ) -> Vec<C>
     where
-        R: Renderer + ImportAll,
+        R: Renderer + ImportAll + AsGlowRenderer,
         R::TextureId: Clone + 'static,
-        C: From<WaylandSurfaceRenderElement<R>>,
+        C: From<SurfaceRenderElement<R>>,
     {
+        let mut geometry = self.0.geometry().to_f64();
+        geometry.loc += location.to_f64().to_logical(scale);
+
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 let surface = toplevel.wl_surface();
@@ -918,8 +927,11 @@ impl CosmicSurface {
                     renderer,
                     surface,
                     location,
+                    geometry,
                     scale,
                     alpha,
+                    should_clip,
+                    radii,
                     scanout_kind_eval(scanout_override, scanout_node),
                 )
             }
@@ -932,8 +944,11 @@ impl CosmicSurface {
                     renderer,
                     &surface,
                     location,
+                    geometry,
                     scale,
                     alpha,
+                    should_clip,
+                    radii,
                     scanout_kind_eval(scanout_override, scanout_node),
                 )
             }
@@ -1075,24 +1090,6 @@ impl WaylandFocus for CosmicSurface {
 impl X11Relatable for CosmicSurface {
     fn is_window(&self, window: &X11Surface) -> bool {
         self.x11_surface() == Some(window)
-    }
-}
-
-impl<R> AsRenderElements<R> for CosmicSurface
-where
-    R: Renderer + ImportAll,
-    R::TextureId: Clone + 'static,
-{
-    type RenderElement = WaylandSurfaceRenderElement<R>;
-
-    fn render_elements<C: From<Self::RenderElement>>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<C> {
-        self.0.render_elements(renderer, location, scale, alpha)
     }
 }
 

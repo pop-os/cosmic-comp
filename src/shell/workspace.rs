@@ -1711,6 +1711,8 @@ impl Workspace {
                     alpha,
                     Some(true),
                     scanout_node,
+                    false,
+                    [0; 4],
                 )
                 .into_iter()
                 .map(animation_rescale)
