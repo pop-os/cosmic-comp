@@ -907,6 +907,7 @@ dependencies = [
  "tracy-client",
  "wayland-backend",
  "wayland-scanner",
+ "wayland-server",
  "xcursor",
  "xdg",
  "xdg-user",
