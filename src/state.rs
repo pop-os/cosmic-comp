@@ -8,7 +8,7 @@ use crate::{
         x11::X11State,
     },
     config::{CompOutputConfig, Config, ScreenFilter},
-    dbus::a11y_keyboard_monitor::A11yKeyboardMonitorState,
+    dbus::DBusState,
     input::{PointerFocusState, gestures::GestureState},
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
@@ -233,7 +233,6 @@ pub struct Common {
     pub display_handle: DisplayHandle,
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
-    pub async_executor: calloop::futures::Scheduler<()>,
 
     pub popups: PopupManager,
     pub shell: Arc<parking_lot::RwLock<Shell>>,
@@ -278,7 +277,7 @@ pub struct Common {
     pub xdg_decoration_state: XdgDecorationState,
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
-    pub a11y_keyboard_monitor_state: A11yKeyboardMonitorState,
+    pub dbus_state: DBusState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -723,16 +722,9 @@ impl State {
         );
         let workspace_state = WorkspaceState::new(dh, client_not_sandboxed);
 
-        let (source, async_executor) = calloop::futures::executor().unwrap();
-        handle.insert_source(source, |_, _, _| {}).unwrap();
-
-        if let Err(err) = crate::dbus::init(&handle) {
-            tracing::warn!(?err, "Failed to initialize dbus handlers");
-        }
-
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
-        let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
+        let dbus_state = DBusState::init(&handle);
 
         State {
             common: Common {
@@ -741,7 +733,6 @@ impl State {
                 display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
-                async_executor,
 
                 popups: PopupManager::default(),
                 shell,
@@ -793,11 +784,11 @@ impl State {
                 xdg_foreign_state,
                 workspace_state,
                 a11y_state,
-                a11y_keyboard_monitor_state,
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+                dbus_state,
 
                 #[cfg(feature = "systemd")]
                 inhibit_lid_fd: None,

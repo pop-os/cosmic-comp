@@ -243,6 +243,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-once-cell"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4288f83726785267c6f2ef073a3d83dc3f9b81464e9f99898240cced85fce35a"
+
+[[package]]
 name = "async-process"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -858,6 +864,7 @@ name = "cosmic-comp"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "async-once-cell",
  "bitflags 2.11.0",
  "calloop 0.14.4",
  "cgmath",
@@ -870,7 +877,6 @@ dependencies = [
  "cosmic-text",
  "egui",
  "egui_plot",
- "futures-executor",
  "futures-util",
  "i18n-embed",
  "i18n-embed-fl",

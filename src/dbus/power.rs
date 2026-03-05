@@ -79,8 +79,7 @@ pub trait PowerDaemon {
     fn power_profile_switch(&self, profile: &str) -> zbus::Result<()>;
 }
 
-pub async fn init() -> anyhow::Result<PowerDaemonProxy<'static>> {
-    let conn = Connection::system().await?;
+pub async fn init(conn: &Connection) -> anyhow::Result<PowerDaemonProxy<'static>> {
     let proxy = PowerDaemonProxy::new(&conn).await?;
     proxy.0.introspect().await?;
     Ok(proxy)

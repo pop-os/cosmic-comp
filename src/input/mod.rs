@@ -1614,9 +1614,9 @@ impl State {
                 .unwrap_or(false)
         });
 
-        self.common
-            .a11y_keyboard_monitor_state
-            .key_event(modifiers, &handle, event.state());
+        if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
+            a11y_keyboard_monitor.key_event(modifiers, &handle, event.state());
+        }
 
         // Leave move overview mode, if any modifier was released
         if let Some(Trigger::KeyboardMove(action_modifiers)) =
@@ -1780,55 +1780,53 @@ impl State {
             )));
         }
 
-        if event.state() == KeyState::Released {
-            let removed = self
-                .common
-                .a11y_keyboard_monitor_state
-                .remove_active_virtual_mod(handle.modified_sym());
-            // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
-            if removed
-                && handle.modified_sym() == Keysym::Caps_Lock
-                && (modifiers.serialized.locked & 2) != 0
+        let mut caps_lock_virtual_mod_removed = false;
+        if let Some(mut a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
+            if event.state() == KeyState::Released {
+                let removed =
+                    a11y_keyboard_monitor.remove_active_virtual_mod(handle.modified_sym());
+                // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
+                if removed
+                    && handle.modified_sym() == Keysym::Caps_Lock
+                    && (modifiers.serialized.locked & 2) != 0
+                {
+                    caps_lock_virtual_mod_removed = true;
+                }
+            } else if event.state() == KeyState::Pressed
+                && a11y_keyboard_monitor.has_virtual_mod(handle.modified_sym())
             {
-                let serial = SERIAL_COUNTER.next_serial();
-                let time = self.common.clock.now().as_millis();
-                keyboard.input(
-                    self,
-                    event.key_code(),
-                    KeyState::Pressed,
-                    serial,
-                    time,
-                    |_, _, _| FilterResult::<()>::Forward,
+                a11y_keyboard_monitor.add_active_virtual_mod(handle.modified_sym());
+
+                tracing::debug!(
+                    "active virtual mods: {:?}",
+                    a11y_keyboard_monitor.active_virtual_mods()
                 );
-                let serial = SERIAL_COUNTER.next_serial();
-                keyboard.input(
-                    self,
-                    event.key_code(),
-                    KeyState::Released,
-                    serial,
-                    time,
-                    |_, _, _| FilterResult::<()>::Forward,
-                );
+                seat.supressed_keys().add(&handle, None);
+
+                return FilterResult::Intercept(None);
             }
-        } else if event.state() == KeyState::Pressed
-            && self
-                .common
-                .a11y_keyboard_monitor_state
-                .has_virtual_mod(handle.modified_sym())
-        {
-            self.common
-                .a11y_keyboard_monitor_state
-                .add_active_virtual_mod(handle.modified_sym());
-
-            tracing::debug!(
-                "active virtual mods: {:?}",
-                self.common
-                    .a11y_keyboard_monitor_state
-                    .active_virtual_mods()
+        }
+        // Separate from above `if let` due to limitation of non-lexical lifetimes
+        if caps_lock_virtual_mod_removed {
+            let serial = SERIAL_COUNTER.next_serial();
+            let time = self.common.clock.now().as_millis();
+            keyboard.input(
+                self,
+                event.key_code(),
+                KeyState::Pressed,
+                serial,
+                time,
+                |_, _, _| FilterResult::<()>::Forward,
             );
-            seat.supressed_keys().add(&handle, None);
-
-            return FilterResult::Intercept(None);
+            let serial = SERIAL_COUNTER.next_serial();
+            keyboard.input(
+                self,
+                event.key_code(),
+                KeyState::Released,
+                serial,
+                time,
+                |_, _, _| FilterResult::<()>::Forward,
+            );
         }
 
         // Skip released events for initially surpressed keys
@@ -1855,17 +1853,16 @@ impl State {
             return FilterResult::Intercept(None);
         }
 
-        if event.state() == KeyState::Pressed
-            && (self.common.a11y_keyboard_monitor_state.has_keyboard_grab()
-                || self
-                    .common
-                    .a11y_keyboard_monitor_state
-                    .has_key_grab(modifiers, handle.modified_sym()))
-        {
-            let modifiers_queue = seat.modifiers_shortcut_queue();
-            modifiers_queue.clear();
-            seat.supressed_keys().add(&handle, None);
-            return FilterResult::Intercept(None);
+        if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
+            if event.state() == KeyState::Pressed
+                && (a11y_keyboard_monitor.has_keyboard_grab()
+                    || a11y_keyboard_monitor.has_key_grab(modifiers, handle.modified_sym()))
+            {
+                let modifiers_queue = seat.modifiers_shortcut_queue();
+                modifiers_queue.clear();
+                seat.supressed_keys().add(&handle, None);
+                return FilterResult::Intercept(None);
+            }
         }
 
         // handle the rest of the global shortcuts
