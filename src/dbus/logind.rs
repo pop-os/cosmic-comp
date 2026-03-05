@@ -1,24 +1,34 @@
 use std::os::fd::OwnedFd;
 
 use anyhow::{Context, Result};
-use logind_zbus::manager::{InhibitType::HandleLidSwitch, ManagerProxyBlocking};
-use zbus::blocking::Connection;
+use logind_zbus::manager::{InhibitType::HandleLidSwitch, ManagerProxy};
 
-pub fn inhibit_lid() -> Result<OwnedFd> {
-    let conn = Connection::system()?;
-    let proxy = ManagerProxyBlocking::new(&conn)?;
-    let fd = proxy.inhibit(
-        HandleLidSwitch,
-        "cosmic-comp",
-        "External output connected",
-        "block",
-    )?;
+use crate::state::Common;
+
+pub fn inhibit_lid(common: &Common) -> Result<OwnedFd> {
+    let fd = futures_executor::block_on(async {
+        let conn = common.dbus_state.system_conn().await?;
+        let manager = ManagerProxy::new(conn).await?;
+        manager
+            .inhibit(
+                HandleLidSwitch,
+                "cosmic-comp",
+                "External output connected",
+                "block",
+            )
+            .await
+    })?;
 
     Ok(fd.into())
 }
 
-pub fn lid_closed() -> Result<bool> {
-    let conn = Connection::system()?;
-    let proxy = ManagerProxyBlocking::new(&conn)?;
-    proxy.lid_closed().context("Failed to talk to logind")
+pub fn lid_closed(common: &Common) -> Result<bool> {
+    futures_executor::block_on(async {
+        let conn = common.dbus_state.system_conn().await?;
+        let manager = ManagerProxy::new(conn).await?;
+        manager
+            .lid_closed()
+            .await
+            .context("Failed to talk to logind")
+    })
 }
