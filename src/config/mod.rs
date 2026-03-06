@@ -10,7 +10,7 @@ use crate::{
 };
 use anyhow::Context;
 use cosmic_config::{ConfigGet, CosmicConfigEntry};
-use cosmic_settings_config::window_rules::ApplicationException;
+use cosmic_settings_config::window_rules::{ApplicationException, WorkspaceAssignment};
 use cosmic_settings_config::{Shortcuts, shortcuts, window_rules};
 use serde::{Deserialize, Serialize};
 use smithay::utils::{Clock, Monotonic};
@@ -70,6 +70,8 @@ pub struct Config {
     pub tiling_exceptions: Vec<ApplicationException>,
     /// System actions from `com.system76.CosmicSettings.Shortcuts`
     pub system_actions: BTreeMap<shortcuts::action::System, String>,
+    // Workspace assignments from `com.system76.CosmicSettings.WindowRules`
+    pub workspace_assignments: Vec<WorkspaceAssignment>,
 }
 
 #[derive(Debug)]
@@ -282,6 +284,7 @@ impl Config {
         let window_rules_context =
             window_rules::context().expect("Failed to load window rules config");
         let tiling_exceptions = window_rules::tiling_exceptions(&window_rules_context);
+        let workspace_assignments = window_rules::workspace_assignments(&window_rules_context);
 
         match cosmic_config::calloop::ConfigWatchSource::new(&window_rules_context) {
             Ok(source) => {
@@ -293,6 +296,17 @@ impl Config {
                                 state.common.config.tiling_exceptions = new_exceptions;
                                 state.common.shell.write().update_tiling_exceptions(
                                     state.common.config.tiling_exceptions.iter(),
+                                );
+                            }
+                            // TODO(karlskewes): Confirm
+                            // "..WindowRules/v1/workspace_assignment_defaults" is likely and
+                            // match on it here. Or should use simpler
+                            // "..WindowRules/v1/workspace_assignment" filename.
+                            "workspace_assignment_custom" => {
+                                let assignments = window_rules::workspace_assignments(&config);
+                                state.common.config.workspace_assignments = assignments;
+                                state.common.shell.write().update_workspace_assignments(
+                                    state.common.config.workspace_assignments.iter(),
                                 );
                             }
                             _ => (),
@@ -331,6 +345,7 @@ impl Config {
             shortcuts,
             system_actions,
             tiling_exceptions,
+            workspace_assignments,
         }
     }
 
