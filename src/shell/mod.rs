@@ -67,6 +67,7 @@ use smithay::{
     xwayland::X11Surface,
 };
 use tracing::error;
+use tracing::warn;
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -2712,10 +2713,32 @@ impl Shell {
         };
 
         let pending_activation = self.pending_activations.remove(&(&window).into());
-        let workspace_handle = match pending_activation {
+        let mut workspace_handle = match pending_activation {
             Some(ActivationContext::Workspace(handle)) => Some(handle),
             _ => None,
         };
+
+        let pinned_workspace_id =
+            layout::get_workspace_assignment(&self.workspace_assignments, &window);
+
+        let pinned_workspace_handle = pinned_workspace_id //
+            .as_deref()
+            .and_then(|target_id| {
+                self.workspaces
+                    .spaces()
+                    .find(|ws| ws.id.as_deref() == Some(target_id))
+                    .map(|ws| ws.handle)
+            });
+
+        if let Some(id) = pinned_workspace_id
+            && pinned_workspace_handle.is_none()
+        {
+            warn!("Assigned workspace id not found: {}", id);
+        };
+
+        // override the pending activation handle if we have a matching pinned workspace.
+        // NOTE: if the pinned workspace is not active, it will not be made active.
+        workspace_handle = pinned_workspace_handle.or(workspace_handle);
 
         let should_be_fullscreen = output.is_some();
         let mut output = output.unwrap_or_else(|| seat.active_output());
