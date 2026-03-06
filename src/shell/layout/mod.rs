@@ -101,3 +101,61 @@ pub fn has_floating_exception(exceptions: &TilingExceptions, window: &CosmicSurf
 
     false
 }
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceAssignment {
+    app_id: Regex,
+    title: Regex,
+    workspace_id: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkspaceAssignments {
+    assignments: Vec<WorkspaceAssignment>,
+}
+
+impl WorkspaceAssignments {
+    pub fn new<'a, I>(assignments_config: I) -> Self
+    where
+        I: Iterator<Item = &'a cosmic_settings_config::window_rules::WorkspaceAssignment>,
+    {
+        let assignments = assignments_config
+            .filter_map(|assignment| {
+                let app_id = match Regex::new(&assignment.appid) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!("Invalid regex for appid: {}, {}", assignment.appid, e);
+                        return None;
+                    }
+                };
+
+                let title = match Regex::new(&assignment.title) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!("Invalid regex for title: {}, {}", assignment.title, e);
+                        return None;
+                    }
+                };
+
+                Some(WorkspaceAssignment {
+                    app_id,
+                    title,
+                    workspace_id: assignment.workspace_id.clone(),
+                })
+            })
+            .collect();
+
+        Self { assignments }
+    }
+}
+
+pub fn get_workspace_assignment(
+    assignments: &WorkspaceAssignments,
+    window: &CosmicSurface,
+) -> Option<String> {
+    assignments
+        .assignments
+        .iter()
+        .find(|a| a.app_id.is_match(&window.app_id()) && a.title.is_match(&window.title()))
+        .map(|a| a.workspace_id.clone())
+}
