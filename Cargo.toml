@@ -138,9 +138,9 @@ inherits = "release"
 [profile.release]
 lto = "fat"
 
-[patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "8eb4076" }
+
+[patch."https://github.com/pop-os/cosmic-settings-daemon"]
+cosmic-settings-config = { git = "https://github.com/karlskewes/cosmic-settings-daemon", branch = "workspace-pinning" }
+cosmic-settings-daemon-config = { git = "https://github.com/karlskewes/cosmic-settings-daemon", branch = "workspace-pinning" }
