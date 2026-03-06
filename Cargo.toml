@@ -141,6 +141,7 @@ lto = "fat"
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "8eb4076" }
 
+# TODO(karlskewes): Change back to upstream OSS when PR merged: https://github.com/pop-os/cosmic-settings-daemon/pull/137
 [patch."https://github.com/pop-os/cosmic-settings-daemon"]
 cosmic-settings-config = { git = "https://github.com/karlskewes/cosmic-settings-daemon", branch = "workspace-pinning" }
 cosmic-settings-daemon-config = { git = "https://github.com/karlskewes/cosmic-settings-daemon", branch = "workspace-pinning" }
