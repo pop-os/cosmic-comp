@@ -812,11 +812,11 @@ dependencies = [
 
 [[package]]
 name = "cosmic-client-toolkit"
-version = "0.2.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?branch=main#160b086abe03cd34a8a375d7fbe47b24308d1f38"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/cosmic-protocols?rev=d0e95be#d0e95be25e423cfe523b11111a3666ed7aaf0dc4"
 dependencies = [
  "bitflags 2.11.0",
- "cosmic-protocols",
+ "cosmic-protocols 0.1.0",
  "libc",
  "smithay-client-toolkit 0.20.0",
  "wayland-client",
@@ -834,7 +834,7 @@ dependencies = [
  "clap_lex",
  "cosmic-comp-config",
  "cosmic-config",
- "cosmic-protocols",
+ "cosmic-protocols 0.2.0",
  "cosmic-settings-config",
  "cosmic-settings-daemon-config",
  "cosmic-text",
@@ -942,12 +942,25 @@ dependencies = [
 
 [[package]]
 name = "cosmic-protocols"
-version = "0.2.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?branch=main#160b086abe03cd34a8a375d7fbe47b24308d1f38"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/cosmic-protocols?rev=d0e95be#d0e95be25e423cfe523b11111a3666ed7aaf0dc4"
 dependencies = [
  "bitflags 2.11.0",
  "wayland-backend",
  "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wayland-scanner",
+ "wayland-server",
+]
+
+[[package]]
+name = "cosmic-protocols"
+version = "0.2.0"
+source = "git+https://github.com/pop-os/cosmic-protocols?rev=160b086#160b086abe03cd34a8a375d7fbe47b24308d1f38"
+dependencies = [
+ "bitflags 2.11.0",
+ "wayland-backend",
  "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-scanner",
@@ -967,7 +980,8 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#e37160f14d1e7ee428f973cd2848b4e95f83dfe1"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#defa9f790432c70054ca1f39737d879ada5d0252"
+source = "git+https://github.com/karlskewes/cosmic-settings-daemon?branch=workspace-pinning#eb7d841467b83f4915fd8a09d345b3a461025e94"
 dependencies = [
  "cosmic-config",
  "ron 0.11.0",
@@ -988,7 +1002,8 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-daemon-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#e37160f14d1e7ee428f973cd2848b4e95f83dfe1"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon#defa9f790432c70054ca1f39737d879ada5d0252"
+source = "git+https://github.com/karlskewes/cosmic-settings-daemon?branch=workspace-pinning#eb7d841467b83f4915fd8a09d345b3a461025e94"
 dependencies = [
  "cosmic-config",
  "cosmic-theme",
