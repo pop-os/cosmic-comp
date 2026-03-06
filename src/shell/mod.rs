@@ -80,6 +80,7 @@ use smithay::{
     xwayland::X11Surface,
 };
 use tracing::error;
+use tracing::warn;
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -3055,7 +3056,31 @@ impl Shell {
                     Some(ActivationContext::Workspace(handle)) => Some(handle),
                     _ => None,
                 };
-                (handle, output.unwrap_or_else(|| seat.active_output()), None)
+
+                // NOTE: if the pinned workspace is not active, it will not be made active.
+                let pinned_workspace_name =
+                    layout::get_workspace_assignment(&self.workspace_assignments, &window);
+
+                let pinned_workspace_handle = pinned_workspace_name //
+                    .as_deref()
+                    .and_then(|target_name| {
+                        self.workspaces
+                            .spaces()
+                            .find(|ws| ws.name.as_deref() == Some(target_name))
+                            .map(|ws| ws.handle)
+                    });
+
+                if let Some(name) = pinned_workspace_name
+                    && pinned_workspace_handle.is_none()
+                {
+                    warn!("Assigned workspace name not found: {}", name);
+                };
+
+                (
+                    pinned_workspace_handle.or(handle),
+                    output.unwrap_or_else(|| seat.active_output()),
+                    None,
+                )
             }
         };
 
