@@ -2,54 +2,100 @@
   description = "Compositor for the COSMIC desktop environment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-
-    parts.url = "github:hercules-ci/flake-parts";
-    parts.inputs.nixpkgs-lib.follows = "nixpkgs";
-
-    crane.url = "github:ipetkov/crane";
-
-    rust.url = "github:oxalica/rust-overlay";
-    rust.inputs.nixpkgs.follows = "nixpkgs";
-
-    nix-filter.url = "github:numtide/nix-filter";
+    nixpkgs.url = "nixpkgs/nixos-unstable";
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
+  nixConfig.bash-prompt-suffix = "[nix]: "; # shows when inside of nix shell
+
   outputs =
-    inputs@{
+    {
       self,
       nixpkgs,
-      parts,
-      crane,
-      rust,
-      nix-filter,
-      ...
+      rust-overlay,
     }:
-    parts.lib.mkFlake { inherit inputs; } {
-      systems = [
-        "aarch64-linux"
+    let
+      supportedSystems = [
         "x86_64-linux"
+        "aarch64-linux"
       ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
 
-      perSystem =
-        {
-          self',
-          lib,
-          system,
-          ...
-        }:
+      pkgsForSystem =
+        system:
+        (import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        });
+
+      commonFor =
+        system:
         let
-          pkgs = nixpkgs.legacyPackages.${system}.extend rust.overlays.default;
-          rust-toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          craneLib = (crane.mkLib pkgs).overrideToolchain rust-toolchain;
-          craneArgs = {
-            pname = "cosmic-comp";
-            version = self.rev or "dirty";
+          pkgs = (pkgsForSystem system);
+          rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+          buildInputs = with pkgs; [
+            rustToolchain
+            libdisplay-info
+            libinput
+            libgbm
+            libxkbcommon
+            fontconfig
+            pixman
+            stdenv.cc.cc.lib
+            seatd # For libseat
+            systemd # For libudev
+            wayland
+          ];
 
-            src = nix-filter.lib.filter {
+          nativeBuildInputs = with pkgs; [
+            autoPatchelfHook
+            cmake
+            pkg-config
+          ];
+
+          runtimeDependencies = with pkgs; [
+            libglvnd # For libEGL
+            wayland # winit->wayland-sys wants to dlopen libwayland-egl.so
+            # for running in X11
+            libx11
+            libxcb
+            libxcursor
+            libxi
+            libxkbcommon
+            xrdb
+            # for vulkan backend
+            vulkan-loader
+          ];
+        in
+        {
+          inherit
+            pkgs
+            rustToolchain
+            buildInputs
+            nativeBuildInputs
+            runtimeDependencies
+            ;
+        };
+    in
+    {
+      packages = forAllSystems (
+        system:
+        let
+          c = (commonFor system);
+          rustPlatform = c.pkgs.makeRustPlatform {
+            cargo = c.rustToolchain;
+            rustc = c.rustToolchain;
+          };
+        in
+        rec {
+          default = cosmic-comp;
+          cosmic-comp = rustPlatform.buildRustPackage {
+            name = "cosmic-comp";
+            src = c.pkgs.lib.fileset.toSource {
               root = ./.;
-              include = [
+              fileset = c.pkgs.lib.fileset.unions [
                 ./src
+                ./build.rs
                 ./i18n.toml
                 ./Cargo.toml
                 ./Cargo.lock
@@ -58,59 +104,32 @@
               ];
             };
 
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              autoPatchelfHook
-              cmake
-            ];
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+              allowBuiltinFetchGit = true;
+            };
 
-            buildInputs = with pkgs; [
-              wayland
-              systemd # For libudev
-              seatd # For libseat
-              libxkbcommon
-              libinput
-              mesa # For libgbm
-              fontconfig
-              stdenv.cc.cc.lib
-              pixman
-              libdisplay-info
-            ];
-
-            runtimeDependencies = with pkgs; [
-              libglvnd # For libEGL
-              wayland # winit->wayland-sys wants to dlopen libwayland-egl.so
-              # for running in X11
-              xorg.libX11
-              xorg.libXcursor
-              xorg.libxcb
-              xorg.libXi
-              libxkbcommon
-              # for vulkan backend
-              vulkan-loader
-            ];
+            buildInputs = c.buildInputs;
+            nativeBuildInputs = c.nativeBuildInputs;
+            runtimeDependencies = c.runtimeDependencies;
           };
+        }
+      );
 
-          cargoArtifacts = craneLib.buildDepsOnly craneArgs;
-          cosmic-comp = craneLib.buildPackage (craneArgs // { inherit cargoArtifacts; });
+      devShells = forAllSystems (
+        system:
+        let
+          c = (commonFor system);
         in
         {
-          apps.cosmic-comp = {
-            type = "app";
-            program = lib.getExe self'.packages.default;
+          default = c.pkgs.mkShell {
+            buildInputs = c.buildInputs;
+            inputsFrom = [ self.packages.${system}.cosmic-comp ];
+
+            LD_LIBRARY_PATH = c.pkgs.lib.makeLibraryPath c.runtimeDependencies;
+            RUSTFLAGS = "-C link-arg=-Wl,-rpath,${c.pkgs.lib.makeLibraryPath c.runtimeDependencies}";
           };
-
-          checks.cosmic-comp = cosmic-comp;
-          packages.default = cosmic-comp;
-
-          devShells.default = craneLib.devShell {
-            LD_LIBRARY_PATH = lib.makeLibraryPath (
-              __concatMap (d: d.runtimeDependencies) (__attrValues self'.checks)
-            );
-
-            # include build inputs
-            inputsFrom = [ cosmic-comp ];
-          };
-        };
+        }
+      );
     };
 }
