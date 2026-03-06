@@ -55,7 +55,7 @@ use smithay::{
             Color32F, Offscreen, Texture, TextureFilter,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
-                Element, Id, Kind, RenderElement, WeakId,
+                Element, Id, Kind, NamespacedElement, RenderElement, WeakId,
                 texture::{TextureRenderBuffer, TextureRenderElement},
                 utils::{
                     ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
@@ -820,7 +820,10 @@ where
                 })
             }
             Stage::LayerPopup {
-                popup, location, ..
+                popup,
+                location,
+                workspace_idx,
+                ..
             } => {
                 let mut geometry = popup.geometry().as_global();
                 geometry.loc += location;
@@ -838,11 +841,20 @@ where
                     false,
                     [0; 4],
                     FRAME_TIME_FILTER,
-                    &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                    &mut |elem| {
+                        elements.extend(
+                            crop_to_output(NamespacedElement::new(elem, workspace_idx).into())
+                                .map(Into::into),
+                        )
+                    },
                     None,
                 )
             }
-            Stage::LayerSurface { layer, location } => {
+            Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx,
+            } => {
                 let mut geometry = layer.geometry().as_global();
                 geometry.loc += location;
 
@@ -859,7 +871,12 @@ where
                     false,
                     [0; 4],
                     FRAME_TIME_FILTER,
-                    &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                    &mut |elem| {
+                        elements.extend(
+                            crop_to_output(NamespacedElement::new(elem, workspace_idx).into())
+                                .map(Into::into),
+                        )
+                    },
                     None,
                 );
             }

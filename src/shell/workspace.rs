@@ -30,7 +30,7 @@ use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smallvec::SmallVec;
-use smithay::backend::renderer::element::Kind;
+use smithay::backend::renderer::element::{Kind, NamespacedElement};
 use smithay::output::WeakOutput;
 use smithay::utils::user_data::UserDataMap;
 use smithay::{
@@ -1957,6 +1957,7 @@ where
     R::TextureId: 'static,
 {
     OverrideRedirect(SurfaceRenderElement<R>),
+    LowerLayerShell(NamespacedElement<SurfaceRenderElement<R>>),
     Fullscreen(RescaleRenderElement<CosmicWindowRenderElement<R>>),
     FullscreenPopup(CosmicWindowRenderElement<R>),
     Window(CosmicMappedRenderElement<R>),
@@ -1971,6 +1972,7 @@ where
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.id(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.id(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.id(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.id(),
             WorkspaceRenderElement::Window(elem) => elem.id(),
@@ -1981,6 +1983,7 @@ where
     fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.current_commit(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.current_commit(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.current_commit(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.current_commit(),
             WorkspaceRenderElement::Window(elem) => elem.current_commit(),
@@ -1991,6 +1994,7 @@ where
     fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.src(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.src(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.src(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.src(),
             WorkspaceRenderElement::Window(elem) => elem.src(),
@@ -2001,6 +2005,7 @@ where
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.geometry(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.geometry(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Window(elem) => elem.geometry(scale),
@@ -2011,6 +2016,7 @@ where
     fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.location(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.location(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.location(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.location(scale),
             WorkspaceRenderElement::Window(elem) => elem.location(scale),
@@ -2021,6 +2027,7 @@ where
     fn transform(&self) -> smithay::utils::Transform {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.transform(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.transform(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.transform(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.transform(),
             WorkspaceRenderElement::Window(elem) => elem.transform(),
@@ -2035,6 +2042,7 @@ where
     ) -> DamageSet<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.damage_since(scale, commit),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Fullscreen(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Window(elem) => elem.damage_since(scale, commit),
@@ -2045,6 +2053,7 @@ where
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.opaque_regions(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Window(elem) => elem.opaque_regions(scale),
@@ -2055,6 +2064,7 @@ where
     fn alpha(&self) -> f32 {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.alpha(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.alpha(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.alpha(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.alpha(),
             WorkspaceRenderElement::Window(elem) => elem.alpha(),
@@ -2065,6 +2075,7 @@ where
     fn kind(&self) -> Kind {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.kind(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.kind(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.kind(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.kind(),
             WorkspaceRenderElement::Window(elem) => elem.kind(),
@@ -2075,6 +2086,7 @@ where
     fn is_framebuffer_effect(&self) -> bool {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::Window(elem) => elem.is_framebuffer_effect(),
@@ -2099,6 +2111,9 @@ where
     ) -> Result<(), R::Error> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
+            }
+            WorkspaceRenderElement::LowerLayerShell(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Fullscreen(elem) => {
@@ -2129,6 +2144,7 @@ where
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage<'_>> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.underlying_storage(renderer),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Fullscreen(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
@@ -2147,6 +2163,9 @@ where
     ) -> Result<(), R::Error> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::LowerLayerShell(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
             WorkspaceRenderElement::Fullscreen(elem) => {
@@ -2202,6 +2221,17 @@ where
 {
     fn from(elem: SurfaceRenderElement<R>) -> Self {
         WorkspaceRenderElement::OverrideRedirect(elem)
+    }
+}
+
+impl<R> From<NamespacedElement<SurfaceRenderElement<R>>> for WorkspaceRenderElement<R>
+where
+    R: AsGlowRenderer,
+    R::TextureId: 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: NamespacedElement<SurfaceRenderElement<R>>) -> Self {
+        WorkspaceRenderElement::LowerLayerShell(elem)
     }
 }
 
