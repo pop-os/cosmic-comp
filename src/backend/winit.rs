@@ -126,6 +126,10 @@ impl WinitState {
         }
     }
 
+    pub fn reset_buffer_ages(&mut self) {
+        self.damage_tracker = OutputDamageTracker::from_output(&self.output);
+    }
+
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
         self.screen_filter_state.filter = screen_filter.clone();
         Ok(())

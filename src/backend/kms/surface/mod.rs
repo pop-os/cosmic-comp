@@ -219,6 +219,7 @@ pub enum ThreadCommand {
     AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
     UseAdaptiveSync(AdaptiveSync),
     AllowFrameFlags(bool, FrameFlags),
+    ResetBufferAges,
     End,
     DpmsOff,
 }
@@ -402,6 +403,10 @@ impl Surface {
         let _ = self
             .thread_command
             .send(ThreadCommand::UpdateScreenFilter(config));
+    }
+
+    pub fn reset_buffer_ages(&self) {
+        let _ = self.thread_command.send(ThreadCommand::ResetBufferAges);
     }
 
     pub fn adaptive_sync_support(&self) -> Result<VrrSupport> {
@@ -612,6 +617,12 @@ fn surface_thread(
             }
             Event::Msg(ThreadCommand::UseAdaptiveSync(vrr)) => {
                 state.vrr_mode = vrr;
+            }
+            Event::Msg(ThreadCommand::ResetBufferAges) => {
+                if let Some(compositor) = state.compositor.as_mut() {
+                    compositor.with_compositor(|c| c.reset_buffer_ages());
+                }
+                state.queue_redraw(false);
             }
             Event::Msg(ThreadCommand::DpmsOff) => {
                 if let Some(compositor) = state.compositor.as_mut() {
@@ -1083,6 +1094,19 @@ impl SurfaceThreadState {
             .then(|| take_screencopy_frames(&self.output, &elements, &mut has_cursor_mode_none))
             .unwrap_or_default();
 
+        // Use nearest-neighbor filtering when zoomed with smooth_images disabled.
+        // Both filters needed: on HiDPI displays, surface buffers may be higher
+        // resolution than the zoomed viewport, making this a downscale operation.
+        let use_nearest_zoom = self
+            .shell
+            .read()
+            .zoom_state()
+            .is_some_and(|z| !z.smooth_images);
+        if use_nearest_zoom {
+            let _ = renderer.upscale_filter(TextureFilter::Nearest);
+            let _ = renderer.downscale_filter(TextureFilter::Nearest);
+        }
+
         // actual rendering
         let source_output = self
             .mirroring
@@ -1294,6 +1318,12 @@ impl SurfaceThreadState {
                     .difference(remove_frame_flags),
             )
         };
+
+        if use_nearest_zoom {
+            let _ = renderer.upscale_filter(TextureFilter::Linear);
+            let _ = renderer.downscale_filter(TextureFilter::Linear);
+        }
+
         self.timings.draw_done(&self.clock);
 
         match res {

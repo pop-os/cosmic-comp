@@ -52,6 +52,7 @@ pub struct ZoomState {
     pub(super) show_overlay: bool,
     pub(super) increment: u32,
     pub(super) movement: ZoomMovement,
+    pub smooth_images: bool,
 }
 
 #[derive(Debug)]

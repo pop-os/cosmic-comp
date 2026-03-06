@@ -1535,6 +1535,14 @@ where
         damage_tracker.damage_output(age, &additional_damage_elements)?;
     }
 
+    // Both filters needed: on HiDPI displays, surface buffers may be higher
+    // resolution than the zoomed viewport, making this a downscale operation.
+    let use_nearest = zoom_level.is_some_and(|z| !z.smooth_images);
+    if use_nearest {
+        let _ = renderer.upscale_filter(TextureFilter::Nearest);
+        let _ = renderer.downscale_filter(TextureFilter::Nearest);
+    }
+
     let res = damage_tracker.render_output(
         renderer,
         target,
@@ -1542,6 +1550,11 @@ where
         &elements,
         CLEAR_COLOR, // TODO use a theme neutral color
     );
+
+    if use_nearest {
+        let _ = renderer.upscale_filter(TextureFilter::Linear);
+        let _ = renderer.downscale_filter(TextureFilter::Linear);
+    }
 
     res.map(|res| (res, elements))
 }

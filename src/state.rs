@@ -355,6 +355,15 @@ impl BackendData {
         }
     }
 
+    pub fn reset_buffer_ages(&mut self) {
+        match self {
+            BackendData::Winit(state) => state.reset_buffer_ages(),
+            BackendData::X11(state) => state.reset_buffer_ages(),
+            BackendData::Kms(state) => state.reset_buffer_ages(),
+            _ => unreachable!("No backend was initialized"),
+        }
+    }
+
     pub fn schedule_render(&mut self, output: &Output) {
         match self {
             BackendData::Winit(_) => {} // We cannot do this on the winit backend.

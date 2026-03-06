@@ -181,6 +181,10 @@ fn default_repeat_delay() -> u32 {
     600
 }
 
+fn default_smooth_images() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ZoomConfig {
     pub start_on_login: bool,
@@ -188,6 +192,10 @@ pub struct ZoomConfig {
     pub increment: u32,
     pub view_moves: ZoomMovement,
     pub enable_mouse_zoom_shortcuts: bool,
+    /// Use bilinear filtering when zoomed (smooth but blurry).
+    /// When false, use nearest-neighbor filtering (crisp pixels).
+    #[serde(default = "default_smooth_images")]
+    pub smooth_images: bool,
 }
 
 impl Default for ZoomConfig {
@@ -198,6 +206,7 @@ impl Default for ZoomConfig {
             increment: 50,
             view_moves: ZoomMovement::Continuously,
             enable_mouse_zoom_shortcuts: true,
+            smooth_images: true,
         }
     }
 }

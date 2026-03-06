@@ -191,6 +191,12 @@ impl X11State {
         }
     }
 
+    pub fn reset_buffer_ages(&mut self) {
+        for surface in &mut self.surfaces {
+            surface.damage_tracker = OutputDamageTracker::from_output(&surface.output);
+        }
+    }
+
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
         for surface in &mut self.surfaces {
             surface.screen_filter_state.filter = screen_filter.clone();

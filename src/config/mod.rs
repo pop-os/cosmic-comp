@@ -938,8 +938,18 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "accessibility_zoom" => {
                 let new = get_config::<ZoomConfig>(&config, "accessibility_zoom");
                 if new != state.common.config.cosmic_conf.accessibility_zoom {
+                    let smooth_changed = new.smooth_images
+                        != state.common.config.cosmic_conf.accessibility_zoom.smooth_images;
                     state.common.config.cosmic_conf.accessibility_zoom = new;
                     state.common.update_config();
+                    if smooth_changed {
+                        // Texture filter changes are invisible to the damage tracker,
+                        // so force full re-render by resetting buffer ages.
+                        state.backend.reset_buffer_ages();
+                    }
+                    for output in state.common.shell.read().outputs() {
+                        state.backend.schedule_render(output);
+                    }
                 }
             }
             "appearance_settings" => {

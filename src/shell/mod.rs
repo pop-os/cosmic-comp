@@ -1467,6 +1467,7 @@ impl Common {
             zoom_state.increment = self.config.cosmic_conf.accessibility_zoom.increment;
             zoom_state.movement = self.config.cosmic_conf.accessibility_zoom.view_moves;
             zoom_state.show_overlay = self.config.cosmic_conf.accessibility_zoom.show_overlay;
+            zoom_state.smooth_images = self.config.cosmic_conf.accessibility_zoom.smooth_images;
 
             for output in shell_ref.workspaces.sets.keys() {
                 let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
@@ -2372,6 +2373,7 @@ impl Shell {
             show_overlay: zoom_config.show_overlay,
             increment: zoom_config.increment,
             movement: zoom_config.view_moves,
+            smooth_images: zoom_config.smooth_images,
         });
     }
 

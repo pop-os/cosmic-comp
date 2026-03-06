@@ -572,6 +572,14 @@ impl KmsState {
             .copied()
     }
 
+    pub fn reset_buffer_ages(&self) {
+        for device in self.drm_devices.values() {
+            for surface in device.inner.surfaces.values() {
+                surface.reset_buffer_ages();
+            }
+        }
+    }
+
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
         for device in self.drm_devices.values_mut() {
             for surface in device.inner.surfaces.values_mut() {
