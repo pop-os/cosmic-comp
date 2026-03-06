@@ -124,12 +124,7 @@ systemd = ["libsystemd", "logind-zbus"]
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "e84a4ca" }
 
-# TODO: karl - local dev
-# [patch."https://github.com/pop-os/cosmic-settings-daemon"]
-# cosmic-settings-config = { path = "../cosmic-settings-daemon/config" }
-# cosmic-settings-daemon-config = { path = "../cosmic-settings-daemon/cosmic-settings-daemon-config" }
-
-# TODO: karl - via remote dev for easier nix build
+# TODO(karlskewes): Change back to upstream OSS when PR merged: https://github.com/pop-os/cosmic-settings-daemon/pull/137
 [patch."https://github.com/pop-os/cosmic-settings-daemon"]
 cosmic-settings-config = { git = "https://github.com/karlskewes/cosmic-settings-daemon", branch = "workspace-pinning" }
 cosmic-settings-daemon-config = { git = "https://github.com/karlskewes/cosmic-settings-daemon", branch = "workspace-pinning" }
