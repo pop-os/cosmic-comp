@@ -124,10 +124,11 @@ systemd = ["libsystemd", "logind-zbus"]
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "e84a4ca" }
 
-# TODO(karlskewes): Change back to upstream OSS when PR merged: https://github.com/pop-os/cosmic-settings-daemon/pull/137
+# TODO(karlskewes): Pin branch/rev after upstream PR merged.
+# https://github.com/pop-os/cosmic-settings-daemon/pull/137
 [patch."https://github.com/pop-os/cosmic-settings-daemon"]
-cosmic-settings-config = { git = "https://github.com/karlskewes/cosmic-settings-daemon", branch = "workspace-pinning" }
-cosmic-settings-daemon-config = { git = "https://github.com/karlskewes/cosmic-settings-daemon", branch = "workspace-pinning" }
+cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", rev = "refs/pull/137/head" }
+cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", rev = "refs/pull/137/head" }
 
 [profile.dev.package.rustybuzz]
 opt-level = 2
