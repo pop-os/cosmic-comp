@@ -12,7 +12,11 @@ use std::{
 use wayland_backend::server::ClientId;
 
 use crate::{
-    shell::{focus::FocusTarget, grabs::fullscreen_items, layout::tiling::PlaceholderType},
+    shell::{
+        focus::FocusTarget,
+        grabs::fullscreen_items,
+        layout::{WorkspaceAssignments, tiling::PlaceholderType},
+    },
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
         protocols::workspace::{State as WState, WorkspaceCapabilities},
@@ -25,7 +29,10 @@ use cosmic_comp_config::{
 use cosmic_config::ConfigSet;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
-use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
+use cosmic_settings_config::{
+    shortcuts,
+    window_rules::{ApplicationException, WorkspaceAssignment},
+};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{input::TouchSlot, renderer::element::RenderElementStates},
@@ -289,7 +296,7 @@ pub struct Shell {
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
-
+    workspace_assignments: WorkspaceAssignments,
     #[cfg(feature = "debug")]
     pub debug_active: bool,
 }
@@ -1579,6 +1586,9 @@ impl Shell {
 
         let tiling_exceptions = layout::TilingExceptions::new(config.tiling_exceptions.iter());
 
+        let workspace_assignments =
+            layout::WorkspaceAssignments::new(config.workspace_assignments.iter());
+
         Shell {
             workspaces: Workspaces::new(config, theme.clone()),
             seats: Seats::new(),
@@ -1601,6 +1611,7 @@ impl Shell {
             appearance_conf: config.cosmic_conf.appearance_settings,
             zoom_state: None,
             tiling_exceptions,
+            workspace_assignments,
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -4842,6 +4853,13 @@ impl Shell {
         I: Iterator<Item = &'a ApplicationException>,
     {
         self.tiling_exceptions = layout::TilingExceptions::new(exceptions);
+    }
+
+    pub fn update_workspace_assignments<'a, I>(&mut self, assignments: I)
+    where
+        I: Iterator<Item = &'a WorkspaceAssignment>,
+    {
+        self.workspace_assignments = layout::WorkspaceAssignments::new(assignments);
     }
 
     pub fn take_presentation_feedback(
