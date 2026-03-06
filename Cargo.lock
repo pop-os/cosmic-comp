@@ -942,7 +942,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/karlskewes/cosmic-settings-daemon?branch=workspace-pinning#bf74a86d301881ec7d57678c417a3bea495b7b60"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon?rev=refs%2Fpull%2F137%2Fhead#74b944382e50458b68412afbeb1b439a6fd86361"
 dependencies = [
  "cosmic-config",
  "ron 0.11.0",
@@ -963,7 +963,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-daemon-config"
 version = "0.1.0"
-source = "git+https://github.com/karlskewes/cosmic-settings-daemon?branch=workspace-pinning#bf74a86d301881ec7d57678c417a3bea495b7b60"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon?rev=refs%2Fpull%2F137%2Fhead#74b944382e50458b68412afbeb1b439a6fd86361"
 dependencies = [
  "cosmic-config",
  "cosmic-theme",
