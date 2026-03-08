@@ -1,8 +1,8 @@
 grow-window = Büyüt
 shrink-window = Küçült
-swap-windows = Pencereleri değiştir
+swap-windows = Pencereleri Değiştir
 stack-windows = Pencereleri Yığınla
-unknown-keybinding = <ayarlanmadı>
+unknown-keybinding = <unset>
 window-menu-minimize = Küçült
 window-menu-maximize = Büyüt
 window-menu-tiled = Pencereyi kaydır
