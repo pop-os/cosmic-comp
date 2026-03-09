@@ -262,6 +262,7 @@ pub struct PendingLayer {
 pub struct Shell {
     pub workspaces: Workspaces,
 
+    // Can't make this into a HashSet. See https://github.com/pop-os/cosmic-comp/pull/1902
     pub pending_windows: Vec<PendingWindow>,
     pub pending_layers: Vec<PendingLayer>,
     pub pending_activations: HashMap<ActivationKey, ActivationContext>,
@@ -2570,6 +2571,7 @@ impl Shell {
                 state:
                     FloatingRestoreData {
                         was_maximized,
+                        was_snapped,
                         geometry,
                         ..
                     },
@@ -2593,6 +2595,8 @@ impl Shell {
                         fullscreen_geometry,
                         true,
                     );
+                } else if let Some(corners) = was_snapped {
+                    workspace.floating_layer.snap_to_corner(&window, &corners);
                 }
             }
             Some(FullscreenRestoreState::Tiling {
@@ -3341,13 +3345,30 @@ impl Shell {
 
         let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
         if !to_workspace.tiling_enabled {
-            let position = match window_state {
-                WorkspaceRestoreData::Floating(Some(data)) => {
-                    Some(data.position_relative(to_workspace.output.geometry().size.as_logical()))
-                }
-                _ => None,
+            let (position, was_maximized, was_snapped) = match &window_state {
+                WorkspaceRestoreData::Floating(Some(data)) => (
+                    Some(data.position_relative(to_workspace.output.geometry().size.as_logical())),
+                    data.was_maximized,
+                    data.was_snapped,
+                ),
+                _ => (None, false, None),
             };
             to_workspace.floating_layer.map(mapped.clone(), position);
+            if was_maximized {
+                let geometry = to_workspace
+                    .floating_layer
+                    .element_geometry(mapped)
+                    .unwrap();
+                *mapped.maximized_state.lock().unwrap() = Some(MaximizedState {
+                    original_geometry: geometry,
+                    original_layer: ManagedLayer::Floating,
+                });
+                to_workspace
+                    .floating_layer
+                    .map_maximized(mapped.clone(), geometry, false);
+            } else if let Some(corners) = was_snapped {
+                to_workspace.floating_layer.snap_to_corner(mapped, &corners);
+            }
         } else {
             for mapped in to_workspace
                 .mapped()
@@ -4144,6 +4165,7 @@ impl Shell {
                     geometry: geo,
                     output_size: set.output.geometry().size.as_logical(),
                     was_maximized: false,
+                    was_snapped: None,
                 },
             });
         } else if let Some((workspace, window)) =
@@ -4657,6 +4679,11 @@ impl Shell {
                 stack.remove_window(&surface);
                 surface
             } else {
+                // Must be set before `map_internal`/`unmap` below, as both may call
+                // intermediate `configure()`, which would send a configure event without the
+                // fullscreen state, causing clients like Chromium to cancel the transition.
+                mapped.set_fullscreen(true);
+
                 if let Some(state) = mapped.maximized_state.lock().unwrap().take() {
                     mapped.set_maximized(false);
                     set.sticky_layer.map_internal(
@@ -4688,6 +4715,7 @@ impl Shell {
                         geometry: from,
                         output_size: workspace.output.geometry().size.as_logical(),
                         was_maximized,
+                        was_snapped: None,
                     },
                 }),
                 Some(from),
@@ -4697,6 +4725,11 @@ impl Shell {
                 // TODO: Rewrite the `MinimizedWindow` to restore to fullscreen
                 return None;
             }
+
+            // Must be set before `unmap_surface()`.
+            // `Workspace::unmap_surface` may call intermediate `configure()` internally, which would send
+            // a configure event without the fullscreen state, causing clients like Chromium to cancel the transition.
+            mapped.set_fullscreen(true);
 
             let from = workspace.element_geometry(&mapped).unwrap();
             let (surface, state) = workspace.unmap_surface(surface).unwrap();

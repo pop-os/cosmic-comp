@@ -1641,6 +1641,23 @@ impl FloatingLayout {
         elements
     }
 
+    pub fn snap_to_corner(&self, mapped: &CosmicMapped, corners: &TiledCorners) {
+        *mapped.floating_tiled.lock().unwrap() = Some(*corners);
+        mapped.set_tiled(true);
+        let snapped_geo = self.snapped_geometry(corners);
+        let output = self.space.outputs().next().unwrap();
+        mapped.set_geometry(snapped_geo.to_global(output));
+        mapped.configure();
+    }
+
+    fn snapped_geometry(&self, corners: &TiledCorners) -> Rectangle<i32, Local> {
+        let output = self.space.outputs().next().unwrap().clone();
+        let layers = layer_map_for_output(&output);
+        let non_exclusive = layers.non_exclusive_zone();
+        std::mem::drop(layers);
+        corners.relative_geometry(non_exclusive, self.gaps())
+    }
+
     fn gaps(&self) -> (i32, i32) {
         let g = self.theme.cosmic().gaps;
         (g.0 as i32, g.1 as i32)

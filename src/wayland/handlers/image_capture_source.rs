@@ -42,7 +42,7 @@ impl ToplevelCaptureSourceHandler for State {
     fn toplevel_source_created(
         &mut self,
         source: ImageCaptureSource,
-        toplevel: &ForeignToplevelHandle,
+        toplevel: ForeignToplevelHandle,
     ) {
         let data = match window_from_ext(self, toplevel) {
             Some(toplevel) => ImageCaptureSourceKind::Toplevel(toplevel.clone()),

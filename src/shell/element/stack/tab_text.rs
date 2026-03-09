@@ -7,7 +7,7 @@ use cosmic::{
         layout::{Layout, Limits, Node},
         mouse::Cursor,
         renderer::{self, Renderer as IcedRenderer},
-        text::{LineHeight, Paragraph, Renderer as TextRenderer, Shaping},
+        text::{Ellipsize, LineHeight, Paragraph, Renderer as TextRenderer, Shaping, Wrapping},
         widget::{Tree, Widget, tree},
     },
 };
@@ -84,7 +84,8 @@ impl TabText {
             vertical_alignment: alignment::Vertical::Center,
             shaping: Shaping::Advanced,
             line_height: LineHeight::default(),
-            wrapping: cosmic::iced::advanced::text::Wrapping::None,
+            wrapping: Wrapping::None,
+            ellipsize: Ellipsize::None,
         })
     }
 }

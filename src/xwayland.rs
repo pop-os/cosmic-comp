@@ -808,14 +808,20 @@ impl XwmHandler for State {
                 *context,
             );
         }
-
-        let surface = CosmicSurface::from(window);
-        shell.pending_windows.push(PendingWindow {
-            surface,
-            seat,
-            fullscreen: None,
-            maximized: false,
-        });
+        if shell
+            .pending_windows
+            .iter()
+            .find(|w| w.surface == window)
+            .is_none()
+        {
+            let surface = CosmicSurface::from(window);
+            shell.pending_windows.push(PendingWindow {
+                surface,
+                seat,
+                fullscreen: None,
+                maximized: false,
+            })
+        }
     }
 
     fn map_window_notify(&mut self, _xwm: XwmId, surface: X11Surface) {
@@ -875,6 +881,11 @@ impl XwmHandler for State {
             let seat = shell.seats.last_active().clone();
             if let Some(pending) =
                 shell.unmap_surface(&window, &seat, &mut self.common.toplevel_info_state)
+                && shell
+                    .pending_windows
+                    .iter()
+                    .find(|w| &w.surface == &pending.surface)
+                    .is_none()
             {
                 shell.pending_windows.push(pending);
             }
