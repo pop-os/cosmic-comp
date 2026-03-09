@@ -1,4 +1,4 @@
-use super::iced::IcedProgram as Program;
+use super::IcedProgram as Program;
 use cosmic::iced::core::event::{self, Event};
 use cosmic::iced::core::mouse;
 use cosmic::iced::core::renderer;

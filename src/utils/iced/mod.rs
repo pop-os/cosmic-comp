@@ -1,3 +1,5 @@
+pub mod state;
+
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -62,7 +64,7 @@ use smithay::{
     },
 };
 
-use crate::utils::state::State;
+use crate::utils::iced::state::State;
 
 static ID: LazyLock<Id> = LazyLock::new(|| Id::new("Program"));
 
@@ -97,6 +99,7 @@ impl<P: Program + Send + 'static> Hash for IcedElement<P> {
     }
 }
 
+// TODO remove this and use our Program trait directly instead
 pub trait IcedProgram {
     type Message: std::fmt::Debug + Send;
     fn update(&mut self, _message: Self::Message) -> Task<Self::Message> {
@@ -145,6 +148,7 @@ pub trait Program {
     }
 }
 
+// TODO remove this and use our Program trait directly
 struct ProgramWrapper<P: Program> {
     program: P,
     evlh: LoopHandle<'static, crate::state::State>,
