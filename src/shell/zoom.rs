@@ -539,7 +539,7 @@ impl Program for ZoomProgram {
                 let _ = loop_handle.insert_idle(|state| {
                     let seat = state.common.shell.read().seats.last_active().clone();
                     let increment =
-                        state.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
+                        state.common.config.cosmic_conf.accessibility_zoom.clamped_increment() as f64 / 100.0;
 
                     state.update_zoom(&seat, -increment, true);
                 });
@@ -548,7 +548,7 @@ impl Program for ZoomProgram {
                 let _ = loop_handle.insert_idle(|state| {
                     let seat = state.common.shell.read().seats.last_active().clone();
                     let increment =
-                        state.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
+                        state.common.config.cosmic_conf.accessibility_zoom.clamped_increment() as f64 / 100.0;
 
                     state.update_zoom(&seat, increment, true);
                 });

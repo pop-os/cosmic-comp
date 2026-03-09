@@ -1464,7 +1464,7 @@ impl Common {
         shell_ref.active_hint = self.config.cosmic_conf.active_hint;
         shell_ref.appearance_conf = self.config.cosmic_conf.appearance_settings.clone();
         if let Some(zoom_state) = shell_ref.zoom_state.as_mut() {
-            zoom_state.increment = self.config.cosmic_conf.accessibility_zoom.increment;
+            zoom_state.increment = self.config.cosmic_conf.accessibility_zoom.clamped_increment();
             zoom_state.movement = self.config.cosmic_conf.accessibility_zoom.view_moves;
             zoom_state.show_overlay = self.config.cosmic_conf.accessibility_zoom.show_overlay;
 
@@ -2323,7 +2323,7 @@ impl Shell {
                         seat,
                         output,
                         1.0,
-                        zoom_config.increment,
+                        zoom_config.clamped_increment(),
                         zoom_config.view_moves,
                         loop_handle.clone(),
                         self.theme.clone(),
@@ -2345,7 +2345,7 @@ impl Shell {
                 level,
                 animate,
                 zoom_config.view_moves,
-                zoom_config.increment,
+                zoom_config.clamped_increment(),
             );
         }
 
@@ -2370,7 +2370,7 @@ impl Shell {
         self.zoom_state = Some(ZoomState {
             seat: seat.clone(),
             show_overlay: zoom_config.show_overlay,
-            increment: zoom_config.increment,
+            increment: zoom_config.clamped_increment(),
             movement: zoom_config.view_moves,
         });
     }

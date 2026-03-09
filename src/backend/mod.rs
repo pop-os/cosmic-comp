@@ -119,7 +119,7 @@ pub fn init_backend_auto(
             state.common.shell.write().trigger_zoom(
                 &initial_seat,
                 None,
-                1.0 + (state.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.),
+                1.0 + (state.common.config.cosmic_conf.accessibility_zoom.clamped_increment() as f64 / 100.),
                 &state.common.config.cosmic_conf.accessibility_zoom,
                 true,
                 &state.common.event_loop_handle,

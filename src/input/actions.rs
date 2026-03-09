@@ -1012,7 +1012,7 @@ impl State {
             x @ Action::ZoomIn | x @ Action::ZoomOut => {
                 let change = {
                     let increment =
-                        self.common.config.cosmic_conf.accessibility_zoom.increment as f64 / 100.0;
+                        self.common.config.cosmic_conf.accessibility_zoom.clamped_increment() as f64 / 100.0;
                     match x {
                         Action::ZoomIn => increment,
                         Action::ZoomOut => -increment,

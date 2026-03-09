@@ -190,6 +190,15 @@ pub struct ZoomConfig {
     pub enable_mouse_zoom_shortcuts: bool,
 }
 
+impl ZoomConfig {
+    /// Clamp increment to the valid range (1–500%).
+    /// The Settings UI offers [25, 50, 100, 150, 200] but the config file
+    /// accepts arbitrary u32; this prevents extreme zoom steps.
+    pub fn clamped_increment(&self) -> u32 {
+        self.increment.clamp(1, 500)
+    }
+}
+
 impl Default for ZoomConfig {
     fn default() -> Self {
         ZoomConfig {
