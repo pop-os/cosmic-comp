@@ -344,10 +344,14 @@ impl CosmicWindow {
         };
 
         self.0.with_program(|p| {
-            p.window
-                .push_popup_render_elements(renderer, window_loc, scale, alpha, &mut |elem| {
-                    push(elem.into())
-                })
+            p.window.push_popup_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                p.appearance_conf.lock().unwrap().blur_strength as usize,
+                &mut |elem| push(elem.into()),
+            )
         })
     }
 
@@ -525,6 +529,7 @@ impl CosmicWindow {
                 scanout_override,
                 clip,
                 radii,
+                appearance.blur_strength as usize,
                 &mut |elem| push_above(elem.into()),
                 Some(&mut |elem| push_below(elem.into())),
             )

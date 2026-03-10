@@ -35,6 +35,7 @@ pub fn push_render_elements_from_surface_tree<R>(
     alpha: f32,
     should_clip: bool,
     radii: [u8; 4],
+    blur_strength: usize,
     kind: impl Into<KindEvaluation>,
     push_above: &mut dyn FnMut(SurfaceRenderElement<R>),
     mut push_below: Option<&mut dyn FnMut(SurfaceRenderElement<R>)>,
@@ -87,7 +88,12 @@ pub fn push_render_elements_from_surface_tree<R>(
                     ) {
                         Ok(Some(surface)) => {
                             blur = BlurElement::from_surface(
-                                renderer, states, geometry, scale.x, radii,
+                                renderer,
+                                states,
+                                geometry,
+                                scale.x,
+                                radii,
+                                blur_strength,
                             );
                             let elem: SurfaceRenderElement<R> = if radii.iter().any(|r| *r != 0)
                                 && should_clip
