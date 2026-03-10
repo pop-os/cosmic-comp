@@ -1,7 +1,7 @@
 use std::{
     borrow::{Borrow, BorrowMut},
     sync::{
-        Arc, Mutex,
+        Arc, LazyLock, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -27,6 +27,7 @@ use smithay::{
     },
     wayland::compositor::SurfaceData,
 };
+use tracing::info;
 
 use crate::{
     backend::render::{element::AsGlowRenderer, wayland::clipped_surface::ClippingShader},
@@ -36,9 +37,50 @@ use crate::{
 pub static BLUR_DOWNSAMPLE_SHADER: &str = include_str!("../shaders/blur_downsample.frag");
 pub static BLUR_UPSAMPLE_SHADER: &str = include_str!("../shaders/blur_upsample.frag");
 
-const PASSES: usize = 3;
-const OFFSET: f64 = 1.1;
 const NOISE: f32 = 0.03;
+const MAX_STEPS: usize = 15;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BlurParameters {
+    passes: usize,
+    offset: f64,
+    extended_radius: i32,
+}
+
+static BLUR_PARAMS: LazyLock<Vec<BlurParameters>> = LazyLock::new(|| {
+    let mut params = Vec::new();
+
+    let mut remaining_steps = MAX_STEPS as isize;
+    let offsets = [
+        // min offset, max offset, extended radius to avoid artifacts
+        (1.0, 2.0, 10),
+        (2.0, 3.0, 20),
+        (2.0, 5.0, 50),
+        (3.0, 8.0, 150),
+    ];
+
+    let sum = offsets.iter().map(|(min, max, _)| *max - *min).sum::<f64>();
+    for (i, (min, max, extended_radius)) in offsets.into_iter().enumerate() {
+        let mut iter_num = f64::ceil((max - min) / sum * (MAX_STEPS as f64)) as usize;
+        remaining_steps -= iter_num as isize;
+
+        if remaining_steps < 0 {
+            iter_num = iter_num.saturating_add_signed(remaining_steps);
+        }
+
+        let diff = max - min;
+        for j in 1..=iter_num {
+            params.push(BlurParameters {
+                passes: i + 1,
+                offset: min + (diff / iter_num as f64) * j as f64,
+                extended_radius,
+            });
+        }
+    }
+
+    info!("Computed blur values: {:#?}", &params);
+    params
+});
 
 #[derive(Debug, Clone)]
 pub struct BlurShaders {
@@ -125,6 +167,7 @@ impl BlurElement {
         geometry: Rectangle<f64, Logical>,
         output_scale: f64,
         radii: [u8; 4],
+        strength: usize,
     ) -> Result<Option<Self>, R::Error> {
         let mut blur_region_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
         let Some(region) = blur_region_state.current().blur_region.as_ref() else {
@@ -133,7 +176,7 @@ impl BlurElement {
 
         let geo = geometry.to_physical_precise_round(output_scale);
         let mut extended_geo = geo;
-        let radius = OFFSET * 2.0f64.powf(PASSES as f64);
+        let radius = BLUR_PARAMS[strength.min(MAX_STEPS - 1)].extended_radius as f64;
         extended_geo.loc -= Point::<f64, Physical>::new(radius, radius);
         extended_geo.size += Size::<f64, Physical>::new(radius, radius).upscale(2.);
 
@@ -187,6 +230,7 @@ impl BlurElement {
             output_scale,
             &mut *state.lock().unwrap(),
             uniforms,
+            strength,
         )?))
     }
 
@@ -197,19 +241,24 @@ impl BlurElement {
         output_scale: f64,
         state: &mut BlurState,
         uniforms: Vec<Uniform<'static>>,
+        strength: usize,
     ) -> Result<Self, R::Error> {
         let renderer_id = renderer.glow_renderer().context_id();
         let src = geometry.size.to_buffer(output_scale, Transform::Normal);
+        let params = &BLUR_PARAMS[strength.min(MAX_STEPS - 1)];
 
         let dirty = !(state
             .renderer_id
             .as_ref()
             .is_some_and(|id| id == &renderer_id)
+            && state.offset == params.offset
+            && state.passes == params.passes
             && &state.region == region
             && state.src == src);
+
         state.renderer_id = Some(renderer_id);
-        state.offset = OFFSET * output_scale; // we want the blur result to be stable across scaling;
-        state.passes = PASSES;
+        state.offset = params.offset;
+        state.passes = params.passes;
         state.region = region.clone();
         state.src = src;
         if dirty {

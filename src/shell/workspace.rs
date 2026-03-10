@@ -1645,6 +1645,7 @@ impl Workspace {
                 Some(true),
                 false,
                 [0, 0, 0, 0],
+                0,
                 &mut fullscreen_push,
                 None,
             );
@@ -1809,6 +1810,7 @@ impl Workspace {
                 render_loc,
                 output_scale.into(),
                 alpha,
+                0,
                 &mut |elem| push(WorkspaceRenderElement::FullscreenPopup(elem.into())),
             );
         }
