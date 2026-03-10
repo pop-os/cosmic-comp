@@ -36,6 +36,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             None,
             false,
             [0; 4],
+            0,
             &mut |elem| elements.push(elem),
             None,
         );
