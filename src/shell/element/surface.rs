@@ -740,6 +740,7 @@ impl CosmicSurface {
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
+        blur_strength: usize,
         push: &mut dyn FnMut(SurfaceRenderElement<R>),
     ) where
         R: Renderer + ImportAll + AsGlowRenderer,
@@ -763,6 +764,7 @@ impl CosmicSurface {
                         alpha,
                         false,
                         [0; 4],
+                        blur_strength,
                         FRAME_TIME_FILTER,
                         push,
                         None,
@@ -782,6 +784,7 @@ impl CosmicSurface {
         scanout_override: Option<bool>,
         should_clip: bool,
         radii: [u8; 4],
+        blur_strength: usize,
         push_above: &mut dyn FnMut(SurfaceRenderElement<R>),
         push_below: Option<&mut dyn FnMut(SurfaceRenderElement<R>)>,
     ) where
@@ -804,6 +807,7 @@ impl CosmicSurface {
                     alpha,
                     should_clip,
                     radii,
+                    blur_strength,
                     scanout_override
                         .map(|val| {
                             if val {
@@ -832,6 +836,7 @@ impl CosmicSurface {
                     alpha,
                     should_clip,
                     radii,
+                    blur_strength,
                     scanout_override
                         .map(|val| {
                             if val {

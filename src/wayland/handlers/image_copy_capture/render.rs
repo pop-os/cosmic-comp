@@ -555,6 +555,7 @@ pub fn render_window_to_buffer(
             .collect();
 
         let shell = common.shell.read();
+        let blur_strength = shell.appearance_config().blur_strength as usize;
         let seat = shell.seats.last_active().clone();
         let pointer = seat.get_pointer().unwrap();
         let pointer_loc = pointer.current_location().to_i32_round().as_global();
@@ -584,6 +585,7 @@ pub fn render_window_to_buffer(
                     1.0.into(),
                     1.0,
                     common.clock.now(),
+                    blur_strength,
                     true,
                     &mut |elem, hotspot| {
                         elements.push(WindowCaptureElement::CursorElement(
@@ -606,6 +608,7 @@ pub fn render_window_to_buffer(
                         &dnd_icon.surface,
                         (location + dnd_icon.offset.to_f64()).to_i32_round(),
                         1.0,
+                        blur_strength,
                         &mut |elem| {
                             elements.push(
                                 RelocateRenderElement::from_element(
@@ -629,6 +632,7 @@ pub fn render_window_to_buffer(
             None,
             false,
             [0; 4],
+            blur_strength,
             &mut |elem| elements.push(elem.into()),
             None,
         );
@@ -802,6 +806,7 @@ pub fn render_cursor_to_buffer(
             1.0.into(),
             1.0,
             common.clock.now(),
+            0,
             true,
             &mut |elem, _| {
                 elements.push(

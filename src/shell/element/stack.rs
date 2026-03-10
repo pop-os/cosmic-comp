@@ -649,6 +649,7 @@ impl CosmicStack {
                 window_loc,
                 scale,
                 alpha,
+                p.appearance_conf.lock().unwrap().blur_strength as usize,
                 &mut |elem| push(elem.into()),
             )
         })
@@ -804,6 +805,7 @@ impl CosmicStack {
                 scanout_override,
                 radii.is_some(),
                 radii.unwrap_or([0; 4]),
+                appearance.blur_strength as usize,
                 &mut |elem| push_above(elem.into()),
                 Some(&mut |elem| push_below(elem.into())),
             );
