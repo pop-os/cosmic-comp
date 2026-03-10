@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use calloop::LoopHandle;
-use smallvec::SmallVec;
 use smithay::{
     backend::{
         allocator::{Buffer, Fourcc, dmabuf::Dmabuf, format::get_transparent},
@@ -491,6 +490,7 @@ smithay::render_elements! {
     pub WindowCaptureElement<R> where R: ImportAll + ImportMem + AsGlowRenderer;
     WaylandElement=SurfaceRenderElement<R>,
     CursorElement=RelocateRenderElement<cursor::CursorRenderElement<R>>,
+    DamageElement=DamageElement,
 }
 
 pub fn render_window_to_buffer(
@@ -540,7 +540,7 @@ pub fn render_window_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let additional_damage_elements: Vec<_> = additional_damage
+        let mut elements: Vec<_> = additional_damage
             .into_iter()
             .filter_map(|rect| {
                 let logical_rect = rect.to_logical(
@@ -551,8 +551,8 @@ pub fn render_window_to_buffer(
                 logical_rect.intersection(Rectangle::from_size(geometry.size))
             })
             .map(DamageElement::new)
+            .map(WindowCaptureElement::<R>::from)
             .collect();
-        dt.damage_output(age, &additional_damage_elements)?;
 
         let shell = common.shell.read();
         let seat = shell.seats.last_active().clone();
@@ -574,8 +574,6 @@ pub fn render_window_to_buffer(
             }
         };
         std::mem::drop(shell);
-
-        let mut elements = Vec::new();
 
         if let Some(location) = location {
             if draw_cursor {
@@ -642,8 +640,10 @@ pub fn render_window_to_buffer(
                 .map_err(DTError::Rendering)?;
             dt.render_output(renderer, &mut fb, age, &elements, Color32F::TRANSPARENT)
         } else {
+            let states = dt.damage_output(age, &elements)?.1;
+
             let fb = offscreen.expect("shm buffer should have an offscreen target");
-            dt.render_output(renderer, fb, 0, &elements, Color32F::TRANSPARENT)
+            dt.render_output_with_states(renderer, fb, 0, &elements, Color32F::TRANSPARENT, states)
         }
     }
 
@@ -785,17 +785,16 @@ pub fn render_cursor_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let additional_damage_elements: Vec<_> = additional_damage
+        let mut elements: Vec<_> = additional_damage
             .into_iter()
             .filter_map(|rect| {
                 let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
                 logical_rect.intersection(Rectangle::from_size((64, 64).into()))
             })
             .map(DamageElement::new)
+            .map(WindowCaptureElement::from)
             .collect();
-        dt.damage_output(age, &additional_damage_elements)?;
 
-        let mut elements = SmallVec::<[WindowCaptureElement<R>; 4]>::new_const();
         cursor::draw_cursor(
             renderer,
             seat,
@@ -818,8 +817,10 @@ pub fn render_cursor_to_buffer(
                 .map_err(DTError::Rendering)?;
             dt.render_output(renderer, &mut fb, age, &elements, [0.0, 0.0, 0.0, 0.0])
         } else {
+            let states = dt.damage_output(age, &elements)?.1;
+
             let fb = offscreen.expect("shm buffers should have offscreen target");
-            dt.render_output(renderer, fb, 0, &elements, [0.0, 0.0, 0.0, 0.0])
+            dt.render_output_with_states(renderer, fb, 0, &elements, [0.0, 0.0, 0.0, 0.0], states)
         }
     }
 
