@@ -668,6 +668,7 @@ impl CosmicStack {
                 scale,
                 alpha,
                 scanout_node,
+                9, // TODO
                 &mut |elem| push(elem.into()),
             )
         })
@@ -825,6 +826,7 @@ impl CosmicStack {
                 scanout_node,
                 radii.is_some(),
                 radii.unwrap_or([0; 4]),
+                9, // as TODO
                 &mut |elem| push_above(elem.into()),
                 Some(&mut |elem| push_below(elem.into())),
             );

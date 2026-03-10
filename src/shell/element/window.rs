@@ -375,6 +375,7 @@ impl CosmicWindow {
                 scale,
                 alpha,
                 scanout_node,
+                9, // TODO
                 &mut |elem| push(elem.into()),
             )
         })
@@ -556,6 +557,7 @@ impl CosmicWindow {
                 scanout_node,
                 clip,
                 radii,
+                9, // TODO
                 &mut |elem| push_above(elem.into()),
                 Some(&mut |elem| push_below(elem.into())),
             )
