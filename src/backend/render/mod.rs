@@ -478,6 +478,7 @@ pub fn cursor_elements<'a, 'frame, R>(
     seats: impl Iterator<Item = &'a Seat<State>>,
     zoom_state: Option<&ZoomState>,
     theme: &Theme,
+    blur_strength: usize,
     now: Time<Monotonic>,
     output: &Output,
     mode: CursorMode,
@@ -514,6 +515,7 @@ pub fn cursor_elements<'a, 'frame, R>(
                 scale.into(),
                 zoom_scale,
                 now,
+                blur_strength,
                 mode != CursorMode::NotDefault,
                 &mut |elem, hotspot| {
                     push(CosmicElement::Cursor(RescaleRenderElement::from_element(
@@ -538,6 +540,7 @@ pub fn cursor_elements<'a, 'frame, R>(
                 &dnd_icon.surface,
                 (location + dnd_icon.offset.to_f64()).to_i32_round(),
                 scale,
+                blur_strength,
                 &mut |elem| push(CosmicElement::Dnd(elem)),
             );
         }
@@ -723,6 +726,7 @@ where
         return Ok(Vec::new());
     }
     let theme = shell_ref.theme().clone();
+    let blur_strength = 9; // TODO
     let scale = output.current_scale().fractional_scale();
     // we don't want to hold a shell lock across `cursor_elements`,
     // that is prone to deadlock with the main-thread on some grabs.
@@ -733,6 +737,7 @@ where
         seats.iter(),
         zoom_level,
         &theme,
+        blur_strength,
         now,
         output,
         cursor_mode,
@@ -845,6 +850,7 @@ where
                     1.0,
                     false,
                     [0; 4],
+                    blur_strength,
                     FRAME_TIME_FILTER,
                     &mut |elem| {
                         elements.extend(
@@ -875,6 +881,7 @@ where
                     1.0,
                     false,
                     [0; 4],
+                    blur_strength,
                     FRAME_TIME_FILTER,
                     &mut |elem| {
                         elements.extend(
@@ -902,6 +909,7 @@ where
                         1.0,
                         false,
                         [0; 4],
+                        blur_strength,
                         FRAME_TIME_FILTER,
                         &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
                         None,
@@ -1048,6 +1056,7 @@ fn session_lock_elements<R>(
             1.0,
             false,
             [0; 4],
+            0,
             FRAME_TIME_FILTER,
             push,
             None,
@@ -1507,7 +1516,19 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
     WorkspaceRenderElement<R>: RenderElement<R>,
 {
-    let elements: Vec<CosmicElement<R>> = workspace_elements(
+    let mut elements: Vec<CosmicElement<R>> = if let Some(additional_damage) = additional_damage {
+        let output_geo = output.geometry().to_local(output).as_logical();
+        additional_damage
+            .into_iter()
+            .filter_map(|rect| rect.intersection(output_geo))
+            .map(DamageElement::new)
+            .map(CosmicElement::from)
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    elements.extend(workspace_elements(
         gpu,
         renderer,
         shell,
@@ -1519,17 +1540,7 @@ where
         cursor_mode,
         element_filter,
         None,
-    )?;
-
-    if let Some(additional_damage) = additional_damage {
-        let output_geo = output.geometry().to_local(output).as_logical();
-        let additional_damage_elements: Vec<_> = additional_damage
-            .into_iter()
-            .filter_map(|rect| rect.intersection(output_geo))
-            .map(DamageElement::new)
-            .collect();
-        damage_tracker.damage_output(age, &additional_damage_elements)?;
-    }
+    )?);
 
     let res = damage_tracker.render_output(
         renderer,

@@ -5408,6 +5408,8 @@ fn render_new_tree_windows<R>(
             scanout_node,
             false,
             [0, 0, 0, 0],
+            // TODO
+            0,
             &mut |elem| {
                 swap_elements.push(CosmicMappedRenderElement::GrabbedWindow(
                     RescaleRenderElement::from_element(
