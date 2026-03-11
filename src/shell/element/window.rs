@@ -364,7 +364,7 @@ impl CosmicWindow {
         alpha: f32,
     ) -> Option<C>
     where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
@@ -444,7 +444,7 @@ impl CosmicWindow {
         scanout_override: Option<bool>,
     ) -> Vec<C>
     where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         C: From<CosmicWindowRenderElement<R>>,
     {
@@ -1350,7 +1350,7 @@ where
 
 impl<R> RenderElement<R> for CosmicWindowRenderElement<R>
 where
-    R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     R::Error: FromGlesError,
 {
