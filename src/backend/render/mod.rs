@@ -1365,7 +1365,7 @@ where
     match result {
         Ok((res, mut elements)) => {
             for (session, frame) in output.take_pending_frames() {
-                if let Some(pending_image_copy_data) = render_session::<_, _, GlesTexture>(
+                if let Some(pending_image_copy_data) = render_session(
                     renderer,
                     session.user_data().get::<SessionData>().unwrap(),
                     frame,

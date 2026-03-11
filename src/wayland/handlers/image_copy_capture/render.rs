@@ -185,7 +185,7 @@ where
     }))
 }
 
-pub fn render_session<F, R, T>(
+pub fn render_session<F, R>(
     renderer: &mut R,
     session: &SessionData,
     frame: Frame,
@@ -193,7 +193,7 @@ pub fn render_session<F, R, T>(
     render_fn: F,
 ) -> Result<Option<PendingImageCopyData>, DTError<R::Error>>
 where
-    R: Offscreen<T> + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::Error: FromGlesError,
     F: for<'d> FnOnce(
         &WlBuffer,
@@ -215,7 +215,8 @@ where
                     .expect("We should be able to convert all hardcoded shm screencopy formats")
             })
             .map_err(|_| DTError::OutputNoMode(OutputNoMode))?;
-            Offscreen::<T>::create_buffer(renderer, format, size).map_err(DTError::Rendering)
+            Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
+                .map_err(DTError::Rendering)
         })
         .transpose()?;
 
@@ -420,7 +421,7 @@ pub fn render_workspace_to_buffer(
     };
     let result = match renderer {
         RendererRef::Glow(renderer) => {
-            match render_session::<_, _, GlesRenderbuffer>(
+            match render_session(
                 renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
@@ -448,7 +449,7 @@ pub fn render_workspace_to_buffer(
             }
         }
         RendererRef::GlMulti(mut renderer) => {
-            match render_session::<_, _, GlesRenderbuffer>(
+            match render_session(
                 &mut renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
@@ -670,7 +671,7 @@ pub fn render_window_to_buffer(
         }
     };
     let result = match renderer {
-        RendererRef::Glow(renderer) => match render_session::<_, _, GlesRenderbuffer>(
+        RendererRef::Glow(renderer) => match render_session(
             renderer,
             session.user_data().get::<SessionData>().unwrap(),
             frame,
@@ -696,7 +697,7 @@ pub fn render_window_to_buffer(
                 None
             }
         },
-        RendererRef::GlMulti(mut renderer) => match render_session::<_, _, GlesRenderbuffer>(
+        RendererRef::GlMulti(mut renderer) => match render_session(
             &mut renderer,
             session.user_data().get::<SessionData>().unwrap(),
             frame,
@@ -830,7 +831,7 @@ pub fn render_cursor_to_buffer(
     };
     let result = match renderer {
         RendererRef::Glow(renderer) => {
-            match render_session::<_, _, GlesRenderbuffer>(
+            match render_session(
                 renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
@@ -856,7 +857,7 @@ pub fn render_cursor_to_buffer(
             }
         }
         RendererRef::GlMulti(mut renderer) => {
-            match render_session::<_, _, GlesRenderbuffer>(
+            match render_session(
                 &mut renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
