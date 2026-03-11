@@ -59,7 +59,7 @@ use smithay::{
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
     },
-    utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Coordinate, Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
         image_copy_capture::{BufferConstraints, CursorSessionRef},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
@@ -350,21 +350,48 @@ impl State {
                     let original_position = position;
                     position += event.delta().as_global();
 
-                    let output = shell
-                        .outputs()
-                        .find(|output| output.geometry().to_f64().contains(position))
+                    let output_containing_position =
+                        State::output_containing_point(position, &shell);
+
+                    let output = output_containing_position
                         .cloned()
                         .unwrap_or(current_output.clone());
 
                     let output_geometry = output.geometry();
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        (output_geometry.loc.x + output_geometry.size.w - 1) as f64,
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        (output_geometry.loc.y + output_geometry.size.h - 1) as f64,
-                    );
+
+                    {
+                        // Clamp the position to the output geometry
+                        let top_left: Point<f64, Global> =
+                            Point::new(output_geometry.loc.x as f64, output_geometry.loc.y as f64);
+                        let bottom_right: Point<f64, Global> = Point::new(
+                            top_left.x.saturating_add(output_geometry.size.w as f64) - 1.0,
+                            top_left.y.saturating_add(output_geometry.size.h as f64) - 1.0,
+                        );
+                        if output_containing_position.is_none() {
+                            position.x = position.x.clamp(top_left.x, bottom_right.x);
+                            position.y = position.y.clamp(top_left.y, bottom_right.y);
+                        } else {
+                            let old_position = position.clone();
+                            if position.x > bottom_right.x
+                                && State::output_containing_point(
+                                    Point::new(bottom_right.x + 1.0, old_position.y),
+                                    &shell,
+                                )
+                                .is_none()
+                            {
+                                position.x = bottom_right.x;
+                            }
+                            if position.y > bottom_right.y
+                                && State::output_containing_point(
+                                    Point::new(old_position.x, bottom_right.y + 1.0),
+                                    &shell,
+                                )
+                                .is_none()
+                            {
+                                position.y = bottom_right.y;
+                            }
+                        }
+                    }
 
                     let new_under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
@@ -2164,6 +2191,12 @@ impl State {
         )
         .ok()
         .flatten()
+    }
+
+    pub fn output_containing_point(point: Point<f64, Global>, shell: &Shell) -> Option<&Output> {
+        shell
+            .outputs()
+            .find(|output| output.geometry().to_f64().contains(point))
     }
 
     #[profiling::function]
