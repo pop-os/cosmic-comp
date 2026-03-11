@@ -10,7 +10,6 @@ use smithay::{
     backend::{
         input::KeyState,
         renderer::{
-            ImportAll, ImportMem, Renderer,
             element::{
                 Element, RenderElement, UnderlyingStorage,
                 memory::MemoryRenderBufferRenderElement,
@@ -571,7 +570,7 @@ impl CosmicMapped {
         alpha: f32,
     ) -> Vec<C>
     where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         C: From<CosmicMappedRenderElement<R>>,
@@ -602,7 +601,7 @@ impl CosmicMapped {
         alpha: f32,
     ) -> Option<C>
     where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         C: From<CosmicMappedRenderElement<R>>,
@@ -646,7 +645,7 @@ impl CosmicMapped {
         scanout_override: Option<bool>,
     ) -> Vec<C>
     where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         C: From<CosmicMappedRenderElement<R>>,
@@ -1061,7 +1060,7 @@ impl From<CosmicStack> for CosmicMapped {
 
 pub enum CosmicMappedRenderElement<R>
 where
-    R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
 {
     Stack(self::stack::CosmicStackRenderElement<R>),
@@ -1096,7 +1095,7 @@ where
 
 impl<R> Element for CosmicMappedRenderElement<R>
 where
-    R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
@@ -1279,7 +1278,7 @@ where
 
 impl<R> RenderElement<R> for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     R::Error: FromGlesError,
 {
@@ -1395,7 +1394,7 @@ where
 
 impl<R> From<stack::CosmicStackRenderElement<R>> for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -1405,7 +1404,7 @@ where
 }
 impl<R> From<window::CosmicWindowRenderElement<R>> for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -1416,7 +1415,7 @@ where
 
 impl<R> From<PixelShaderElement> for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -1427,7 +1426,7 @@ where
 
 impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -1439,7 +1438,7 @@ where
 #[cfg(feature = "debug")]
 impl<R> From<TextureRenderElement<GlesTexture>> for CosmicMappedRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
