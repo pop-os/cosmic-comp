@@ -692,7 +692,7 @@ impl Common {
                             ),
                             (
                                 "Gdk/WindowScalingFactor".into(),
-                                (new_scale.round() as i32).into(),
+                                (new_scale.floor() as i32).into(),
                             ),
                             (
                                 "Gtk/CursorThemeSize".into(),
