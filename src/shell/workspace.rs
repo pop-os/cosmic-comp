@@ -34,7 +34,6 @@ use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::output::WeakOutput;
 use smithay::{
     backend::renderer::{
-        ImportAll, ImportMem, Renderer,
         element::{
             Element, Id, RenderElement, surface::WaylandSurfaceRenderElement,
             texture::TextureRenderElement, utils::RescaleRenderElement,
@@ -1518,7 +1517,7 @@ impl Workspace {
         theme: &CosmicTheme,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -1720,7 +1719,7 @@ impl Workspace {
         theme: &CosmicTheme,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -1860,7 +1859,7 @@ pub struct OutputNotMapped;
 
 pub enum WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
 {
     OverrideRedirect(WaylandSurfaceRenderElement<R>),
@@ -1872,7 +1871,7 @@ where
 
 impl<R> Element for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
@@ -1972,7 +1971,7 @@ where
 
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     R::Error: FromGlesError,
 {
@@ -2027,7 +2026,7 @@ where
 
 impl<R> From<RescaleRenderElement<CosmicWindowRenderElement<R>>> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -2038,7 +2037,7 @@ where
 
 impl<R> From<CosmicWindowRenderElement<R>> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -2049,7 +2048,7 @@ where
 
 impl<R> From<WaylandSurfaceRenderElement<R>> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -2060,7 +2059,7 @@ where
 
 impl<R> From<CosmicMappedRenderElement<R>> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -2071,7 +2070,7 @@ where
 
 impl<R> From<TextureRenderElement<GlesTexture>> for WorkspaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
