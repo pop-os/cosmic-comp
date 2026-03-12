@@ -514,7 +514,6 @@ pub fn render_window_to_buffer(
             return;
         };
         session.update_constraints(constraints);
-
         if let Some(data) = session.user_data().get::<SessionData>() {
             let size = geometry.size.to_physical(1);
             *data.lock().unwrap() =
@@ -639,7 +638,7 @@ pub fn render_window_to_buffer(
             dt.render_output(renderer, &mut fb, age, &elements, Color32F::TRANSPARENT)
         } else {
             let fb = offscreen.expect("shm buffer should have an offscreen target");
-            dt.render_output(renderer, fb, age, &elements, Color32F::TRANSPARENT)
+            dt.render_output(renderer, fb, 0, &elements, Color32F::TRANSPARENT)
         }
     }
 
@@ -814,7 +813,7 @@ pub fn render_cursor_to_buffer(
             dt.render_output(renderer, &mut fb, age, &elements, [0.0, 0.0, 0.0, 0.0])
         } else {
             let fb = offscreen.expect("shm buffers should have offscreen target");
-            dt.render_output(renderer, fb, age, &elements, [0.0, 0.0, 0.0, 0.0])
+            dt.render_output(renderer, fb, 0, &elements, [0.0, 0.0, 0.0, 0.0])
         }
     }
 
