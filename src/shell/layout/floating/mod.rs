@@ -10,9 +10,12 @@ use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::renderer::element::{
-        AsRenderElements, RenderElement,
-        utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+    backend::renderer::{
+        ImportAll, ImportMem, Renderer,
+        element::{
+            AsRenderElements, RenderElement,
+            utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+        },
     },
     desktop::{PopupKind, Space, WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
@@ -1418,7 +1421,7 @@ impl FloatingLayout {
         alpha: f32,
     ) -> Vec<CosmicMappedRenderElement<R>>
     where
-        R: AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -1469,7 +1472,7 @@ impl FloatingLayout {
         theme: &cosmic::theme::CosmicTheme,
     ) -> Vec<CosmicMappedRenderElement<R>>
     where
-        R: AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,

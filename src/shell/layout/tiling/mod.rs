@@ -47,6 +47,7 @@ use keyframe::{
 };
 use smithay::{
     backend::renderer::{
+        ImportAll, ImportMem, Renderer,
         element::{
             AsRenderElements, Id, RenderElement,
             utils::{
@@ -4010,7 +4011,7 @@ impl TilingLayout {
         theme: &cosmic::theme::CosmicTheme,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
-        R: AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -4170,7 +4171,7 @@ impl TilingLayout {
         theme: &cosmic::theme::CosmicTheme,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
-        R: AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -4344,7 +4345,7 @@ fn geometries_for_groupview<'a, R>(
     Vec<CosmicMappedRenderElement<R>>,
 )
 where
-    R: AsGlowRenderer + 'a,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer + 'a,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -4976,7 +4977,7 @@ fn render_old_tree_popups<R>(
     is_swap_mode: bool,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
-    R: AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -5019,7 +5020,7 @@ fn render_old_tree_windows<R>(
     theme: &cosmic::theme::CosmicTheme,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
-    R: AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -5202,7 +5203,7 @@ fn render_new_tree_popups<R>(
     swap_desc: Option<NodeDesc>,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
-    R: AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,
@@ -5268,7 +5269,7 @@ fn render_new_tree_windows<R>(
     theme: &cosmic::theme::CosmicTheme,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
-    R: AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
     CosmicWindowRenderElement<R>: RenderElement<R>,

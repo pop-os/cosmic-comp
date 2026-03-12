@@ -45,10 +45,11 @@ use cosmic::Theme;
 use element::FromGlesError;
 use smithay::{
     backend::{
-        allocator::Fourcc,
+        allocator::{Fourcc, dmabuf::Dmabuf},
         drm::{DrmDeviceFd, DrmNode},
         renderer::{
-            Color32F, ImportAll, Offscreen, Renderer, Texture, TextureFilter,
+            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
+            TextureFilter,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
                 Element, Id, Kind, RenderElement, WeakId,
@@ -477,7 +478,7 @@ pub fn cursor_elements<'a, 'frame, R>(
     exclude_dnd_icon: bool,
 ) -> Vec<CosmicElement<R>>
 where
-    R: AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -619,7 +620,7 @@ pub fn output_elements<R>(
     _fps: Option<(&EguiState, &Timings)>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
-    R: AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -717,7 +718,7 @@ pub fn workspace_elements<R>(
     element_filter: ElementFilter,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
-    R: AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -1059,7 +1060,7 @@ pub struct PostprocessState {
 }
 
 impl PostprocessState {
-    pub fn new_with_renderer<R: AsGlowRenderer>(
+    pub fn new_with_renderer<R: AsGlowRenderer + Offscreen<GlesTexture>>(
         renderer: &mut R,
         format: Fourcc,
         output_config: PostprocessOutputConfig,
@@ -1090,7 +1091,7 @@ impl PostprocessState {
         })
     }
 
-    pub fn track_cursor<R: AsGlowRenderer>(
+    pub fn track_cursor<R: AsGlowRenderer + Offscreen<GlesTexture>>(
         &mut self,
         renderer: &mut R,
         format: Fourcc,
@@ -1192,7 +1193,14 @@ pub fn render_output<'d, R>(
     loop_handle: &calloop::LoopHandle<'static, State>,
 ) -> Result<RenderOutputResult<'d>, RenderError<R::Error>>
 where
-    R: AsGlowRenderer,
+    R: Renderer
+        + ImportAll
+        + ImportMem
+        + ExportMem
+        + Bind<Dmabuf>
+        + Offscreen<GlesTexture>
+        + Blit
+        + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
@@ -1497,7 +1505,7 @@ pub fn render_workspace<'d, R>(
     element_filter: ElementFilter,
 ) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R::Error>>
 where
-    R: AsGlowRenderer,
+    R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,

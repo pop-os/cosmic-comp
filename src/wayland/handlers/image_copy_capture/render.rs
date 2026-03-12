@@ -3,10 +3,10 @@
 use calloop::LoopHandle;
 use smithay::{
     backend::{
-        allocator::{Buffer, Fourcc, format::get_transparent},
+        allocator::{Buffer, Fourcc, dmabuf::Dmabuf, format::get_transparent},
         renderer::{
-            BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, buffer_dimensions,
-            buffer_type,
+            Bind, Blit, BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            buffer_dimensions, buffer_type,
             damage::{Error as DTError, OutputDamageTracker, RenderOutputResult},
             element::{
                 AsRenderElements, RenderElement,
@@ -193,7 +193,7 @@ pub fn render_session<F, R, T>(
     render_fn: F,
 ) -> Result<Option<PendingImageCopyData>, DTError<R::Error>>
 where
-    R: Offscreen<T> + AsGlowRenderer,
+    R: ExportMem + Offscreen<T>,
     R::Error: FromGlesError,
     F: for<'d> FnOnce(
         &WlBuffer,
@@ -215,7 +215,9 @@ where
                     .expect("We should be able to convert all hardcoded shm screencopy formats")
             })
             .map_err(|_| DTError::OutputNoMode(OutputNoMode))?;
-            Offscreen::<T>::create_buffer(renderer, format, size).map_err(DTError::Rendering)
+            renderer
+                .create_buffer(format, size)
+                .map_err(DTError::Rendering)
         })
         .transpose()?;
 
@@ -302,7 +304,7 @@ pub fn render_workspace_to_buffer(
         handle: (WorkspaceHandle, usize),
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>
     where
-        R: AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + Blit + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
@@ -535,7 +537,7 @@ pub fn render_window_to_buffer(
         geometry: Rectangle<i32, Logical>,
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>
     where
-        R: AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + Blit + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
@@ -774,7 +776,7 @@ pub fn render_cursor_to_buffer(
         seat: &Seat<State>,
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>
     where
-        R: AsGlowRenderer,
+        R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + Blit + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
