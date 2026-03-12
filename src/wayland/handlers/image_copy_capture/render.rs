@@ -5,8 +5,8 @@ use smithay::{
     backend::{
         allocator::{Buffer, Fourcc, format::get_transparent},
         renderer::{
-            BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, buffer_dimensions,
-            buffer_type,
+            BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            buffer_dimensions, buffer_type,
             damage::{Error as DTError, OutputDamageTracker, RenderOutputResult},
             element::{
                 AsRenderElements, RenderElement,
@@ -204,37 +204,53 @@ where
         Vec<Rectangle<i32, BufferCoords>>,
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>,
 {
-    let mut session_damage_tracking = session.lock().unwrap();
+    let mut session_user_data = session.lock().unwrap();
 
     let buffer = frame.buffer();
-    let mut offscreen = matches!(buffer_type(&buffer), Some(BufferType::Shm))
-        .then(|| {
-            let size = buffer_dimensions(&buffer).ok_or(DTError::OutputNoMode(OutputNoMode))?;
-            let format = with_buffer_contents(&buffer, |_, _, data| {
-                shm_format_to_fourcc(data.format)
-                    .expect("We should be able to convert all hardcoded shm screencopy formats")
-            })
-            .map_err(|_| DTError::OutputNoMode(OutputNoMode))?;
-            Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
-                .map_err(DTError::Rendering)
-        })
-        .transpose()?;
 
-    let age = if offscreen.is_some() {
-        // TODO re-use offscreen buffer to damage track screencopy to shm
-        0
+    let mut age = 1;
+    if matches!(buffer_type(&buffer), Some(BufferType::Shm)) {
+        let size = buffer_dimensions(&buffer).ok_or(DTError::OutputNoMode(OutputNoMode))?;
+        let format = with_buffer_contents(&buffer, |_, _, data| {
+            shm_format_to_fourcc(data.format)
+                .expect("We should be able to convert all hardcoded shm screencopy formats")
+        })
+        .map_err(|_| DTError::OutputNoMode(OutputNoMode))?;
+
+        // Re-allocate if context id, size, or format are different
+        session_user_data
+            .offscreen
+            .take_if(|(context_id, renderbuffer)| {
+                renderer.glow_renderer().context_id() != *context_id
+                    || renderbuffer.size() != size
+                    || renderbuffer.format() != Some(format)
+            });
+
+        if session_user_data.offscreen.is_none() {
+            let renderbuffer = Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
+                .map_err(DTError::Rendering)?;
+            session_user_data.offscreen =
+                Some((renderer.glow_renderer().context_id(), renderbuffer));
+            // If we're allocating a new offscreen buffer, we need to re-render everything
+            // (or copy the contexts of the shm buffer)
+            age = 0;
+        }
     } else {
-        1
-    };
+        // If for some reason a capture session is used for shm, but then changes to dmabuf capture,
+        // remove the offscreen buffer.
+        session_user_data.offscreen = None;
+    }
+
+    let SessionUserData { dt, offscreen } = &mut *session_user_data;
     let mut fb = offscreen
         .as_mut()
-        .map(|tex| renderer.bind(tex).map_err(DTError::Rendering))
+        .map(|(_, tex)| renderer.bind(tex).map_err(DTError::Rendering))
         .transpose()?;
     let res = render_fn(
         &frame.buffer(),
         renderer,
         fb.as_mut(),
-        &mut session_damage_tracking.dt,
+        dt,
         age,
         frame.damage(),
     );
