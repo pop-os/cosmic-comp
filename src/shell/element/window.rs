@@ -773,6 +773,7 @@ impl Program for CosmicWindowInternal {
                                 cursor.y -= SSD_HEIGHT;
 
                                 let res = shell.menu_request(
+                                    false,
                                     &surface,
                                     &seat,
                                     serial,
@@ -1031,6 +1032,13 @@ impl PointerTarget<State> for CosmicWindow {
                 let Some(surface) = self.wl_surface().map(Cow::into_owned) else {
                     return;
                 };
+
+                // Only start a resize if the left button was pressed
+                if event.state != smithay::backend::input::ButtonState::Pressed
+                    || event.button != 0x110
+                {
+                    return;
+                }
                 self.0.loop_handle().insert_idle(move |state| {
                     let res = state.common.shell.write().resize_request(
                         &surface,

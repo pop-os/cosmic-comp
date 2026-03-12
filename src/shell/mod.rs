@@ -3429,6 +3429,7 @@ impl Shell {
 
     pub fn menu_request(
         &self,
+        is_client_initiated: bool,
         surface: &WlSurface,
         seat: &Seat<State>,
         serial: impl Into<Option<Serial>>,
@@ -3439,7 +3440,7 @@ impl Shell {
     ) -> Option<(MenuGrab, Focus)> {
         let serial = serial.into();
         let Some(GrabStartData::Pointer(start_data)) =
-            check_grab_preconditions(seat, serial, Some(surface))
+            check_grab_preconditions(seat, serial, is_client_initiated.then_some(surface))
         else {
             return None; // TODO: an application can send a menu request for a touch event
         };
