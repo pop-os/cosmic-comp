@@ -3,7 +3,11 @@
 use std::{cell::RefCell, sync::Mutex};
 
 use smithay::{
-    backend::renderer::damage::OutputDamageTracker,
+    backend::renderer::{
+        ContextId,
+        damage::OutputDamageTracker,
+        gles::{GlesRenderbuffer, GlesTexture},
+    },
     output::Output,
     wayland::image_copy_capture::{
         CursorSession, CursorSessionRef, Frame, FrameRef, Session, SessionRef,
@@ -19,11 +23,15 @@ pub type SessionData = Mutex<SessionUserData>;
 
 pub struct SessionUserData {
     pub dt: OutputDamageTracker,
+    pub offscreen: Option<(ContextId<GlesTexture>, GlesRenderbuffer)>,
 }
 
 impl SessionUserData {
     pub fn new(tracker: OutputDamageTracker) -> SessionUserData {
-        SessionUserData { dt: tracker }
+        SessionUserData {
+            dt: tracker,
+            offscreen: None,
+        }
     }
 }
 
