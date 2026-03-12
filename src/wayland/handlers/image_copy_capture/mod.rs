@@ -21,8 +21,9 @@ use smithay::{
         dmabuf::get_dmabuf,
         image_capture_source::ImageCaptureSource,
         image_copy_capture::{
-            BufferConstraints, CursorSession, CursorSessionRef, DmabufConstraints, Frame, FrameRef,
-            ImageCopyCaptureHandler, ImageCopyCaptureState, Session, SessionRef,
+            BufferConstraints, CaptureFailureReason, CursorSession, CursorSessionRef,
+            DmabufConstraints, Frame, FrameRef, ImageCopyCaptureHandler, ImageCopyCaptureState,
+            Session, SessionRef,
         },
         seat::WaylandFocus,
     },
@@ -138,7 +139,9 @@ impl ImageCopyCaptureHandler for State {
                 });
                 toplevel.add_session(session);
             }
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {
+                session.stop();
+            }
         }
     }
 
@@ -258,7 +261,9 @@ impl ImageCopyCaptureHandler for State {
 
                 toplevel.add_cursor_session(session);
             }
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {
+                session.stop();
+            }
         }
     }
 
@@ -284,7 +289,9 @@ impl ImageCopyCaptureHandler for State {
             ImageCaptureSourceKind::Toplevel(toplevel) => {
                 render_window_to_buffer(self, session, frame, &toplevel)
             }
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {
+                frame.fail(CaptureFailureReason::Stopped);
+            }
         }
     }
 
@@ -330,7 +337,7 @@ impl ImageCopyCaptureHandler for State {
                 }
             }
             ImageCaptureSourceKind::Toplevel(mut toplevel) => toplevel.remove_session(&session),
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {}
         }
     }
 
@@ -361,7 +368,7 @@ impl ImageCopyCaptureHandler for State {
             ImageCaptureSourceKind::Toplevel(mut toplevel) => {
                 toplevel.remove_cursor_session(&session)
             }
-            ImageCaptureSourceKind::Destroyed => unreachable!(),
+            ImageCaptureSourceKind::Destroyed => {}
         }
     }
 }
