@@ -368,6 +368,7 @@ impl XdgShellHandler for State {
 
         let shell = self.common.shell.read();
         let res = shell.menu_request(
+            true,
             surface.wl_surface(),
             &seat,
             serial,

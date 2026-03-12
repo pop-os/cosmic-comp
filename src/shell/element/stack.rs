@@ -1130,6 +1130,7 @@ impl Program for CosmicStackInternal {
                                     .to_i32_round();
                                 cursor.y -= TAB_HEIGHT;
                                 let res = shell.menu_request(
+                                    false,
                                     &surface,
                                     &seat,
                                     serial,
@@ -1172,6 +1173,7 @@ impl Program for CosmicStackInternal {
                                         .to_i32_round();
                                     cursor.y -= TAB_HEIGHT;
                                     let res = shell.menu_request(
+                                        false,
                                         &surface,
                                         &seat,
                                         serial,
