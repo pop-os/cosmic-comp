@@ -165,6 +165,10 @@ impl State {
         <B as InputBackend>::Device: 'static,
     {
         crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
+        {
+            let seat = self.common.shell.read().seats.last_active().clone();
+            self.common.idle_notifier_state.notify_activity(&seat);
+        }
 
         use smithay::backend::input::Event;
         match event {
