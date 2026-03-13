@@ -1241,6 +1241,7 @@ impl Workspace {
     pub fn take_fullscreen(
         &mut self,
     ) -> Option<(
+        CosmicSurface,
         Option<FullscreenRestoreState>,
         Option<Rectangle<i32, Local>>,
     )> {
@@ -1250,7 +1251,11 @@ impl Workspace {
             focus_stack.retain(|t| t != &surface.surface);
         }
 
-        Some((surface.previous_state, surface.previous_geometry))
+        Some((
+            surface.surface,
+            surface.previous_state,
+            surface.previous_geometry,
+        ))
     }
 
     #[must_use]

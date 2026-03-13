@@ -3130,7 +3130,7 @@ impl Shell {
         let is_minimized = window.is_minimized();
         let is_fullscreen = from_workspace.get_fullscreen().is_some_and(|f| f == window);
         let mut window_state = if is_fullscreen {
-            let (previous_state, previous_geometry) = from_workspace.take_fullscreen().unwrap();
+            let (_, previous_state, previous_geometry) = from_workspace.take_fullscreen().unwrap();
             WorkspaceRestoreData::Fullscreen(previous_state.zip(previous_geometry).map(
                 |(previous_state, previous_geometry)| FullscreenRestoreData {
                     previous_state,
