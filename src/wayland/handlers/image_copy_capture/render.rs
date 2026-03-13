@@ -3,9 +3,9 @@
 use calloop::LoopHandle;
 use smithay::{
     backend::{
-        allocator::{Buffer, Fourcc, dmabuf::Dmabuf, format::get_transparent},
+        allocator::{Buffer, Fourcc, format::get_transparent},
         renderer::{
-            Bind, Blit, BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
             buffer_dimensions, buffer_type,
             damage::{Error as DTError, OutputDamageTracker, RenderOutputResult},
             element::{
@@ -185,7 +185,7 @@ where
     }))
 }
 
-pub fn render_session<F, R, T>(
+pub fn render_session<F, R>(
     renderer: &mut R,
     session: &SessionData,
     frame: Frame,
@@ -193,7 +193,7 @@ pub fn render_session<F, R, T>(
     render_fn: F,
 ) -> Result<Option<PendingImageCopyData>, DTError<R::Error>>
 where
-    R: ExportMem + Offscreen<T>,
+    R: AsGlowRenderer,
     R::Error: FromGlesError,
     F: for<'d> FnOnce(
         &WlBuffer,
@@ -204,38 +204,53 @@ where
         Vec<Rectangle<i32, BufferCoords>>,
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>,
 {
-    let mut session_damage_tracking = session.lock().unwrap();
+    let mut session_user_data = session.lock().unwrap();
 
     let buffer = frame.buffer();
-    let mut offscreen = matches!(buffer_type(&buffer), Some(BufferType::Shm))
-        .then(|| {
-            let size = buffer_dimensions(&buffer).ok_or(DTError::OutputNoMode(OutputNoMode))?;
-            let format = with_buffer_contents(&buffer, |_, _, data| {
-                shm_format_to_fourcc(data.format)
-                    .expect("We should be able to convert all hardcoded shm screencopy formats")
-            })
-            .map_err(|_| DTError::OutputNoMode(OutputNoMode))?;
-            renderer
-                .create_buffer(format, size)
-                .map_err(DTError::Rendering)
-        })
-        .transpose()?;
 
-    let age = if offscreen.is_some() {
-        // TODO re-use offscreen buffer to damage track screencopy to shm
-        0
+    let mut age = 1;
+    if matches!(buffer_type(&buffer), Some(BufferType::Shm)) {
+        let size = buffer_dimensions(&buffer).ok_or(DTError::OutputNoMode(OutputNoMode))?;
+        let format = with_buffer_contents(&buffer, |_, _, data| {
+            shm_format_to_fourcc(data.format)
+                .expect("We should be able to convert all hardcoded shm screencopy formats")
+        })
+        .map_err(|_| DTError::OutputNoMode(OutputNoMode))?;
+
+        // Re-allocate if context id, size, or format are different
+        session_user_data
+            .offscreen
+            .take_if(|(context_id, renderbuffer)| {
+                renderer.glow_renderer().context_id() != *context_id
+                    || renderbuffer.size() != size
+                    || renderbuffer.format() != Some(format)
+            });
+
+        if session_user_data.offscreen.is_none() {
+            let renderbuffer = Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
+                .map_err(DTError::Rendering)?;
+            session_user_data.offscreen =
+                Some((renderer.glow_renderer().context_id(), renderbuffer));
+            // If we're allocating a new offscreen buffer, we need to re-render everything
+            // (or copy the contexts of the shm buffer)
+            age = 0;
+        }
     } else {
-        1
-    };
+        // If for some reason a capture session is used for shm, but then changes to dmabuf capture,
+        // remove the offscreen buffer.
+        session_user_data.offscreen = None;
+    }
+
+    let SessionUserData { dt, offscreen } = &mut *session_user_data;
     let mut fb = offscreen
         .as_mut()
-        .map(|tex| renderer.bind(tex).map_err(DTError::Rendering))
+        .map(|(_, tex)| renderer.bind(tex).map_err(DTError::Rendering))
         .transpose()?;
     let res = render_fn(
         &frame.buffer(),
         renderer,
         fb.as_mut(),
-        &mut session_damage_tracking.dt,
+        dt,
         age,
         frame.damage(),
     );
@@ -304,7 +319,7 @@ pub fn render_workspace_to_buffer(
         handle: (WorkspaceHandle, usize),
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>
     where
-        R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + Blit + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
@@ -422,7 +437,7 @@ pub fn render_workspace_to_buffer(
     };
     let result = match renderer {
         RendererRef::Glow(renderer) => {
-            match render_session::<_, _, GlesRenderbuffer>(
+            match render_session(
                 renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
@@ -450,7 +465,7 @@ pub fn render_workspace_to_buffer(
             }
         }
         RendererRef::GlMulti(mut renderer) => {
-            match render_session::<_, _, GlesRenderbuffer>(
+            match render_session(
                 &mut renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
@@ -514,6 +529,7 @@ pub fn render_window_to_buffer(
             return;
         };
         session.update_constraints(constraints);
+
         if let Some(data) = session.user_data().get::<SessionData>() {
             let size = geometry.size.to_physical(1);
             *data.lock().unwrap() =
@@ -536,7 +552,7 @@ pub fn render_window_to_buffer(
         geometry: Rectangle<i32, Logical>,
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>
     where
-        R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + Blit + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
@@ -638,7 +654,7 @@ pub fn render_window_to_buffer(
             dt.render_output(renderer, &mut fb, age, &elements, Color32F::TRANSPARENT)
         } else {
             let fb = offscreen.expect("shm buffer should have an offscreen target");
-            dt.render_output(renderer, fb, 0, &elements, Color32F::TRANSPARENT)
+            dt.render_output(renderer, fb, age, &elements, Color32F::TRANSPARENT)
         }
     }
 
@@ -671,7 +687,7 @@ pub fn render_window_to_buffer(
         }
     };
     let result = match renderer {
-        RendererRef::Glow(renderer) => match render_session::<_, _, GlesRenderbuffer>(
+        RendererRef::Glow(renderer) => match render_session(
             renderer,
             session.user_data().get::<SessionData>().unwrap(),
             frame,
@@ -697,7 +713,7 @@ pub fn render_window_to_buffer(
                 None
             }
         },
-        RendererRef::GlMulti(mut renderer) => match render_session::<_, _, GlesRenderbuffer>(
+        RendererRef::GlMulti(mut renderer) => match render_session(
             &mut renderer,
             session.user_data().get::<SessionData>().unwrap(),
             frame,
@@ -775,7 +791,7 @@ pub fn render_cursor_to_buffer(
         seat: &Seat<State>,
     ) -> Result<RenderOutputResult<'d>, DTError<R::Error>>
     where
-        R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + Blit + AsGlowRenderer,
+        R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         R::Error: FromGlesError,
         CosmicElement<R>: RenderElement<R>,
@@ -813,7 +829,7 @@ pub fn render_cursor_to_buffer(
             dt.render_output(renderer, &mut fb, age, &elements, [0.0, 0.0, 0.0, 0.0])
         } else {
             let fb = offscreen.expect("shm buffers should have offscreen target");
-            dt.render_output(renderer, fb, 0, &elements, [0.0, 0.0, 0.0, 0.0])
+            dt.render_output(renderer, fb, age, &elements, [0.0, 0.0, 0.0, 0.0])
         }
     }
 
@@ -831,7 +847,7 @@ pub fn render_cursor_to_buffer(
     };
     let result = match renderer {
         RendererRef::Glow(renderer) => {
-            match render_session::<_, _, GlesRenderbuffer>(
+            match render_session(
                 renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
@@ -857,7 +873,7 @@ pub fn render_cursor_to_buffer(
             }
         }
         RendererRef::GlMulti(mut renderer) => {
-            match render_session::<_, _, GlesRenderbuffer>(
+            match render_session(
                 &mut renderer,
                 session.user_data().get::<SessionData>().unwrap(),
                 frame,
