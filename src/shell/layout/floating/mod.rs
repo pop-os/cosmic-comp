@@ -686,11 +686,11 @@ impl FloatingLayout {
                 mapped_geometry.size = last_size;
             }
         } else if !window.is_maximized(true) {
-            if window.active_window().has_pending_changes() {
+            if window.active_window().has_pending_changes() || window.active_window().was_maximized() {
                 if let Some(pending_size) = window.pending_size() {
                     mapped_geometry.size = pending_size.as_local();
                 }
-            }
+            }  
             *window.last_geometry.lock().unwrap() = Some(mapped_geometry);
         }
 
