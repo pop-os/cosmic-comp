@@ -1242,11 +1242,7 @@ impl Workspace {
         Option<FullscreenRestoreState>,
         Option<Rectangle<i32, Local>>,
     )> {
-        let surface = self.fullscreen.take()?;
-        if surface.ended_at.is_some() {
-            self.fullscreen = Some(surface);
-            return None;
-        }
+        let surface = self.fullscreen.take_if(|s| s.ended_at.is_none())?;
 
         for focus_stack in self.focus_stack.0.values_mut() {
             focus_stack.retain(|t| t != &surface.surface);
