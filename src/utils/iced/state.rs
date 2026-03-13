@@ -145,11 +145,11 @@ where
             // for now :^)
             let temp_cache = user_interface.into_cache();
 
-            let tasks = Task::batch(messages.into_iter().map(|message| {
-                let task = self.program.update(message);
-
-                task
-            }));
+            let tasks = Task::batch(
+                messages
+                    .into_iter()
+                    .map(|message| self.program.update(message)),
+            );
 
             let mut user_interface =
                 build_user_interface(id, &mut self.program, temp_cache, renderer, bounds);
@@ -216,7 +216,5 @@ fn build_user_interface<'a, P: Program>(
 ) -> UserInterface<'a, P::Message, cosmic::Theme, cosmic::Renderer> {
     let view = program.view();
 
-    let user_interface = UserInterface::build(view, size, cache, renderer);
-
-    user_interface
+    UserInterface::build(view, size, cache, renderer)
 }

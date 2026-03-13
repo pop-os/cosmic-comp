@@ -61,10 +61,10 @@ impl ShadowShader {
 
         let mut geo = geo.to_f64();
         let fractional_pixel = scale.ceil() / scale;
-        geo.loc.x = geo.loc.x + fractional_pixel;
-        geo.loc.y = geo.loc.y + fractional_pixel;
-        geo.size.w = geo.size.w - fractional_pixel * 2.;
-        geo.size.h = geo.size.h - fractional_pixel * 2.;
+        geo.loc.x += fractional_pixel;
+        geo.loc.y += fractional_pixel;
+        geo.size.w -= fractional_pixel * 2.;
+        geo.size.h -= fractional_pixel * 2.;
 
         let user_data = Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
             .egl_context()
@@ -125,7 +125,7 @@ impl ShadowShader {
             .cast::<f32>()
             .unwrap();
 
-            let window_geo_loc = Vector2::new(window_geo.loc.x as f64, window_geo.loc.y as f64);
+            let window_geo_loc = Vector2::new(window_geo.loc.x, window_geo.loc.y);
             let window_input_to_geo = (Matrix3::from_nonuniform_scale(area_size.x, area_size.y)
                 * Matrix3::from_translation(Vector2::new(
                     -window_geo_loc.x / area_size.x,

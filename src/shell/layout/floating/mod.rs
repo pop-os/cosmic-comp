@@ -388,13 +388,12 @@ impl FloatingLayout {
         } else {
             self.animations.remove(&mapped);
         }
-        if mapped.floating_tiled.lock().unwrap().take().is_some() {
-            if let Some(state) = mapped.maximized_state.lock().unwrap().as_mut() {
-                if let Some(real_old_geo) = *mapped.last_geometry.lock().unwrap() {
-                    state.original_geometry = real_old_geo;
-                }
-            };
-        }
+        if mapped.floating_tiled.lock().unwrap().take().is_some()
+            && let Some(state) = mapped.maximized_state.lock().unwrap().as_mut()
+            && let Some(real_old_geo) = *mapped.last_geometry.lock().unwrap()
+        {
+            state.original_geometry = real_old_geo;
+        };
         self.space
             .map_element(mapped, geometry.loc.as_logical(), true);
         self.space.refresh();
@@ -686,10 +685,10 @@ impl FloatingLayout {
                 mapped_geometry.size = last_size;
             }
         } else if !window.is_maximized(true) {
-            if window.active_window().has_pending_changes() {
-                if let Some(pending_size) = window.pending_size() {
-                    mapped_geometry.size = pending_size.as_local();
-                }
+            if window.active_window().has_pending_changes()
+                && let Some(pending_size) = window.pending_size()
+            {
+                mapped_geometry.size = pending_size.as_local();
             }
             *window.last_geometry.lock().unwrap() = Some(mapped_geometry);
         }

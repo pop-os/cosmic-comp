@@ -356,22 +356,20 @@ where
             if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
-            ) {
-                if let Some(message) = self.press_message.clone() {
-                    shell.publish(message);
-                    shell.capture_event();
-                    return;
-                }
+            ) && let Some(message) = self.press_message.clone()
+            {
+                shell.publish(message);
+                shell.capture_event();
+                return;
             }
             if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right))
-            ) {
-                if let Some(message) = self.right_click_message.clone() {
-                    shell.publish(message);
-                    shell.capture_event();
-                    return;
-                }
+            ) && let Some(message) = self.right_click_message.clone()
+            {
+                shell.publish(message);
+                shell.capture_event();
+                return;
             }
             if matches!(
                 event,
@@ -379,7 +377,6 @@ where
             ) {
                 shell.publish(Message::activate(self.idx));
                 shell.capture_event();
-                return;
             }
         }
     }

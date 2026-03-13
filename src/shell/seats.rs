@@ -112,12 +112,12 @@ impl Devices {
             .collect::<Vec<_>>();
         map.insert(id, caps);
 
-        if device.has_capability(DeviceCapability::Keyboard) {
-            if let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(device) {
-                let mut device = device.clone();
-                device.led_update(led_state.into());
-                self.keyboards.borrow_mut().push(device);
-            }
+        if device.has_capability(DeviceCapability::Keyboard)
+            && let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(device)
+        {
+            let mut device = device.clone();
+            device.led_update(led_state.into());
+            self.keyboards.borrow_mut().push(device);
         }
 
         new_caps
@@ -385,10 +385,10 @@ impl SeatExt for Seat<State> {
         let lock = self.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
         // Reset the cursor if the surface is no longer alive
         let mut cursor_status = lock.lock().unwrap();
-        if let CursorImageStatus::Surface(ref surface) = *cursor_status {
-            if !surface.alive() {
-                *cursor_status = CursorImageStatus::default_named();
-            }
+        if let CursorImageStatus::Surface(ref surface) = *cursor_status
+            && !surface.alive()
+        {
+            *cursor_status = CursorImageStatus::default_named();
         }
         cursor_status.clone()
     }

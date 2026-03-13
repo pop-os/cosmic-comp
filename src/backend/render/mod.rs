@@ -529,19 +529,17 @@ where
             );
         }
 
-        if !exclude_dnd_icon {
-            if let Some(dnd_icon) = get_dnd_icon(seat) {
-                elements.extend(
-                    cursor::draw_dnd_icon(
-                        renderer,
-                        &dnd_icon.surface,
-                        (location + dnd_icon.offset.to_f64()).to_i32_round(),
-                        scale,
-                    )
-                    .into_iter()
-                    .map(CosmicElement::Dnd),
-                );
-            }
+        if !exclude_dnd_icon && let Some(dnd_icon) = get_dnd_icon(seat) {
+            elements.extend(
+                cursor::draw_dnd_icon(
+                    renderer,
+                    &dnd_icon.surface,
+                    (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                    scale,
+                )
+                .into_iter()
+                .map(CosmicElement::Dnd),
+            );
         }
 
         let theme = theme.cosmic();
@@ -1103,17 +1101,15 @@ impl PostprocessState {
         if let (Some(tex), Some(tracker)) = (
             self.cursor_texture.as_ref(),
             self.cursor_damage_tracker.as_ref(),
-        ) {
-            if tex.format().is_some_and(|f| f == format)
-                && tracker.mode()
-                    == &(OutputModeSource::Static {
-                        size,
-                        scale,
-                        transform: Transform::Normal,
-                    })
-            {
-                return Ok(());
-            }
+        ) && tex.format().is_some_and(|f| f == format)
+            && tracker.mode()
+                == &(OutputModeSource::Static {
+                    size,
+                    scale,
+                    transform: Transform::Normal,
+                })
+        {
+            return Ok(());
         }
 
         let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
