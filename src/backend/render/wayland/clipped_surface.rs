@@ -3,19 +3,23 @@
 use std::borrow::{Borrow, BorrowMut};
 
 use cgmath::{Matrix3, Vector2};
-use smithay::backend::renderer::{
-    ImportAll, ImportMem, Renderer,
-    element::{
-        Element, Id, Kind, RenderElement, UnderlyingStorage, surface::WaylandSurfaceRenderElement,
-    },
-    gles::{GlesFrame, GlesRenderer, GlesTexProgram, Uniform, UniformValue},
-    utils::{CommitCounter, DamageSet, OpaqueRegions},
-};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
+use smithay::{
+    backend::renderer::{
+        ImportAll, Renderer,
+        element::{
+            Element, Id, Kind, RenderElement, UnderlyingStorage,
+            surface::WaylandSurfaceRenderElement,
+        },
+        gles::{GlesFrame, GlesRenderer, GlesTexProgram, Uniform, UniformValue},
+        utils::{CommitCounter, DamageSet, OpaqueRegions},
+    },
+    utils::user_data::UserDataMap,
+};
 
 use crate::backend::render::element::AsGlowRenderer;
 
-pub static CLIPPING_SHADER: &str = include_str!("./shaders/clipped_surface.frag");
+pub static CLIPPING_SHADER: &str = include_str!("../shaders/clipped_surface.frag");
 pub struct ClippingShader(pub GlesTexProgram);
 
 impl ClippingShader {
@@ -31,10 +35,7 @@ impl ClippingShader {
 }
 
 #[derive(Debug)]
-pub struct ClippedSurfaceRenderElement<R>
-where
-    R: Renderer + ImportAll + ImportMem,
-{
+pub struct ClippedSurfaceRenderElement<R: Renderer> {
     inner: WaylandSurfaceRenderElement<R>,
     program: GlesTexProgram,
     radius: [u8; 4],
@@ -44,7 +45,7 @@ where
 
 impl<R> ClippedSurfaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll,
 {
     pub fn new(
         renderer: &mut R,
@@ -110,6 +111,7 @@ where
                     transpose: false,
                 },
             ),
+            Uniform::new("noise", UniformValue::_1f(0.0)),
         ];
 
         Self {
@@ -170,7 +172,8 @@ where
 
 impl<R> Element for ClippedSurfaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + AsGlowRenderer,
+    R::TextureId: 'static,
 {
     fn id(&self) -> &Id {
         self.inner.id()
@@ -243,7 +246,7 @@ where
 
 impl<R> RenderElement<R> for ClippedSurfaceRenderElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    R: AsGlowRenderer + Renderer + ImportAll,
     R::TextureId: 'static,
 {
     fn draw(
@@ -253,10 +256,12 @@ where
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
         BorrowMut::<GlesFrame>::borrow_mut(<R as AsGlowRenderer>::glow_frame_mut(frame))
             .override_default_tex_program(self.program.clone(), self.uniforms.clone());
-        self.inner.draw(frame, src, dst, damage, opaque_regions)?;
+        self.inner
+            .draw(frame, src, dst, damage, opaque_regions, cache)?;
         BorrowMut::<GlesFrame>::borrow_mut(<R as AsGlowRenderer>::glow_frame_mut(frame))
             .clear_tex_program_override();
         Ok(())

@@ -4852,6 +4852,7 @@ impl Shell {
                     |surface, _| {
                         surface_presentation_feedback_flags_from_states(
                             surface,
+                            None,
                             render_element_states,
                         )
                     },
@@ -4868,6 +4869,7 @@ impl Shell {
                     |surface, _| {
                         surface_presentation_feedback_flags_from_states(
                             surface,
+                            None,
                             render_element_states,
                         )
                     },
@@ -4877,11 +4879,16 @@ impl Shell {
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
+            let namespace = self.workspaces.active_num(output).1;
             layer_surface.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                    surface_presentation_feedback_flags_from_states(
+                        surface,
+                        Some(namespace),
+                        render_element_states,
+                    )
                 },
             );
         }
