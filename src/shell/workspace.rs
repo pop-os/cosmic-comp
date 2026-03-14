@@ -1238,6 +1238,27 @@ impl Workspace {
     }
 
     #[must_use]
+    pub fn take_fullscreen(
+        &mut self,
+    ) -> Option<(
+        CosmicSurface,
+        Option<FullscreenRestoreState>,
+        Option<Rectangle<i32, Local>>,
+    )> {
+        let surface = self.fullscreen.take_if(|s| s.ended_at.is_none())?;
+
+        for focus_stack in self.focus_stack.0.values_mut() {
+            focus_stack.retain(|t| t != &surface.surface);
+        }
+
+        Some((
+            surface.surface,
+            surface.previous_state,
+            surface.previous_geometry,
+        ))
+    }
+
+    #[must_use]
     pub fn remove_fullscreen(
         &mut self,
     ) -> Option<(
