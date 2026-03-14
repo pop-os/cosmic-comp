@@ -820,6 +820,7 @@ impl InnerDevice {
                     primary_node,
                     self.dev_node,
                     self.render_node,
+                    self.is_software,
                     evlh,
                     screen_filter,
                     shell,
