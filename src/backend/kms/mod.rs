@@ -37,7 +37,6 @@ use smithay::{
     wayland::{
         dmabuf::DmabufGlobal,
         drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd},
-        relative_pointer::RelativePointerManagerState,
     },
 };
 use surface::GbmDrmOutput;
@@ -91,7 +90,7 @@ pub fn init_backend(
     let (session, notifier) = LibSeatSession::new().context("Failed to acquire session")?;
 
     // setup input
-    let libinput_context = init_libinput(dh, &session, &event_loop.handle())
+    let libinput_context = init_libinput(&session, &event_loop.handle())
         .context("Failed to initialize libinput backend")?;
 
     // watch for gpu events
@@ -179,11 +178,7 @@ pub fn init_backend(
     Ok(())
 }
 
-fn init_libinput(
-    dh: &DisplayHandle,
-    session: &LibSeatSession,
-    evlh: &LoopHandle<'static, State>,
-) -> Result<Libinput> {
+fn init_libinput(session: &LibSeatSession, evlh: &LoopHandle<'static, State>) -> Result<Libinput> {
     let mut libinput_context =
         Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(session.clone().into());
     libinput_context
@@ -211,9 +206,6 @@ fn init_libinput(
     })
     .map_err(|err| err.error)
     .context("Failed to initialize libinput event source")?;
-
-    // Create relative pointer global
-    RelativePointerManagerState::new::<State>(dh);
 
     Ok(libinput_context)
 }
