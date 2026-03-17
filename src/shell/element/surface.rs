@@ -429,6 +429,10 @@ impl CosmicSurface {
             .store(minimized, Ordering::SeqCst);
         if let WindowSurface::X11(surface) = self.0.underlying_surface() {
             let _ = surface.set_hidden(minimized);
+            if !minimized && surface.is_fullscreen() {
+                let _ = surface.set_mapped(false);
+                let _ = surface.set_mapped(true);
+            }
         }
     }
 
