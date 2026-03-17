@@ -115,7 +115,6 @@ use smithay::{
     },
     xwayland::XWaylandClientData,
 };
-use time::UtcOffset;
 use tracing::warn;
 
 #[cfg(feature = "systemd")]
@@ -242,7 +241,7 @@ pub struct Common {
     pub clock: Clock<Monotonic>,
     pub startup_done: Arc<AtomicBool>,
     pub should_stop: bool,
-    pub local_offset: time::UtcOffset,
+
     pub gesture_state: Option<GestureState>,
 
     pub kiosk_child: Option<Child>,
@@ -635,7 +634,6 @@ impl State {
             .with_context(|| "Failed to load languages")
             .unwrap();
 
-        let local_offset = UtcOffset::current_local_offset().expect("No yet multithreaded");
         let clock = Clock::new();
         let config = Config::load(&handle);
         let compositor_state = CompositorState::new::<Self>(dh);
@@ -748,8 +746,6 @@ impl State {
 
                 popups: PopupManager::default(),
                 shell,
-
-                local_offset,
 
                 clock,
                 startup_done: Arc::new(AtomicBool::new(false)),
