@@ -3,6 +3,7 @@
 //! Compare to Mutter's `MetaDbusAccessChecker`
 
 use futures_executor::ThreadPool;
+use futures_util::stream::FusedStream;
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use std::{
     collections::{HashMap, HashSet},
@@ -38,9 +39,15 @@ impl Inner {
     /// Process all events so far on `stream`, and update `name_owners`.
     fn update_if_needed(&mut self) {
         let mut context = Context::from_waker(&self.waker);
-        while let Poll::Ready(val) = self.stream.poll_next_unpin(&mut context) {
-            let val = val.unwrap();
-            let args = val.args().unwrap();
+        while !self.stream.is_terminated()
+            && let Poll::Ready(val) = self.stream.poll_next_unpin(&mut context)
+        {
+            let Some(val) = val else {
+                break;
+            };
+            let Ok(args) = val.args() else {
+                break;
+            };
             match args.name {
                 BusName::Unique(name) => {
                     if args.new_owner.is_some() {
