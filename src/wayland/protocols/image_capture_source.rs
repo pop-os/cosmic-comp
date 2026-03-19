@@ -1,9 +1,7 @@
 use super::{
     workspace::{WorkspaceHandle, WorkspaceHandler},
 };
-use crate::{
-    shell::CosmicSurface,
-};
+use crate::shell::element::surface::WeakCosmicSurface;
 use cosmic_protocols::image_capture_source::v1::server::{
     zcosmic_workspace_image_capture_source_manager_v1::{
         Request as CosmicWorkspaceSourceRequest, ZcosmicWorkspaceImageCaptureSourceManagerV1,
@@ -30,11 +28,11 @@ pub struct WorkspaceImageCaptureSourceManagerGlobalData {
     filter: Box<dyn for<'a> Fn(&'a Client) -> bool + Send + Sync>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum ImageCaptureSourceKind {
     Output(WeakOutput),
     Workspace(WorkspaceHandle),
-    Toplevel(CosmicSurface),
+    Toplevel(WeakCosmicSurface),
     Destroyed,
 }
 
