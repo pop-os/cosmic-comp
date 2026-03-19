@@ -1,7 +1,7 @@
 a11y-zoom-move-continuously = 视图随指针连续移动
 a11y-zoom-move-onedge = 指针到达边缘时视图移动
 a11y-zoom-move-centered = 视图移动时保持指针居中
-a11y-zoom-settings = 放大镜设置...
+a11y-zoom-settings = 放大镜设置…
 grow-window = 增大
 shrink-window = 缩小
 swap-windows = 交换窗口
