@@ -1502,6 +1502,7 @@ impl Common {
         self.toplevel_info_state.refresh(&self.workspace_state);
         self.refresh_idle_inhibit();
         self.a11y_keyboard_monitor_state.refresh();
+        self.image_copy_capture_state.cleanup();
     }
 
     pub fn refresh_idle_inhibit(&mut self) {
