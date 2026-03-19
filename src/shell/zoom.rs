@@ -41,7 +41,7 @@ use crate::{
 };
 
 use super::{
-    ANIMATION_DURATION, check_grab_preconditions,
+    animation_duration, animation_progress, check_grab_preconditions,
     focus::target::PointerFocusTarget,
     grabs::{ContextMenu, Item, MenuAlignment, MenuGrab},
 };
@@ -58,6 +58,7 @@ pub struct ZoomState {
 pub struct OutputZoomState {
     pub(super) level: f64,
     pub(super) previous_level: Option<(f64, Instant)>,
+    animations_enabled: bool,
     focal_point: Point<f64, Local>,
     previous_point: Option<(Point<f64, Local>, Instant)>,
     element: ZoomElement,
@@ -70,6 +71,7 @@ impl OutputZoomState {
         level: f64,
         increment: u32,
         movement: ZoomMovement,
+        animations_enabled: bool,
         loop_handle: LoopHandle<'static, State>,
         theme: cosmic::Theme,
     ) -> OutputZoomState {
@@ -118,6 +120,7 @@ impl OutputZoomState {
         OutputZoomState {
             level,
             previous_level: None,
+            animations_enabled,
             focal_point,
             previous_point: None,
             element,
@@ -125,15 +128,19 @@ impl OutputZoomState {
     }
 
     pub fn animating_focal_point(&mut self) -> Point<f64, Local> {
+        if !self.animations_enabled {
+            self.previous_point = None;
+            return self.focal_point;
+        }
+
         if let Some((old_point, start)) = self.previous_point.as_ref() {
-            let duration_since = Instant::now().duration_since(*start);
-            if duration_since > ANIMATION_DURATION {
+            let duration = animation_duration(self.animations_enabled);
+            if duration.is_zero() || Instant::now().duration_since(*start) > duration {
                 self.previous_point.take();
                 return self.focal_point;
             }
 
-            let percentage =
-                duration_since.as_millis() as f32 / ANIMATION_DURATION.as_millis() as f32;
+            let percentage = animation_progress(*start, duration);
             ease(
                 EaseInOutCubic,
                 EasePoint(*old_point),
@@ -155,10 +162,13 @@ impl OutputZoomState {
     }
 
     pub fn animating_level(&self) -> f64 {
-        if let Some((old_level, start)) = self.previous_level.as_ref() {
-            let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                / ANIMATION_DURATION.as_millis() as f32;
+        if !self.animations_enabled {
+            return self.level;
+        }
 
+        if let Some((old_level, start)) = self.previous_level.as_ref() {
+            let percentage =
+                animation_progress(*start, animation_duration(self.animations_enabled));
             ease(EaseInOutCubic, *old_level, self.level, percentage)
         } else {
             self.level
@@ -166,22 +176,36 @@ impl OutputZoomState {
     }
 
     pub fn is_animating(&self) -> bool {
-        self.previous_point.is_some() || self.previous_level.is_some()
+        self.animations_enabled && (self.previous_point.is_some() || self.previous_level.is_some())
     }
 
     pub fn refresh(&mut self) -> bool {
-        if self
-            .previous_level
-            .as_ref()
-            .is_some_and(|(_, start)| Instant::now().duration_since(*start) > ANIMATION_DURATION)
-        {
-            self.previous_level.take();
+        let duration = animation_duration(self.animations_enabled);
+        if duration.is_zero() {
+            self.previous_level = None;
+            self.previous_point = None;
+        } else {
+            if self
+                .previous_level
+                .as_ref()
+                .is_some_and(|(_, start)| Instant::now().duration_since(*start) > duration)
+            {
+                self.previous_level.take();
+            }
+            if self
+                .previous_point
+                .as_ref()
+                .is_some_and(|(_, start)| Instant::now().duration_since(*start) > duration)
+            {
+                self.previous_point.take();
+            }
         }
         self.element.refresh();
-        self.level == 1. && self.previous_level.is_none()
+        self.level == 1. && self.previous_level.is_none() && self.previous_point.is_none()
     }
 
     pub fn update(&mut self, level: f64, animate: bool, movement: ZoomMovement, increment: u32) {
+        let animate = animate && self.animations_enabled;
         self.previous_level = animate.then_some((self.animating_level(), Instant::now()));
         self.level = level;
         self.element.set_additional_scale(level.min(4.));
@@ -190,6 +214,14 @@ impl OutputZoomState {
             movement,
             increment,
         });
+    }
+
+    pub fn set_animations_enabled(&mut self, enabled: bool) {
+        self.animations_enabled = enabled;
+        if !enabled {
+            self.previous_level = None;
+            self.previous_point = None;
+        }
     }
 
     fn render<R, C>(&mut self, renderer: &mut R, output: &Output) -> Vec<C>
@@ -269,7 +301,9 @@ impl ZoomState {
 
         // animate movement type changes
         if self.movement != movement {
-            output_state_ref.previous_point = Some((output_state_ref.focal_point, Instant::now()));
+            output_state_ref.previous_point = output_state_ref
+                .animations_enabled
+                .then_some((output_state_ref.focal_point, Instant::now()));
             self.movement = movement;
         }
 
@@ -298,8 +332,9 @@ impl ZoomState {
                         output_geometry.loc.y,
                         output_geometry.loc.y + output_geometry.size.h - 1,
                     );
-                    output_state_ref.previous_point =
-                        Some((output_state_ref.focal_point, Instant::now()));
+                    output_state_ref.previous_point = output_state_ref
+                        .animations_enabled
+                        .then_some((output_state_ref.focal_point, Instant::now()));
                     output_state_ref.focal_point = focal_point.to_local(output).to_f64();
                 } else if !zoomed_output_geometry.contains(cursor_position.to_global(output)) {
                     let mut diff = output_state_ref.focal_point.to_global(output)

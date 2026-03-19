@@ -34,6 +34,7 @@ pub struct Tabs<'a, Message> {
     id: Option<Id>,
     height: Length,
     width: Length,
+    animations_enabled: bool,
     group_focused: bool,
     scroll_to: Option<usize>,
 }
@@ -56,6 +57,7 @@ struct TabAnimationState {
 /// The local state of [`Tabs`].
 #[derive(Debug, Clone)]
 pub struct State {
+    animations_enabled: bool,
     offset_x: Offset,
     scroll_animation: Option<ScrollAnimationState>,
     scroll_to: Option<usize>,
@@ -70,7 +72,7 @@ impl Scrollable for State {
 
     fn scroll_to(&mut self, offset: AbsoluteOffset<Option<f32>>) {
         let new_offset = Offset::Absolute(offset.x.unwrap_or(0.0).max(0.0));
-        self.scroll_animation = Some(ScrollAnimationState {
+        self.scroll_animation = self.animations_enabled.then_some(ScrollAnimationState {
             start_time: Instant::now(),
             start: self.offset_x,
             end: new_offset,
@@ -85,7 +87,7 @@ impl Scrollable for State {
         _bounds: Rectangle,
         _content_bounds: Rectangle,
     ) {
-        self.scroll_animation = Some(ScrollAnimationState {
+        self.scroll_animation = self.animations_enabled.then_some(ScrollAnimationState {
             start_time: Instant::now(),
             start: self.offset_x,
             end: self.offset_x,
@@ -97,6 +99,7 @@ impl Scrollable for State {
 impl Default for State {
     fn default() -> Self {
         State {
+            animations_enabled: true,
             offset_x: Offset::Absolute(0.),
             scroll_animation: None,
             scroll_to: None,
@@ -133,6 +136,7 @@ where
         active: usize,
         activated: bool,
         group_focused: bool,
+        animations_enabled: bool,
     ) -> Self {
         let tabs = tabs.into_iter().enumerate().map(|(i, tab)| {
             let rule = if activated {
@@ -205,6 +209,7 @@ where
             id: None,
             width: Length::Fill,
             height: Length::Shrink,
+            animations_enabled,
             group_focused,
             scroll_to: None,
         }
@@ -232,7 +237,19 @@ where
 }
 
 impl State {
+    fn set_animations_enabled(&mut self, enabled: bool) {
+        self.animations_enabled = enabled;
+        if !enabled {
+            self.scroll_animation = None;
+            self.tab_animations.clear();
+        }
+    }
+
     fn next_tab_animation(&self) -> Option<&TabAnimationState> {
+        if !self.animations_enabled {
+            return None;
+        }
+
         let now = Instant::now();
 
         self.tab_animations
@@ -241,7 +258,9 @@ impl State {
     }
 
     pub fn offset(&self, bounds: Rectangle, content_bounds: Size) -> Vector {
-        if let Some(animation) = self.scroll_animation {
+        if self.animations_enabled
+            && let Some(animation) = self.scroll_animation
+        {
             let percentage = {
                 let percentage = Instant::now()
                     .duration_since(animation.start_time)
@@ -268,6 +287,12 @@ impl State {
     }
 
     pub fn cleanup_old_animations(&mut self) {
+        if !self.animations_enabled {
+            self.scroll_animation = None;
+            self.tab_animations.clear();
+            return;
+        }
+
         let start_time = Instant::now();
 
         if let Some(animation) = self.scroll_animation.as_ref()
@@ -341,6 +366,10 @@ where
 
     #[allow(clippy::too_many_lines)]
     fn layout(&mut self, tree: &mut Tree, renderer: &cosmic::Renderer, limits: &Limits) -> Node {
+        tree.state
+            .downcast_mut::<State>()
+            .set_animations_enabled(self.animations_enabled);
+
         let limits = limits.width(self.width).height(self.height);
         let element_count = self.elements.len();
         // calculate the smallest possible size
@@ -694,6 +723,7 @@ where
         operation: &mut dyn Operation<()>,
     ) {
         let state = tree.state.downcast_mut::<State>();
+        state.set_animations_enabled(self.animations_enabled);
         let bounds = layout.bounds();
         let content_layout = layout.children().next().unwrap();
         let content_bounds = content_layout.bounds();
@@ -734,6 +764,7 @@ where
         viewport: &Rectangle,
     ) {
         let state = tree.state.downcast_mut::<State>();
+        state.set_animations_enabled(self.animations_enabled);
         state.cleanup_old_animations();
 
         let mut bounds = layout.bounds();
@@ -790,7 +821,9 @@ where
         };
 
         if unknown_keys || changes.is_some() {
-            if !scrolling || !matches!(changes, Some(Difference::Focus)) {
+            if state.animations_enabled
+                && (!scrolling || !matches!(changes, Some(Difference::Focus)))
+            {
                 let start_time = Instant::now();
 
                 State::discard_expired_tab_animations(&mut state.tab_animations, start_time);
@@ -843,12 +876,13 @@ where
                         }
                     };
 
-                    state.scroll_animation = Some(ScrollAnimationState {
-                        start_time: Instant::now(),
-                        start: Offset::Absolute(offset.x),
-                        end: Offset::Absolute(new_offset.x),
-                        extra: Offset::Absolute(0.),
-                    });
+                    state.scroll_animation =
+                        state.animations_enabled.then_some(ScrollAnimationState {
+                            start_time: Instant::now(),
+                            start: Offset::Absolute(offset.x),
+                            end: Offset::Absolute(new_offset.x),
+                            extra: Offset::Absolute(0.),
+                        });
                     state.offset_x = Offset::Absolute(new_offset.x);
                 }
             }
