@@ -21,3 +21,4 @@ window-menu-resize-edge-top = 頂部
 window-menu-resize-edge-left = 左側
 window-menu-resize-edge-right = 右側
 window-menu-resize-edge-bottom = 底部
+a11y-zoom-move-continuously = 檢視畫面隨指標持續移動
