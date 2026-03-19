@@ -22,7 +22,7 @@ use smithay::{
         },
     },
     desktop::{
-        PopupManager, Window, WindowSurface, WindowSurfaceType, space::SpaceElement,
+        PopupManager, WeakWindow, Window, WindowSurface, WindowSurfaceType, space::SpaceElement,
         utils::OutputPresentationFeedback,
     },
     input::{
@@ -67,6 +67,9 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct CosmicSurface(pub Window);
 
+#[derive(Debug, Clone)]
+pub struct WeakCosmicSurface(pub WeakWindow);
+
 impl From<ToplevelSurface> for CosmicSurface {
     fn from(s: ToplevelSurface) -> Self {
         CosmicSurface(Window::new_wayland_window(s))
@@ -100,6 +103,12 @@ impl PartialEq<ToplevelSurface> for CosmicSurface {
 impl PartialEq<X11Surface> for CosmicSurface {
     fn eq(&self, other: &X11Surface) -> bool {
         self.x11_surface() == Some(other)
+    }
+}
+
+impl PartialEq<WeakCosmicSurface> for CosmicSurface {
+    fn eq(&self, other: &WeakCosmicSurface) -> bool {
+        other.upgrade().is_some_and(|other| other == *self)
     }
 }
 
@@ -848,6 +857,16 @@ impl CosmicSurface {
 
     pub fn x11_surface(&self) -> Option<&X11Surface> {
         self.0.x11_surface()
+    }
+
+    pub fn downgrade(&self) -> WeakCosmicSurface {
+        WeakCosmicSurface(self.0.downgrade())
+    }
+}
+
+impl WeakCosmicSurface {
+    pub fn upgrade(&self) -> Option<CosmicSurface> {
+        self.0.upgrade().map(CosmicSurface)
     }
 }
 
