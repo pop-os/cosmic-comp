@@ -6,7 +6,6 @@ use std::{
     collections::HashMap,
     ops::ControlFlow,
     sync::{Arc, Weak},
-    time::Instant,
 };
 
 #[cfg(feature = "debug")]
@@ -22,12 +21,11 @@ use crate::{
     },
     config::ScreenFilter,
     shell::{
-        CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
-        WorkspaceRenderElement,
+        CosmicMappedRenderElement, SeatExt, Trigger, WorkspaceDelta, WorkspaceRenderElement,
         element::CosmicMappedKey,
         focus::{FocusTarget, Stage, render_input_order, target::WindowGroup},
         grabs::{SeatMenuGrabState, SeatMoveGrabState},
-        layout::tiling::ANIMATION_DURATION,
+        overview_fade_alpha,
         zoom::ZoomState,
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
@@ -887,23 +885,7 @@ where
                 }));
             }
             Stage::StickyPopups(layout) => {
-                let alpha = match &overview.0 {
-                    OverviewMode::Started(_, started) => {
-                        (1.0 - (Instant::now().duration_since(*started).as_millis()
-                            / ANIMATION_DURATION.as_millis()) as f32)
-                            .max(0.0)
-                            * 0.4
-                            + 0.6
-                    }
-                    OverviewMode::Ended(_, ended) => {
-                        ((Instant::now().duration_since(*ended).as_millis()
-                            / ANIMATION_DURATION.as_millis()) as f32)
-                            * 0.4
-                            + 0.6
-                    }
-                    OverviewMode::Active(_) => 0.6,
-                    OverviewMode::None => 1.0,
-                };
+                let alpha = overview_fade_alpha(&overview.0, shell.animations_enabled());
 
                 elements.extend(
                     layout
@@ -915,23 +897,7 @@ where
                 );
             }
             Stage::Sticky(layout) => {
-                let alpha = match &overview.0 {
-                    OverviewMode::Started(_, started) => {
-                        (1.0 - (Instant::now().duration_since(*started).as_millis()
-                            / ANIMATION_DURATION.as_millis()) as f32)
-                            .max(0.0)
-                            * 0.4
-                            + 0.6
-                    }
-                    OverviewMode::Ended(_, ended) => {
-                        ((Instant::now().duration_since(*ended).as_millis()
-                            / ANIMATION_DURATION.as_millis()) as f32)
-                            * 0.4
-                            + 0.6
-                    }
-                    OverviewMode::Active(_) => 0.6,
-                    OverviewMode::None => 1.0,
-                };
+                let alpha = overview_fade_alpha(&overview.0, shell.animations_enabled());
 
                 let current_focus = (!move_active && is_active_space)
                     .then_some(last_active_seat)

@@ -12,5 +12,6 @@ target
 vendor
 vendor.tar
 .vscode
+.idea
 *.log
 /result
