@@ -61,6 +61,7 @@ pub enum PointerFocusTarget {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum PointerFocusToplevel {
     Surface(CosmicSurface),
     Popup(PopupKind),

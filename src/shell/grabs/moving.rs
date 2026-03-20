@@ -737,6 +737,8 @@ impl MoveGrab {
         release: ReleaseMode,
         evlh: LoopHandle<'static, State>,
     ) -> MoveGrab {
+        // false-positive: `Output`s hash is based on it's inner ptr
+        #[allow(clippy::mutable_key_type)]
         let mut outputs = HashSet::new();
         outputs.insert(cursor_output.clone());
         window.output_enter(&cursor_output, window.geometry()); // not accurate but...
@@ -798,6 +800,8 @@ impl Drop for MoveGrab {
         // No more buttons are pressed, release the grab.
         let output = self.cursor_output.clone();
         let seat = self.seat.clone();
+        // false-positive: `Output`s hash is based on it's inner ptr
+        #[allow(clippy::mutable_key_type)]
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
         let previous = self.previous;
         let window = self.window.clone();

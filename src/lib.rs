@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::len_without_is_empty
+)]
 // SPDX-License-Identifier: GPL-3.0-only
 
 use calloop::timer::{TimeoutAction, Timer};
