@@ -1,4 +1,4 @@
-a11y-zoom-move-continuously = A vista move-se continuamente com o ponteiro
+a11y-zoom-move-continuously = A visualização move-se continuamente com o cursor
 a11y-zoom-move-onedge = A vista move-se quando o ponteiro atinge a extremidade
 a11y-zoom-move-centered = A vista move-se para manter o ponteiro centrado
 a11y-zoom-settings = Definições do ampliador...
