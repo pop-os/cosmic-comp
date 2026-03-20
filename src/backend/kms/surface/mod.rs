@@ -511,8 +511,10 @@ fn surface_thread(
     let egui = {
         let state =
             smithay_egui::EguiState::new(smithay::utils::Rectangle::from_size((400, 800).into()));
-        let mut visuals: egui::style::Visuals = Default::default();
-        visuals.window_shadow = egui::Shadow::NONE;
+        let visuals = egui::style::Visuals {
+            window_shadow: egui::Shadow::NONE,
+            ..Default::default()
+        };
         state.context().set_visuals(visuals);
         state
     };

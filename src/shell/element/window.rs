@@ -154,6 +154,8 @@ impl Focus {
         }
     }
 
+    /// # Safety
+    /// `value` must be in the range of `Focus`
     pub unsafe fn from_u8(value: u8) -> Option<Focus> {
         match value {
             0 => None,
