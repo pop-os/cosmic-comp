@@ -102,6 +102,12 @@ impl State {
 
     pub fn handle_swipe_action(&mut self, action: gestures::SwipeAction, seat: &Seat<State>) {
         use gestures::SwipeAction;
+        let wraparound: bool = self
+            .common
+            .config
+            .cosmic_conf
+            .workspaces
+            .workspace_wraparound;
 
         match action {
             SwipeAction::NextWorkspace => {
@@ -109,6 +115,7 @@ impl State {
                     &mut self.common.shell.write(),
                     seat,
                     true,
+                    wraparound,
                     &mut self.common.workspace_state.update(),
                 );
             }
@@ -117,6 +124,7 @@ impl State {
                     &mut self.common.shell.write(),
                     seat,
                     true,
+                    wraparound,
                     &mut self.common.workspace_state.update(),
                 );
             }
@@ -203,32 +211,26 @@ impl State {
                     &mut self.common.shell.write(),
                     seat,
                     false,
+                    self.common
+                        .config
+                        .cosmic_conf
+                        .workspaces
+                        .workspace_wraparound,
                     &mut self.common.workspace_state.update(),
                 );
-                if next.is_err() {
-                    if propagate {
-                        if let Some(inferred) = pattern.inferred_direction() {
-                            self.handle_shortcut_action(
-                                Action::SwitchOutput(inferred),
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                direction,
-                                true,
-                            )
-                        };
-                    } else {
-                        self.handle_shortcut_action(
-                            Action::Workspace(1),
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            direction,
-                            false,
-                        )
-                    }
+                if next.is_err()
+                    && propagate
+                    && let Some(inferred) = pattern.inferred_direction()
+                {
+                    self.handle_shortcut_action(
+                        Action::SwitchOutput(inferred),
+                        seat,
+                        serial,
+                        time,
+                        pattern,
+                        direction,
+                        true,
+                    )
                 }
             }
 
@@ -248,33 +250,27 @@ impl State {
                     &mut self.common.shell.write(),
                     seat,
                     false,
+                    self.common
+                        .config
+                        .cosmic_conf
+                        .workspaces
+                        .workspace_wraparound,
                     &mut self.common.workspace_state.update(),
                 );
-                if previous.is_err() {
-                    if propagate {
-                        if let Some(inferred) = pattern.inferred_direction() {
-                            self.handle_shortcut_action(
-                                Action::SwitchOutput(inferred),
-                                seat,
-                                serial,
-                                time,
-                                pattern,
-                                direction,
-                                true,
-                            )
-                        };
-                    } else {
-                        self.handle_shortcut_action(
-                            Action::LastWorkspace,
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            direction,
-                            false,
-                        )
-                    }
-                }
+                if previous.is_err()
+                    && propagate
+                    && let Some(inferred) = pattern.inferred_direction()
+                {
+                    self.handle_shortcut_action(
+                        Action::SwitchOutput(inferred),
+                        seat,
+                        serial,
+                        time,
+                        pattern,
+                        direction,
+                        true,
+                    )
+                };
             }
 
             x @ Action::MoveToWorkspace(_) | x @ Action::SendToWorkspace(_) => {
@@ -398,20 +394,29 @@ impl State {
                         }
                     }
                     Err(_) => {
-                        // cycle through
-                        self.handle_shortcut_action(
-                            if matches!(x, Action::MoveToNextWorkspace) {
-                                Action::MoveToWorkspace(1)
-                            } else {
-                                Action::SendToWorkspace(1)
-                            },
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            direction,
-                            false,
-                        )
+                        let wraparound = self
+                            .common
+                            .config
+                            .cosmic_conf
+                            .workspaces
+                            .workspace_wraparound;
+
+                        if wraparound {
+                            // cycle through
+                            self.handle_shortcut_action(
+                                if matches!(x, Action::MoveToNextWorkspace) {
+                                    Action::MoveToWorkspace(1)
+                                } else {
+                                    Action::SendToWorkspace(1)
+                                },
+                                seat,
+                                serial,
+                                time,
+                                pattern,
+                                direction,
+                                false,
+                            )
+                        }
                     }
                 }
             }
@@ -480,20 +485,29 @@ impl State {
                         }
                     }
                     Err(_) => {
-                        // cycle through
-                        self.handle_shortcut_action(
-                            if matches!(x, Action::MoveToPreviousWorkspace) {
-                                Action::MoveToLastWorkspace
-                            } else {
-                                Action::SendToLastWorkspace
-                            },
-                            seat,
-                            serial,
-                            time,
-                            pattern,
-                            direction,
-                            false,
-                        )
+                        let wraparound = self
+                            .common
+                            .config
+                            .cosmic_conf
+                            .workspaces
+                            .workspace_wraparound;
+
+                        if wraparound {
+                            // cycle through
+                            self.handle_shortcut_action(
+                                if matches!(x, Action::MoveToPreviousWorkspace) {
+                                    Action::MoveToLastWorkspace
+                                } else {
+                                    Action::SendToLastWorkspace
+                                },
+                                seat,
+                                serial,
+                                time,
+                                pattern,
+                                direction,
+                                false,
+                            )
+                        }
                     }
                 }
             }
@@ -1096,6 +1110,7 @@ fn to_next_workspace(
     shell: &mut Shell,
     seat: &Seat<State>,
     gesture: bool,
+    wraparound: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
 ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
@@ -1103,7 +1118,7 @@ fn to_next_workspace(
     let mut workspace = active.checked_add(1).ok_or(InvalidWorkspaceIndex)?;
 
     if workspace >= shell.workspaces.len(&current_output) {
-        workspace = 0;
+        workspace = if wraparound { 0 } else { active }
     }
     if workspace == active {
         return Err(InvalidWorkspaceIndex);
@@ -1125,17 +1140,20 @@ fn to_previous_workspace(
     shell: &mut Shell,
     seat: &Seat<State>,
     gesture: bool,
+    wraparound: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
 ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
     let current_output = seat.active_output();
     let active = shell.workspaces.active_num(&current_output).1;
-    let workspace = active.checked_sub(1).unwrap_or(
+    let workspace = active.checked_sub(1).unwrap_or(if wraparound {
         shell
             .workspaces
             .len(&current_output)
             .checked_sub(1)
-            .ok_or(InvalidWorkspaceIndex)?,
-    );
+            .ok_or(InvalidWorkspaceIndex)?
+    } else {
+        0
+    });
 
     if workspace == active {
         return Err(InvalidWorkspaceIndex);
