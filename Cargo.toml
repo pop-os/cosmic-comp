@@ -13,57 +13,67 @@ members = ["cosmic-comp-config"]
 anyhow = { version = "1.0.102", features = ["backtrace"] }
 bitflags = "2.11.0"
 calloop = { version = "0.14.4", features = ["executor"] }
+cgmath = "0.18.0"
+# CLI arguments
+clap_lex = "1.0"
 cosmic-comp-config = { path = "cosmic-comp-config", features = [
-    "libdisplay-info",
-    "output",
+  "libdisplay-info",
+  "output",
 ] }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic", features = [
-    "calloop",
-    "macro",
+  "calloop",
+  "macro",
 ] }
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "160b086", default-features = false, features = [
-    "server",
+  "server",
 ] }
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
 cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
-    "greeter",
+  "greeter",
 ] }
 cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = [
-    "shape-run-cache",
+  "shape-run-cache",
 ] }
-libdisplay-info = "0.3.0"
 egui = { version = "0.31.1", optional = true }
 egui_plot = { version = "0.31.0", optional = true }
+futures-executor = { version = "0.3.32", features = ["thread-pool"] }
+futures-util = "0.3.32"
 i18n-embed = { version = "0.16", features = [
-    "fluent-system",
-    "desktop-requester",
+  "desktop-requester",
+  "fluent-system",
 ] }
 i18n-embed-fl = "0.10"
 iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic" }
 indexmap = "2.13"
+jiff = "0.2"
 keyframe = "1.1.1"
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
+libdisplay-info = "0.3.0"
 libsystemd = { version = "0.7", optional = true }
 log-panics = { version = "2", features = ["with-backtrace"] }
+logind-zbus = { version = "5.3.2", optional = true }
 ordered-float = "5.1"
+parking_lot = "0.12.5"
 png = "0.18"
+profiling = { version = "1.0" }
+rand = "0.10"
 regex = "1"
 ron = "0.12"
 rust-embed = { version = "8.11", features = ["debug-embed"] }
+rustix = { version = "1.1.4", features = ["process"] }
 sanitize-filename = "0.6.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.18"
-jiff = "0.2"
 tiny-skia = "0.11"
 tracing = { version = "0.1.44", features = [
-    "max_level_debug",
-    "release_max_level_info",
+  "max_level_debug",
+  "release_max_level_info",
 ] }
 tracing-journald = "0.3.2"
 tracing-subscriber = { version = "0.3.22", features = [
-    "env-filter",
-    "tracing-log",
+  "env-filter",
+  "tracing-log",
 ] }
 tracy-client = { version = "0.18.4", default-features = false }
 wayland-backend = "0.3.12"
@@ -73,40 +83,30 @@ xdg = "^3.0"
 xdg-user = "0.2.1"
 xkbcommon = "0.9"
 zbus = "5.14.0"
-profiling = { version = "1.0" }
-rustix = { version = "1.1.4", features = ["process"] }
-rand = "0.10"
-# CLI arguments
-clap_lex = "1.0"
-parking_lot = "0.12.5"
-logind-zbus = { version = "5.3.2", optional = true }
-futures-executor = { version = "0.3.32", features = ["thread-pool"] }
-futures-util = "0.3.32"
-cgmath = "0.18.0"
 
 [dependencies.id_tree]
-branch = "feature/copy_clone"
 git = "https://github.com/Drakulix/id-tree.git"
+branch = "feature/copy_clone"
 
 [dependencies.smithay]
 version = "0.7.0"
 default-features = false
 features = [
-    "backend_drm",
-    "backend_gbm",
-    "backend_egl",
-    "backend_libinput",
-    "backend_session_libseat",
-    "backend_udev",
-    "backend_winit",
-    "backend_vulkan",
-    "backend_x11",
-    "desktop",
-    "renderer_glow",
-    "renderer_multi",
-    "renderer_pixman",
-    "wayland_frontend",
-    "xwayland",
+  "backend_drm",
+  "backend_egl",
+  "backend_gbm",
+  "backend_libinput",
+  "backend_session_libseat",
+  "backend_udev",
+  "backend_vulkan",
+  "backend_winit",
+  "backend_x11",
+  "desktop",
+  "renderer_glow",
+  "renderer_multi",
+  "renderer_pixman",
+  "wayland_frontend",
+  "xwayland",
 ]
 
 [dependencies.smithay-egui]
@@ -115,31 +115,31 @@ features = ["svg"]
 optional = true
 
 [features]
-debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
-systemd = ["libsystemd", "logind-zbus"]
+debug = ["anyhow/backtrace", "egui", "egui_plot", "smithay-egui"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
 profile-with-tracy-gpu = ["profile-with-tracy", "smithay/tracy_gpu_profiling"]
+systemd = ["libsystemd", "logind-zbus"]
 
-[profile.dev.package.tiny-skia]
-opt-level = 2
+[patch.crates-io]
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "e84a4ca" }
+
+[patch."https://github.com/pop-os/cosmic-protocols"]
+cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
+cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [profile.dev.package.rustybuzz]
+opt-level = 2
+
+[profile.dev.package.tiny-skia]
 opt-level = 2
 
 [profile.dev.package.ttf-parser]
 opt-level = 2
 
-[profile.fastdebug]
-debug = true
-inherits = "release"
-
 [profile.release]
 lto = "fat"
 
-[patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-
-[patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "e84a4ca" }
+[profile.fastdebug]
+inherits = "release"
+debug = true
