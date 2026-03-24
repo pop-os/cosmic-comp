@@ -1459,35 +1459,32 @@ impl TilingLayout {
         let _ = tree.remove_node(node.clone(), RemoveBehavior::DropChildren);
 
         // fixup parent node
-        match parent_id {
-            Some(id) => {
-                let position = position.unwrap();
-                let group = tree.get_mut(&id).unwrap().data_mut();
-                assert!(group.is_group());
+        if let Some(id) = parent_id {
+            let position = position.unwrap();
+            let group = tree.get_mut(&id).unwrap().data_mut();
+            assert!(group.is_group());
 
-                if group.len() > 2 {
-                    group.remove_window(position);
-                } else {
-                    trace!("Removing Group");
-                    let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
-                    let fork_pos = parent_parent_id.as_ref().and_then(|parent_id| {
-                        tree.children_ids(parent_id).unwrap().position(|i| i == &id)
-                    });
-                    let _ = tree.remove_node(id.clone(), RemoveBehavior::OrphanChildren);
-                    tree.move_node(
-                        &other_child,
-                        parent_parent_id
-                            .as_ref()
-                            .map(MoveBehavior::ToParent)
-                            .unwrap_or(MoveBehavior::ToRoot),
-                    )
-                    .unwrap();
-                    if let Some(old_pos) = fork_pos {
-                        tree.make_nth_sibling(&other_child, old_pos).unwrap();
-                    }
+            if group.len() > 2 {
+                group.remove_window(position);
+            } else {
+                trace!("Removing Group");
+                let other_child = tree.children_ids(&id).unwrap().next().cloned().unwrap();
+                let fork_pos = parent_parent_id.as_ref().and_then(|parent_id| {
+                    tree.children_ids(parent_id).unwrap().position(|i| i == &id)
+                });
+                let _ = tree.remove_node(id.clone(), RemoveBehavior::OrphanChildren);
+                tree.move_node(
+                    &other_child,
+                    parent_parent_id
+                        .as_ref()
+                        .map(MoveBehavior::ToParent)
+                        .unwrap_or(MoveBehavior::ToRoot),
+                )
+                .unwrap();
+                if let Some(old_pos) = fork_pos {
+                    tree.make_nth_sibling(&other_child, old_pos).unwrap();
                 }
             }
-            None => {} // root
         }
     }
 

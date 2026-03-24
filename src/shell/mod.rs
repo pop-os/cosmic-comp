@@ -1186,6 +1186,8 @@ impl Workspaces {
                 let len = self.sets[0].workspaces.len();
                 let mut active = self.sets[0].active;
                 let mut keep = vec![true; len];
+                // false-positive: we iterate over multiple sets
+                #[allow(clippy::needless_range_loop)]
                 for i in 0..len {
                     let has_windows = self
                         .sets

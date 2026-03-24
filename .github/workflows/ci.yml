@@ -1,103 +1,104 @@
 name: Continuous Integration
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+    push:
+        branches: [master]
+    pull_request:
+        branches: [master]
 
 jobs:
-  format:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Cargo cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-      - name: Format
-        run: cargo +stable fmt --all -- --check
+    format:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v6
+            - name: Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: rustfmt
+            - name: Cargo cache
+              uses: actions/cache@v5
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+            - name: Format
+              run: cargo +stable fmt --all -- --check
 
-  clippy-check:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Cargo cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-      - name: System dependencies
-        run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev
-      - name: Clippy
-        run: cargo +stable clippy -- -D warnings
+    clippy-check:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v6
+            - name: Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+              with:
+                  components: clippy
+            - name: Cargo cache
+              uses: actions/cache@v5
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+            - name: System dependencies
+              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev
+            - name: Clippy
+              run: cargo +stable clippy --all-features -- -D warnings
 
-  check-features:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Cargo cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-      - name: System dependencies
-        run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev
-      - run: cargo +stable check --no-default-features
-      - run: cargo +stable check --features debug
-      - run: cargo +stable check --features profile-with-tracy
+    check-features:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v6
+            - name: Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+            - name: Cargo cache
+              uses: actions/cache@v5
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+            - name: System dependencies
+              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev
+            - run: cargo +stable check --no-default-features
+            - run: cargo +stable check --features debug
+            - run: cargo +stable check --features profile-with-tracy
+            - run: cargo +stable check --features profile-with-tracy-gpu
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v6
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Cargo cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
-      - name: System dependencies
-        run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libdisplay-info-dev libpixman-1-dev meson ninja-build
-      - name: Build cache
-        uses: actions/cache@v5
-        with:
-          path: target
-          key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.toml') }}
-      - name: Build and install Libseat
-        run: |
-          wget https://git.sr.ht/~kennylevinsen/seatd/archive/0.9.1.tar.gz -O libseat-source.tar.gz
-          tar xf libseat-source.tar.gz
-          cd seatd-0.9.1
-          meson setup -Dlibseat-builtin=enabled -Dserver=disabled -Dexamples=disabled -Dman-pages=disabled build .
-          ninja -C build
-          sudo meson install -C build
-          sudo ldconfig
-      - name: Test features
-        env:
-          RUST_BACKTRACE: full
-        run: cargo test --all-features
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout sources
+              uses: actions/checkout@v6
+            - name: Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+            - name: Cargo cache
+              uses: actions/cache@v5
+              with:
+                  path: |
+                      ~/.cargo/registry
+                      ~/.cargo/git
+                  key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+            - name: System dependencies
+              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libdisplay-info-dev libpixman-1-dev meson ninja-build
+            - name: Build cache
+              uses: actions/cache@v5
+              with:
+                  path: target
+                  key: ${{ runner.os }}-build-${{ hashFiles('**/Cargo.toml') }}
+            - name: Build and install Libseat
+              run: |
+                  wget https://git.sr.ht/~kennylevinsen/seatd/archive/0.9.1.tar.gz -O libseat-source.tar.gz
+                  tar xf libseat-source.tar.gz
+                  cd seatd-0.9.1
+                  meson setup -Dlibseat-builtin=enabled -Dserver=disabled -Dexamples=disabled -Dman-pages=disabled build .
+                  ninja -C build
+                  sudo meson install -C build
+                  sudo ldconfig
+            - name: Test features
+              env:
+                  RUST_BACKTRACE: full
+              run: cargo test --all-features

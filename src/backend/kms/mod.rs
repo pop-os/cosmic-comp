@@ -747,7 +747,7 @@ impl KmsGuard<'_> {
                 .crtcs()
                 .iter()
                 .filter(|crtc| {
-                    device.inner.surfaces.get(crtc).is_none()
+                    !device.inner.surfaces.contains_key(crtc)
                     // TODO: We can't do this. See https://github.com/Smithay/smithay/pull/1820
                     //.is_some_and(|surface| surface.output.is_enabled())
                 })

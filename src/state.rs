@@ -300,6 +300,7 @@ pub struct Common {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum BackendData {
     X11(X11State),
     Winit(WinitState),
