@@ -45,7 +45,7 @@ use smithay::{
         IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, user_data::UserDataMap,
     },
     wayland::{
-        compositor::{SurfaceData, TraversalAction, with_states, with_surface_tree_downward},
+        compositor::{self, SurfaceData, TraversalAction, with_states, with_surface_tree_downward},
         seat::WaylandFocus,
         shell::xdg::{
             SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
@@ -103,8 +103,9 @@ impl PartialEq<X11Surface> for CosmicSurface {
     }
 }
 
-#[derive(Default)]
-struct WasMaximized(AtomicBool);
+/* TODO: remove */
+// #[derive(Default)]
+// struct WasMaximized(AtomicBool);
 
 #[derive(Default)]
 struct Minimized(AtomicBool);
@@ -182,6 +183,31 @@ impl CosmicSurface {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => toplevel.has_pending_changes(),
             WindowSurface::X11(_surface) => false,
+        }
+    }
+
+    pub fn unacked_server_size(&self) -> Option<Size<i32, Logical>> {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                compositor::with_states(toplevel.wl_surface(), |states| {
+                    let attributes = states
+                        .data_map
+                        .get::<XdgToplevelSurfaceData>()
+                        .unwrap()
+                        .lock()
+                        .unwrap();
+                    let server_size = attributes.current_server_state().size?;
+                    let acked_size = attributes.last_acked.as_ref()?.state.size?;
+
+                    // If they differ, it means there's a configure sent but not yet acked. 
+                    if server_size != acked_size {
+                        Some(server_size)
+                    } else {
+                        None
+                    }
+                })
+            }
+            WindowSurface::X11(_) => None,
         }
     }
 
@@ -402,14 +428,16 @@ impl CosmicSurface {
     }
 
     pub fn set_maximized(&self, maximized: bool) {
-        let was_maximized = self.is_maximized(false);
 
-        // update was_maximized flag
-        self.0
-            .user_data()
-            .get_or_insert_threadsafe(WasMaximized::default)
-            .0
-            .store(was_maximized && !maximized, Ordering::SeqCst);
+        // TODO: remove
+        // let was_maximized = self.is_maximized(false);
+
+        // // update was_maximized flag
+        // self.0
+        //     .user_data()
+        //     .get_or_insert_threadsafe(WasMaximized::default)
+        //     .0
+        //     .store(was_maximized && !maximized, Ordering::SeqCst);
 
 
         match self.0.underlying_surface() {
@@ -449,13 +477,14 @@ impl CosmicSurface {
         }
     }
 
-    pub fn was_maximized(&self) -> bool {
-        self.0
-            .user_data()
-            .get_or_insert_threadsafe(WasMaximized::default)
-            .0
-            .load(Ordering::SeqCst)
-    }
+    // TODO: remove
+    // pub fn was_maximized(&self) -> bool {
+    //     self.0
+    //         .user_data()
+    //         .get_or_insert_threadsafe(WasMaximized::default)
+    //         .0
+    //         .load(Ordering::SeqCst)
+    // }
 
     pub fn is_sticky(&self) -> bool {
         self.0
