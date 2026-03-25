@@ -1501,7 +1501,9 @@ impl Common {
         self.popups.cleanup();
         self.toplevel_info_state.refresh(&self.workspace_state);
         self.refresh_idle_inhibit();
-        self.a11y_keyboard_monitor_state.refresh();
+        if let Some(mut a11y_keyboard_monitor) = self.dbus_state.a11y_keyboard_monitor() {
+            a11y_keyboard_monitor.refresh();
+        }
     }
 
     pub fn refresh_idle_inhibit(&mut self) {

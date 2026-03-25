@@ -12,7 +12,7 @@ members = ["cosmic-comp-config"]
 [dependencies]
 anyhow = { version = "1.0.102", features = ["backtrace"] }
 bitflags = "2.11.0"
-calloop = { version = "0.14.4", features = ["executor"] }
+calloop = { version = "0.14.4", features = ["executor", "stream"] }
 cosmic-comp-config = { path = "cosmic-comp-config", features = [
     "libdisplay-info",
     "output",
@@ -80,9 +80,9 @@ rand = "0.10"
 clap_lex = "1.0"
 parking_lot = "0.12.5"
 logind-zbus = { version = "5.3.2", optional = true }
-futures-executor = { version = "0.3.32", features = ["thread-pool"] }
 futures-util = "0.3.32"
 cgmath = "0.18.0"
+async-once-cell = "0.5.4"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
