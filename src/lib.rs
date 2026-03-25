@@ -73,7 +73,7 @@ impl State {
 
             // potentially tell the session we are setup now
             if let Err(err) =
-                session::setup_socket(self.common.event_loop_handle.clone(), &self.common)
+                session::run_socket(self.common.event_loop_handle.clone(), &self.common)
             {
                 warn!(?err, "Failed to setup cosmic-session communication");
             }
@@ -147,6 +147,9 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     tracy_client::Client::start();
 
     utils::rlimit::increase_nofile_limit();
+    if let Err(err) = session::setup_socket() {
+        warn!("Session error: {:?}", err);
+    };
 
     // init hook globals
     hooks::HOOKS.set(hooks)
