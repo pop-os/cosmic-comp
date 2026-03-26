@@ -50,6 +50,7 @@
             systemd
             udev
             wayland
+            xrdb
           ];
 
           nativeBuildInputs = with pkgs; [
@@ -66,7 +67,7 @@
             libxcursor
             libxi
             libxkbcommon
-            xorg.xrdb
+            xrdb
             vulkan-loader
           ];
         };
@@ -75,10 +76,10 @@
       packages = forAllSystems (
         system:
         let
-          c = commonFor system;
-          rustPlatform = c.pkgs.makeRustPlatform {
-            cargo = c.rustToolchain;
-            rustc = c.rustToolchain;
+          common = commonFor system;
+          rustPlatform = common.pkgs.makeRustPlatform {
+            cargo = common.rustToolchain;
+            rustc = common.rustToolchain;
           };
         in
         {
@@ -86,18 +87,20 @@
 
           cosmic-comp = rustPlatform.buildRustPackage {
             pname = "cosmic-comp";
-            version = "1.0.8-dev";
+            version = "1.0.0-dev";
 
-            src = c.pkgs.lib.fileset.toSource {
+            src = common.pkgs.lib.fileset.toSource {
               root = ./.;
-              fileset = c.pkgs.lib.fileset.unions [
+              fileset = common.pkgs.lib.fileset.unions [
+                ./cosmic-comp-config
+                ./data
+                ./resources
                 ./src
-                ./build.rs
-                ./i18n.toml
                 ./Cargo.toml
                 ./Cargo.lock
-                ./resources
-                ./cosmic-comp-config
+                ./Makefile
+                ./build.rs
+                ./i18n.toml
               ];
             };
 
@@ -106,20 +109,18 @@
               allowBuiltinFetchGit = true;
             };
 
-            separateDebugInfo = true;
+            dontCargoInstall = true;
 
-            buildInputs = c.buildInputs;
-            nativeBuildInputs = c.nativeBuildInputs;
-            runtimeDependencies = c.runtimeDependencies;
+            inherit (common) buildInputs nativeBuildInputs runtimeDependencies;
+
+            separateDebugInfo = true;
 
             makeFlags = [
               "prefix=${placeholder "out"}"
-              "CARGO_TARGET_DIR=target/${c.pkgs.stdenv.hostPlatform.rust.cargoShortTarget}"
+              "CARGO_TARGET_DIR=target/${common.pkgs.stdenv.hostPlatform.rust.cargoShortTarget}"
             ];
 
-            dontCargoInstall = true;
-
-            meta = with c.pkgs.lib; {
+            meta = with common.pkgs.lib; {
               description = "Compositor for the COSMIC desktop environment";
               homepage = "https://github.com/pop-os/cosmic-comp";
               license = licenses.gpl3Only;
@@ -133,19 +134,18 @@
       devShells = forAllSystems (
         system:
         let
-          c = commonFor system;
+          common = commonFor system;
         in
         {
-          default = c.pkgs.mkShell {
+          default = common.pkgs.mkShell {
             inputsFrom = [ self.packages.${system}.cosmic-comp ];
 
-            packages = with c.pkgs; [
-              c.rustToolchain
+            packages = with common.pkgs; [
+              common.rustToolchain
               rust-analyzer
-              cargo-watch
             ];
 
-            LD_LIBRARY_PATH = c.pkgs.lib.makeLibraryPath c.runtimeDependencies;
+            LD_LIBRARY_PATH = common.pkgs.lib.makeLibraryPath common.runtimeDependencies;
 
             shellHook = ''
               echo "COSMIC Compositor development environment"
