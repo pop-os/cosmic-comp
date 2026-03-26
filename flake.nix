@@ -91,13 +91,14 @@
             src = c.pkgs.lib.fileset.toSource {
               root = ./.;
               fileset = c.pkgs.lib.fileset.unions [
+                ./cosmic-comp-config
+                ./resources
                 ./src
-                ./build.rs
-                ./i18n.toml
                 ./Cargo.toml
                 ./Cargo.lock
-                ./resources
-                ./cosmic-comp-config
+                ./Makefile
+                ./build.rs
+                ./i18n.toml
               ];
             };
 
