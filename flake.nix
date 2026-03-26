@@ -66,7 +66,7 @@
             libxcursor
             libxi
             libxkbcommon
-            xorg.xrdb
+            xrdb
             vulkan-loader
           ];
         };
