@@ -146,6 +146,10 @@ impl OutputZoomState {
         }
     }
 
+    pub fn output_leave(&self, output: &Output) {
+        SpaceElement::output_leave(&self.element, output);
+    }
+
     pub fn current_focal_point(&mut self) -> Point<f64, Local> {
         self.focal_point
     }

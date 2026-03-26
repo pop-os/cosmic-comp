@@ -927,6 +927,9 @@ impl Workspaces {
             return;
         }
 
+        if let Some(zoom_state) = output.user_data().get::<Mutex<OutputZoomState>>() {
+            zoom_state.lock().unwrap().output_leave(output);
+        }
         if let Some(set) = self.sets.shift_remove(output) {
             {
                 let map = layer_map_for_output(output);
