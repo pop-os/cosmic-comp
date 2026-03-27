@@ -2662,6 +2662,26 @@ impl Shell {
         window
     }
 
+    /// Force-unfullscreen all tabs of a stack before moving it.
+    fn force_unfullscreen_stack_tabs(
+        &mut self,
+        mapped: &CosmicMapped,
+        evlh: &LoopHandle<'static, State>,
+    ) {
+        if let Some(stack) = mapped.stack_ref() {
+            if !stack.has_any_fullscreened_tab() {
+                return;
+            }
+            let fs_surfaces: Vec<CosmicSurface> = stack
+                .surfaces()
+                .filter(|s| stack.is_tab_fullscreened(s))
+                .collect();
+            for surface in fs_surfaces {
+                self.unfullscreen_request(&surface, evlh);
+            }
+        }
+    }
+
     #[must_use]
     pub fn map_window(
         &mut self,
@@ -2753,7 +2773,7 @@ impl Shell {
         let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);
 
         if should_be_fullscreen {
-            if let Some((surface, state, _)) = workspace.map_fullscreen(&window, &seat, None, None)
+            if let Some((surface, state, _)) = workspace.map_fullscreen(&window, &seat, None, None, None)
             {
                 toplevel_leave_output(&surface, &workspace.output);
                 toplevel_leave_workspace(&surface, &workspace.handle);
@@ -2937,7 +2957,20 @@ impl Shell {
             } else if let Some((surface, _)) = set
                 .workspaces
                 .iter_mut()
-                .find_map(|w| w.unmap_surface(surface))
+                .find_map(|w| {
+                    // Clean up stack side if this is a fullscreened stack tab
+                    if w.get_fullscreen().is_some_and(|f| f == surface) {
+                        if let Some(origin) = w.fullscreen_stack_origin().cloned() {
+                            if let Some(stack) = origin.mapped.stack_ref() {
+                                stack.unmark_tab_fullscreened_by_surface(surface);
+                                if let Some(idx) = stack.surfaces().position(|s| &s == surface) {
+                                    stack.remove_idx(idx);
+                                }
+                            }
+                        }
+                    }
+                    w.unmap_surface(surface)
+                })
             {
                 Some(surface)
             } else {
@@ -3086,25 +3119,44 @@ impl Shell {
 
                 Ok(None)
             }
-            Some(KeyboardFocusTarget::Fullscreen(surface)) => Ok(self.move_window(
-                Some(seat),
-                &surface,
-                &from,
-                &to,
-                follow,
-                direction,
-                workspace_state,
-                evlh,
-            )),
-            Some(KeyboardFocusTarget::Element(mapped)) => Ok(self.move_element(
-                Some(seat),
-                &mapped,
-                &from,
-                &to,
-                follow,
-                direction,
-                workspace_state,
-            )),
+            Some(KeyboardFocusTarget::Fullscreen(surface)) => {
+                // If this is a stack tab being moved, extract it permanently
+                for (_, set) in self.workspaces.sets.iter_mut() {
+                    for workspace in set.workspaces.iter_mut() {
+                        if workspace.get_fullscreen().is_some_and(|f| f == &surface) {
+                            if let Some(origin) = workspace.fullscreen_stack_origin().cloned() {
+                                if let Some(stack) = origin.mapped.stack_ref() {
+                                    stack.unmark_tab_fullscreened(&surface);
+                                    stack.remove_window(&surface);
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(self.move_window(
+                    Some(seat),
+                    &surface,
+                    &from,
+                    &to,
+                    follow,
+                    direction,
+                    workspace_state,
+                    evlh,
+                ))
+            }
+            Some(KeyboardFocusTarget::Element(mapped)) => {
+                // Pre-move: force-unfullscreen any stack tabs
+                self.force_unfullscreen_stack_tabs(&mapped, evlh);
+                Ok(self.move_element(
+                    Some(seat),
+                    &mapped,
+                    &from,
+                    &to,
+                    follow,
+                    direction,
+                    workspace_state,
+                ))
+            }
             _ => Ok(None),
         }
     }
@@ -3280,6 +3332,7 @@ impl Shell {
                     None,
                     previous.clone().map(|p| p.previous_state),
                     previous.map(|p| p.previous_geometry),
+                    None,
                 ) {
                     self.remap_unfullscreened_window(old_surface, previous_state, evlh);
                 }
@@ -4527,6 +4580,14 @@ impl Shell {
     }
 
     pub fn toggle_sticky(&mut self, seat: &Seat<State>, mapped: &CosmicMapped) {
+        // Block toggle if stack has fullscreened tabs — would break dual state
+        if mapped
+            .stack_ref()
+            .is_some_and(|s| s.has_any_fullscreened_tab())
+        {
+            return;
+        }
+
         // clean from focus-stacks
         for workspace in self.workspaces.spaces_mut() {
             for seat in self.seats.iter() {
@@ -4664,14 +4725,16 @@ impl Shell {
         {
             let mut from = set.sticky_layer.element_geometry(&mapped).unwrap();
             let mut was_maximized = false;
-            window = if mapped
+            let is_stack_tab = mapped
                 .stack_ref()
                 .map(|stack| stack.len() > 1)
-                .unwrap_or(false)
-            {
+                .unwrap_or(false);
+
+            window = if is_stack_tab {
+                // NO-EXTRACTION: tab stays in the stack
                 let stack = mapped.stack_ref().unwrap();
                 let surface = stack.surfaces().find(|s| s == surface).unwrap();
-                stack.remove_window(&surface);
+                stack.mark_tab_fullscreened(&surface);
                 surface
             } else {
                 // Must be set before `map_internal`/`unmap` below, as both may call
@@ -4694,26 +4757,42 @@ impl Shell {
                 mapped.active_window()
             };
 
-            toplevel_leave_output(&window, old_output);
+            if !is_stack_tab {
+                toplevel_leave_output(&window, old_output);
+            }
             let old_output = old_output.downgrade();
             let workspace_handle = self.active_space(&output).unwrap().handle;
-            toplevel_enter_output(&window, &output);
-            toplevel_enter_workspace(&window, &workspace_handle);
+            if !is_stack_tab {
+                toplevel_enter_output(&window, &output);
+                toplevel_enter_workspace(&window, &workspace_handle);
+            }
 
             let workspace = self.active_space_mut(&output).unwrap();
             workspace.map_fullscreen(
                 &window,
                 None,
-                Some(FullscreenRestoreState::Sticky {
-                    output: old_output,
-                    state: FloatingRestoreData {
-                        geometry: from,
-                        output_size: workspace.output.geometry().size.as_logical(),
-                        was_maximized,
-                        was_snapped: None,
-                    },
-                }),
+                if is_stack_tab {
+                    None // No restore state — tab is still in the stack
+                } else {
+                    Some(FullscreenRestoreState::Sticky {
+                        output: old_output,
+                        state: FloatingRestoreData {
+                            geometry: from,
+                            output_size: workspace.output.geometry().size.as_logical(),
+                            was_maximized,
+                            was_snapped: None,
+                        },
+                    })
+                },
                 Some(from),
+                if is_stack_tab {
+                    Some(StackOrigin {
+                        mapped: mapped.clone(),
+                        stack_geometry: from,
+                    })
+                } else {
+                    None
+                },
             )
         } else if let Some(workspace) = self.space_for_mut(&mapped) {
             if mapped.is_minimized() {
@@ -4721,43 +4800,70 @@ impl Shell {
                 return None;
             }
 
-            // Must be set before `unmap_surface()`.
-            // `Workspace::unmap_surface` may call intermediate `configure()` internally, which would send
-            // a configure event without the fullscreen state, causing clients like Chromium to cancel the transition.
-            mapped.set_fullscreen(true);
+            let is_stack_tab = mapped
+                .stack_ref()
+                .map(|stack| stack.len() > 1)
+                .unwrap_or(false);
 
             let from = workspace.element_geometry(&mapped).unwrap();
-            let (surface, state) = workspace.unmap_surface(surface).unwrap();
-            window = surface;
-            let handle = workspace.handle;
 
-            toplevel_leave_output(&window, &workspace.output);
-            toplevel_leave_workspace(&window, &workspace.handle);
+            if is_stack_tab {
+                // NO-EXTRACTION: tab stays in stack, no intermediate configures
+                let stack = mapped.stack_ref().unwrap();
+                let surface_found = stack.surfaces().find(|s| s == surface).unwrap();
+                stack.mark_tab_fullscreened(&surface_found);
+                window = surface_found;
 
-            let workspace = self.active_space_mut(&output).unwrap();
-            toplevel_enter_output(&window, &output);
-            toplevel_enter_workspace(&window, &workspace.handle);
+                let workspace = self.active_space_mut(&output).unwrap();
+                workspace.map_fullscreen(
+                    &window,
+                    None,
+                    None, // No restore state — tab is still in the stack
+                    Some(from),
+                    Some(StackOrigin {
+                        mapped: mapped.clone(),
+                        stack_geometry: from,
+                    }),
+                )
+            } else {
+                // Must be set before `unmap_surface()`.
+                // `Workspace::unmap_surface` may call intermediate `configure()` internally, which would send
+                // a configure event without the fullscreen state, causing clients like Chromium to cancel the transition.
+                mapped.set_fullscreen(true);
 
-            workspace.map_fullscreen(
-                &window,
-                None,
-                match state {
-                    WorkspaceRestoreData::Floating(floating_state) => {
-                        floating_state.map(|state| FullscreenRestoreState::Floating {
-                            workspace: handle,
-                            state,
-                        })
-                    }
-                    WorkspaceRestoreData::Tiling(tiling_state) => {
-                        tiling_state.map(|state| FullscreenRestoreState::Tiling {
-                            workspace: handle,
-                            state,
-                        })
-                    }
-                    WorkspaceRestoreData::Fullscreen(_) => unreachable!(),
-                },
-                Some(from),
-            )
+                let (surface, state) = workspace.unmap_surface(surface).unwrap();
+                window = surface;
+                let handle = workspace.handle;
+
+                toplevel_leave_output(&window, &workspace.output);
+                toplevel_leave_workspace(&window, &workspace.handle);
+
+                let workspace = self.active_space_mut(&output).unwrap();
+                toplevel_enter_output(&window, &output);
+                toplevel_enter_workspace(&window, &workspace.handle);
+
+                workspace.map_fullscreen(
+                    &window,
+                    None,
+                    match state {
+                        WorkspaceRestoreData::Floating(floating_state) => {
+                            floating_state.map(|state| FullscreenRestoreState::Floating {
+                                workspace: handle,
+                                state,
+                            })
+                        }
+                        WorkspaceRestoreData::Tiling(tiling_state) => {
+                            tiling_state.map(|state| FullscreenRestoreState::Tiling {
+                                workspace: handle,
+                                state,
+                            })
+                        }
+                        WorkspaceRestoreData::Fullscreen(_) => unreachable!(),
+                    },
+                    Some(from),
+                    None, // Not a stack tab
+                )
+            }
         } else {
             return None;
         };
@@ -4784,12 +4890,33 @@ impl Shell {
         });
 
         if let Some(workspace) = maybe_workspace {
-            let (old_fullscreen, restore, _) = workspace.remove_fullscreen().unwrap();
-            toplevel_leave_output(&old_fullscreen, &workspace.output);
-            toplevel_leave_workspace(&old_fullscreen, &workspace.handle);
+            let stack_origin = workspace.fullscreen_stack_origin().cloned();
 
-            let window = self.remap_unfullscreened_window(old_fullscreen, restore, loop_handle);
-            Some(KeyboardFocusTarget::Element(window))
+            let (old_fullscreen, restore, _) = workspace.remove_fullscreen().unwrap();
+
+            if let Some(origin) = stack_origin {
+                // Stack tab path: reactivate in the stack
+                if origin.mapped.alive() {
+                    if let Some(stack) = origin.mapped.stack_ref() {
+                        stack.unmark_tab_fullscreened(&old_fullscreen);
+                    }
+                    Some(KeyboardFocusTarget::Element(origin.mapped))
+                } else {
+                    // Stack died during fullscreen — fall back to remap
+                    toplevel_leave_output(&old_fullscreen, &workspace.output);
+                    toplevel_leave_workspace(&old_fullscreen, &workspace.handle);
+                    let window =
+                        self.remap_unfullscreened_window(old_fullscreen, restore, loop_handle);
+                    Some(KeyboardFocusTarget::Element(window))
+                }
+            } else {
+                // Non-stack path: existing behavior
+                toplevel_leave_output(&old_fullscreen, &workspace.output);
+                toplevel_leave_workspace(&old_fullscreen, &workspace.handle);
+                let window =
+                    self.remap_unfullscreened_window(old_fullscreen, restore, loop_handle);
+                Some(KeyboardFocusTarget::Element(window))
+            }
         } else {
             None
         }
