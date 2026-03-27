@@ -3,9 +3,7 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            ExportMem, ImportAll, Offscreen, Renderer,
-            damage::OutputDamageTracker,
-            element::{AsRenderElements, surface::WaylandSurfaceRenderElement},
+            ExportMem, ImportAll, Offscreen, Renderer, damage::OutputDamageTracker,
             gles::GlesRenderbuffer,
         },
     },
@@ -16,7 +14,7 @@ use smithay::{
 use tracing::warn;
 
 use crate::{
-    backend::render::RendererRef,
+    backend::render::{RendererRef, element::AsGlowRenderer},
     shell::element::CosmicSurface,
     state::{State, advertised_node_for_surface},
 };
@@ -24,17 +22,23 @@ use crate::{
 pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
     fn render_window<R>(renderer: &mut R, window: &CosmicSurface) -> anyhow::Result<()>
     where
-        R: Renderer + ImportAll + Offscreen<GlesRenderbuffer> + ExportMem,
+        R: Renderer + ImportAll + Offscreen<GlesRenderbuffer> + ExportMem + AsGlowRenderer,
         R::TextureId: Clone + 'static,
         R::Error: Send + Sync + 'static,
     {
         let bbox = bbox_from_surface_tree(&window.wl_surface().unwrap(), (0, 0));
-        let elements = AsRenderElements::<R>::render_elements::<WaylandSurfaceRenderElement<R>>(
-            window,
+        let mut elements = Vec::new();
+        window.push_render_elements(
             renderer,
             (-bbox.loc.x, -bbox.loc.y).into(),
             Scale::from(1.0),
             1.0,
+            None,
+            false,
+            [0; 4],
+            0,
+            &mut |elem| elements.push(elem),
+            None,
         );
 
         // TODO: 10-bit

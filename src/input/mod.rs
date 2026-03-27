@@ -2055,6 +2055,7 @@ impl State {
                         layer,
                         popup,
                         location,
+                        ..
                     } => {
                         if layer.can_receive_keyboard_focus() {
                             let surface = popup.wl_surface();
@@ -2072,7 +2073,9 @@ impl State {
                             }
                         }
                     }
-                    Stage::LayerSurface { layer, location } => {
+                    Stage::LayerSurface {
+                        layer, location, ..
+                    } => {
                         if under_from_surface_tree(
                             layer.wl_surface(),
                             global_pos.as_logical(),
@@ -2224,7 +2227,9 @@ impl State {
                             ))));
                         }
                     }
-                    Stage::LayerSurface { layer, location } => {
+                    Stage::LayerSurface {
+                        layer, location, ..
+                    } => {
                         let surface = layer.wl_surface();
                         if let Some((surface, surface_loc)) = under_from_surface_tree(
                             surface,
