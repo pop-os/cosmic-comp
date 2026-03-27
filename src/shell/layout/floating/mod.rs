@@ -686,6 +686,8 @@ impl FloatingLayout {
                 && let Some(pending_size) = window.pending_size()
             {
                 mapped_geometry.size = pending_size.as_local();
+            } else if let Some(server_size) = window.active_window().last_server_size() {
+                mapped_geometry.size = server_size.as_local();
             }
             *window.last_geometry.lock().unwrap() = Some(mapped_geometry);
         }

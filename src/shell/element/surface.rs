@@ -182,6 +182,21 @@ impl CosmicSurface {
         }
     }
 
+    pub fn last_server_size(&self) -> Option<Size<i32, Logical>> {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
+                let attributes = states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap();
+                attributes.current_server_state().size
+            }),
+            WindowSurface::X11(_) => None,
+        }
+    }
+
     pub fn global_geometry(&self) -> Option<Rectangle<i32, Global>> {
         *self
             .0
