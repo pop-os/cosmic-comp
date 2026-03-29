@@ -24,3 +24,4 @@ a11y-zoom-move-continuously = Timeẓri tezga dima tetteddu s usewwaṛ
 a11y-zoom-move-onedge = Timeẓri tetteddu mi ara yaweḍ usewwaṛ ɣer yiri
 a11y-zoom-move-centered = Timeẓri tetteddu iwakken ad tḥerzeḍ asewwaṛ d alemmas
 swap-windows = Senfel isfuyla
+window-menu-resize = Beddel tiddi
