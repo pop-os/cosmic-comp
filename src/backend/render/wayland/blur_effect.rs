@@ -226,9 +226,9 @@ impl BlurElement {
         Ok(Some(Self::from_state(
             renderer,
             extended_geo.to_logical(output_scale),
-            &region,
+            region,
             output_scale,
-            &mut *state.lock().unwrap(),
+            &mut state.lock().unwrap(),
             uniforms,
             strength,
         )?))
@@ -502,7 +502,7 @@ fn render_blur(
 
         let adjusted_tex_size = tex_size.downscale(1 << i);
         let target_tex_size = tex_size
-            .downscale(1 << i + 1)
+            .downscale(1 << (i + 1))
             .to_logical(1, Transform::Normal)
             .to_physical(1);
         let half_pixel = [
