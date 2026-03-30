@@ -866,6 +866,7 @@ dependencies = [
  "sanitize-filename",
  "serde",
  "serde_json",
+ "smallvec",
  "smithay",
  "smithay-egui",
  "thiserror 2.0.18",
@@ -4923,7 +4924,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/smithay/smithay.git?rev=e84a4ca#e84a4ca82d58d783839083bd48c4ab120715c4b6"
+source = "git+https://github.com/smithay/smithay.git?rev=f6d1070#f6d10709db2bb68c46b9c128a4163d035356572c"
 dependencies = [
  "aliasable",
  "appendlist",
