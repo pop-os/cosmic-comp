@@ -623,16 +623,14 @@ pub fn render_window_to_buffer(
                     1.0,
                     blur_strength,
                     &mut |elem| {
-                        elements
-                            .push(
-                                RelocateRenderElement::from_element(
-                                    CursorRenderElement::Surface(elem),
-                                    Point::new(0, 0),
-                                    Relocate::Relative,
-                                )
-                                .into(),
+                        elements.push(
+                            RelocateRenderElement::from_element(
+                                CursorRenderElement::Surface(elem),
+                                Point::new(0, 0),
+                                Relocate::Relative,
                             )
-                            .into()
+                            .into(),
+                        )
                     },
                 );
             }
