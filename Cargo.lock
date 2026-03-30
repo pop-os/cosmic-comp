@@ -813,7 +813,7 @@ dependencies = [
 [[package]]
 name = "cosmic-client-toolkit"
 version = "0.2.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?branch=main#160b086abe03cd34a8a375d7fbe47b24308d1f38"
+source = "git+https://github.com/pop-os/cosmic-protocols?rev=160b086#160b086abe03cd34a8a375d7fbe47b24308d1f38"
 dependencies = [
  "bitflags 2.11.0",
  "cosmic-protocols",
@@ -943,7 +943,7 @@ dependencies = [
 [[package]]
 name = "cosmic-protocols"
 version = "0.2.0"
-source = "git+https://github.com/pop-os//cosmic-protocols?branch=main#160b086abe03cd34a8a375d7fbe47b24308d1f38"
+source = "git+https://github.com/pop-os/cosmic-protocols?rev=160b086#160b086abe03cd34a8a375d7fbe47b24308d1f38"
 dependencies = [
  "bitflags 2.11.0",
  "wayland-backend",
@@ -967,7 +967,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#e37160f14d1e7ee428f973cd2848b4e95f83dfe1"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon?rev=refs%2Fpull%2F137%2Fhead#d96ad983bf26e49cf45e42942decebc4607f393d"
 dependencies = [
  "cosmic-config",
  "ron 0.11.0",
@@ -988,7 +988,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-daemon-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#e37160f14d1e7ee428f973cd2848b4e95f83dfe1"
+source = "git+https://github.com/pop-os/cosmic-settings-daemon?rev=refs%2Fpull%2F137%2Fhead#d96ad983bf26e49cf45e42942decebc4607f393d"
 dependencies = [
  "cosmic-config",
  "cosmic-theme",
