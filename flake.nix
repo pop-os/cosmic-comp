@@ -92,6 +92,7 @@
               root = ./.;
               fileset = c.pkgs.lib.fileset.unions [
                 ./cosmic-comp-config
+                ./data
                 ./resources
                 ./src
                 ./Cargo.toml
