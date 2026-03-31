@@ -1,5 +1,6 @@
 use crate::shell::focus::FocusTarget;
 use crate::shell::layout::tiling::RestoreTilingState;
+use crate::shell::element::stack::TAB_HEIGHT;
 use crate::wayland::handlers::xdg_activation::ActivationContext;
 use crate::{
     backend::render::{
@@ -208,6 +209,18 @@ pub struct FullscreenSurface {
     pub previous_geometry: Option<Rectangle<i32, Local>>,
     start_at: Option<Instant>,
     pub ended_at: Option<Instant>,
+    /// When Some, this surface is still inside a CosmicStack.
+    /// On unfullscreen, reactivate the tab instead of remapping.
+    pub stack_origin: Option<StackOrigin>,
+}
+
+/// Tracks that a fullscreened surface originated from a CosmicStack.
+#[derive(Debug, Clone)]
+pub struct StackOrigin {
+    /// The CosmicMapped that contains the stack.
+    pub mapped: CosmicMapped,
+    /// Stack geometry at the time of fullscreen (for restore configure).
+    pub stack_geometry: Rectangle<i32, Local>,
 }
 
 impl PartialEq for FullscreenSurface {
@@ -1119,6 +1132,7 @@ impl Workspace {
                     previous_geometry: previous.map(|p| p.previous_geometry),
                     start_at: None,
                     ended_at: None,
+                    stack_origin: None,
                 });
                 old_fullscreen
             }
@@ -1205,6 +1219,7 @@ impl Workspace {
         seat: impl Into<Option<&'a Seat<State>>>,
         restore: Option<FullscreenRestoreState>,
         previous_geometry: Option<Rectangle<i32, Local>>,
+        stack_origin: Option<StackOrigin>,
     ) -> Option<(
         CosmicSurface,
         Option<FullscreenRestoreState>,
@@ -1230,6 +1245,7 @@ impl Workspace {
             previous_geometry,
             start_at: Some(Instant::now()),
             ended_at: None,
+            stack_origin,
         });
 
         res
@@ -1270,12 +1286,22 @@ impl Workspace {
             }
 
             if surface.surface.alive() {
-                surface.surface.output_leave(&self.output);
                 surface.surface.set_fullscreen(false);
-                if let Some(previous_geometry) = surface.previous_geometry.as_ref() {
-                    surface
-                        .surface
-                        .set_geometry(previous_geometry.to_global(&self.output), 0);
+                if let Some(ref origin) = surface.stack_origin {
+                    // Stack tab: configure with stack geometry, don't leave output
+                    // (surface stays associated with the stack's output)
+                    surface.surface.set_geometry(
+                        origin.stack_geometry.to_global(&self.output),
+                        TAB_HEIGHT as u32,
+                    );
+                } else {
+                    // Non-stack: existing path
+                    surface.surface.output_leave(&self.output);
+                    if let Some(previous_geometry) = surface.previous_geometry.as_ref() {
+                        surface
+                            .surface
+                            .set_geometry(previous_geometry.to_global(&self.output), 0);
+                    }
                 }
                 surface.surface.send_configure();
             }
@@ -1306,6 +1332,12 @@ impl Workspace {
         } else {
             None
         }
+    }
+
+    pub fn fullscreen_stack_origin(&self) -> Option<&StackOrigin> {
+        self.fullscreen
+            .as_ref()
+            .and_then(|f| f.stack_origin.as_ref())
     }
 
     pub fn get_fullscreen(&self) -> Option<&CosmicSurface> {
