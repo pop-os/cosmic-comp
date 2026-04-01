@@ -107,13 +107,11 @@ impl XdgShellHandler for State {
             match ret {
                 Ok(mut grab) => {
                     if let Some(keyboard) = seat.get_keyboard() {
-                        if keyboard.is_grabbed()
-                            && !(keyboard.has_grab(serial)
-                                || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
-                        {
-                            grab.ungrab(PopupUngrabStrategy::All);
-                            return;
-                        }
+                        // Do not reject the popup grab based on keyboard grab state.
+                        // Smithay's grab_popup() already validated the popup chain.
+                        // Keyboard grabs from other subsystems (input method, stale
+                        // PopupKeyboardGrab, etc.) are unrelated to popup validity and
+                        // the new PopupKeyboardGrab will replace them.
                         Shell::set_focus(
                             self,
                             grab.current_grab().as_ref(),
