@@ -43,7 +43,9 @@ mod render;
 mod user_data;
 pub use self::render::*;
 use self::user_data::*;
-pub use self::user_data::{FrameHolder, ImageCopySessions, SessionData, SessionHolder};
+pub use self::user_data::{
+    CursorFrameHolder, FrameHolder, ImageCopySessions, SessionData, SessionHolder,
+};
 
 fn seat_for_wl_pointer<'a>(shell: &'a Shell, pointer: &WlPointer) -> Option<&'a Seat<State>> {
     let pointer_handle = PointerHandle::<State>::from_resource(pointer)?;
