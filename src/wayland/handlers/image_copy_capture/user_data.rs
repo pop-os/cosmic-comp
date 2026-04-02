@@ -8,16 +8,21 @@ use smithay::{
         damage::OutputDamageTracker,
         gles::{GlesRenderbuffer, GlesTexture},
     },
+    input::Seat,
     output::Output,
     wayland::image_copy_capture::{
         CursorSession, CursorSessionRef, Frame, FrameRef, Session, SessionRef,
     },
 };
 
-use crate::shell::{CosmicSurface, Workspace};
+use crate::{
+    shell::{CosmicSurface, Workspace},
+    state::State,
+};
 
 type ImageCopySessionsData = RefCell<ImageCopySessions>;
 type PendingImageCopyBuffers = Mutex<Vec<(SessionRef, Frame)>>;
+type PendingImageCopyCursorBuffers = Mutex<Vec<(CursorSessionRef, Frame)>>;
 
 pub type SessionData = Mutex<SessionUserData>;
 
@@ -55,6 +60,12 @@ pub trait FrameHolder {
     fn add_frame(&mut self, session: SessionRef, frame: Frame);
     fn remove_frame(&mut self, frame: &FrameRef);
     fn take_pending_frames(&self) -> Vec<(SessionRef, Frame)>;
+}
+
+pub trait CursorFrameHolder {
+    fn add_cursor_frame(&mut self, session: CursorSessionRef, frame: Frame);
+    fn remove_cursor_frame(&mut self, frame: &FrameRef);
+    fn take_pending_cursor_frames(&self) -> Vec<(CursorSessionRef, Frame)>;
 }
 
 impl SessionHolder for Output {
@@ -245,5 +256,31 @@ impl SessionHolder for CosmicSurface {
                     .map(|s| (*s).clone())
                     .collect()
             })
+    }
+}
+
+impl CursorFrameHolder for Seat<State> {
+    fn add_cursor_frame(&mut self, session: CursorSessionRef, frame: Frame) {
+        self.user_data()
+            .insert_if_missing(PendingImageCopyCursorBuffers::default);
+        self.user_data()
+            .get::<PendingImageCopyCursorBuffers>()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .push((session, frame));
+    }
+
+    fn remove_cursor_frame(&mut self, frame: &FrameRef) {
+        if let Some(pending) = self.user_data().get::<PendingImageCopyCursorBuffers>() {
+            pending.lock().unwrap().retain(|(_, f)| f != frame);
+        }
+    }
+
+    fn take_pending_cursor_frames(&self) -> Vec<(CursorSessionRef, Frame)> {
+        self.user_data()
+            .get::<PendingImageCopyCursorBuffers>()
+            .map(|pending| std::mem::take(&mut *pending.lock().unwrap()))
+            .unwrap_or_default()
     }
 }
