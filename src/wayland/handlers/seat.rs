@@ -21,7 +21,7 @@ impl SeatHandler for State {
     }
 
     fn cursor_image(&mut self, seat: &smithay::input::Seat<Self>, image: CursorImageStatus) {
-        seat.set_cursor_image_status(image);
+        seat.set_cursor_image_status(self, image);
     }
 
     fn focus_changed(
