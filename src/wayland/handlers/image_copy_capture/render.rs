@@ -753,6 +753,46 @@ pub fn render_window_to_buffer(
     }
 }
 
+pub(super) fn cursor_elements<R>(
+    renderer: &mut R,
+    additional_damage: &[Rectangle<i32, BufferCoords>],
+    common: &mut Common,
+    seat: &Seat<State>,
+) -> Vec<WindowCaptureElement<R>>
+where
+    R: AsGlowRenderer,
+    R::TextureId: Send + Clone + 'static,
+    CosmicElement<R>: RenderElement<R>,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    let mut elements: Vec<_> = additional_damage
+        .into_iter()
+        .filter_map(|rect| {
+            let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
+            logical_rect.intersection(Rectangle::from_size((64, 64).into()))
+        })
+        .map(DamageElement::new)
+        .map(WindowCaptureElement::from)
+        .collect();
+
+    cursor::draw_cursor(
+        renderer,
+        seat,
+        Point::from((0.0, 0.0)),
+        1.0.into(),
+        1.0,
+        common.clock.now(),
+        0,
+        true,
+        &mut |elem, _| {
+            elements
+                .push(RelocateRenderElement::from_element(elem, (0, 0), Relocate::Relative).into())
+        },
+    );
+
+    elements
+}
+
 pub fn render_cursor_to_buffer(
     state: &mut State,
     session: &CursorSessionRef,
@@ -799,31 +839,7 @@ pub fn render_cursor_to_buffer(
         CosmicElement<R>: RenderElement<R>,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
-        let mut elements: Vec<_> = additional_damage
-            .into_iter()
-            .filter_map(|rect| {
-                let logical_rect = rect.to_logical(1, Transform::Normal, &Size::from((64, 64)));
-                logical_rect.intersection(Rectangle::from_size((64, 64).into()))
-            })
-            .map(DamageElement::new)
-            .map(WindowCaptureElement::from)
-            .collect();
-
-        cursor::draw_cursor(
-            renderer,
-            seat,
-            Point::from((0.0, 0.0)),
-            1.0.into(),
-            1.0,
-            common.clock.now(),
-            0,
-            true,
-            &mut |elem, _| {
-                elements.push(
-                    RelocateRenderElement::from_element(elem, (0, 0), Relocate::Relative).into(),
-                )
-            },
-        );
+        let elements = cursor_elements(renderer, &additional_damage, common, seat);
 
         if let Ok(dmabuf) = get_dmabuf(buffer) {
             let mut dmabuf_clone = dmabuf.clone();

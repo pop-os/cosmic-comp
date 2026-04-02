@@ -326,14 +326,57 @@ impl ImageCopyCaptureHandler for State {
     fn cursor_frame(&mut self, session: &CursorSessionRef, frame: Frame) {
         if !session.has_cursor() {
             frame.success(Transform::Normal, Vec::new(), self.common.clock.now());
+            // TODO delay indefinitely on additional capture
             return;
         }
 
         let shell = self.common.shell.read();
-        if let Some(seat) = seat_for_wl_pointer(&shell, &session.pointer()).cloned() {
-            drop(shell);
-            render_cursor_to_buffer(self, session, frame, &seat);
+        let Some(mut seat) = seat_for_wl_pointer(&shell, &session.pointer()).cloned() else {
+            return;
+        };
+        drop(shell);
+
+        // TODO: detect commit to unsync subsurface?
+
+        // XXX simple and less redundant way to check if there is damage?
+        if frame.damage().is_empty() {
+            let renderer = match self
+                .backend
+                .offscreen_renderer(|kms| *kms.primary_node.read().unwrap())
+            {
+                Ok(renderer) => renderer,
+                Err(err) => {
+                    tracing::warn!(?err, "Couldn't use node for screencopy");
+                    frame.fail(CaptureFailureReason::Unknown);
+                    return;
+                }
+            };
+            let age = 1; // XXX
+            let session_data = session.user_data().get::<SessionData>().unwrap();
+            let mut session_data_lock = session_data.lock().unwrap();
+            use crate::backend::render::RendererRef;
+            // XXX does damage_output have right semantics here?
+            let res = match renderer {
+                RendererRef::Glow(renderer) => {
+                    let elements = render::cursor_elements(renderer, &[], &mut self.common, &seat);
+                    session_data_lock.dt.damage_output(age, &elements)
+                }
+                RendererRef::GlMulti(mut renderer) => {
+                    let elements =
+                        render::cursor_elements(&mut renderer, &[], &mut self.common, &seat);
+                    session_data_lock.dt.damage_output(age, &elements)
+                }
+            };
+            if let Ok((damage, _)) = res {
+                if damage.is_none() {
+                    // Capture only once cursor updates
+                    seat.add_cursor_frame(session.clone(), frame);
+                    return;
+                }
+            }
         }
+
+        render_cursor_to_buffer(self, session, frame, &seat);
     }
 
     fn frame_aborted(&mut self, frame: FrameRef) {
