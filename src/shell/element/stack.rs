@@ -1613,7 +1613,7 @@ impl PointerTarget<State> for CosmicStack {
                 .lock()
                 .unwrap();
             cursor_state.set_shape(next.cursor_shape());
-            seat.set_cursor_image_status(CursorImageStatus::default_named());
+            seat.set_cursor_image_status(data, CursorImageStatus::default_named());
         });
 
         event.location -= self.0.with_program(|p| {
@@ -1642,7 +1642,7 @@ impl PointerTarget<State> for CosmicStack {
                 .lock()
                 .unwrap();
             cursor_state.set_shape(next.cursor_shape());
-            seat.set_cursor_image_status(CursorImageStatus::default_named());
+            seat.set_cursor_image_status(data, CursorImageStatus::default_named());
         });
 
         let active_window_geo = self.0.with_program(|p| {
