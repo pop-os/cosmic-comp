@@ -315,6 +315,11 @@ impl XdgShellHandler for State {
             let mut shell = self.common.shell.write();
             let seat = shell.seats.last_active().clone();
 
+            // Clean up pending_windows for surfaces that were never mapped.
+            shell
+                .pending_windows
+                .retain(|pending| pending.surface != surface);
+
             let output = shell
                 .visible_output_for_surface(surface.wl_surface())
                 .cloned();
