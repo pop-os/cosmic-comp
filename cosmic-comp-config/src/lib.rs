@@ -54,6 +54,7 @@ pub struct AppearanceConfig {
     pub clip_floating_windows: bool,
     pub clip_tiled_windows: bool,
     pub shadow_tiled_windows: bool,
+    pub disable_workspace_switch_animation: bool,
 }
 
 impl Default for AppearanceConfig {
@@ -62,6 +63,7 @@ impl Default for AppearanceConfig {
             clip_floating_windows: true,
             clip_tiled_windows: true,
             shadow_tiled_windows: false,
+            disable_workspace_switch_animation: false,
         }
     }
 }
