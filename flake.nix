@@ -144,7 +144,6 @@
             packages = with c.pkgs; [
               c.rustToolchain
               rust-analyzer
-              cargo-watch
             ];
 
             LD_LIBRARY_PATH = c.pkgs.lib.makeLibraryPath c.runtimeDependencies;
