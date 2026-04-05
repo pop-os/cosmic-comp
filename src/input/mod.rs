@@ -979,7 +979,10 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
+                    if event.fingers() >= 3
+                        && (!workspace_overview_is_open(&seat.active_output())
+                            || event.fingers() >= 4)
+                    {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();
@@ -1024,7 +1027,13 @@ impl State {
                             activate_action = match gesture_state.fingers {
                                 3 => None, // TODO: 3 finger gestures
                                 4 => {
-                                    if self.common.config.cosmic_conf.workspaces.workspace_layout
+                                    if workspace_overview_is_open(&seat.active_output()) {
+                                        // Overview is open: swipe down to close it
+                                        match gesture_state.direction {
+                                            Some(Direction::Down) => Some(SwipeAction::WorkspaceOverview),
+                                            _ => None,
+                                        }
+                                    } else if self.common.config.cosmic_conf.workspaces.workspace_layout
                                         == WorkspaceLayout::Horizontal
                                     {
                                         match gesture_state.direction {
@@ -1042,7 +1051,8 @@ impl State {
                                                     Some(SwipeAction::NextWorkspace)
                                                 }
                                             }
-                                            _ => None, // TODO: Other actions
+                                            Some(Direction::Up) => Some(SwipeAction::WorkspaceOverview),
+                                            _ => None,
                                         }
                                     } else {
                                         match gesture_state.direction {
@@ -1060,7 +1070,7 @@ impl State {
                                                     Some(SwipeAction::NextWorkspace)
                                                 }
                                             }
-                                            _ => None, // TODO: Other actions
+                                            _ => None,
                                         }
                                     }
                                 }
@@ -1124,6 +1134,12 @@ impl State {
                                     norm_velocity,
                                     &mut self.common.workspace_state.update(),
                                 );
+                            }
+                            Some(SwipeAction::WorkspaceOverview) => {
+                                use cosmic_settings_config::shortcuts::action::System;
+                                if let Some(command) = self.common.config.system_actions.get(&System::WorkspaceOverview) {
+                                    self.spawn_command(command.clone());
+                                }
                             }
                             _ => {}
                         }
