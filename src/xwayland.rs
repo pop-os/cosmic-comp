@@ -1113,6 +1113,33 @@ impl XwmHandler for State {
         shell.unminimize_request(&window, &seat, &self.common.event_loop_handle);
     }
 
+    fn above_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if window.is_override_redirect() {
+            return;
+        }
+        if let Err(err) = window.set_above(true) {
+            warn!(?err, "Failed to set _NET_WM_STATE_ABOVE");
+        }
+    }
+
+    fn unabove_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Err(err) = window.set_above(false) {
+            warn!(?err, "Failed to unset _NET_WM_STATE_ABOVE");
+        }
+    }
+
+    fn below_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Err(err) = window.set_below(true) {
+            warn!(?err, "Failed to set _NET_WM_STATE_BELOW");
+        }
+    }
+
+    fn unbelow_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Err(err) = window.set_below(false) {
+            warn!(?err, "Failed to unset _NET_WM_STATE_BELOW");
+        }
+    }
+
     fn fullscreen_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();

@@ -138,4 +138,4 @@ inherits = "release"
 lto = "fat"
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "e84a4ca" }
+smithay = { git = "https://github.com/jdoss/smithay.git", rev = "bd47d6e" }
