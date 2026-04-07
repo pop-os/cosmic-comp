@@ -7,6 +7,7 @@ use crate::{
     config::{Config, xkb_config_to_wl},
     input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
+    wayland::handlers::image_copy_capture::{CursorFrameHolder, render_cursor_to_buffer},
 };
 use smithay::{
     backend::input::{Device, DeviceCapability},
@@ -17,9 +18,12 @@ use smithay::{
         pointer::{CursorImageAttributes, CursorImageStatus},
     },
     output::Output,
-    reexports::{input::Device as InputDevice, wayland_server::DisplayHandle},
+    reexports::{
+        input::Device as InputDevice,
+        wayland_server::{DisplayHandle, Resource, Weak, protocol::wl_surface},
+    },
     utils::{Buffer, IsAlive, Monotonic, Point, Rectangle, Serial, Time, Transform},
-    wayland::compositor::with_states,
+    wayland::compositor::{HookId, add_post_commit_hook, remove_post_commit_hook, with_states},
 };
 use tracing::warn;
 
@@ -201,7 +205,7 @@ pub fn create_seat(
     userdata.insert_if_missing_threadsafe(CursorState::default);
     userdata.insert_if_missing_threadsafe(|| ActiveOutput(Mutex::new(output.clone())));
     userdata.insert_if_missing_threadsafe(|| FocusedOutput(Mutex::new(None)));
-    userdata.insert_if_missing_threadsafe(|| Mutex::new(CursorImageStatus::default_named()));
+    userdata.insert_if_missing_threadsafe(|| Mutex::new(CursorImageStatusData::default()));
 
     // A lot of clients bind keyboard and pointer unconditionally once on launch..
     // Initial clients might race the compositor on adding periheral and
@@ -259,7 +263,7 @@ pub trait SeatExt {
         time: Time<Monotonic>,
     ) -> Option<(Rectangle<i32, Buffer>, Point<i32, Buffer>)>;
     fn cursor_image_status(&self) -> CursorImageStatus;
-    fn set_cursor_image_status(&self, status: CursorImageStatus);
+    fn set_cursor_image_status(&self, state: &mut State, status: CursorImageStatus);
 }
 
 impl SeatExt for Seat<State> {
@@ -382,19 +386,69 @@ impl SeatExt for Seat<State> {
     }
 
     fn cursor_image_status(&self) -> CursorImageStatus {
-        let lock = self.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
+        let lock = self
+            .user_data()
+            .get::<Mutex<CursorImageStatusData>>()
+            .unwrap();
         // Reset the cursor if the surface is no longer alive
-        let mut cursor_status = lock.lock().unwrap();
-        if let CursorImageStatus::Surface(ref surface) = *cursor_status
+        let mut cursor_status_data = lock.lock().unwrap();
+        if let CursorImageStatus::Surface(surface) = &cursor_status_data.status
             && !surface.alive()
         {
-            *cursor_status = CursorImageStatus::default_named();
+            *cursor_status_data = CursorImageStatusData::default();
         }
-        cursor_status.clone()
+        cursor_status_data.status.clone()
     }
 
-    fn set_cursor_image_status(&self, status: CursorImageStatus) {
-        let cursor_status = self.user_data().get::<Mutex<CursorImageStatus>>().unwrap();
-        *cursor_status.lock().unwrap() = status;
+    fn set_cursor_image_status(&self, state: &mut State, status: CursorImageStatus) {
+        let post_commit_hook = if let CursorImageStatus::Surface(surface) = &status {
+            let seat = self.downgrade();
+            let hook_id = add_post_commit_hook::<State, _>(surface, move |state, _dh, _surface| {
+                if let Some(seat) = seat.upgrade() {
+                    for (session, frame) in seat.take_pending_cursor_frames() {
+                        render_cursor_to_buffer(state, &session, frame, &seat);
+                    }
+                }
+            });
+            Some((surface.downgrade(), hook_id))
+        } else {
+            None
+        };
+        let cursor_status_data = self
+            .user_data()
+            .get::<Mutex<CursorImageStatusData>>()
+            .unwrap();
+        *cursor_status_data.lock().unwrap() = CursorImageStatusData {
+            status,
+            post_commit_hook,
+        };
+
+        for (session, frame) in self.take_pending_cursor_frames() {
+            render_cursor_to_buffer(state, &session, frame, self);
+        }
+    }
+}
+
+struct CursorImageStatusData {
+    status: CursorImageStatus,
+    post_commit_hook: Option<(Weak<wl_surface::WlSurface>, HookId)>,
+}
+
+impl Default for CursorImageStatusData {
+    fn default() -> Self {
+        Self {
+            status: CursorImageStatus::default_named(),
+            post_commit_hook: None,
+        }
+    }
+}
+
+impl Drop for CursorImageStatusData {
+    fn drop(&mut self) {
+        if let Some((surface, hook_id)) = &self.post_commit_hook {
+            if let Ok(surface) = surface.upgrade() {
+                remove_post_commit_hook(&surface, hook_id.clone());
+            }
+        }
     }
 }
