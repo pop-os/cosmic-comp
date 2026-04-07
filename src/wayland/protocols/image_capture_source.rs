@@ -37,9 +37,13 @@ pub enum ImageCaptureSourceKind {
 }
 
 impl ImageCaptureSourceKind {
-    pub fn from_resource(resource: &ExtImageCaptureSourceV1) -> Option<Self> {
-        let source = ImageCaptureSource::from_resource(resource)?;
-        source.user_data().get::<ImageCaptureSourceKind>().cloned()
+    pub fn from_source(source: &ImageCaptureSource) -> Self {
+        // If no user-data, assume source was created for a destroyed output, etc.
+        source
+            .user_data()
+            .get::<ImageCaptureSourceKind>()
+            .cloned()
+            .unwrap_or(Self::Destroyed)
     }
 }
 
