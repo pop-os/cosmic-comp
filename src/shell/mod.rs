@@ -12,7 +12,11 @@ use std::{
 use wayland_backend::server::ClientId;
 
 use crate::{
-    shell::{focus::FocusTarget, grabs::fullscreen_items, layout::tiling::PlaceholderType},
+    shell::{
+        focus::FocusTarget,
+        grabs::fullscreen_items,
+        layout::{WorkspaceAssignments, tiling::PlaceholderType},
+    },
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
         protocols::workspace::{State as WState, WorkspaceCapabilities},
@@ -25,7 +29,10 @@ use cosmic_comp_config::{
 use cosmic_config::ConfigSet;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
-use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
+use cosmic_settings_config::{
+    shortcuts,
+    window_rules::{ApplicationException, WorkspaceAssignment},
+};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
     backend::{input::TouchSlot, renderer::element::RenderElementStates},
@@ -60,6 +67,7 @@ use smithay::{
     xwayland::X11Surface,
 };
 use tracing::error;
+use tracing::warn;
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -289,7 +297,7 @@ pub struct Shell {
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
-
+    workspace_assignments: WorkspaceAssignments,
     #[cfg(feature = "debug")]
     pub debug_active: bool,
 }
@@ -1579,6 +1587,9 @@ impl Shell {
 
         let tiling_exceptions = layout::TilingExceptions::new(config.tiling_exceptions.iter());
 
+        let workspace_assignments =
+            layout::WorkspaceAssignments::new(config.workspace_assignments.iter());
+
         Shell {
             workspaces: Workspaces::new(config, theme.clone()),
             seats: Seats::new(),
@@ -1601,6 +1612,7 @@ impl Shell {
             appearance_conf: config.cosmic_conf.appearance_settings,
             zoom_state: None,
             tiling_exceptions,
+            workspace_assignments,
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -2701,10 +2713,32 @@ impl Shell {
         };
 
         let pending_activation = self.pending_activations.remove(&(&window).into());
-        let workspace_handle = match pending_activation {
+        let mut workspace_handle = match pending_activation {
             Some(ActivationContext::Workspace(handle)) => Some(handle),
             _ => None,
         };
+
+        let pinned_workspace_id =
+            layout::get_workspace_assignment(&self.workspace_assignments, &window);
+
+        let pinned_workspace_handle = pinned_workspace_id //
+            .as_deref()
+            .and_then(|target_id| {
+                self.workspaces
+                    .spaces()
+                    .find(|ws| ws.id.as_deref() == Some(target_id))
+                    .map(|ws| ws.handle)
+            });
+
+        if let Some(id) = pinned_workspace_id
+            && pinned_workspace_handle.is_none()
+        {
+            warn!("Assigned workspace id not found: {}", id);
+        };
+
+        // override the pending activation handle if we have a matching pinned workspace.
+        // NOTE: if the pinned workspace is not active, it will not be made active.
+        workspace_handle = pinned_workspace_handle.or(workspace_handle);
 
         let should_be_fullscreen = output.is_some();
         let mut output = output.unwrap_or_else(|| seat.active_output());
@@ -4842,6 +4876,13 @@ impl Shell {
         I: Iterator<Item = &'a ApplicationException>,
     {
         self.tiling_exceptions = layout::TilingExceptions::new(exceptions);
+    }
+
+    pub fn update_workspace_assignments<'a, I>(&mut self, assignments: I)
+    where
+        I: Iterator<Item = &'a WorkspaceAssignment>,
+    {
+        self.workspace_assignments = layout::WorkspaceAssignments::new(assignments);
     }
 
     pub fn take_presentation_feedback(
