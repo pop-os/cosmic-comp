@@ -324,27 +324,42 @@ impl State {
                         .as_ref()
                         .and_then(|(target, l)| Some((target.wl_surface()?, l)))
                     {
-                        with_pointer_constraint(&surface, &ptr, |constraint| match constraint {
-                            Some(constraint) if constraint.is_active() => {
-                                // Constraint does not apply if not within region
-                                if !constraint.region().is_none_or(|x| {
-                                    x.contains(
-                                        (ptr.current_location() - *surface_loc).to_i32_round(),
-                                    )
-                                }) {
-                                    return;
-                                }
-                                match &*constraint {
-                                    PointerConstraint::Locked(_locked) => {
-                                        pointer_locked = true;
-                                    }
-                                    PointerConstraint::Confined(confine) => {
-                                        pointer_confined = true;
-                                        confine_region = confine.region().cloned();
-                                    }
+                        with_pointer_constraint(&surface, &ptr, |constraint| {
+                            let Some(constraint) = constraint else { return };
+                            // Eagerly activate if the pointer is already within the constraint
+                            // region but the constraint hasn't been activated yet (e.g., the
+                            // constraint was created before the first pointer motion event).
+                            if !constraint.is_active() {
+                                let region = match &*constraint {
+                                    PointerConstraint::Locked(locked) => locked.region(),
+                                    PointerConstraint::Confined(confined) => confined.region(),
+                                };
+                                let point =
+                                    (ptr.current_location() - *surface_loc).to_i32_round();
+                                if region.is_none_or(|r| r.contains(point)) {
+                                    constraint.activate();
                                 }
                             }
-                            _ => {}
+                            if !constraint.is_active() {
+                                return;
+                            }
+                            // Constraint does not apply if not within region
+                            if !constraint.region().is_none_or(|x| {
+                                x.contains(
+                                    (ptr.current_location() - *surface_loc).to_i32_round(),
+                                )
+                            }) {
+                                return;
+                            }
+                            match &*constraint {
+                                PointerConstraint::Locked(_locked) => {
+                                    pointer_locked = true;
+                                }
+                                PointerConstraint::Confined(confine) => {
+                                    pointer_confined = true;
+                                    confine_region = confine.region().cloned();
+                                }
+                            }
                         });
                     }
                     let original_position = position;
