@@ -120,6 +120,9 @@ impl State {
                     &mut self.common.workspace_state.update(),
                 );
             }
+            SwipeAction::WorkspaceOverview => {
+                // Handled at gesture end, not during progressive updates
+            }
         }
     }
 
