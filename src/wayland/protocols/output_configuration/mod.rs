@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::wayland::handlers::image_copy_capture::{FrameHolder, ImageCopySessionsData};
 use calloop::{
     LoopHandle,
     timer::{TimeoutAction, Timer},
@@ -253,6 +254,12 @@ where
                     let mut inner = inner.lock().unwrap();
                     inner.enabled = false;
                     output.leave_all();
+                    output.take_pending_frames();
+                    *output
+                        .user_data()
+                        .get::<ImageCopySessionsData>()
+                        .unwrap()
+                        .borrow_mut() = Default::default();
                     if let Some(global) = inner.global.take() {
                         remove_global_with_timer(&self.dh, &self.event_loop_handle, global);
                     }
