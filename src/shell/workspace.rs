@@ -23,7 +23,7 @@ use crate::{
         },
     },
 };
-use cosmic_comp_config::AppearanceConfig;
+use cosmic_comp_config::{AppearanceConfig, SplitConfig};
 use cosmic_comp_config::workspace::{OutputMatch, PinnedWorkspace};
 
 use cosmic::theme::CosmicTheme;
@@ -365,8 +365,9 @@ impl Workspace {
         tiling_enabled: bool,
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
+        split: SplitConfig,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output, split);
         let floating_layer = FloatingLayout::new(theme, appearance, &output);
         let output_match = output_match_for_output(&output);
 
@@ -398,8 +399,9 @@ impl Workspace {
         output: Output,
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
+        split: SplitConfig,
     ) -> Self {
-        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
+        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output, split);
         let floating_layer = FloatingLayout::new(theme, appearance, &output);
         let output_match = output_match_for_output(&output);
 

@@ -6,6 +6,55 @@ use std::collections::HashMap;
 
 use crate::input::TouchpadOverride;
 
+/// Bundled configuration for tiling split ratios.
+///
+/// A value of `0.0` for `first_h` or `first_v` means "not configured",
+/// in which case the corresponding default ratio is used instead.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SplitConfig {
+    /// Default ratio for horizontal splits (0.0–1.0, default 0.5 for equal halves).
+    pub default_h: f64,
+    /// Default ratio for vertical splits (0.0–1.0, default 0.5 for equal halves).
+    pub default_v: f64,
+    /// If non-zero, overrides `default_h` for the very first horizontal split on a workspace.
+    pub first_h: f64,
+    /// If non-zero, overrides `default_v` for the very first vertical split on a workspace.
+    pub first_v: f64,
+}
+
+impl Default for SplitConfig {
+    fn default() -> Self {
+        Self {
+            default_h: 0.5,
+            default_v: 0.5,
+            first_h: 0.0,
+            first_v: 0.0,
+        }
+    }
+}
+
+impl SplitConfig {
+    /// Returns the effective horizontal ratio, using `first_h` when `is_first_split` is true
+    /// and `first_h` is non-zero.
+    pub fn h_ratio(&self, is_first_split: bool) -> f64 {
+        if is_first_split && self.first_h != 0.0 {
+            self.first_h
+        } else {
+            self.default_h
+        }
+    }
+
+    /// Returns the effective vertical ratio, using `first_v` when `is_first_split` is true
+    /// and `first_v` is non-zero.
+    pub fn v_ratio(&self, is_first_split: bool) -> f64 {
+        if is_first_split && self.first_v != 0.0 {
+            self.first_v
+        } else {
+            self.default_v
+        }
+    }
+}
+
 pub mod input;
 #[cfg(feature = "output")]
 pub mod output;
@@ -99,6 +148,16 @@ pub struct CosmicCompConfig {
     pub edge_snap_threshold: u32,
     pub accessibility_zoom: ZoomConfig,
     pub appearance_settings: AppearanceConfig,
+    /// Default ratio for horizontal splits (0.0–1.0, default 0.5 for equal halves)
+    pub default_h_split_ratio: f64,
+    /// Default ratio for vertical splits (0.0–1.0, default 0.5 for equal halves)
+    pub default_v_split_ratio: f64,
+    /// Ratio for the very first horizontal split on a workspace (overrides default_h_split_ratio
+    /// for that split only). Set to 0.0 (or leave absent) to use the default ratio.
+    pub first_h_split_ratio: f64,
+    /// Ratio for the very first vertical split on a workspace (overrides default_v_split_ratio
+    /// for that split only). Set to 0.0 (or leave absent) to use the default ratio.
+    pub first_v_split_ratio: f64,
 }
 
 impl Default for CosmicCompConfig {
@@ -135,6 +194,22 @@ impl Default for CosmicCompConfig {
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
+            default_h_split_ratio: 0.5,
+            default_v_split_ratio: 0.5,
+            first_h_split_ratio: 0.0,
+            first_v_split_ratio: 0.0,
+        }
+    }
+}
+
+impl CosmicCompConfig {
+    /// Builds a [`SplitConfig`] from the individual config fields.
+    pub fn split_config(&self) -> SplitConfig {
+        SplitConfig {
+            default_h: self.default_h_split_ratio,
+            default_v: self.default_v_split_ratio,
+            first_h: self.first_h_split_ratio,
+            first_v: self.first_v_split_ratio,
         }
     }
 }
@@ -233,4 +308,66 @@ pub enum XwaylandDescaling {
     Disabled,
     #[default]
     Fractional,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_config_defaults() {
+        let cfg = SplitConfig::default();
+        assert_eq!(cfg.default_h, 0.5);
+        assert_eq!(cfg.default_v, 0.5);
+        assert_eq!(cfg.first_h, 0.0);
+        assert_eq!(cfg.first_v, 0.0);
+    }
+
+    #[test]
+    fn split_config_uses_default_when_first_is_zero() {
+        let cfg = SplitConfig {
+            default_h: 0.4,
+            default_v: 0.6,
+            first_h: 0.0,
+            first_v: 0.0,
+        };
+        assert_eq!(cfg.h_ratio(false), 0.4);
+        assert_eq!(cfg.h_ratio(true), 0.4);
+        assert_eq!(cfg.v_ratio(false), 0.6);
+        assert_eq!(cfg.v_ratio(true), 0.6);
+    }
+
+    #[test]
+    fn split_config_uses_first_override_when_nonzero() {
+        let cfg = SplitConfig {
+            default_h: 0.4,
+            default_v: 0.6,
+            first_h: 0.3,
+            first_v: 0.7,
+        };
+        assert_eq!(cfg.h_ratio(false), 0.4);
+        assert_eq!(cfg.h_ratio(true), 0.3);
+        assert_eq!(cfg.v_ratio(false), 0.6);
+        assert_eq!(cfg.v_ratio(true), 0.7);
+    }
+
+    #[test]
+    fn cosmic_comp_config_builds_split_config() {
+        let config = CosmicCompConfig {
+            default_h_split_ratio: 0.35,
+            default_v_split_ratio: 0.65,
+            first_h_split_ratio: 0.2,
+            first_v_split_ratio: 0.8,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.split_config(),
+            SplitConfig {
+                default_h: 0.35,
+                default_v: 0.65,
+                first_h: 0.2,
+                first_v: 0.8,
+            }
+        );
+    }
 }
