@@ -1891,7 +1891,60 @@ impl State {
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
                     modifiers_queue.clear();
-                    seat.supressed_keys().add(&handle, None);
+
+                    // For repeatable system actions (volume, brightness), libinput
+                    // does not forward EV_REP events to the compositor — Wayland
+                    // delegates key repeat to clients via wl_keyboard.repeat_info,
+                    // so shortcut actions would otherwise fire only once per hold.
+                    // Drive repeats ourselves via a calloop timer until the key is
+                    // released. The existing Released branch (~line 1819) already
+                    // tears these timers down via seat.supressed_keys().filter().
+                    let is_repeatable = matches!(
+                        action,
+                        shortcuts::Action::System(
+                            shortcuts::action::System::BrightnessDown
+                                | shortcuts::action::System::BrightnessUp
+                                | shortcuts::action::System::KeyboardBrightnessDown
+                                | shortcuts::action::System::KeyboardBrightnessUp
+                                | shortcuts::action::System::VolumeLower
+                                | shortcuts::action::System::VolumeRaise
+                        )
+                    );
+                    let repeat_token = if is_repeatable {
+                        let action_clone = Action::Shortcut(action.clone());
+                        let binding_clone = binding.clone();
+                        let seat_clone = seat.clone();
+                        let start = Instant::now();
+                        let start_time = event.time_msec();
+                        let xkb = self.common.config.xkb_config();
+                        let repeat_delay = xkb.repeat_delay as u64;
+                        let repeat_interval = 1000 / xkb.repeat_rate.max(1) as u64;
+                        self.common
+                            .event_loop_handle
+                            .insert_source(
+                                Timer::from_duration(Duration::from_millis(repeat_delay)),
+                                move |current, _, state| {
+                                    let dt =
+                                        current.duration_since(start).as_millis() as u32;
+                                    state.handle_action(
+                                        action_clone.clone(),
+                                        &seat_clone,
+                                        serial,
+                                        start_time.overflowing_add(dt).0,
+                                        binding_clone.clone(),
+                                        None,
+                                    );
+                                    TimeoutAction::ToDuration(Duration::from_millis(
+                                        repeat_interval,
+                                    ))
+                                },
+                            )
+                            .ok()
+                    } else {
+                        None
+                    };
+                    seat.supressed_keys().add(&handle, repeat_token);
+
                     return FilterResult::Intercept(Some((
                         Action::Shortcut(action.clone()),
                         binding.clone(),
