@@ -7,11 +7,12 @@ use crate::{
         element::{AsGlowRenderer, FromGlesError},
     },
     shell::{
-        ANIMATION_DURATION, OverviewMode, SeatMoveGrabState,
+        OverviewMode, SeatMoveGrabState, animation_duration, animation_progress,
         layout::{
             floating::{FloatingLayout, TiledCorners},
             tiling::TilingLayout,
         },
+        overview_fade_alpha,
     },
     state::State,
     utils::{prelude::*, tween::EaseRectangle},
@@ -71,8 +72,6 @@ use super::{
     layout::tiling::{Data, NodeDesc},
 };
 
-const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
-
 // For stable workspace id, generate random 24-bit integer, as a hex string
 // Must be compared with existing workspaces work uniqueness.
 pub fn random_workspace_id() -> String {
@@ -104,6 +103,7 @@ pub struct Workspace {
     pub output: Output,
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,
+    pub animations_enabled: bool,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub tiling_enabled: bool,
     pub fullscreen: Option<FullscreenSurface>,
@@ -363,17 +363,20 @@ impl Workspace {
         handle: WorkspaceHandle,
         output: Output,
         tiling_enabled: bool,
+        animations_enabled: bool,
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
     ) -> Workspace {
-        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
-        let floating_layer = FloatingLayout::new(theme, appearance, &output);
+        let tiling_layer =
+            TilingLayout::new(theme.clone(), appearance, animations_enabled, &output);
+        let floating_layer = FloatingLayout::new(theme, appearance, animations_enabled, &output);
         let output_match = output_match_for_output(&output);
 
         Workspace {
             output,
             tiling_layer,
             floating_layer,
+            animations_enabled,
             tiling_enabled,
             minimized_windows: Vec::new(),
             fullscreen: None,
@@ -396,17 +399,20 @@ impl Workspace {
         pinned: &PinnedWorkspace,
         handle: WorkspaceHandle,
         output: Output,
+        animations_enabled: bool,
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
     ) -> Self {
-        let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
-        let floating_layer = FloatingLayout::new(theme, appearance, &output);
+        let tiling_layer =
+            TilingLayout::new(theme.clone(), appearance, animations_enabled, &output);
+        let floating_layer = FloatingLayout::new(theme, appearance, animations_enabled, &output);
         let output_match = output_match_for_output(&output);
 
         Workspace {
             output,
             tiling_layer,
             floating_layer,
+            animations_enabled,
             tiling_enabled: pinned.tiling_enabled,
             minimized_windows: Vec::new(),
             fullscreen: None,
@@ -445,11 +451,76 @@ impl Workspace {
         }
     }
 
+    fn fullscreen_transition(
+        &self,
+        fullscreen: &FullscreenSurface,
+        fullscreen_geo: Rectangle<i32, Local>,
+    ) -> (Rectangle<i32, Local>, f32) {
+        let previous_geo = fullscreen
+            .previous_geometry
+            .as_ref()
+            .unwrap_or(&fullscreen_geo);
+        let duration = self.fullscreen_animation_duration();
+
+        match (fullscreen.start_at, fullscreen.ended_at) {
+            (Some(started), _) => {
+                let progress = animation_progress(started, duration) as f64;
+                (
+                    ease(
+                        EaseInOutCubic,
+                        EaseRectangle(*previous_geo),
+                        EaseRectangle(fullscreen_geo),
+                        progress,
+                    )
+                    .0,
+                    ease(EaseInOutCubic, 0.0, 1.0, progress as f32),
+                )
+            }
+            (_, Some(ended)) => {
+                let progress = animation_progress(ended, duration) as f64;
+                (
+                    ease(
+                        EaseInOutCubic,
+                        EaseRectangle(fullscreen_geo),
+                        EaseRectangle(*previous_geo),
+                        progress,
+                    )
+                    .0,
+                    ease(EaseInOutCubic, 1.0, 0.0, progress as f32),
+                )
+            }
+            (None, None) => (fullscreen_geo, 1.0),
+        }
+    }
+
     #[profiling::function]
     pub fn refresh(&mut self) {
         self.fullscreen.take_if(|w| !w.alive());
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
+    }
+
+    fn fullscreen_animation_duration(&self) -> Duration {
+        animation_duration(self.animations_enabled)
+    }
+
+    pub fn set_animations_enabled(&mut self, enabled: bool) {
+        self.animations_enabled = enabled;
+        self.floating_layer.set_animations_enabled(enabled);
+        self.tiling_layer.set_animations_enabled(enabled);
+        if let Some(fullscreen) = self.fullscreen.as_mut() {
+            if !enabled {
+                fullscreen.start_at = None;
+            }
+        }
+        if !enabled
+            && self
+                .fullscreen
+                .as_ref()
+                .is_some_and(|f| f.ended_at.is_some())
+        {
+            let _ = self.fullscreen.take();
+        }
     }
 
     fn has_activation_token(&self, xdg_activation_state: &XdgActivationState) -> bool {
@@ -516,10 +587,11 @@ impl Workspace {
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
+        let duration = self.fullscreen_animation_duration();
         if let Some(f) = self.fullscreen.as_mut() {
             if let Some(start) = f.start_at.as_ref() {
                 let duration_since = Instant::now().duration_since(*start);
-                if duration_since > FULLSCREEN_ANIMATION_DURATION {
+                if duration_since >= duration {
                     f.start_at.take();
                     self.dirty.store(true, Ordering::SeqCst);
                 }
@@ -527,7 +599,7 @@ impl Workspace {
 
             if let Some(end) = f.ended_at {
                 let duration_since = Instant::now().duration_since(end);
-                if duration_since >= FULLSCREEN_ANIMATION_DURATION {
+                if duration_since >= duration {
                     let _ = self.fullscreen.take();
                     self.dirty.store(true, Ordering::SeqCst);
                 }
@@ -1010,27 +1082,26 @@ impl Workspace {
         CosmicSurface: PartialEq<S>,
     {
         if self.get_fullscreen().is_some_and(|s| s == surface) {
+            let duration = self.fullscreen_animation_duration();
             let fullscreen_state = self.fullscreen.clone().unwrap();
-            {
+            if self.animations_enabled {
                 let f = self.fullscreen.as_mut().unwrap();
                 f.previous_geometry = Some(to);
                 f.ended_at = Some(
                     Instant::now()
-                        - (FULLSCREEN_ANIMATION_DURATION
+                        - (duration
                             - f.start_at
                                 .take()
-                                .map(|earlier| {
-                                    Instant::now()
-                                        .duration_since(earlier)
-                                        .min(FULLSCREEN_ANIMATION_DURATION)
-                                })
-                                .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
+                                .map(|earlier| Instant::now().duration_since(earlier).min(duration))
+                                .unwrap_or(duration)),
                 );
+            } else {
+                let _ = self.fullscreen.take();
             }
 
             fullscreen_state.surface.set_minimized(true);
             return Some(MinimizedWindow::Fullscreen {
-                surface: fullscreen_state.surface,
+                surface: fullscreen_state.surface.clone(),
                 previous: fullscreen_state
                     .previous_state
                     .zip(fullscreen_state.previous_geometry)
@@ -1228,7 +1299,7 @@ impl Workspace {
             surface: window.clone(),
             previous_state: restore,
             previous_geometry,
-            start_at: Some(Instant::now()),
+            start_at: self.animations_enabled.then(Instant::now),
             ended_at: None,
         });
 
@@ -1264,6 +1335,7 @@ impl Workspace {
         Option<FullscreenRestoreState>,
         Option<Rectangle<i32, Local>>,
     )> {
+        let duration = self.fullscreen_animation_duration();
         if let Some(surface) = self.fullscreen.as_mut() {
             if surface.ended_at.is_some() {
                 return None;
@@ -1284,25 +1356,30 @@ impl Workspace {
                 focus_stack.retain(|t| t != &surface.surface);
             }
 
-            surface.ended_at = Some(
-                Instant::now()
-                    - (FULLSCREEN_ANIMATION_DURATION
-                        - surface
-                            .start_at
-                            .take()
-                            .map(|earlier| {
-                                Instant::now()
-                                    .duration_since(earlier)
-                                    .min(FULLSCREEN_ANIMATION_DURATION)
-                            })
-                            .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
-            );
+            if self.animations_enabled {
+                surface.ended_at = Some(
+                    Instant::now()
+                        - (duration
+                            - surface
+                                .start_at
+                                .take()
+                                .map(|earlier| Instant::now().duration_since(earlier).min(duration))
+                                .unwrap_or(duration)),
+                );
 
-            Some((
-                surface.surface.clone(),
-                surface.previous_state.clone(),
-                surface.previous_geometry,
-            ))
+                Some((
+                    surface.surface.clone(),
+                    surface.previous_state.clone(),
+                    surface.previous_geometry,
+                ))
+            } else {
+                let surface = self.fullscreen.take().unwrap();
+                Some((
+                    surface.surface,
+                    surface.previous_state,
+                    surface.previous_geometry,
+                ))
+            }
         } else {
             None
         }
@@ -1555,42 +1632,7 @@ impl Workspace {
 
         let mut fullscreen_elements = if let Some(fullscreen) = self.fullscreen.as_ref() {
             let fullscreen_geo = self.fullscreen_geometry().unwrap();
-            let previous_geo = fullscreen
-                .previous_geometry
-                .as_ref()
-                .unwrap_or(&fullscreen_geo);
-
-            let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
-                (Some(started), _) => {
-                    let duration = Instant::now().duration_since(started).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(*previous_geo),
-                            EaseRectangle(fullscreen_geo),
-                            duration,
-                        )
-                        .0,
-                        ease(EaseInOutCubic, 0.0, 1.0, duration),
-                    )
-                }
-                (_, Some(ended)) => {
-                    let duration = Instant::now().duration_since(ended).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(fullscreen_geo),
-                            EaseRectangle(*previous_geo),
-                            duration,
-                        )
-                        .0,
-                        ease(EaseInOutCubic, 1.0, 0.0, duration),
-                    )
-                }
-                (None, None) => (fullscreen_geo, 1.0),
-            };
+            let (target_geo, alpha) = self.fullscreen_transition(fullscreen, fullscreen_geo);
 
             let render_loc = target_geo
                 .loc
@@ -1640,23 +1682,7 @@ impl Workspace {
                 .unwrap_or(true)
         {
             // floating surfaces
-            let alpha = match &overview.0 {
-                OverviewMode::Started(_, started) => {
-                    (1.0 - (Instant::now().duration_since(*started).as_millis()
-                        / ANIMATION_DURATION.as_millis()) as f32)
-                        .max(0.0)
-                        * 0.4
-                        + 0.6
-                }
-                OverviewMode::Ended(_, ended) => {
-                    ((Instant::now().duration_since(*ended).as_millis()
-                        / ANIMATION_DURATION.as_millis()) as f32)
-                        * 0.4
-                        + 0.6
-                }
-                OverviewMode::Active(_) => 0.6,
-                OverviewMode::None => 1.0,
-            };
+            let alpha = overview_fade_alpha(&overview.0, self.animations_enabled);
 
             elements.extend(
                 self.floating_layer
@@ -1678,18 +1704,7 @@ impl Workspace {
                     .map(WorkspaceRenderElement::from),
             );
 
-            let alpha = match &overview.0 {
-                OverviewMode::Started(_, start) => Some(
-                    (Instant::now().duration_since(*start).as_millis() as f64 / 100.0).min(1.0)
-                        as f32,
-                ),
-                OverviewMode::Active(_) => Some(1.0),
-                OverviewMode::Ended(_, ended) => Some(
-                    1.0 - (Instant::now().duration_since(*ended).as_millis() as f64 / 100.0)
-                        .min(1.0) as f32,
-                ),
-                OverviewMode::None => None,
-            };
+            let alpha = overview.0.alpha(self.animations_enabled);
 
             //tiling surfaces
             elements.extend(
@@ -1756,42 +1771,7 @@ impl Workspace {
 
         if let Some(fullscreen) = self.fullscreen.as_ref() {
             let fullscreen_geo = self.fullscreen_geometry().unwrap();
-            let previous_geo = fullscreen
-                .previous_geometry
-                .as_ref()
-                .unwrap_or(&fullscreen_geo);
-
-            let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
-                (Some(started), _) => {
-                    let duration = Instant::now().duration_since(started).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(*previous_geo),
-                            EaseRectangle(fullscreen_geo),
-                            duration,
-                        )
-                        .0,
-                        ease(EaseInOutCubic, 0.0, 1.0, duration),
-                    )
-                }
-                (_, Some(ended)) => {
-                    let duration = Instant::now().duration_since(ended).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(fullscreen_geo),
-                            EaseRectangle(*previous_geo),
-                            duration,
-                        )
-                        .0,
-                        ease(EaseInOutCubic, 1.0, 0.0, duration),
-                    )
-                }
-                (None, None) => (fullscreen_geo, 1.0),
-            };
+            let (target_geo, alpha) = self.fullscreen_transition(fullscreen, fullscreen_geo);
 
             let render_loc = target_geo
                 .loc
@@ -1821,23 +1801,7 @@ impl Workspace {
                 .unwrap_or(true)
         {
             // floating surfaces
-            let alpha = match &overview.0 {
-                OverviewMode::Started(_, started) => {
-                    (1.0 - (Instant::now().duration_since(*started).as_millis()
-                        / ANIMATION_DURATION.as_millis()) as f32)
-                        .max(0.0)
-                        * 0.4
-                        + 0.6
-                }
-                OverviewMode::Ended(_, ended) => {
-                    ((Instant::now().duration_since(*ended).as_millis()
-                        / ANIMATION_DURATION.as_millis()) as f32)
-                        * 0.4
-                        + 0.6
-                }
-                OverviewMode::Active(_) => 0.6,
-                OverviewMode::None => 1.0,
-            };
+            let alpha = overview_fade_alpha(&overview.0, self.animations_enabled);
 
             elements.extend(
                 self.floating_layer

@@ -112,6 +112,7 @@ impl TargetZone {
 struct TreeQueue {
     trees: VecDeque<(Tree<Data>, Duration, Option<TilingBlocker>)>,
     animation_start: Option<Instant>,
+    animations_enabled: bool,
 }
 
 impl TreeQueue {
@@ -121,8 +122,15 @@ impl TreeQueue {
         duration: impl Into<Option<Duration>>,
         blocker: Option<TilingBlocker>,
     ) {
-        self.trees
-            .push_back((tree, duration.into().unwrap_or(Duration::ZERO), blocker))
+        self.trees.push_back((
+            tree,
+            if self.animations_enabled {
+                duration.into().unwrap_or(Duration::ZERO)
+            } else {
+                Duration::ZERO
+            },
+            blocker,
+        ))
     }
 }
 
@@ -349,6 +357,7 @@ impl TilingLayout {
     pub fn new(
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
+        animations_enabled: bool,
         output: &Output,
     ) -> TilingLayout {
         TilingLayout {
@@ -359,6 +368,7 @@ impl TilingLayout {
                     queue
                 },
                 animation_start: None,
+                animations_enabled,
             },
             output: output.clone(),
             backdrop_id: Id::new(),
@@ -366,6 +376,19 @@ impl TilingLayout {
             last_overview_hover: None,
             theme,
             appearance,
+        }
+    }
+
+    fn animations_enabled(&self) -> bool {
+        self.queue.animations_enabled
+    }
+
+    pub fn set_animations_enabled(&mut self, enabled: bool) {
+        self.queue.animations_enabled = enabled;
+        if !enabled {
+            for (_, duration, _) in self.queue.trees.iter_mut().skip(1) {
+                *duration = Duration::ZERO;
+            }
         }
     }
 
@@ -2146,6 +2169,7 @@ impl TilingLayout {
                         (&self.output, mapped.bbox()),
                         self.theme.clone(),
                         self.appearance,
+                        self.animations_enabled(),
                     );
                     focus_stack.append(mapped.clone());
                     KeyboardFocusTarget::Element(mapped.clone())
@@ -2288,6 +2312,7 @@ impl TilingLayout {
                         handle,
                         self.theme.clone(),
                         self.appearance,
+                        self.animations_enabled(),
                     );
 
                     for child in tree
@@ -2771,6 +2796,7 @@ impl TilingLayout {
                             (&self.output, mapped.bbox()),
                             self.theme.clone(),
                             self.appearance,
+                            self.animations_enabled(),
                         );
                         let Some(stack) = mapped.stack_ref() else {
                             unreachable!()
@@ -3356,6 +3382,7 @@ impl TilingLayout {
         overview: OverviewMode,
     ) {
         let gaps = self.gaps();
+        let animations_enabled = self.animations_enabled();
         let last_overview_hover = &mut self.last_overview_hover;
         let tree = &self.queue.trees.back().unwrap().0;
         let Some(root) = tree.root_node_id() else {
@@ -3406,7 +3433,7 @@ impl TilingLayout {
                 None,
                 self.output.current_scale().fractional_scale(),
                 1.0,
-                overview.alpha().unwrap(),
+                overview.alpha(animations_enabled).unwrap(),
                 &self.backdrop_id,
                 Some(None),
                 None,
@@ -4037,7 +4064,7 @@ impl TilingLayout {
         } else {
             1.0
         };
-        let draw_groups = overview.0.alpha();
+        let draw_groups = overview.0.alpha(self.animations_enabled());
 
         let mut elements = Vec::default();
 
@@ -4134,6 +4161,7 @@ impl TilingLayout {
             } else {
                 indicator_thickness
             },
+            self.animations_enabled(),
             overview,
             resize_indicator,
             swap_desc.clone(),
@@ -4183,13 +4211,17 @@ impl TilingLayout {
             .then(|| &self.queue.trees.front().unwrap().0);
 
         let percentage = if let Some(animation_start) = self.queue.animation_start {
-            let percentage = Instant::now().duration_since(animation_start).as_millis() as f32
-                / duration.as_millis() as f32;
-            ease(EaseInOutCubic, 0.0, 1.0, percentage)
+            if duration.is_zero() {
+                1.0
+            } else {
+                let percentage = Instant::now().duration_since(animation_start).as_millis() as f32
+                    / duration.as_millis() as f32;
+                ease(EaseInOutCubic, 0.0, 1.0, percentage)
+            }
         } else {
             1.0
         };
-        let draw_groups = overview.0.alpha();
+        let draw_groups = overview.0.alpha(self.animations_enabled());
 
         let mut elements = Vec::default();
 
@@ -5247,6 +5279,7 @@ fn render_new_tree_windows<R>(
     percentage: f32,
     transition: Option<f32>,
     indicator_thickness: u8,
+    animations_enabled: bool,
     overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
     mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
     swap_desc: Option<NodeDesc>,
@@ -5514,7 +5547,7 @@ where
                                 renderer,
                                 geo.loc.as_logical().to_physical_precise_round(output_scale),
                                 output_scale.into(),
-                                alpha * overview.0.alpha().unwrap_or(1.0),
+                                alpha * overview.0.alpha(animations_enabled).unwrap_or(1.0),
                             )
                             .into_iter()
                             .map(CosmicMappedRenderElement::from),
@@ -5549,7 +5582,7 @@ where
                                     renderer,
                                     geo.loc.as_logical().to_physical_precise_round(output_scale),
                                     output_scale.into(),
-                                    alpha * mode.alpha().unwrap_or(1.0),
+                                    alpha * mode.alpha(animations_enabled).unwrap_or(1.0),
                                 )
                                 .into_iter()
                                 .map(CosmicMappedRenderElement::from)

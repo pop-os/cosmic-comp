@@ -499,13 +499,20 @@ impl CosmicMapped {
         (output, overlap): (&Output, Rectangle<i32, Logical>),
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
+        animations_enabled: bool,
     ) {
         if let CosmicMappedInternal::Window(window) = &self.element {
             let surface = window.surface();
             let activated = surface.is_activated(true);
             let handle = window.loop_handle();
 
-            let stack = CosmicStack::new(std::iter::once(surface), handle, theme, appearance);
+            let stack = CosmicStack::new(
+                std::iter::once(surface),
+                handle,
+                theme,
+                appearance,
+                animations_enabled,
+            );
             if let Some(geo) = *self.last_geometry.lock().unwrap() {
                 stack.set_geometry(geo.to_global(output));
             }
@@ -861,6 +868,14 @@ impl CosmicMapped {
         match &self.element {
             CosmicMappedInternal::Window(w) => w.update_appearance_conf(appearance),
             CosmicMappedInternal::Stack(s) => s.update_appearance_conf(appearance),
+            CosmicMappedInternal::_GenericCatcher(_) => {}
+        }
+    }
+
+    pub(crate) fn update_animations_enabled(&self, enabled: bool) {
+        match &self.element {
+            CosmicMappedInternal::Window(_) => {}
+            CosmicMappedInternal::Stack(s) => s.update_animations_enabled(enabled),
             CosmicMappedInternal::_GenericCatcher(_) => {}
         }
     }
