@@ -318,7 +318,7 @@ impl PointerGrab<State> for ResizeSurfaceGrab {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {
+    fn unset(&mut self, _data: &mut State, _handle: &mut PointerInnerHandle<'_, State>) {
         self.ungrab();
     }
 }
@@ -401,7 +401,7 @@ impl TouchGrab<State> for ResizeSurfaceGrab {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {
+    fn unset(&mut self, _data: &mut State, _handle: &mut TouchInnerHandle<'_, State>) {
         self.ungrab();
     }
 }
