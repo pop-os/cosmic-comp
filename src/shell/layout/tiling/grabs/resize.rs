@@ -496,7 +496,7 @@ impl PointerGrab<State> for ResizeForkGrab {
         }
     }
 
-    fn unset(&mut self, data: &mut State) {
+    fn unset(&mut self, data: &mut State, _handle: &mut PointerInnerHandle<'_, State>) {
         self.update_location(data, self.last_loc.as_logical(), true);
     }
 }
@@ -579,7 +579,7 @@ impl TouchGrab<State> for ResizeForkGrab {
         handle.orientation(data, event, seq)
     }
 
-    fn unset(&mut self, data: &mut State) {
+    fn unset(&mut self, data: &mut State, _handle: &mut TouchInnerHandle<'_, State>) {
         self.update_location(data, self.last_loc.as_logical(), true);
     }
 }
