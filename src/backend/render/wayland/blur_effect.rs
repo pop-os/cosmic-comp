@@ -148,6 +148,7 @@ pub struct BlurElement {
     id: Id,
     commit: CommitCounter,
     src: Size<f64, Buffer>,
+    extended_offset: Point<f64, Logical>,
     geometry: Rectangle<f64, Logical>,
     scaling_shaders: BlurShaders,
     render_shader: GlesTexProgram,
@@ -223,6 +224,7 @@ impl BlurElement {
         Ok(Some(Self::from_state(
             renderer,
             extended_geo.to_logical(output_scale),
+            Point::new(radius, radius),
             region,
             output_scale,
             &mut state.lock().unwrap(),
@@ -234,6 +236,7 @@ impl BlurElement {
     fn from_state<R: AsGlowRenderer>(
         renderer: &mut R,
         geometry: Rectangle<f64, Logical>,
+        extended_offset: Point<f64, Physical>,
         region: &Vec<Rectangle<i32, Logical>>,
         output_scale: f64,
         state: &mut BlurState,
@@ -267,13 +270,18 @@ impl BlurElement {
             commit: state.commit,
             src,
             geometry,
+            extended_offset: extended_offset.to_logical(output_scale),
             scaling_shaders: BlurShaders::get(renderer),
             render_shader: ClippingShader::get(renderer),
             offset: state.offset,
             passes: state.passes,
             region: region
                 .iter()
-                .map(|rect| rect.to_physical_precise_round(output_scale))
+                .map(|rect| {
+                    let mut phys = rect.to_f64().to_physical(output_scale);
+                    phys.loc += extended_offset;
+                    phys.to_i32_round()
+                })
                 .collect(),
             uniforms,
         })
@@ -307,7 +315,15 @@ impl Element for BlurElement {
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
         if self.commit.distance(commit).is_none_or(|d| d > 0) {
-            DamageSet::from_slice(&[self.geometry.to_physical_precise_round(scale)])
+            DamageSet::from_slice(&[Rectangle::new(
+                self.extended_offset.to_physical_precise_round(scale),
+                self.geometry.size.to_physical_precise_round(scale)
+                    - self
+                        .extended_offset
+                        .to_size()
+                        .upscale(2.)
+                        .to_physical_precise_round(scale),
+            )])
         } else {
             DamageSet::default()
         }
