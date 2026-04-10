@@ -27,7 +27,7 @@ use smithay::{
     },
     wayland::compositor::SurfaceData,
 };
-use tracing::info;
+use tracing::trace;
 
 use crate::{
     backend::render::{element::AsGlowRenderer, wayland::clipped_surface::ClippingShader},
@@ -78,7 +78,7 @@ static BLUR_PARAMS: LazyLock<Vec<BlurParameters>> = LazyLock::new(|| {
         }
     }
 
-    info!("Computed blur values: {:#?}", &params);
+    trace!("Computed blur values: {:#?}", &params);
     params
 });
 
