@@ -192,7 +192,7 @@ impl<G: PointerGrab<State>> PointerGrab<State> for DelayGrab<G> {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, _data: &mut State, _handle: &mut PointerInnerHandle<'_, State>) {}
 }
 
 impl<G: TouchGrab<State>> TouchGrab<State> for DelayGrab<G> {
@@ -281,5 +281,5 @@ impl<G: TouchGrab<State>> TouchGrab<State> for DelayGrab<G> {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, _data: &mut State, _handle: &mut TouchInnerHandle<'_, State>) {}
 }

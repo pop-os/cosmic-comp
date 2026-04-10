@@ -8,8 +8,8 @@ use smithay::desktop::layer_map_for_output;
 use smithay::{
     delegate_xdg_shell,
     desktop::{
-        PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupTouchGrab, PopupUngrabStrategy,
-        WindowSurfaceType, find_popup_root_surface,
+        PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupTouchGrab,
+        PopupUngrabStrategy, WindowSurfaceType, find_popup_root_surface,
     },
     input::{Seat, pointer::Focus},
     output::Output,
