@@ -1,9 +1,6 @@
 use std::{
     borrow::{Borrow, BorrowMut},
-    sync::{
-        Arc, LazyLock, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{LazyLock, Mutex},
 };
 
 use cgmath::{Matrix3, SquareMatrix, Vector2};
@@ -127,7 +124,7 @@ struct BlurState {
     offset: f64,
     passes: usize,
     region: Vec<Rectangle<i32, Logical>>,
-    dirty: Arc<AtomicBool>,
+    commit: CommitCounter,
 }
 
 unsafe impl Send for BlurState {}
@@ -142,18 +139,18 @@ impl BlurState {
             offset: 0.,
             passes: 0,
             region: Vec::new(),
-            dirty: Arc::new(AtomicBool::new(true)),
+            commit: CommitCounter::default(),
         }
     }
 }
 
 pub struct BlurElement {
     id: Id,
+    commit: CommitCounter,
     src: Size<f64, Buffer>,
     geometry: Rectangle<f64, Logical>,
     scaling_shaders: BlurShaders,
     render_shader: GlesTexProgram,
-    dirty: Arc<AtomicBool>,
     region: Vec<Rectangle<i32, Physical>>,
     offset: f64,
     passes: usize,
@@ -262,16 +259,16 @@ impl BlurElement {
         state.region = region.clone();
         state.src = src;
         if dirty {
-            state.dirty.store(dirty, Ordering::Release);
+            state.commit.increment();
         }
 
         Ok(BlurElement {
             id: state.id.clone(),
+            commit: state.commit,
             src,
             geometry,
             scaling_shaders: BlurShaders::get(renderer),
             render_shader: ClippingShader::get(renderer),
-            dirty: state.dirty.clone(),
             offset: state.offset,
             passes: state.passes,
             region: region
@@ -289,7 +286,7 @@ impl Element for BlurElement {
     }
 
     fn current_commit(&self) -> CommitCounter {
-        Default::default()
+        self.commit
     }
 
     fn src(&self) -> Rectangle<f64, Buffer> {
@@ -309,7 +306,7 @@ impl Element for BlurElement {
         scale: Scale<f64>,
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
-        if commit.is_none() || self.dirty.load(Ordering::Acquire) {
+        if self.commit.distance(commit).is_none_or(|d| d > 0) {
             DamageSet::from_slice(&[self.geometry.to_physical_precise_round(scale)])
         } else {
             DamageSet::default()
@@ -344,7 +341,10 @@ impl<R: Renderer + AsGlowRenderer> RenderElement<R> for BlurElement {
 
         let texture_ref = cache.get_or_insert_threadsafe(BlurTexture::default);
         let mut texture_entry = texture_ref.lock().unwrap();
-        if self.dirty.swap(false, Ordering::Acquire) {
+        if texture_entry
+            .as_ref()
+            .is_some_and(|tex| tex.size() != tex_size)
+        {
             texture_entry.take();
         }
 
