@@ -148,10 +148,11 @@ pub struct BlurElement {
     id: Id,
     commit: CommitCounter,
     src: Size<f64, Buffer>,
+    extended_offset: Point<f64, Logical>,
     geometry: Rectangle<f64, Logical>,
     scaling_shaders: BlurShaders,
     render_shader: GlesTexProgram,
-    region: Vec<Rectangle<i32, Physical>>,
+    region: Vec<Rectangle<i32, Logical>>,
     offset: f64,
     passes: usize,
     uniforms: Vec<Uniform<'static>>,
@@ -223,6 +224,7 @@ impl BlurElement {
         Ok(Some(Self::from_state(
             renderer,
             extended_geo.to_logical(output_scale),
+            Point::<f64, Physical>::new(radius, radius).to_logical(output_scale),
             region,
             output_scale,
             &mut state.lock().unwrap(),
@@ -234,6 +236,7 @@ impl BlurElement {
     fn from_state<R: AsGlowRenderer>(
         renderer: &mut R,
         geometry: Rectangle<f64, Logical>,
+        extended_offset: Point<f64, Logical>,
         region: &Vec<Rectangle<i32, Logical>>,
         output_scale: f64,
         state: &mut BlurState,
@@ -267,13 +270,18 @@ impl BlurElement {
             commit: state.commit,
             src,
             geometry,
+            extended_offset,
             scaling_shaders: BlurShaders::get(renderer),
             render_shader: ClippingShader::get(renderer),
             offset: state.offset,
             passes: state.passes,
             region: region
                 .iter()
-                .map(|rect| rect.to_physical_precise_round(output_scale))
+                .cloned()
+                .map(|mut rect| {
+                    rect.loc += extended_offset.to_i32_round();
+                    rect
+                })
                 .collect(),
             uniforms,
         })
@@ -307,7 +315,15 @@ impl Element for BlurElement {
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
         if self.commit.distance(commit).is_none_or(|d| d > 0) {
-            DamageSet::from_slice(&[self.geometry.to_physical_precise_round(scale)])
+            DamageSet::from_slice(&[Rectangle::new(
+                self.extended_offset.to_physical_precise_round(scale),
+                self.geometry.size.to_physical_precise_round(scale)
+                    - self
+                        .extended_offset
+                        .to_size()
+                        .upscale(2.)
+                        .to_physical_precise_round(scale),
+            )])
         } else {
             DamageSet::default()
         }
@@ -391,10 +407,21 @@ impl<R: Renderer + AsGlowRenderer> RenderElement<R> for BlurElement {
         cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
         let glow_frame = <R as AsGlowRenderer>::glow_frame_mut(frame);
+        let src_to_geo = self.geometry.size / self.src;
+        let src_log = src
+            .upscale(src_to_geo)
+            .to_logical(1., Transform::Normal, &Size::default());
+        let scale = dst.size.to_f64() / src_log.size;
+
         let damage = self
             .region
             .iter()
-            .flat_map(|rect| damage.iter().flat_map(|r| r.intersection(*rect)))
+            .flat_map(|rect| {
+                let mut rect = rect.to_f64().intersection(src_log)?;
+                rect.loc -= src_log.loc;
+                Some(rect.to_physical_precise_round(scale))
+            })
+            .flat_map(|rect| damage.iter().flat_map(move |r| r.intersection(rect)))
             .collect::<Vec<_>>();
         let cache = cache.expect("Framebuffer element without cache?");
         let Some(texture) = cache.get::<BlurTexture>() else {
