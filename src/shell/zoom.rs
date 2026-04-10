@@ -11,7 +11,7 @@ use cosmic_comp_config::ZoomMovement;
 use cosmic_config::ConfigSet;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::renderer::{ImportMem, Renderer, element::AsRenderElements},
+    backend::renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
     desktop::space::SpaceElement,
     input::{
         Seat,
@@ -192,9 +192,12 @@ impl OutputZoomState {
         });
     }
 
-    fn render<R, C>(&mut self, renderer: &mut R, output: &Output) -> Vec<C>
-    where
-        C: From<<IcedElement<ZoomProgram> as AsRenderElements<R>>::RenderElement>,
+    fn render<R>(
+        &mut self,
+        renderer: &mut R,
+        output: &Output,
+        push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+    ) where
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
@@ -208,8 +211,13 @@ impl OutputZoomState {
         .to_physical(scale.fractional_scale())
         .to_i32_round();
 
-        self.element
-            .render_elements(renderer, location, scale.fractional_scale().into(), 1.0)
+        self.element.push_render_elements(
+            renderer,
+            location,
+            scale.fractional_scale().into(),
+            1.0,
+            push,
+        )
     }
 }
 
@@ -389,14 +397,16 @@ impl ZoomState {
         None
     }
 
-    pub fn render<R, C>(renderer: &mut R, output: &Output) -> Vec<C>
-    where
-        C: From<<IcedElement<ZoomProgram> as AsRenderElements<R>>::RenderElement>,
+    pub fn render<R>(
+        renderer: &mut R,
+        output: &Output,
+        push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+    ) where
         R: Renderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
-        output_state.lock().unwrap().render(renderer, output)
+        output_state.lock().unwrap().render(renderer, output, push)
     }
 }
 
