@@ -408,6 +408,14 @@ impl CosmicMapped {
         }
     }
 
+    pub fn last_server_size(&self) -> Option<Size<i32, Logical>> {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.last_server_size(),
+            CosmicMappedInternal::Window(w) => w.last_server_size(),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         match &self.element {
             CosmicMappedInternal::Stack(s) => s.set_geometry(geo),
