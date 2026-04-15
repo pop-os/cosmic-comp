@@ -271,16 +271,16 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref() {
-        if !has_fullscreen {
-            // previous bottom layer popups
-            for (layer, popup, location) in layer_popups(output, Layer::Bottom, element_filter) {
-                callback(Stage::LayerPopup {
-                    layer,
-                    popup: &popup,
-                    location: location + offset.as_global(),
-                })?;
-            }
+    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+        && !has_fullscreen
+    {
+        // previous bottom layer popups
+        for (layer, popup, location) in layer_popups(output, Layer::Bottom, element_filter) {
+            callback(Stage::LayerPopup {
+                layer,
+                popup: &popup,
+                location: location + offset.as_global(),
+            })?;
         }
     }
 
@@ -295,17 +295,16 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref() {
-        if !has_fullscreen {
-            // previous background layer popups
-            for (layer, popup, location) in layer_popups(output, Layer::Background, element_filter)
-            {
-                callback(Stage::LayerPopup {
-                    layer,
-                    popup: &popup,
-                    location: location + offset.as_global(),
-                })?;
-            }
+    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+        && !has_fullscreen
+    {
+        // previous background layer popups
+        for (layer, popup, location) in layer_popups(output, Layer::Background, element_filter) {
+            callback(Stage::LayerPopup {
+                layer,
+                popup: &popup,
+                location: location + offset.as_global(),
+            })?;
         }
     }
 
@@ -348,13 +347,13 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref() {
-        if !has_fullscreen {
-            // previous bottom layer
-            for (layer, mut location) in layer_surfaces(output, Layer::Bottom, element_filter) {
-                location += offset.as_global();
-                callback(Stage::LayerSurface { layer, location })?;
-            }
+    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+        && !has_fullscreen
+    {
+        // previous bottom layer
+        for (layer, mut location) in layer_surfaces(output, Layer::Bottom, element_filter) {
+            location += offset.as_global();
+            callback(Stage::LayerSurface { layer, location })?;
         }
     }
 
@@ -366,13 +365,13 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref() {
-        if !has_fullscreen {
-            // previous background layer
-            for (layer, mut location) in layer_surfaces(output, Layer::Background, element_filter) {
-                location += offset.as_global();
-                callback(Stage::LayerSurface { layer, location })?;
-            }
+    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+        && !has_fullscreen
+    {
+        // previous background layer
+        for (layer, mut location) in layer_surfaces(output, Layer::Background, element_filter) {
+            location += offset.as_global();
+            callback(Stage::LayerSurface { layer, location })?;
         }
     }
 

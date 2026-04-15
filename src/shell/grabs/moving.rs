@@ -737,6 +737,8 @@ impl MoveGrab {
         release: ReleaseMode,
         evlh: LoopHandle<'static, State>,
     ) -> MoveGrab {
+        // false-positive: `Output`s hash is based on it's inner ptr
+        #[allow(clippy::mutable_key_type)]
         let mut outputs = HashSet::new();
         outputs.insert(cursor_output.clone());
         window.output_enter(&cursor_output, window.geometry()); // not accurate but...
@@ -798,6 +800,8 @@ impl Drop for MoveGrab {
         // No more buttons are pressed, release the grab.
         let output = self.cursor_output.clone();
         let seat = self.seat.clone();
+        // false-positive: `Output`s hash is based on it's inner ptr
+        #[allow(clippy::mutable_key_type)]
         let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
         let previous = self.previous;
         let window = self.window.clone();
@@ -862,43 +866,43 @@ impl Drop for MoveGrab {
                                 window_location.to_local(&workspace.output),
                             );
 
-                            if matches!(previous, ManagedLayer::Floating) {
-                                if let Some(sz) = grab_state.snapping_zone {
-                                    if sz == SnappingZone::Maximize {
-                                        shell.maximize_toggle(
-                                            &window,
-                                            &seat,
-                                            &state.common.event_loop_handle,
-                                        );
-                                    } else {
-                                        let directions = match sz {
-                                            SnappingZone::Maximize => vec![],
-                                            SnappingZone::Top => vec![Direction::Up],
-                                            SnappingZone::TopLeft => {
-                                                vec![Direction::Up, Direction::Left]
-                                            }
-                                            SnappingZone::Left => vec![Direction::Left],
-                                            SnappingZone::BottomLeft => {
-                                                vec![Direction::Down, Direction::Left]
-                                            }
-                                            SnappingZone::Bottom => vec![Direction::Down],
-                                            SnappingZone::BottomRight => {
-                                                vec![Direction::Down, Direction::Right]
-                                            }
-                                            SnappingZone::Right => vec![Direction::Right],
-                                            SnappingZone::TopRight => {
-                                                vec![Direction::Up, Direction::Right]
-                                            }
-                                        };
-                                        for direction in directions {
-                                            workspace.floating_layer.move_element(
-                                                direction,
-                                                &seat,
-                                                ManagedLayer::Floating,
-                                                &theme,
-                                                &window,
-                                            );
+                            if matches!(previous, ManagedLayer::Floating)
+                                && let Some(sz) = grab_state.snapping_zone
+                            {
+                                if sz == SnappingZone::Maximize {
+                                    shell.maximize_toggle(
+                                        &window,
+                                        &seat,
+                                        &state.common.event_loop_handle,
+                                    );
+                                } else {
+                                    let directions = match sz {
+                                        SnappingZone::Maximize => vec![],
+                                        SnappingZone::Top => vec![Direction::Up],
+                                        SnappingZone::TopLeft => {
+                                            vec![Direction::Up, Direction::Left]
                                         }
+                                        SnappingZone::Left => vec![Direction::Left],
+                                        SnappingZone::BottomLeft => {
+                                            vec![Direction::Down, Direction::Left]
+                                        }
+                                        SnappingZone::Bottom => vec![Direction::Down],
+                                        SnappingZone::BottomRight => {
+                                            vec![Direction::Down, Direction::Right]
+                                        }
+                                        SnappingZone::Right => vec![Direction::Right],
+                                        SnappingZone::TopRight => {
+                                            vec![Direction::Up, Direction::Right]
+                                        }
+                                    };
+                                    for direction in directions {
+                                        workspace.floating_layer.move_element(
+                                            direction,
+                                            &seat,
+                                            ManagedLayer::Floating,
+                                            &theme,
+                                            &window,
+                                        );
                                     }
                                 }
                             }

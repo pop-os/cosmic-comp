@@ -22,11 +22,7 @@ use crate::{
 };
 
 pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
-    fn render_window<R>(
-        renderer: &mut R,
-        window: &CosmicSurface,
-        offset: &time::UtcOffset,
-    ) -> anyhow::Result<()>
+    fn render_window<R>(renderer: &mut R, window: &CosmicSurface) -> anyhow::Result<()>
     where
         R: Renderer + ImportAll + Offscreen<GlesRenderbuffer> + ExportMem,
         R::TextureId: Clone + 'static,
@@ -65,17 +61,13 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
         let gl_data = renderer.map_texture(&mapping)?;
 
         if let Ok(Some(path)) = xdg_user::pictures() {
-            let local_timestamp = time::OffsetDateTime::now_utc().to_offset(*offset);
+            let local_timestamp = jiff::Zoned::now();
             let mut title = window.title();
             title.truncate(227); // 255 - time - png
             let name = sanitize_filename::sanitize(format!(
                 "{}_{}.png",
                 title,
-                local_timestamp
-                    .format(time::macros::format_description!(
-                        "[year]-[month]-[day]_[hour]:[minute]:[second]_[subsecond digits:4]"
-                    ))
-                    .unwrap(),
+                local_timestamp.strftime("%Y-%m-%d_%H:%M:%S_%4f"),
             ));
             let file = std::fs::File::create(path.join(name))?;
 
@@ -108,12 +100,8 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             })
             .with_context(|| "Failed to get renderer for screenshot")
             .and_then(|renderer| match renderer {
-                RendererRef::Glow(renderer) => {
-                    render_window(renderer, surface, &state.common.local_offset)
-                }
-                RendererRef::GlMulti(mut renderer) => {
-                    render_window(&mut renderer, surface, &state.common.local_offset)
-                }
+                RendererRef::Glow(renderer) => render_window(renderer, surface),
+                RendererRef::GlMulti(mut renderer) => render_window(&mut renderer, surface),
             });
         if let Err(err) = res {
             warn!(?err, "Failed to take screenshot")

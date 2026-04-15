@@ -45,11 +45,10 @@ use cosmic::Theme;
 use element::FromGlesError;
 use smithay::{
     backend::{
-        allocator::{Fourcc, dmabuf::Dmabuf},
+        allocator::Fourcc,
         drm::{DrmDeviceFd, DrmNode},
         renderer::{
-            Bind, Blit, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer, Texture,
-            TextureFilter,
+            Color32F, ImportAll, Offscreen, Renderer, Texture, TextureFilter,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
                 Element, Id, Kind, RenderElement, WeakId,
@@ -478,7 +477,7 @@ pub fn cursor_elements<'a, 'frame, R>(
     exclude_dnd_icon: bool,
 ) -> Vec<CosmicElement<R>>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -529,19 +528,17 @@ where
             );
         }
 
-        if !exclude_dnd_icon {
-            if let Some(dnd_icon) = get_dnd_icon(seat) {
-                elements.extend(
-                    cursor::draw_dnd_icon(
-                        renderer,
-                        &dnd_icon.surface,
-                        (location + dnd_icon.offset.to_f64()).to_i32_round(),
-                        scale,
-                    )
-                    .into_iter()
-                    .map(CosmicElement::Dnd),
-                );
-            }
+        if !exclude_dnd_icon && let Some(dnd_icon) = get_dnd_icon(seat) {
+            elements.extend(
+                cursor::draw_dnd_icon(
+                    renderer,
+                    &dnd_icon.surface,
+                    (location + dnd_icon.offset.to_f64()).to_i32_round(),
+                    scale,
+                )
+                .into_iter()
+                .map(CosmicElement::Dnd),
+            );
         }
 
         let theme = theme.cosmic();
@@ -620,7 +617,7 @@ pub fn output_elements<R>(
     _fps: Option<(&EguiState, &Timings)>,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -718,7 +715,7 @@ pub fn workspace_elements<R>(
     element_filter: ElementFilter,
 ) -> Result<Vec<CosmicElement<R>>, RenderError<R::Error>>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -1060,7 +1057,7 @@ pub struct PostprocessState {
 }
 
 impl PostprocessState {
-    pub fn new_with_renderer<R: AsGlowRenderer + Offscreen<GlesTexture>>(
+    pub fn new_with_renderer<R: AsGlowRenderer>(
         renderer: &mut R,
         format: Fourcc,
         output_config: PostprocessOutputConfig,
@@ -1091,7 +1088,7 @@ impl PostprocessState {
         })
     }
 
-    pub fn track_cursor<R: AsGlowRenderer + Offscreen<GlesTexture>>(
+    pub fn track_cursor<R: AsGlowRenderer>(
         &mut self,
         renderer: &mut R,
         format: Fourcc,
@@ -1103,17 +1100,15 @@ impl PostprocessState {
         if let (Some(tex), Some(tracker)) = (
             self.cursor_texture.as_ref(),
             self.cursor_damage_tracker.as_ref(),
-        ) {
-            if tex.format().is_some_and(|f| f == format)
-                && tracker.mode()
-                    == &(OutputModeSource::Static {
-                        size,
-                        scale,
-                        transform: Transform::Normal,
-                    })
-            {
-                return Ok(());
-            }
+        ) && tex.format().is_some_and(|f| f == format)
+            && tracker.mode()
+                == &(OutputModeSource::Static {
+                    size,
+                    scale,
+                    transform: Transform::Normal,
+                })
+        {
+            return Ok(());
         }
 
         let texture = Offscreen::<GlesTexture>::create_buffer(renderer, format, buffer_size)?;
@@ -1193,14 +1188,7 @@ pub fn render_output<'d, R>(
     loop_handle: &calloop::LoopHandle<'static, State>,
 ) -> Result<RenderOutputResult<'d>, RenderError<R::Error>>
 where
-    R: Renderer
-        + ImportAll
-        + ImportMem
-        + ExportMem
-        + Bind<Dmabuf>
-        + Offscreen<GlesTexture>
-        + Blit
-        + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,
@@ -1373,7 +1361,7 @@ where
     match result {
         Ok((res, mut elements)) => {
             for (session, frame) in output.take_pending_frames() {
-                if let Some(pending_image_copy_data) = render_session::<_, _, GlesTexture>(
+                if let Some(pending_image_copy_data) = render_session(
                     renderer,
                     session.user_data().get::<SessionData>().unwrap(),
                     frame,
@@ -1505,7 +1493,7 @@ pub fn render_workspace<'d, R>(
     element_filter: ElementFilter,
 ) -> Result<(RenderOutputResult<'d>, Vec<CosmicElement<R>>), RenderError<R::Error>>
 where
-    R: Renderer + ImportAll + ImportMem + ExportMem + Bind<Dmabuf> + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
     R::Error: FromGlesError,
     CosmicElement<R>: RenderElement<R>,

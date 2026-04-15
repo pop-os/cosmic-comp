@@ -1,3 +1,8 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::len_without_is_empty
+)]
 // SPDX-License-Identifier: GPL-3.0-only
 
 use calloop::timer::{TimeoutAction, Timer};
@@ -109,12 +114,17 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     let mut cursor = raw_args.cursor();
     let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
 
+    let mut with_xwayland = true;
     // Parse the arguments
     while let Some(arg) = raw_args.next_os(&mut cursor) {
         match arg.to_str() {
             Some("--help") | Some("-h") => {
                 print_help(env!("CARGO_PKG_VERSION"), git_hash);
                 return Ok(());
+            }
+            Some("--no-xwayland") => {
+                tracing::info!("Running without Xwayland");
+                with_xwayland = false;
             }
             Some("--version") | Some("-V") => {
                 println!(
@@ -152,6 +162,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         socket,
         event_loop.handle(),
         event_loop.get_signal(),
+        with_xwayland,
     );
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;
@@ -239,8 +250,9 @@ Designed for the COSMIC™ desktop environment, cosmic-comp is a Wayland Composi
 Project home page: https://github.com/pop-os/cosmic-comp
 
 Options:
-  -h, --help     Show this message
-  -v, --version  Show the version of cosmic-comp"#
+  -h, --help          Show this message
+  --no-xwayland       Run without Xwayland
+  -v, --version       Show the version of cosmic-comp"#
     );
 }
 

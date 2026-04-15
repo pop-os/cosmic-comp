@@ -124,4 +124,5 @@
     (modifiers: [], key: "XF86PowerOff"): System(PowerOff),
     (modifiers: [], key: "XF86TouchpadToggle"): System(TouchpadToggle),
     (modifiers: [Super, Ctrl], key: "XF86TouchpadToggle"): System(TouchpadToggle),
+    (modifiers: [], key: "XF86LaunchA"): System(WorkspaceOverview),
 }

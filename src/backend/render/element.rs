@@ -1,19 +1,22 @@
 use crate::shell::{CosmicMappedRenderElement, WorkspaceRenderElement};
 
 #[cfg(feature = "debug")]
-use smithay::backend::renderer::{element::texture::TextureRenderElement, gles::GlesTexture};
+use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::{
-    backend::renderer::{
-        ImportAll, ImportMem, Renderer,
-        element::{
-            Element, Id, Kind, RenderElement, UnderlyingStorage,
-            memory::MemoryRenderBufferRenderElement,
-            surface::WaylandSurfaceRenderElement,
-            utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
+    backend::{
+        allocator::dmabuf::Dmabuf,
+        renderer::{
+            Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            element::{
+                Element, Id, Kind, RenderElement, UnderlyingStorage,
+                memory::MemoryRenderBufferRenderElement,
+                surface::WaylandSurfaceRenderElement,
+                utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
+            },
+            gles::{GlesError, GlesRenderbuffer, GlesTexture, element::TextureShaderElement},
+            glow::{GlowFrame, GlowRenderer},
+            utils::{CommitCounter, DamageSet, OpaqueRegions},
         },
-        gles::{GlesError, element::TextureShaderElement},
-        glow::{GlowFrame, GlowRenderer},
-        utils::{CommitCounter, DamageSet, OpaqueRegions},
     },
     utils::{Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale},
 };
@@ -22,7 +25,7 @@ use super::{GlMultiRenderer, cursor::CursorRenderElement};
 
 pub enum CosmicElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -42,7 +45,7 @@ where
 
 impl<R> Element for CosmicElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -183,7 +186,7 @@ where
 
 impl<R> RenderElement<R> for CosmicElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     R::Error: FromGlesError,
     CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -253,7 +256,7 @@ where
 impl<R> From<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>
     for CosmicElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -268,7 +271,7 @@ where
 
 impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -280,7 +283,7 @@ where
 #[cfg(feature = "debug")]
 impl<R> From<TextureRenderElement<GlesTexture>> for CosmicElement<R>
 where
-    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
@@ -289,9 +292,15 @@ where
     }
 }
 
-pub trait AsGlowRenderer
-where
-    Self: Renderer,
+pub trait AsGlowRenderer:
+    Renderer
+    + Offscreen<GlesTexture>
+    + Offscreen<GlesRenderbuffer>
+    + ImportAll
+    + ImportMem
+    + ExportMem
+    + Bind<Dmabuf>
+    + Blit
 {
     fn glow_renderer(&self) -> &GlowRenderer;
     fn glow_renderer_mut(&mut self) -> &mut GlowRenderer;

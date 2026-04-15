@@ -74,13 +74,12 @@ impl XdgDecorationHandler for State {
             if let Some((window, _)) = mapped
                 .windows()
                 .find(|(window, _)| window.wl_surface().as_deref() == Some(toplevel.wl_surface()))
+                && let Some(toplevel) = window.0.toplevel()
             {
-                if let Some(toplevel) = window.0.toplevel() {
-                    toplevel.with_pending_state(|state| {
-                        state.decoration_mode = Some(mode);
-                    });
-                    toplevel.send_configure();
-                }
+                toplevel.with_pending_state(|state| {
+                    state.decoration_mode = Some(mode);
+                });
+                toplevel.send_configure();
             }
         }
     }
@@ -91,14 +90,13 @@ impl XdgDecorationHandler for State {
             if let Some((window, _)) = mapped
                 .windows()
                 .find(|(window, _)| window.wl_surface().as_deref() == Some(toplevel.wl_surface()))
+                && let Some(toplevel) = window.0.toplevel()
             {
-                if let Some(toplevel) = window.0.toplevel() {
-                    PreferredDecorationMode::update(&window.0, Some(mode));
-                    toplevel.with_pending_state(|state| {
-                        state.decoration_mode = Some(mode);
-                    });
-                    toplevel.send_configure();
-                }
+                PreferredDecorationMode::update(&window.0, Some(mode));
+                toplevel.with_pending_state(|state| {
+                    state.decoration_mode = Some(mode);
+                });
+                toplevel.send_configure();
             }
         } else {
             toplevel.with_pending_state(|state| state.decoration_mode = Some(mode));
@@ -107,19 +105,17 @@ impl XdgDecorationHandler for State {
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
         let shell = self.common.shell.read();
-        if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface()) {
-            if let Some((window, _)) = mapped
+        if let Some(mapped) = shell.element_for_surface(toplevel.wl_surface())
+            && let Some((window, _)) = mapped
                 .windows()
                 .find(|(window, _)| window.wl_surface().as_deref() == Some(toplevel.wl_surface()))
-            {
-                if let Some(toplevel) = window.0.toplevel() {
-                    PreferredDecorationMode::update(&window.0, None);
-                    toplevel.with_pending_state(|state| {
-                        state.decoration_mode = None;
-                    });
-                    toplevel.send_configure();
-                }
-            }
+            && let Some(toplevel) = window.0.toplevel()
+        {
+            PreferredDecorationMode::update(&window.0, None);
+            toplevel.with_pending_state(|state| {
+                state.decoration_mode = None;
+            });
+            toplevel.send_configure();
         }
     }
 }

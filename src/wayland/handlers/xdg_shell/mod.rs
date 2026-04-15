@@ -44,13 +44,16 @@ impl XdgShellHandler for State {
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
-        let window = CosmicSurface::from(surface);
-        shell.pending_windows.push(PendingWindow {
-            surface: window,
-            seat,
-            fullscreen: None,
-            maximized: false,
-        });
+
+        if !shell.pending_windows.iter().any(|w| w.surface == surface) {
+            let surface = CosmicSurface::from(surface);
+            shell.pending_windows.push(PendingWindow {
+                surface,
+                seat,
+                fullscreen: None,
+                maximized: false,
+            })
+        }
         // We will position the window after the first commit, when we know its size hints
     }
 
@@ -312,6 +315,11 @@ impl XdgShellHandler for State {
             let mut shell = self.common.shell.write();
             let seat = shell.seats.last_active().clone();
 
+            // Clean up pending_windows for surfaces that were never mapped.
+            shell
+                .pending_windows
+                .retain(|pending| pending.surface != surface);
+
             let output = shell
                 .visible_output_for_surface(surface.wl_surface())
                 .cloned();
@@ -360,6 +368,7 @@ impl XdgShellHandler for State {
 
         let shell = self.common.shell.read();
         let res = shell.menu_request(
+            true,
             surface.wl_surface(),
             &seat,
             serial,

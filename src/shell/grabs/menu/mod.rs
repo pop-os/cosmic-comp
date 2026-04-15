@@ -13,7 +13,7 @@ use cosmic::{
     iced_core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
     iced_widget::{self, Column, Row, text::Style as TextStyle},
     theme,
-    widget::{button, divider, horizontal_space, icon::from_name, text},
+    widget::{button, divider, icon::from_name, space, text},
 };
 use smithay::{
     backend::{
@@ -260,115 +260,112 @@ impl Program for ContextMenu {
                 // But right now we don't have any touch responsive menus with submenus
             }
             Message::ItemEntered(idx, bounds) => {
-                if let Some(Item::Submenu { items, .. }) = self.items.get_mut(idx) {
-                    if let Some((seat, _)) = last_seat.cloned() {
-                        let items = items.clone();
-                        let _ = loop_handle.insert_idle(move |state| {
-                            let grab_state = seat
-                                .user_data()
-                                .get::<SeatMenuGrabState>()
-                                .unwrap()
-                                .lock()
-                                .unwrap();
+                if let Some(Item::Submenu { items, .. }) = self.items.get_mut(idx)
+                    && let Some((seat, _)) = last_seat.cloned()
+                {
+                    let items = items.clone();
+                    let _ = loop_handle.insert_idle(move |state| {
+                        let grab_state = seat
+                            .user_data()
+                            .get::<SeatMenuGrabState>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
 
-                            if let Some(grab_state) = &*grab_state {
-                                let mut elements = grab_state.elements.lock().unwrap();
+                        if let Some(grab_state) = &*grab_state {
+                            let mut elements = grab_state.elements.lock().unwrap();
 
-                                let position = elements.last().unwrap().position;
-                                let element = IcedElement::new(
-                                    ContextMenu::new(items),
-                                    Size::default(),
-                                    state.common.event_loop_handle.clone(),
-                                    state.common.theme.clone(),
-                                );
+                            let position = elements.last().unwrap().position;
+                            let element = IcedElement::new(
+                                ContextMenu::new(items),
+                                Size::default(),
+                                state.common.event_loop_handle.clone(),
+                                state.common.theme.clone(),
+                            );
 
-                                let min_size = element.minimum_size();
-                                element.with_program(|p| {
-                                    *p.row_width.lock().unwrap() = Some(min_size.w as f32);
-                                });
-                                element.resize(min_size);
+                            let min_size = element.minimum_size();
+                            element.with_program(|p| {
+                                *p.row_width.lock().unwrap() = Some(min_size.w as f32);
+                            });
+                            element.resize(min_size);
 
-                                let output = seat.active_output();
-                                let position = [
-                                    // to the right -> down
-                                    Rectangle::new(
-                                        position
-                                            + Point::from((
-                                                bounds.width.ceil() as i32,
-                                                bounds.y.ceil() as i32,
-                                            )),
-                                        min_size.as_global(),
-                                    ),
-                                    // to the right -> up
-                                    Rectangle::new(
-                                        position
-                                            + Point::from((
-                                                bounds.width.ceil() as i32,
-                                                bounds.y.ceil() as i32
-                                                    + bounds.height.ceil() as i32
-                                                    - min_size.h,
-                                            )),
-                                        min_size.as_global(),
-                                    ),
-                                    // to the left -> down
-                                    Rectangle::new(
-                                        position
-                                            + Point::from((-min_size.w, bounds.y.ceil() as i32)),
-                                        min_size.as_global(),
-                                    ),
-                                    // to the left -> up
-                                    Rectangle::new(
-                                        position
-                                            + Point::from((
-                                                -min_size.w,
-                                                bounds.y.ceil() as i32
-                                                    + bounds.height.ceil() as i32
-                                                    - min_size.h,
-                                            )),
-                                        min_size.as_global(),
-                                    ),
-                                ]
-                                .iter()
-                                .rev() // preference of max_by_key is backwards
-                                .max_by_key(|rect| {
-                                    output
-                                        .geometry()
-                                        .intersection(**rect)
-                                        .map(|rect| rect.size.w * rect.size.h)
-                                })
-                                .unwrap()
-                                .loc;
-                                element.output_enter(&output, element.bbox());
-                                element.set_additional_scale(*grab_state.scale.lock().unwrap());
+                            let output = seat.active_output();
+                            let position = [
+                                // to the right -> down
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            bounds.width.ceil() as i32,
+                                            bounds.y.ceil() as i32,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                                // to the right -> up
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            bounds.width.ceil() as i32,
+                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
+                                                - min_size.h,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                                // to the left -> down
+                                Rectangle::new(
+                                    position + Point::from((-min_size.w, bounds.y.ceil() as i32)),
+                                    min_size.as_global(),
+                                ),
+                                // to the left -> up
+                                Rectangle::new(
+                                    position
+                                        + Point::from((
+                                            -min_size.w,
+                                            bounds.y.ceil() as i32 + bounds.height.ceil() as i32
+                                                - min_size.h,
+                                        )),
+                                    min_size.as_global(),
+                                ),
+                            ]
+                            .iter()
+                            .rev() // preference of max_by_key is backwards
+                            .max_by_key(|rect| {
+                                output
+                                    .geometry()
+                                    .intersection(**rect)
+                                    .map(|rect| rect.size.w * rect.size.h)
+                            })
+                            .unwrap()
+                            .loc;
+                            element.output_enter(&output, element.bbox());
+                            element.set_additional_scale(*grab_state.scale.lock().unwrap());
 
-                                elements.push(Element {
-                                    iced: element,
-                                    position,
-                                    pointer_entered: false,
-                                    touch_entered: None,
-                                })
-                            }
-                        });
-                    }
+                            elements.push(Element {
+                                iced: element,
+                                position,
+                                pointer_entered: false,
+                                touch_entered: None,
+                            })
+                        }
+                    });
                 }
             }
             Message::ItemLeft(idx, _) => {
-                if let Some(Item::Submenu { .. }) = self.items.get_mut(idx) {
-                    if let Some((seat, _)) = last_seat.cloned() {
-                        let _ = loop_handle.insert_idle(move |_| {
-                            let grab_state = seat
-                                .user_data()
-                                .get::<SeatMenuGrabState>()
-                                .unwrap()
-                                .lock()
-                                .unwrap();
+                if let Some(Item::Submenu { .. }) = self.items.get_mut(idx)
+                    && let Some((seat, _)) = last_seat.cloned()
+                {
+                    let _ = loop_handle.insert_idle(move |_| {
+                        let grab_state = seat
+                            .user_data()
+                            .get::<SeatMenuGrabState>()
+                            .unwrap()
+                            .lock()
+                            .unwrap();
 
-                            if let Some(grab_state) = &*grab_state {
-                                let mut elements = grab_state.elements.lock().unwrap();
-                                elements.pop();
-                            }
-                        });
-                    }
+                        if let Some(grab_state) = &*grab_state {
+                            let mut elements = grab_state.elements.lock().unwrap();
+                            elements.pop();
+                        }
+                    });
                 }
             }
         };
@@ -392,7 +389,7 @@ impl Program for ContextMenu {
             match item {
                 Item::Separator => divider::horizontal::light().into(),
                 Item::Submenu { title, .. } => Row::with_children(vec![
-                    horizontal_space().width(16).into(),
+                    space::horizontal().width(16).into(),
                     text::body(title).width(mode).into(),
                     from_name("go-next-symbolic")
                         .size(16)
@@ -425,7 +422,7 @@ impl Program for ContextMenu {
                                 }))
                                 .into()
                         } else {
-                            horizontal_space().width(16).into()
+                            space::horizontal().width(16).into()
                         },
                         text::body(title)
                             .width(mode)
@@ -441,7 +438,7 @@ impl Program for ContextMenu {
                                 theme::Text::Default
                             })
                             .into(),
-                        horizontal_space().width(16).into(),
+                        space::horizontal().width(16).into(),
                     ];
                     if let Some(shortcut) = shortcut.as_ref() {
                         components.push(
@@ -479,6 +476,7 @@ impl Program for ContextMenu {
             let cosmic = theme.cosmic();
             let component = &cosmic.background.component;
             iced_widget::container::Style {
+                snap: true,
                 icon_color: Some(cosmic.accent.base.into()),
                 text_color: Some(component.on.into()),
                 background: Some(Background::Color(component.base.into())),

@@ -49,8 +49,9 @@ pub struct ScrollConfig {
     pub scroll_factor: Option<f64>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum DeviceState {
+    #[default]
     Enabled,
     Disabled,
     DisabledOnExternalMouse,
@@ -61,12 +62,6 @@ pub enum TouchpadOverride {
     #[default]
     None,
     ForceDisable,
-}
-
-impl Default for DeviceState {
-    fn default() -> Self {
-        Self::Enabled
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

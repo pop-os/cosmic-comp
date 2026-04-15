@@ -574,10 +574,8 @@ where
                         instance.geometry(&wl_output, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h);
                     }
                     changed = true;
-                } else if geometry_changed {
-                    if let Some(geo) = geometry {
-                        instance.geometry(&wl_output, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h);
-                    }
+                } else if geometry_changed && let Some(geo) = geometry {
+                    instance.geometry(&wl_output, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h);
                 }
             }
         }
@@ -635,10 +633,10 @@ pub fn window_from_handle<W: Window + 'static>(handle: ZcosmicToplevelHandleV1) 
         .and_then(|state| state.lock().unwrap().window.clone())
 }
 
-pub fn window_from_ext<'a, W: Window + 'static, D>(
-    state: &'a D,
-    handle: &ForeignToplevelHandle,
-) -> Option<&'a W>
+pub fn window_from_ext<W: Window + 'static, D>(
+    state: &D,
+    handle: ForeignToplevelHandle,
+) -> Option<&W>
 where
     D: ToplevelInfoHandler<Window = W>,
 {
@@ -662,7 +660,7 @@ where
     D: ToplevelInfoHandler<Window = W>,
 {
     let handle = ForeignToplevelHandle::from_resource(foreign_toplevel)?;
-    window_from_ext(state, &handle)
+    window_from_ext(state, handle)
 }
 
 macro_rules! delegate_toplevel_info {

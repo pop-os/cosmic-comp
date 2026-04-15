@@ -55,7 +55,7 @@ impl<Internal, Message: std::clone::Clone + 'static, Lower: Decorations<Internal
                 widget::column()
                     .push(canvas(Circle {
                         radius: (self.height as f32 / 2.) * 0.8,
-                        color: Color::new(1.0, 0.0, 0.0, 1.0),
+                        color: Color::from_rgba(1.0, 0.0, 0.0, 1.0),
                     }))
                     .width(self.height as f32),
             )

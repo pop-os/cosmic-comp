@@ -232,24 +232,24 @@ impl ZoomState {
         let active_output = self.seat.active_output();
         let output = output.unwrap_or(&active_output);
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
-        let res = output_state
+
+        output_state
             .lock()
             .unwrap()
             .animating_focal_point()
-            .to_global(output);
-        res
+            .to_global(output)
     }
 
     pub fn current_focal_point(&self, output: Option<&Output>) -> Point<f64, Global> {
         let active_output = self.seat.active_output();
         let output = output.unwrap_or(&active_output);
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
-        let res = output_state
+
+        output_state
             .lock()
             .unwrap()
             .current_focal_point()
-            .to_global(output);
-        res
+            .to_global(output)
     }
 
     pub fn update_focal_point(
@@ -514,6 +514,7 @@ impl Program for ZoomProgram {
             let cosmic = theme.cosmic();
             let component = &cosmic.background.component;
             iced_widget::container::Style {
+                snap: true,
                 icon_color: Some(component.on.into()),
                 text_color: Some(component.on.into()),
                 background: Some(Background::Color(component.base.into())),
