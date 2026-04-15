@@ -52,6 +52,14 @@ impl State {
                 action,
                 Action::Shortcut(shortcuts::Action::Terminate)
                     | Action::Shortcut(shortcuts::Action::Debug)
+                    | Action::Shortcut(shortcuts::Action::System(
+                        shortcuts::action::System::InputSourceSwitch
+                            | shortcuts::action::System::BrightnessDown
+                            | shortcuts::action::System::BrightnessUp
+                            | shortcuts::action::System::VolumeLower
+                            | shortcuts::action::System::VolumeRaise
+                            | shortcuts::action::System::Mute,
+                    ))
             )
         {
             return;
