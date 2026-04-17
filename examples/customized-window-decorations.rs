@@ -23,7 +23,7 @@ struct Circle {
     color: Color,
 }
 
-impl<Message, Theme, Renderer: cosmic::iced_renderer::geometry::Renderer>
+impl<Message, Theme, Renderer: cosmic::iced::renderer::geometry::Renderer>
     canvas::Program<Message, Theme, Renderer> for Circle
 {
     type State = ();
@@ -50,17 +50,17 @@ impl<Internal, Message: std::clone::Clone + 'static, Lower: Decorations<Internal
 {
     fn view(&self, window: &Internal) -> cosmic::Element<'_, Message> {
         let orig = self.lower.view(window);
-        widget::row()
-            .push(
-                widget::column()
-                    .push(canvas(Circle {
-                        radius: (self.height as f32 / 2.) * 0.8,
-                        color: Color::from_rgba(1.0, 0.0, 0.0, 1.0),
-                    }))
-                    .width(self.height as f32),
-            )
-            .push(orig)
-            .into()
+        widget::row([
+            widget::column([canvas(Circle {
+                radius: (self.height as f32 / 2.) * 0.8,
+                color: Color::from_rgba(1.0, 0.0, 0.0, 1.0),
+            })
+            .into()])
+            .width(self.height as f32)
+            .into(),
+            orig,
+        ])
+        .into()
     }
 }
 

@@ -117,21 +117,22 @@ impl BlurShaders {
 
 type BlurTexture = Mutex<Option<GlesTexture>>;
 
-struct BlurState {
-    id: Id,
-    renderer_id: Option<ContextId<GlesTexture>>,
-    src: Size<f64, Buffer>,
-    offset: f64,
-    passes: usize,
-    region: Vec<Rectangle<i32, Logical>>,
-    commit: CommitCounter,
+#[derive(Debug)]
+pub struct BlurState {
+    pub id: Id,
+    pub renderer_id: Option<ContextId<GlesTexture>>,
+    pub src: Size<f64, Buffer>,
+    pub offset: f64,
+    pub passes: usize,
+    pub region: Vec<Rectangle<i32, Logical>>,
+    pub commit: CommitCounter,
 }
 
 unsafe impl Send for BlurState {}
 unsafe impl Sync for BlurState {}
 
-impl BlurState {
-    fn new() -> Self {
+impl Default for BlurState {
+    fn default() -> Self {
         BlurState {
             id: Id::new(),
             renderer_id: None,
@@ -159,6 +160,27 @@ pub struct BlurElement {
 }
 
 impl BlurElement {
+    pub fn from_state<R: ImportAll + AsGlowRenderer>(
+        renderer: &mut R,
+        state: &mut BlurState,
+        geometry: Rectangle<f64, Logical>,
+        output_scale: f64,
+        radii: [u8; 4],
+        strength: usize,
+    ) -> Result<Option<Self>, R::Error> {
+        let region = vec![Rectangle::from_size(geometry.size.to_i32_round())];
+
+        Self::internal(
+            renderer,
+            state,
+            geometry,
+            &region,
+            output_scale,
+            radii,
+            strength,
+        )
+    }
+
     pub fn from_surface<R: ImportAll + AsGlowRenderer>(
         renderer: &mut R,
         states: &SurfaceData,
@@ -172,9 +194,37 @@ impl BlurElement {
             return Ok(None);
         };
 
+        let state = states
+            .data_map
+            .get_or_insert_threadsafe::<Mutex<BlurState>, _>(Default::default);
+
+        Self::internal(
+            renderer,
+            &mut state.lock().unwrap(),
+            geometry,
+            region,
+            output_scale,
+            radii,
+            strength,
+        )
+    }
+
+    pub fn internal<R: ImportAll + AsGlowRenderer>(
+        renderer: &mut R,
+        state: &mut BlurState,
+        geometry: Rectangle<f64, Logical>,
+        region: &Vec<Rectangle<i32, Logical>>,
+        output_scale: f64,
+        radii: [u8; 4],
+        strength: usize,
+    ) -> Result<Option<Self>, R::Error> {
+        if strength == 0 {
+            return Ok(None);
+        }
+
         let geo = geometry.to_physical_precise_round(output_scale);
         let mut extended_geo = geo;
-        let radius = BLUR_PARAMS[strength.min(MAX_STEPS - 1)].extended_radius as f64;
+        let radius = BLUR_PARAMS[(strength + 2).min(MAX_STEPS - 1)].extended_radius as f64;
         extended_geo.loc -= Point::<f64, Physical>::new(radius, radius);
         extended_geo.size += Size::<f64, Physical>::new(radius, radius).upscale(2.);
 
@@ -217,32 +267,9 @@ impl BlurElement {
             Uniform::new("noise", UniformValue::_1f(NOISE)),
         ];
 
-        let state = states
-            .data_map
-            .get_or_insert_threadsafe::<Mutex<BlurState>, _>(|| Mutex::new(BlurState::new()));
+        let geometry = extended_geo.to_logical(output_scale);
+        let extended_offset = Point::<f64, Physical>::new(radius, radius).to_logical(output_scale);
 
-        Ok(Some(Self::from_state(
-            renderer,
-            extended_geo.to_logical(output_scale),
-            Point::<f64, Physical>::new(radius, radius).to_logical(output_scale),
-            region,
-            output_scale,
-            &mut state.lock().unwrap(),
-            uniforms,
-            strength,
-        )?))
-    }
-
-    fn from_state<R: AsGlowRenderer>(
-        renderer: &mut R,
-        geometry: Rectangle<f64, Logical>,
-        extended_offset: Point<f64, Logical>,
-        region: &Vec<Rectangle<i32, Logical>>,
-        output_scale: f64,
-        state: &mut BlurState,
-        uniforms: Vec<Uniform<'static>>,
-        strength: usize,
-    ) -> Result<Self, R::Error> {
         let renderer_id = renderer.glow_renderer().context_id();
         let src = geometry.size.to_buffer(output_scale, Transform::Normal);
         let params = &BLUR_PARAMS[strength.min(MAX_STEPS - 1)];
@@ -265,7 +292,7 @@ impl BlurElement {
             state.commit.increment();
         }
 
-        Ok(BlurElement {
+        Ok(Some(BlurElement {
             id: state.id.clone(),
             commit: state.commit,
             src,
@@ -284,7 +311,7 @@ impl BlurElement {
                 })
                 .collect(),
             uniforms,
-        })
+        }))
     }
 }
 

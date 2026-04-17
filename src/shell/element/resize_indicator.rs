@@ -12,9 +12,9 @@ use cosmic::{
     Apply,
     iced::{
         Alignment,
+        core::{Background, Border, Color, Length},
         widget::{column, container, row, space},
     },
-    iced_core::{Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, text},
 };

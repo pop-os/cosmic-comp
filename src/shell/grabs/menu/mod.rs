@@ -9,9 +9,11 @@ use std::{
 use calloop::LoopHandle;
 use cosmic::{
     Apply as _, Task,
-    iced::{Alignment, Background},
-    iced_core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
-    iced_widget::{self, Column, Row, text::Style as TextStyle},
+    iced::{
+        Alignment, Background,
+        core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
+        widget::{self as iced_widget, Column, Row, text::Style as TextStyle},
+    },
     theme,
     widget::{button, divider, icon::from_name, space, text},
 };
@@ -424,7 +426,7 @@ impl Program for ContextMenu {
                             .width(mode)
                             .class(if *disabled {
                                 theme::Text::Custom(|theme| {
-                                    let mut color = theme.cosmic().background.component.on;
+                                    let mut color = theme.cosmic().background(false).component.on;
                                     color.alpha *= 0.5;
                                     TextStyle {
                                         color: Some(color.into()),
@@ -442,7 +444,7 @@ impl Program for ContextMenu {
                                 .align_x(Horizontal::Right)
                                 .width(Length::Shrink)
                                 .class(theme::Text::Custom(|theme| {
-                                    let mut color = theme.cosmic().background.component.on;
+                                    let mut color = theme.cosmic().background(false).component.on;
                                     color.alpha *= 0.75;
                                     TextStyle {
                                         color: Some(color.into()),
@@ -470,7 +472,7 @@ impl Program for ContextMenu {
         .padding(1)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
-            let component = &cosmic.background.component;
+            let component = &cosmic.background(false).component;
             iced_widget::container::Style {
                 snap: true,
                 icon_color: Some(cosmic.accent.base.into()),

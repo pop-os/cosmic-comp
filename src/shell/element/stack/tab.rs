@@ -3,16 +3,15 @@ use cosmic::{
     font::Font,
     iced::{
         Background,
-        widget::{self, container::draw_background, rule::FillMode},
+        core::{
+            Border, Clipboard, Color, Length, Rectangle, Shell, Size, alignment, event,
+            layout::{Layout, Limits, Node},
+            mouse, overlay, renderer,
+            text::{Ellipsize, EllipsizeHeightLimit, Shaping, Wrapping},
+            widget::{Id, Widget, operation::Operation, tree::Tree},
+        },
+        widget::{self, container::draw_background, rule::FillMode, scrollable::AbsoluteOffset},
     },
-    iced_core::{
-        Border, Clipboard, Color, Length, Rectangle, Shell, Size, alignment, event,
-        layout::{Layout, Limits, Node},
-        mouse, overlay, renderer,
-        text::{Ellipsize, EllipsizeHeightLimit, Shaping, Wrapping},
-        widget::{Id, Widget, operation::Operation, tree::Tree},
-    },
-    iced_widget::scrollable::AbsoluteOffset,
     theme,
     widget::{Icon, icon::from_name, text},
 };
@@ -64,9 +63,17 @@ impl From<TabBackgroundTheme> for theme::Container<'_> {
                     snap: true,
                     icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
                     text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(Background::Color(
-                        theme.cosmic().primary.component.selected.into(),
-                    )),
+                    background: Some(Background::Color({
+                        let mut color = theme
+                            .cosmic()
+                            .primary(theme.cosmic().frosted_windows)
+                            .component
+                            .selected;
+                        if theme.cosmic().frosted_windows {
+                            color.alpha = theme.cosmic().frosted.alpha();
+                        }
+                        color.into()
+                    })),
                     border: Border {
                         radius: 0.0.into(),
                         width: 0.0,
@@ -80,9 +87,17 @@ impl From<TabBackgroundTheme> for theme::Container<'_> {
                     snap: true,
                     icon_color: None,
                     text_color: None,
-                    background: Some(Background::Color(
-                        theme.cosmic().primary.component.base.into(),
-                    )),
+                    background: Some(Background::Color({
+                        let mut color = theme
+                            .cosmic()
+                            .primary(theme.cosmic().frosted_windows)
+                            .component
+                            .base;
+                        if theme.cosmic().frosted_windows {
+                            color.alpha = theme.cosmic().frosted.alpha();
+                        }
+                        color.into()
+                    })),
                     border: Border {
                         radius: 0.0.into(),
                         width: 0.0,
@@ -289,8 +304,8 @@ where
             .min_height(size.height)
             .width(size.width)
             .height(size.height);
-        cosmic::iced_core::layout::flex::resolve(
-            cosmic::iced_core::layout::flex::Axis::Horizontal,
+        cosmic::iced::core::layout::flex::resolve(
+            cosmic::iced::core::layout::flex::Axis::Horizontal,
             renderer,
             &limits,
             Length::Fill,
