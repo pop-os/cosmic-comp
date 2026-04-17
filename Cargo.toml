@@ -139,7 +139,7 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
+cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "corner-radius-v2" }
 
 [patch."https://github.com/pop-os/libcosmic"]
 libcosmic = { git = "https://github.com/pop-os/libcosmic//", branch = "theme-v2" }
@@ -152,4 +152,4 @@ iced_renderer = { git = "https://github.com/pop-os/libcosmic//", branch = "theme
 iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic//", branch = "theme-v2" }
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "f6d1070" }
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "da2b053" }

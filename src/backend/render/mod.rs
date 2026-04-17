@@ -39,6 +39,7 @@ use crate::{
     wayland::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
+            corner_radius::{pad_rect, surface_corners, surface_padding},
             data_device::get_dnd_icon,
             image_copy_capture::{FrameHolder, SessionData, render_session},
         },
@@ -78,7 +79,7 @@ use smithay::{
     utils::{
         IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
     },
-    wayland::{dmabuf::get_dmabuf, session_lock::LockSurface},
+    wayland::{compositor::with_states, dmabuf::get_dmabuf, session_lock::LockSurface},
 };
 
 #[cfg(feature = "debug")]
@@ -833,6 +834,11 @@ where
                 let mut geometry = popup.geometry().as_global();
                 geometry.loc += location;
 
+                let radii = with_states(popup.wl_surface(), |states| {
+                    surface_corners(states, geometry.size.as_logical())
+                })
+                .unwrap_or([0; 4]);
+
                 push_render_elements_from_surface_tree(
                     renderer,
                     popup.wl_surface(),
@@ -844,7 +850,8 @@ where
                     Scale::from(scale),
                     1.0,
                     false,
-                    [0; 4],
+                    radii,
+                    None,
                     blur_strength,
                     FRAME_TIME_FILTER,
                     &mut |elem| {
@@ -863,6 +870,17 @@ where
             } => {
                 let mut geometry = layer.geometry().as_global();
                 geometry.loc += location;
+                let geometry = geometry.to_local(output).as_logical();
+
+                let padded = with_states(layer.wl_surface(), |states| {
+                    surface_padding(states, geometry.size)
+                        .and_then(|padding| pad_rect(geometry, &padding))
+                })
+                .unwrap_or(geometry);
+                let radii = with_states(layer.wl_surface(), |states| {
+                    surface_corners(states, padded.size)
+                })
+                .unwrap_or([0; 4]);
 
                 push_render_elements_from_surface_tree(
                     renderer,
@@ -871,11 +889,12 @@ where
                         .to_local(output)
                         .as_logical()
                         .to_physical_precise_round(scale),
-                    geometry.to_local(output).as_logical().to_f64(),
+                    geometry.to_f64(),
                     Scale::from(scale),
                     1.0,
                     false,
-                    [0; 4],
+                    radii,
+                    padded.to_f64(),
                     blur_strength,
                     FRAME_TIME_FILTER,
                     &mut |elem| {
@@ -904,6 +923,7 @@ where
                         1.0,
                         false,
                         [0; 4],
+                        None,
                         blur_strength,
                         FRAME_TIME_FILTER,
                         &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
@@ -1048,6 +1068,7 @@ fn session_lock_elements<R>(
             1.0,
             false,
             [0; 4],
+            None,
             0,
             FRAME_TIME_FILTER,
             push,
