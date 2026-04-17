@@ -6,8 +6,10 @@ use crate::{
 use calloop::LoopHandle;
 use cosmic::{
     Apply,
-    iced::widget::{container, row, space},
-    iced_core::{Alignment, Background, Border, Color, Length},
+    iced::{
+        core::{Alignment, Background, Border, Color, Length},
+        widget::{container, row, space},
+    },
     theme,
     widget::{icon::from_name, text},
 };
