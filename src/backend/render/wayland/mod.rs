@@ -35,6 +35,7 @@ pub fn push_render_elements_from_surface_tree<R>(
     alpha: f32,
     should_clip: bool,
     radii: [u8; 4],
+    blur_geometry: impl Into<Option<Rectangle<f64, Logical>>>,
     blur_strength: usize,
     kind: impl Into<KindEvaluation>,
     push_above: &mut dyn FnMut(SurfaceRenderElement<R>),
@@ -44,7 +45,8 @@ pub fn push_render_elements_from_surface_tree<R>(
     R::TextureId: Clone + 'static,
 {
     let location = location.into().to_f64();
-    let geometry = geometry.into().to_f64();
+    let geometry = geometry.into();
+    let blur_geometry = blur_geometry.into();
     let scale = scale.into();
     let kind = kind.into();
     let mut passed_main = false;
@@ -87,10 +89,11 @@ pub fn push_render_elements_from_surface_tree<R>(
                         renderer, surface, states, location, alpha, kind,
                     ) {
                         Ok(Some(surface)) => {
+                            let blur_geo = blur_geometry.unwrap_or(geometry);
                             blur = BlurElement::from_surface(
                                 renderer,
                                 states,
-                                geometry,
+                                blur_geo,
                                 scale.x,
                                 radii,
                                 blur_strength,
