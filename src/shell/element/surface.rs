@@ -4,9 +4,7 @@ use crate::{
         wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
     },
     shell::focus::target::PointerFocusTarget,
-    wayland::{
-        handlers::compositor::frame_time_filter_fn, protocols::corner_radius::CacheableCorners,
-    },
+    wayland::handlers::{compositor::frame_time_filter_fn, corner_radius::surface_corners},
 };
 use std::{
     borrow::Cow,
@@ -142,22 +140,7 @@ impl CosmicSurface {
 
     pub fn corner_radius(&self, geometry_size: Size<i32, Logical>) -> Option<[u8; 4]> {
         self.wl_surface().and_then(|surface| {
-            with_states(&surface, |states| {
-                let mut guard = states.cached_state.get::<CacheableCorners>();
-
-                // guard against corner radius being too large, potentially disconnecting the outline
-                let half_min_dim =
-                    u8::try_from(geometry_size.w.min(geometry_size.h) / 2).unwrap_or(u8::MAX);
-
-                let corners = guard.current().0?;
-
-                Some([
-                    corners.top_left.min(half_min_dim),
-                    corners.top_right.min(half_min_dim),
-                    corners.bottom_right.min(half_min_dim),
-                    corners.bottom_left.min(half_min_dim),
-                ])
-            })
+            with_states(&surface, |states| surface_corners(states, geometry_size))
         })
     }
 
@@ -780,6 +763,10 @@ impl CosmicSurface {
                         .to_physical_precise_round(scale);
                     let mut geometry = popup.geometry().to_f64();
                     geometry.loc += location.to_f64().to_logical(scale) + popup_offset.to_f64();
+                    let radii = with_states(popup.wl_surface(), |states| {
+                        surface_corners(states, geometry.size.to_i32_round())
+                    })
+                    .unwrap_or([0; 4]);
 
                     push_render_elements_from_surface_tree(
                         renderer,
@@ -789,7 +776,8 @@ impl CosmicSurface {
                         scale,
                         alpha,
                         false,
-                        [0; 4],
+                        radii,
+                        None,
                         blur_strength,
                         FRAME_TIME_FILTER,
                         push,
@@ -833,6 +821,7 @@ impl CosmicSurface {
                     alpha,
                     should_clip,
                     radii,
+                    None,
                     blur_strength,
                     scanout_override
                         .map(|val| {
@@ -862,6 +851,7 @@ impl CosmicSurface {
                     alpha,
                     should_clip,
                     radii,
+                    None,
                     blur_strength,
                     scanout_override
                         .map(|val| {
