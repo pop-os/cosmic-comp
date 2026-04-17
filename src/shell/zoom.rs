@@ -3,8 +3,8 @@ use std::{sync::Mutex, time::Instant};
 use calloop::LoopHandle;
 use cosmic::{
     Apply,
-    iced::{Alignment, Background, Border, Length, alignment::Vertical},
-    iced_widget, theme,
+    iced::{Alignment, Background, Border, Length, alignment::Vertical, widget as iced_widget},
+    theme,
     widget::{self, icon::Named},
 };
 use cosmic_comp_config::ZoomMovement;
@@ -522,7 +522,7 @@ impl Program for ZoomProgram {
         .padding(8)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
-            let component = &cosmic.background.component;
+            let component = &cosmic.background(false).component;
             iced_widget::container::Style {
                 snap: true,
                 icon_color: Some(component.on.into()),
