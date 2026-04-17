@@ -1628,88 +1628,86 @@ impl Workspace {
         let fullscreen_focused = matches!(focused, Some(FocusTarget::Fullscreen(_)));
 
         let mut fullscreen_elements = SmallVec::<[WorkspaceRenderElement<R>; 2]>::new_const();
-        let render_fullscreen = |fullscreen: &FullscreenSurface,
-                                 renderer: &mut R,
-                                 output_scale: f64|
-        {
-            let fullscreen_geo = self.fullscreen_geometry_for(fullscreen);
-            let previous_geo = fullscreen
-                .previous_geometry
-                .as_ref()
-                .unwrap_or(&fullscreen_geo);
+        let mut render_fullscreen =
+            |fullscreen: &FullscreenSurface, renderer: &mut R, output_scale: f64| {
+                let fullscreen_geo = self.fullscreen_geometry_for(fullscreen);
+                let previous_geo = fullscreen
+                    .previous_geometry
+                    .as_ref()
+                    .unwrap_or(&fullscreen_geo);
 
-            let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
-                (Some(started), _) => {
-                    let duration = Instant::now().duration_since(started).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(*previous_geo),
-                            EaseRectangle(fullscreen_geo),
-                            duration,
+                let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
+                    (Some(started), _) => {
+                        let duration = Instant::now().duration_since(started).as_secs_f64()
+                            / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                        (
+                            ease(
+                                EaseInOutCubic,
+                                EaseRectangle(*previous_geo),
+                                EaseRectangle(fullscreen_geo),
+                                duration,
+                            )
+                            .0,
+                            ease(EaseInOutCubic, 0.0, 1.0, duration),
                         )
-                        .0,
-                        ease(EaseInOutCubic, 0.0, 1.0, duration),
-                    )
-                }
-                (_, Some(ended)) => {
-                    let duration = Instant::now().duration_since(ended).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(fullscreen_geo),
-                            EaseRectangle(*previous_geo),
-                            duration,
+                    }
+                    (_, Some(ended)) => {
+                        let duration = Instant::now().duration_since(ended).as_secs_f64()
+                            / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                        (
+                            ease(
+                                EaseInOutCubic,
+                                EaseRectangle(fullscreen_geo),
+                                EaseRectangle(*previous_geo),
+                                duration,
+                            )
+                            .0,
+                            ease(EaseInOutCubic, 1.0, 0.0, duration),
                         )
-                        .0,
-                        ease(EaseInOutCubic, 1.0, 0.0, duration),
-                    )
-                }
-                (None, None) => (fullscreen_geo, 1.0),
-            };
+                    }
+                    (None, None) => (fullscreen_geo, 1.0),
+                };
 
-            let render_loc = target_geo
-                .loc
-                .as_logical()
-                .to_physical_precise_round(output_scale);
+                let render_loc = target_geo
+                    .loc
+                    .as_logical()
+                    .to_physical_precise_round(output_scale);
 
-            let fullscreen_geo = fullscreen.surface.0.geometry();
-            let scale = Scale {
-                x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
-                y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
-            };
+                let fullscreen_geo = fullscreen.surface.0.geometry();
+                let scale = Scale {
+                    x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
+                    y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
+                };
 
-            // Only rescale geometry when animating
-            let animation_rescale = |elem| {
-                if fullscreen.is_animating() {
-                    RescaleRenderElement::from_element(elem, render_loc, scale).into()
-                } else {
-                    Into::<WorkspaceRenderElement<_>>::into(elem)
-                }
-            };
+                // Only rescale geometry when animating
+                let animation_rescale = |elem| {
+                    if fullscreen.is_animating() {
+                        RescaleRenderElement::from_element(elem, render_loc, scale).into()
+                    } else {
+                        Into::<WorkspaceRenderElement<_>>::into(elem)
+                    }
+                };
 
-            let mut fullscreen_push = |elem: SurfaceRenderElement<R>| {
-                if fullscreen_focused {
-                    push(animation_rescale(elem.into()))
-                } else {
-                    fullscreen_elements.push(animation_rescale(elem.into()))
-                }
+                let mut fullscreen_push = |elem: SurfaceRenderElement<R>| {
+                    if fullscreen_focused {
+                        push(animation_rescale(elem.into()))
+                    } else {
+                        fullscreen_elements.push(animation_rescale(elem.into()))
+                    }
+                };
+                fullscreen.surface.push_render_elements(
+                    renderer,
+                    render_loc,
+                    output_scale.into(),
+                    alpha,
+                    Some(true),
+                    false,
+                    [0, 0, 0, 0],
+                    0,
+                    &mut fullscreen_push,
+                    None,
+                );
             };
-            fullscreen.surface.push_render_elements(
-                renderer,
-                render_loc,
-                output_scale.into(),
-                alpha,
-                Some(true),
-                false,
-                [0, 0, 0, 0],
-                0,
-                &mut fullscreen_push,
-                None,
-            );
-        };
 
         let top_fullscreen = self.get_fullscreen(last_active_seat);
 

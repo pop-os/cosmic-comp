@@ -12,9 +12,9 @@ use cosmic::{
     Apply,
     iced::{
         Alignment,
+        core::{Background, Border, Color, Length},
         widget::{column, container, row, space},
     },
-    iced_core::{Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, text},
 };
@@ -67,9 +67,28 @@ impl Program for ResizeIndicatorInternal {
     type Message = ();
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        let edges = self.edges.lock().unwrap();
-        let icon_container_style = || {
-            theme::Container::custom(|theme| container::Style {
+        row(vec![
+            text::heading(&self.shortcut1).into(),
+            text::body(fl!("grow-window")).into(),
+            space::horizontal().width(40).into(),
+            text::heading(&self.shortcut2).into(),
+            text::body(fl!("shrink-window")).into(),
+        ])
+        .apply(container)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .padding(16)
+        .apply(container)
+        .class(theme::Container::custom(|theme| {
+            let mut background = theme.cosmic().accent_color();
+            if theme.transparent {
+                background.alpha = theme
+                    .cosmic()
+                    .alpha_map
+                    .blurred_alpha(theme.cosmic().frosted);
+            }
+
+            container::Style {
                 snap: true,
                 icon_color: Some(Color::from(theme.cosmic().accent.on)),
                 text_color: Some(Color::from(theme.cosmic().accent.on)),
@@ -80,107 +99,58 @@ impl Program for ResizeIndicatorInternal {
                     color: Color::TRANSPARENT,
                 },
                 shadow: Default::default(),
-            })
-        };
+            }
+        }))
+        .width(Length::Shrink)
+        .height(Length::Shrink)
+        .into()
+    }
+}
 
-        column(vec![
-            if edges.contains(ResizeEdge::TOP) {
-                from_name(if self.direction == ResizeDirection::Outwards {
-                    "go-up-symbolic"
-                } else {
-                    "go-down-symbolic"
-                })
-                .size(20)
-                .prefer_svg(true)
-                .apply(container)
-                .padding(8)
-                .class(icon_container_style())
-                .width(Length::Shrink)
-                .apply(container)
-                .center_x(Length::Fill)
-                .into()
+pub struct ResizeIndicatorArrow {
+    direction: Arc<Mutex<ResizeDirection>>,
+    icon_outwards: &'static str,
+    icon_inwards: &'static str,
+}
+
+impl Program for ResizeIndicatorArrow {
+    type Message = ();
+
+    fn view(&self) -> cosmic::Element<'_, Self::Message> {
+        from_name(
+            if *self.direction.lock().unwrap() == ResizeDirection::Outwards {
+                self.icon_outwards
             } else {
-                space::vertical().height(36).into()
+                self.icon_inwards
             },
-            row(vec![
-                if edges.contains(ResizeEdge::LEFT) {
-                    from_name(if self.direction == ResizeDirection::Outwards {
-                        "go-previous-symbolic"
-                    } else {
-                        "go-next-symbolic"
-                    })
-                    .size(20)
-                    .prefer_svg(true)
-                    .apply(container)
-                    .padding(8)
-                    .class(icon_container_style())
-                    .width(Length::Shrink)
-                    .apply(container)
-                    .center_y(Length::Fill)
-                    .into()
-                } else {
-                    space::horizontal().width(36).into()
+        )
+        .size(20)
+        .prefer_svg(true)
+        .apply(container)
+        .padding(8)
+        .class(theme::Container::custom(|theme| {
+            let mut background = theme.cosmic().accent_color();
+            if theme.transparent {
+                background.alpha = theme
+                    .cosmic()
+                    .alpha_map
+                    .blurred_alpha(theme.cosmic().frosted);
+            }
+
+            container::Style {
+                snap: true,
+                icon_color: Some(Color::from(theme.cosmic().accent.on)),
+                text_color: Some(Color::from(theme.cosmic().accent.on)),
+                background: Some(Background::Color(background.into())),
+                border: Border {
+                    radius: theme.cosmic().radius_s().into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
                 },
-                row(vec![
-                    text::heading(&self.shortcut1).into(),
-                    text::body(fl!("grow-window")).into(),
-                    space::horizontal().width(40).into(),
-                    text::heading(&self.shortcut2).into(),
-                    text::body(fl!("shrink-window")).into(),
-                ])
-                .apply(container)
-                .align_x(Alignment::Center)
-                .align_y(Alignment::Center)
-                .padding(16)
-                .apply(container)
-                .class(icon_container_style())
-                .width(Length::Shrink)
-                .height(Length::Shrink)
-                .apply(container)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-                .into(),
-                if edges.contains(ResizeEdge::RIGHT) {
-                    from_name(if self.direction == ResizeDirection::Outwards {
-                        "go-next-symbolic"
-                    } else {
-                        "go-previous-symbolic"
-                    })
-                    .size(20)
-                    .prefer_svg(true)
-                    .apply(container)
-                    .padding(8)
-                    .class(icon_container_style())
-                    .height(Length::Shrink)
-                    .apply(container)
-                    .center_y(Length::Fill)
-                    .into()
-                } else {
-                    space::horizontal().width(36).into()
-                },
-            ])
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into(),
-            if edges.contains(ResizeEdge::BOTTOM) {
-                from_name(if self.direction == ResizeDirection::Outwards {
-                    "go-down-symbolic"
-                } else {
-                    "go-up-symbolic"
-                })
-                .size(20)
-                .prefer_svg(true)
-                .apply(container)
-                .padding(8)
-                .class(icon_container_style())
-                .width(Length::Shrink)
-                .apply(container)
-                .center_x(Length::Fill)
-                .into()
-            } else {
-                space::vertical().height(36).into()
-            },
-        ])
+                shadow: Default::default(),
+            }
+        }))
+        .width(Length::Shrink)
         .into()
     }
 }

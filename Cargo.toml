@@ -4,7 +4,7 @@ edition = "2024"
 license = "GPL-3.0-only"
 name = "cosmic-comp"
 version = "1.0.0"
-rust-version = "1.90"
+rust-version = "1.93"
 
 [workspace]
 members = ["cosmic-comp-config"]
@@ -28,7 +28,7 @@ cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daem
 cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
     "greeter",
 ] }
-cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = [
+cosmic-text = { version = "0.19", features = [
     "shape-run-cache",
 ] }
 libdisplay-info = "0.3.0"
@@ -83,6 +83,7 @@ logind-zbus = { version = "5.3.2", optional = true }
 futures-executor = { version = "0.3.32" }
 futures-util = "0.3.32"
 cgmath = "0.18.0"
+smallvec = "1.15.2"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
@@ -140,7 +141,6 @@ lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "8eb4076" }

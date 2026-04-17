@@ -1,7 +1,13 @@
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
-        shadow::ShadowShader, wayland::SurfaceRenderElement,
+        IndicatorShader, Key, Usage,
+        cursor::CursorState,
+        element::AsGlowRenderer,
+        shadow::ShadowShader,
+        wayland::{
+            SurfaceRenderElement,
+            blur_effect::{BlurElement, BlurState},
+        },
     },
     hooks::{Decorations, HOOKS},
     shell::{
@@ -92,6 +98,7 @@ pub struct CosmicWindowInternal {
     tiled: AtomicBool,
     theme: Mutex<cosmic::Theme>,
     appearance_conf: Mutex<AppearanceConfig>,
+    blur_state: Mutex<BlurState>,
 }
 
 #[repr(u8)]
@@ -212,6 +219,7 @@ impl CosmicWindow {
                 tiled: AtomicBool::new(false),
                 theme: Mutex::new(theme.clone()),
                 appearance_conf: Mutex::new(appearance),
+                blur_state: Mutex::default(),
             },
             (width, SSD_HEIGHT),
             handle,
@@ -367,12 +375,19 @@ impl CosmicWindow {
         };
 
         self.0.with_program(|p| {
+            let theme = p.theme.lock().unwrap();
+            let frosted = if theme.cosmic().frosted_windows {
+                (theme.cosmic().frosted as u8 + 1) as usize
+            } else {
+                0
+            };
+
             p.window.push_popup_render_elements(
                 renderer,
                 window_loc,
                 scale,
                 alpha,
-                9, // TODO
+                frosted,
                 &mut |elem| push(elem.into()),
             )
         })
@@ -539,11 +554,17 @@ impl CosmicWindow {
             push_above(elem);
         }
 
-        self.0.with_program(|p| {
+        let frosted = self.0.with_program(|p| {
             if has_ssd {
                 radii[1] = 0;
                 radii[3] = 0;
             }
+            let theme = p.theme.lock().unwrap();
+            let frosted = if theme.cosmic().frosted_windows {
+                (theme.cosmic().frosted as u8 + 1) as usize
+            } else {
+                0
+            };
             p.window.push_render_elements(
                 renderer,
                 window_loc,
@@ -552,18 +573,31 @@ impl CosmicWindow {
                 scanout_override,
                 clip,
                 radii,
-                9, // TODO
+                frosted,
                 &mut |elem| push_above(elem.into()),
                 Some(&mut |elem| push_below(elem.into())),
-            )
+            );
+
+            frosted
         });
 
         if has_ssd {
             let ssd_loc = location
                 + self
                     .0
-                    .with_program(|p| p.window.geometry().loc)
-                    .to_physical_precise_round(scale);
+                    .with_program(|p| p.window.geometry().loc.to_physical_precise_round(scale));
+            if frosted > 0 {
+                let geometry = Rectangle::new(
+                    ssd_loc.to_f64().to_logical(scale),
+                    Size::new(geo.size.w, SSD_HEIGHT as f64),
+                );
+                if let Ok(Some(elem)) = self.0.with_program(|p| {
+                    let mut state = p.blur_state.lock().unwrap();
+                    BlurElement::from_state(renderer, &mut state, geometry, scale.x, radii, frosted)
+                }) {
+                    push_below(elem.into());
+                }
+            }
             self.0
                 .push_render_elements(renderer, ssd_loc, scale, alpha, &mut |elem| {
                     push_above(elem.into())
@@ -807,7 +841,11 @@ impl Program for CosmicWindowInternal {
 
     fn background_color(&self, theme: &cosmic::Theme) -> Color {
         if self.window.is_maximized(false) {
-            theme.cosmic().background.base.into()
+            theme
+                .cosmic()
+                .background(theme.cosmic().frosted_windows)
+                .base
+                .into()
         } else {
             Color::TRANSPARENT
         }
@@ -1226,6 +1264,7 @@ impl WaylandFocus for CosmicWindow {
 
 pub enum CosmicWindowRenderElement<R: Renderer + ImportAll + ImportMem> {
     Header(MemoryRenderBufferRenderElement<R>),
+    HeaderBlur(BlurElement),
     Shadow(PixelShaderElement),
     Border(PixelShaderElement),
     Window(SurfaceRenderElement<R>),
@@ -1236,6 +1275,12 @@ impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R
 {
     fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
         Self::Header(value)
+    }
+}
+
+impl<R: Renderer + AsGlowRenderer> From<BlurElement> for CosmicWindowRenderElement<R> {
+    fn from(value: BlurElement) -> Self {
+        Self::HeaderBlur(value)
     }
 }
 
@@ -1255,6 +1300,7 @@ where
     fn id(&self) -> &RendererId {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.id(),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.id(),
             CosmicWindowRenderElement::Shadow(elem) => elem.id(),
             CosmicWindowRenderElement::Border(elem) => elem.id(),
             CosmicWindowRenderElement::Window(elem) => elem.id(),
@@ -1264,6 +1310,7 @@ where
     fn current_commit(&self) -> CommitCounter {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.current_commit(),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.current_commit(),
             CosmicWindowRenderElement::Shadow(elem) => elem.current_commit(),
             CosmicWindowRenderElement::Border(elem) => elem.current_commit(),
             CosmicWindowRenderElement::Window(elem) => elem.current_commit(),
@@ -1273,6 +1320,7 @@ where
     fn src(&self) -> Rectangle<f64, Buffer> {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.src(),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.src(),
             CosmicWindowRenderElement::Shadow(elem) => elem.src(),
             CosmicWindowRenderElement::Border(elem) => elem.src(),
             CosmicWindowRenderElement::Window(elem) => elem.src(),
@@ -1282,6 +1330,7 @@ where
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.geometry(scale),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.geometry(scale),
             CosmicWindowRenderElement::Shadow(elem) => elem.geometry(scale),
             CosmicWindowRenderElement::Border(elem) => elem.geometry(scale),
             CosmicWindowRenderElement::Window(elem) => elem.geometry(scale),
@@ -1291,6 +1340,7 @@ where
     fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.location(scale),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.location(scale),
             CosmicWindowRenderElement::Shadow(elem) => elem.location(scale),
             CosmicWindowRenderElement::Border(elem) => elem.location(scale),
             CosmicWindowRenderElement::Window(elem) => elem.location(scale),
@@ -1300,6 +1350,7 @@ where
     fn transform(&self) -> Transform {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.transform(),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.transform(),
             CosmicWindowRenderElement::Shadow(elem) => elem.transform(),
             CosmicWindowRenderElement::Border(elem) => elem.transform(),
             CosmicWindowRenderElement::Window(elem) => elem.transform(),
@@ -1313,6 +1364,7 @@ where
     ) -> DamageSet<i32, Physical> {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.damage_since(scale, commit),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.damage_since(scale, commit),
             CosmicWindowRenderElement::Shadow(elem) => elem.damage_since(scale, commit),
             CosmicWindowRenderElement::Border(elem) => elem.damage_since(scale, commit),
             CosmicWindowRenderElement::Window(elem) => elem.damage_since(scale, commit),
@@ -1322,6 +1374,7 @@ where
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.opaque_regions(scale),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.opaque_regions(scale),
             CosmicWindowRenderElement::Shadow(elem) => elem.opaque_regions(scale),
             CosmicWindowRenderElement::Border(elem) => elem.opaque_regions(scale),
             CosmicWindowRenderElement::Window(elem) => elem.opaque_regions(scale),
@@ -1331,6 +1384,7 @@ where
     fn alpha(&self) -> f32 {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.alpha(),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.alpha(),
             CosmicWindowRenderElement::Shadow(elem) => elem.alpha(),
             CosmicWindowRenderElement::Border(elem) => elem.alpha(),
             CosmicWindowRenderElement::Window(elem) => elem.alpha(),
@@ -1340,6 +1394,7 @@ where
     fn kind(&self) -> Kind {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.kind(),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.kind(),
             CosmicWindowRenderElement::Shadow(elem) => elem.kind(),
             CosmicWindowRenderElement::Border(elem) => elem.kind(),
             CosmicWindowRenderElement::Window(elem) => elem.kind(),
@@ -1349,6 +1404,7 @@ where
     fn is_framebuffer_effect(&self) -> bool {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.is_framebuffer_effect(),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.is_framebuffer_effect(),
             CosmicWindowRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
             CosmicWindowRenderElement::Border(elem) => elem.is_framebuffer_effect(),
             CosmicWindowRenderElement::Window(elem) => elem.is_framebuffer_effect(),
@@ -1374,6 +1430,9 @@ where
             CosmicWindowRenderElement::Header(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
+            CosmicWindowRenderElement::HeaderBlur(elem) => {
+                RenderElement::<R>::draw(elem, frame, src, dst, damage, opaque_regions, cache)
+            }
             CosmicWindowRenderElement::Shadow(elem) | CosmicWindowRenderElement::Border(elem) => {
                 RenderElement::<GlowRenderer>::draw(
                     elem,
@@ -1395,6 +1454,7 @@ where
     fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         match self {
             CosmicWindowRenderElement::Header(elem) => elem.underlying_storage(renderer),
+            CosmicWindowRenderElement::HeaderBlur(elem) => elem.underlying_storage(renderer),
             CosmicWindowRenderElement::Shadow(elem) | CosmicWindowRenderElement::Border(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
@@ -1412,6 +1472,9 @@ where
         match self {
             CosmicWindowRenderElement::Header(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            CosmicWindowRenderElement::HeaderBlur(elem) => {
+                RenderElement::<R>::capture_framebuffer(elem, frame, src, dst, cache)
             }
             CosmicWindowRenderElement::Shadow(elem) | CosmicWindowRenderElement::Border(elem) => {
                 RenderElement::<GlowRenderer>::capture_framebuffer(

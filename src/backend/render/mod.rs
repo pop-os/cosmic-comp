@@ -722,7 +722,7 @@ where
         return Ok(Vec::new());
     }
     let theme = shell_ref.theme().clone();
-    let blur_strength = 9; // TODO
+    let blur_strength = (theme.cosmic().frosted as u8 + 1) as usize;
     let scale = output.current_scale().fractional_scale();
     // we don't want to hold a shell lock across `cursor_elements`,
     // that is prone to deadlock with the main-thread on some grabs.
