@@ -8,9 +8,9 @@ use cosmic::{
     Apply,
     iced::{
         Alignment,
+        core::{Background, Border, Color, Length},
         widget::{container, row},
     },
-    iced_core::{Background, Border, Color, Length},
     theme,
     widget::{icon::from_name, space, text},
 };
@@ -47,17 +47,27 @@ impl Program for StackHoverInternal {
         .align_y(Alignment::Center)
         .padding(16)
         .apply(container)
-        .class(theme::Container::custom(|theme| container::Style {
-            snap: true,
-            icon_color: Some(Color::from(theme.cosmic().accent.on)),
-            text_color: Some(Color::from(theme.cosmic().accent.on)),
-            background: Some(Background::Color(theme.cosmic().accent_color().into())),
-            border: Border {
-                radius: 18.0.into(),
-                width: 0.0,
-                color: Color::TRANSPARENT,
-            },
-            shadow: Default::default(),
+        .class(theme::Container::custom(|theme| {
+            let mut background = theme.cosmic().accent_color();
+            if theme.transparent {
+                background.alpha = theme
+                    .cosmic()
+                    .alpha_map
+                    .blurred_alpha(theme.cosmic().frosted);
+            }
+
+            container::Style {
+                snap: true,
+                icon_color: Some(Color::from(theme.cosmic().accent.on)),
+                text_color: Some(Color::from(theme.cosmic().accent.on)),
+                background: Some(Background::Color(background.into())),
+                border: Border {
+                    radius: theme.cosmic().radius_s().into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
+            }
         }))
         .width(Length::Shrink)
         .height(Length::Shrink)
