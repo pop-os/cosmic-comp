@@ -50,6 +50,20 @@ use std::{
     sync::{Arc, RwLock, atomic::AtomicBool},
 };
 
+fn linear_gamma_ramp(gamma_length: usize) -> Vec<u16> {
+    let mut ramp = vec![0u16; gamma_length * 3];
+    let (red, rest) = ramp.split_at_mut(gamma_length);
+    let (green, blue) = rest.split_at_mut(gamma_length);
+    let denom = (gamma_length as u64).saturating_sub(1).max(1);
+    for i in 0..gamma_length {
+        let v = (0xFFFFu64 * i as u64 / denom) as u16;
+        red[i] = v;
+        green[i] = v;
+        blue[i] = v;
+    }
+    ramp
+}
+
 mod device;
 mod drm_helpers;
 pub mod render;
@@ -467,6 +481,60 @@ impl State {
 }
 
 impl KmsState {
+    /// Return the CRTC gamma-ramp length for the CRTC currently driving `output`,
+    /// or `None` if the output is not mapped to a CRTC or the hardware does not
+    /// expose a gamma ramp.
+    pub fn get_gamma_size(&mut self, output: &Output) -> Option<u32> {
+        for device in self.drm_devices.values_mut() {
+            for (crtc, surface) in device.inner.surfaces.iter() {
+                if &surface.output == output {
+                    let info = device.drm.device().get_crtc(*crtc).ok()?;
+                    let len = info.gamma_length();
+                    return (len > 0).then_some(len);
+                }
+            }
+        }
+        None
+    }
+
+    /// Apply `ramp` (interleaved red/green/blue u16 ramps, each of length
+    /// `gamma_size`) to the CRTC driving `output`. Pass `None` to reset to a
+    /// linear ramp.
+    pub fn set_gamma(&mut self, output: &Output, ramp: Option<Vec<u16>>) -> Option<()> {
+        for device in self.drm_devices.values_mut() {
+            let crtc = device
+                .inner
+                .surfaces
+                .iter()
+                .find_map(|(c, s)| (&s.output == output).then_some(*c))?;
+            let gamma_length = device.drm.device().get_crtc(crtc).ok()?.gamma_length() as usize;
+            if gamma_length == 0 {
+                return None;
+            }
+
+            let owned_ramp;
+            let ramp_slice: &[u16] = match ramp.as_deref() {
+                Some(ramp) if ramp.len() == gamma_length * 3 => ramp,
+                Some(_) => return None,
+                None => {
+                    owned_ramp = linear_gamma_ramp(gamma_length);
+                    &owned_ramp
+                }
+            };
+            let (red, rest) = ramp_slice.split_at(gamma_length);
+            let (green, blue) = rest.split_at(gamma_length);
+
+            match device.drm.device_mut().set_gamma(crtc, red, green, blue) {
+                Ok(()) => return Some(()),
+                Err(err) => {
+                    warn!(?err, "failed to set gamma");
+                    return None;
+                }
+            }
+        }
+        None
+    }
+
     fn select_primary_gpu(&mut self, dh: &DisplayHandle) -> Result<()> {
         // We don't have to check the allow/blocklist here,
         // as any disallowed devices won't be in `self.drm_devices`.
