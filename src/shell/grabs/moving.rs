@@ -6,10 +6,7 @@ use crate::{
     },
     shell::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
-        element::{
-            CosmicMappedRenderElement,
-            stack_hover::{StackHover, stack_hover},
-        },
+        element::{CosmicMappedRenderElement, stack_hover::StackHover},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         layout::floating::TiledCorners,
     },
@@ -25,7 +22,7 @@ use smithay::{
         drm::DrmNode,
         input::ButtonState,
         renderer::{
-            ImportAll, ImportMem, Renderer,
+            ImportAll, ImportMem,
             element::{RenderElement, utils::RescaleRenderElement},
         },
     },
@@ -78,7 +75,7 @@ impl MoveGrabState {
         scanout_node: Option<DrmNode>,
         push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
     ) where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        R: AsGlowRenderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
@@ -122,6 +119,7 @@ impl MoveGrabState {
                 output_scale,
                 1.0,
                 &mut |elem| push(elem.into()),
+                None,
             );
         }
 
@@ -441,7 +439,7 @@ impl MoveGrab {
                         if let Some(indicator) =
                             grab_state.stacking_indicator.as_ref().map(|x| &x.0)
                         {
-                            indicator.output_enter(output, overlap);
+                            indicator.output_enter(output);
                         }
                     }
                 } else if self.window_outputs.remove(output) {
@@ -455,16 +453,14 @@ impl MoveGrab {
             let indicator_location = shell.stacking_indicator(&current_output, self.previous);
             if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
-                    let element = stack_hover(
+                    let size = geo.size.as_logical();
+                    let element = StackHover::new(
                         state.common.event_loop_handle.clone(),
-                        geo.size.as_logical(),
+                        size,
                         state.common.theme.clone(),
                     );
                     for output in &self.window_outputs {
-                        element.output_enter(
-                            output,
-                            Rectangle::from_size(output.geometry().size.as_logical()),
-                        );
+                        element.output_enter(output);
                     }
                     (element, geo.loc.as_logical())
                 });
