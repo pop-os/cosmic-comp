@@ -182,7 +182,11 @@ impl MinimizedWindow {
         }
     }
 
-    pub fn unmaximize(&mut self, original_geometry: Rectangle<i32, Local>) {
+    pub fn unmaximize(
+        &mut self,
+        original_geometry: Rectangle<i32, Local>,
+        original_snapped: Option<TiledCorners>,
+    ) {
         match self {
             MinimizedWindow::Fullscreen { .. } => {}
             MinimizedWindow::Tiling {
@@ -196,6 +200,7 @@ impl MinimizedWindow {
                 window, previous, ..
             } => {
                 previous.geometry = original_geometry;
+                previous.was_snapped = original_snapped;
                 window.set_maximized(false);
                 window.configure();
             }
@@ -972,7 +977,7 @@ impl Workspace {
         let mut state = elem.maximized_state.lock().unwrap();
         if let Some(state) = state.take() {
             if let Some(minimized) = self.minimized_windows.iter_mut().find(|m| *m == elem) {
-                minimized.unmaximize(state.original_geometry);
+                minimized.unmaximize(state.original_geometry, state.original_snapped);
                 Some(state.original_geometry)
             } else {
                 match state.original_layer {
@@ -998,6 +1003,10 @@ impl Workspace {
                             use_geometry.then_some(state.original_geometry.size.as_logical()),
                             None,
                         );
+                        // Re-apply the snap if the window was snapped before maximizing
+                        if let Some(corners) = state.original_snapped {
+                            self.floating_layer.snap_to_corner(elem, &corners);
+                        }
                         Some(state.original_geometry)
                     }
                 }
@@ -1052,6 +1061,7 @@ impl Workspace {
         let was_maximized = if let Some(MaximizedState {
             original_geometry,
             original_layer,
+            original_snapped,
         }) = mapped.maximized_state.lock().unwrap().take()
         {
             // we need to do this manually instead of calling `self.unmaximize_request`
@@ -1064,6 +1074,10 @@ impl Workspace {
             }
             mapped.set_geometry(original_geometry.to_global(&self.output));
             mapped.set_maximized(false);
+            // Restore the snap marker to lett unminimize re-apply it.
+            if let Some(corners) = original_snapped {
+                *mapped.floating_tiled.lock().unwrap() = Some(corners);
+            }
             Some(original_geometry)
         } else {
             None
@@ -1138,6 +1152,7 @@ impl Workspace {
                     *state = Some(MaximizedState {
                         original_geometry: geometry,
                         original_layer: ManagedLayer::Floating,
+                        original_snapped: previous.was_snapped,
                     });
                     std::mem::drop(state);
                     self.floating_layer.map_maximized(window, geometry, true);
@@ -1171,6 +1186,7 @@ impl Workspace {
                         *state = Some(MaximizedState {
                             original_geometry: previous_geometry,
                             original_layer: ManagedLayer::Tiling,
+                            original_snapped: None,
                         });
                         std::mem::drop(state);
                         self.floating_layer.map_maximized(window, from, true);
@@ -1187,6 +1203,7 @@ impl Workspace {
                         *state = Some(MaximizedState {
                             original_geometry: geometry,
                             original_layer: ManagedLayer::Tiling,
+                            original_snapped: None,
                         });
                         std::mem::drop(state);
                         self.floating_layer.map_maximized(window, from, true);
@@ -1393,6 +1410,7 @@ impl Workspace {
             *state = Some(MaximizedState {
                 original_geometry,
                 original_layer,
+                original_snapped: None,
             });
             std::mem::drop(state);
 
