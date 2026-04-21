@@ -869,12 +869,22 @@ impl Drop for MoveGrab {
                             if matches!(previous, ManagedLayer::Floating)
                                 && let Some(sz) = grab_state.snapping_zone
                             {
+                                // `last_geometry` was set to the pre-drag geometry(in FloatingLayout::unmap).
+                                // Snapshot it here and restore it after so "restore-to-floating" goes back to where the user had the window.
+                                let pre_drag_geometry = *window.last_geometry.lock().unwrap();
+
                                 if sz == SnappingZone::Maximize {
                                     shell.maximize_toggle(
                                         &window,
                                         &seat,
                                         &state.common.event_loop_handle,
                                     );
+                                    if let Some(geo) = pre_drag_geometry
+                                        && let Some(state) =
+                                            window.maximized_state.lock().unwrap().as_mut()
+                                    {
+                                        state.original_geometry = geo;
+                                    }
                                 } else {
                                     let directions = match sz {
                                         SnappingZone::Maximize => vec![],
@@ -903,6 +913,9 @@ impl Drop for MoveGrab {
                                             &theme,
                                             &window,
                                         );
+                                    }
+                                    if let Some(geo) = pre_drag_geometry {
+                                        *window.last_geometry.lock().unwrap() = Some(geo);
                                     }
                                 }
                             }
