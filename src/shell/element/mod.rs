@@ -1,7 +1,10 @@
 use crate::{
     backend::render::element::AsGlowRenderer,
     state::State,
-    utils::{iced::IcedElementInternal, prelude::*},
+    utils::{
+        iced::{IcedElementInternal, IcedRenderElement},
+        prelude::*,
+    },
 };
 use calloop::LoopHandle;
 use cosmic_comp_config::AppearanceConfig;
@@ -12,7 +15,6 @@ use smithay::{
         renderer::{
             element::{
                 Element, Kind, RenderElement, UnderlyingStorage,
-                memory::MemoryRenderBufferRenderElement,
                 utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
             },
             gles::element::PixelShaderElement,
@@ -1090,7 +1092,7 @@ where
     GrabbedWindow(RescaleRenderElement<self::window::CosmicWindowRenderElement<R>>),
     FocusIndicator(PixelShaderElement),
     Overlay(PixelShaderElement),
-    StackHoverIndicator(MemoryRenderBufferRenderElement<R>),
+    StackHoverIndicator(IcedRenderElement<R>),
     #[cfg(feature = "debug")]
     Egui(TextureRenderElement<GlesTexture>),
 }
@@ -1544,13 +1546,13 @@ where
     }
 }
 
-impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicMappedRenderElement<R>
+impl<R> From<IcedRenderElement<R>> for CosmicMappedRenderElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: MemoryRenderBufferRenderElement<R>) -> Self {
+    fn from(elem: IcedRenderElement<R>) -> Self {
         CosmicMappedRenderElement::StackHoverIndicator(elem)
     }
 }

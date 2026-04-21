@@ -33,7 +33,7 @@ use smithay::{
         allocator::Fourcc,
         input::{ButtonState, KeyState},
         renderer::{
-            ImportMem, Renderer,
+            ImportMem,
             element::{
                 Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
@@ -56,15 +56,21 @@ use smithay::{
         },
     },
     output::Output,
-    reexports::calloop::RegistrationToken,
-    reexports::calloop::{self, LoopHandle, futures::Scheduler},
+    reexports::calloop::{self, LoopHandle, RegistrationToken, futures::Scheduler},
+    render_elements,
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
         Transform,
     },
 };
 
-use crate::utils::iced::state::State;
+use crate::{
+    backend::render::{
+        element::AsGlowRenderer,
+        wayland::blur_effect::{BlurElement, BlurState},
+    },
+    utils::iced::state::State,
+};
 
 static ID: LazyLock<Id> = LazyLock::new(|| Id::new("Program"));
 
@@ -174,6 +180,7 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
     pending_realloc: bool,
+    blur: BlurState,
 
     // state
     size: Size<i32, Logical>,
@@ -224,6 +231,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
             pending_realloc: self.pending_realloc,
+            blur: BlurState::default(),
             size: self.size,
             last_seat: self.last_seat.clone(),
             cursor_pos: self.cursor_pos,
@@ -305,6 +313,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             outputs: HashSet::new(),
             buffers: HashMap::new(),
             pending_realloc: false,
+            blur: BlurState::default(),
             size,
             cursor_pos: None,
             last_seat,
@@ -335,7 +344,6 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         let node = element
             .as_widget_mut()
             .layout(
-                // TODO Avoid creating a new tree here?
                 &mut tree,
                 &internal.renderer,
                 &Limits::new(IcedSize::ZERO, IcedSize::INFINITE)
@@ -377,6 +385,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn force_update(&self) {
         self.0.lock().unwrap().update(true);
+    }
+
+    pub fn with_theme<R: 'static>(&self, f: impl FnOnce(&Theme) -> R) -> R {
+        let guard = self.0.lock().unwrap();
+        f(&guard.theme)
     }
 
     pub fn set_theme(&self, theme: cosmic::Theme) {
@@ -902,9 +915,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         location: Point<i32, Physical>,
         mut scale: Scale<f64>,
         alpha: f32,
-        push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+        mut radii: [u8; 4],
+        push_above: &mut dyn FnMut(IcedRenderElement<R>),
+        push_below: Option<&mut dyn FnMut(IcedRenderElement<R>)>,
     ) where
-        R: Renderer + ImportMem,
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
         let mut internal = self.0.lock().unwrap();
@@ -1037,10 +1052,51 @@ impl<P: Program + Send + 'static> IcedElement<P> {
                 Kind::Unspecified,
             ) {
                 Ok(buffer) => {
-                    push(buffer);
+                    push_above(buffer.into());
                 }
                 Err(err) => tracing::warn!("What? {:?}", err),
             }
+
+            if internal_ref.theme.transparent {
+                for radius in radii.iter_mut() {
+                    *radius = ((*radius as f64) * internal_ref.additional_scale).round() as u8;
+                }
+
+                match BlurElement::from_state(
+                    renderer,
+                    &mut internal_ref.blur,
+                    Rectangle::new(
+                        location
+                            .to_f64()
+                            .to_logical(scale)
+                            .upscale(internal_ref.additional_scale),
+                        internal_ref
+                            .size
+                            .to_f64()
+                            .upscale(internal_ref.additional_scale)
+                            .to_i32_round(),
+                    ),
+                    scale.x,
+                    radii,
+                    (internal_ref.theme.cosmic().frosted as u8 + 1) as usize,
+                ) {
+                    Ok(Some(elem)) => {
+                        if let Some(push_below) = push_below {
+                            push_below(elem.into())
+                        } else {
+                            push_above(elem.into())
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => tracing::warn!("Blur elem error: {:?}", err),
+                }
+            }
         }
     }
+}
+
+render_elements! {
+    pub IcedRenderElement<R> where R: ImportMem + AsGlowRenderer;
+    UI=MemoryRenderBufferRenderElement<R>,
+    Blur=BlurElement,
 }

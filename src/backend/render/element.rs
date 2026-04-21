@@ -1,6 +1,7 @@
 use crate::{
     backend::render::{GlMultiError, wayland::SurfaceRenderElement},
     shell::{CosmicMappedRenderElement, WorkspaceRenderElement},
+    utils::iced::IcedRenderElement,
 };
 
 #[cfg(feature = "debug")]
@@ -12,7 +13,6 @@ use smithay::{
             Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
             element::{
                 Element, Id, Kind, RenderElement, UnderlyingStorage,
-                memory::MemoryRenderBufferRenderElement,
                 utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
             },
             gles::{GlesError, GlesRenderbuffer, GlesTexture, element::TextureShaderElement},
@@ -42,7 +42,7 @@ where
     Postprocess(
         CropRenderElement<RelocateRenderElement<RescaleRenderElement<TextureShaderElement>>>,
     ),
-    Zoom(MemoryRenderBufferRenderElement<R>),
+    Zoom(IcedRenderElement<R>),
     Damage(DamageElement),
     #[cfg(feature = "debug")]
     Egui(TextureRenderElement<GlesTexture>),
@@ -344,13 +344,13 @@ where
     }
 }
 
-impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicElement<R>
+impl<R> From<IcedRenderElement<R>> for CosmicElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
+    fn from(value: IcedRenderElement<R>) -> Self {
         Self::Zoom(value)
     }
 }
