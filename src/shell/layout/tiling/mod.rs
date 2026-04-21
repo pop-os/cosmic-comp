@@ -5305,13 +5305,12 @@ fn render_new_tree_windows<R>(
 
     let mut group_backdrop = None;
     let mut indicators = SmallVec::<[CosmicMappedRenderElement<R>; 2]>::new_const();
-    let mut resize_element = None;
+    let mut resize_elements = SmallVec::<[CosmicMappedRenderElement<R>; 10]>::new_const();
     let mut swap_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
 
-    let output_geo = output.geometry();
     let output_scale = output.current_scale().fractional_scale();
 
-    let (swap_indicator, swap_tree) = overview.1.unzip();
+    let (mut swap_indicator, swap_tree) = overview.1.unzip();
     let swap_desc = swap_desc.filter(|_| is_active_output);
     let swap_tree = swap_tree.flatten().filter(|_| is_active_output);
     let window_hint = crate::theme::active_window_hint(theme);
@@ -5514,16 +5513,18 @@ fn render_new_tree_windows<R>(
                                         .unwrap_or(false)
                                 })
                                 .unwrap_or(false))
-                        && let Some(swap) = swap_indicator.as_ref()
+                        && let Some(swap) = swap_indicator.as_mut()
                     {
-                        swap.resize(geo.size.as_logical());
-                        swap.output_enter(output, output_geo.as_logical());
+                        let size = geo.size.as_logical();
+                        swap.resize(size);
+                        swap.output_enter(output);
                         swap.push_render_elements(
                             renderer,
                             geo.loc.as_logical().to_physical_precise_round(output_scale),
                             output_scale.into(),
                             alpha * overview.0.alpha().unwrap_or(1.0),
                             &mut |elem| swap_elements.push(elem.into()),
+                            None,
                         );
                     }
                 }
@@ -5534,29 +5535,20 @@ fn render_new_tree_windows<R>(
                     geo.size += (36, 36).into();
 
                     resize.resize(geo.size.as_logical());
-                    resize.output_enter(output, output_geo.as_logical());
+                    resize.output_enter(output);
                     let possible_edges =
                         TilingLayout::possible_resizes(target_tree, node_id.clone());
                     if !possible_edges.is_empty() {
-                        if resize.with_program(|internal| {
-                            let mut edges = internal.edges.lock().unwrap();
-                            if *edges != possible_edges {
-                                *edges = possible_edges;
-                                true
-                            } else {
-                                false
-                            }
-                        }) {
-                            resize.force_update();
-                        }
+                        resize.set_edges(possible_edges);
                         resize.push_render_elements(
                             renderer,
                             geo.loc.as_logical().to_physical_precise_round(output_scale),
                             output_scale.into(),
                             alpha * mode.alpha().unwrap_or(1.0),
                             &mut |elem| {
-                                resize_element = Some(elem.into());
+                                resize_elements.push(elem.into());
                             },
+                            None,
                         );
                     }
                 }
@@ -5716,7 +5708,7 @@ fn render_new_tree_windows<R>(
         },
     );
 
-    for elem in resize_element
+    for elem in resize_elements
         .into_iter()
         .chain(swap_elements)
         .chain(indicators)

@@ -1497,6 +1497,27 @@ impl FloatingLayout {
             if focused == Some(elem) && !elem.is_maximized(false) {
                 let active_window_hint = crate::theme::active_window_hint(theme);
                 let radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
+
+                if let Some((mode, resize)) = resize_indicator.as_mut() {
+                    let mut resize_geometry = geometry;
+                    resize_geometry.loc -= (18, 18).into();
+                    resize_geometry.size += (36, 36).into();
+
+                    resize.resize(resize_geometry.size.as_logical());
+                    resize.output_enter(output);
+                    resize.push_render_elements(
+                        renderer,
+                        resize_geometry
+                            .loc
+                            .as_logical()
+                            .to_physical_precise_round(output_scale),
+                        output_scale.into(),
+                        alpha * mode.alpha().unwrap_or(1.0),
+                        &mut |elem| push(CosmicMappedRenderElement::Window(elem.into())),
+                        None,
+                    );
+                }
+
                 if indicator_thickness > 0 {
                     let element = IndicatorShader::focus_element(
                         renderer,
@@ -1513,25 +1534,6 @@ impl FloatingLayout {
                         ],
                     );
                     push(element.into());
-                }
-
-                if let Some((mode, resize)) = resize_indicator.as_mut() {
-                    let mut resize_geometry = geometry;
-                    resize_geometry.loc -= (18, 18).into();
-                    resize_geometry.size += (36, 36).into();
-
-                    resize.resize(resize_geometry.size.as_logical());
-                    resize.output_enter(output, Rectangle::default() /* unused */);
-                    resize.push_render_elements(
-                        renderer,
-                        resize_geometry
-                            .loc
-                            .as_logical()
-                            .to_physical_precise_round(output_scale),
-                        output_scale.into(),
-                        alpha * mode.alpha().unwrap_or(1.0),
-                        &mut |elem| push(CosmicMappedRenderElement::Window(elem.into())),
-                    );
                 }
             }
 

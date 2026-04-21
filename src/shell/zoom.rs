@@ -11,7 +11,7 @@ use cosmic_comp_config::ZoomMovement;
 use cosmic_config::ConfigSet;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
+    backend::renderer::ImportMem,
     desktop::space::SpaceElement,
     input::{
         Seat,
@@ -32,9 +32,10 @@ use smithay::{
 use tracing::error;
 
 use crate::{
+    backend::render::element::AsGlowRenderer,
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
         tween::EasePoint,
     },
@@ -71,8 +72,9 @@ impl OutputZoomState {
         increment: u32,
         movement: ZoomMovement,
         loop_handle: LoopHandle<'static, State>,
-        theme: cosmic::Theme,
+        mut theme: cosmic::Theme,
     ) -> OutputZoomState {
+        theme.transparent = theme.cosmic().frosted_system_interface;
         let cursor_position = seat.get_pointer().unwrap().current_location().as_global();
         let output_geometry = output.geometry().to_f64();
         let focal_point = if output_geometry.contains(cursor_position) {
@@ -108,8 +110,7 @@ impl OutputZoomState {
         let program = ZoomProgram::new(level, movement, increment);
         let element = IcedElement::new(program, Size::default(), loop_handle, theme);
         let mut size = element.minimum_size();
-        size.w = (size.w + 32/*TODO: figure out why iced is calculating too little*/)
-            .min(output_geometry.size.w.round() as i32);
+        size.w = size.w.min(output_geometry.size.w.round() as i32);
         element.set_activate(true);
         element.resize(size);
         element.output_enter(output, Rectangle::new(Point::from((0, 0)), size));
@@ -196,9 +197,9 @@ impl OutputZoomState {
         &mut self,
         renderer: &mut R,
         output: &Output,
-        push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+        push: &mut dyn FnMut(IcedRenderElement<R>),
     ) where
-        R: Renderer + ImportMem,
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
         let size = self.element.current_size().to_f64();
@@ -216,7 +217,11 @@ impl OutputZoomState {
             location,
             scale.fractional_scale().into(),
             1.0,
+            self.element
+                .with_theme(|theme| theme.cosmic().radius_s())
+                .map(|x| x.round() as u8),
             push,
+            None,
         )
     }
 }
@@ -397,12 +402,9 @@ impl ZoomState {
         None
     }
 
-    pub fn render<R>(
-        renderer: &mut R,
-        output: &Output,
-        push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
-    ) where
-        R: Renderer + ImportMem,
+    pub fn render<R>(renderer: &mut R, output: &Output, push: &mut dyn FnMut(IcedRenderElement<R>))
+    where
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
@@ -522,7 +524,7 @@ impl Program for ZoomProgram {
         .padding(8)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
-            let component = &cosmic.background(false).component;
+            let component = &cosmic.background(theme.transparent).component;
             iced_widget::container::Style {
                 snap: true,
                 icon_color: Some(component.on.into()),
@@ -598,6 +600,8 @@ impl Program for ZoomProgram {
                                 let level = output_state_ref.level;
                                 std::mem::drop(output_state_ref);
 
+                                let mut theme = state.common.theme.clone();
+                                theme.transparent = theme.cosmic().frosted_system_interface;
                                 let grab = MenuGrab::new(
                                     start_data,
                                     &seat,
@@ -710,7 +714,7 @@ impl Program for ZoomProgram {
                                     ),
                                     Some(level.min(4.)),
                                     state.common.event_loop_handle.clone(),
-                                    state.common.theme.clone(),
+                                    theme,
                                 );
 
                                 std::mem::drop(shell);
@@ -763,6 +767,8 @@ impl Program for ZoomProgram {
                                 let level = output_state_ref.level;
                                 std::mem::drop(output_state_ref);
 
+                                let mut theme = state.common.theme.clone();
+                                theme.transparent = theme.cosmic().frosted_system_interface;
                                 let grab = MenuGrab::new(
                                     start_data,
                                     &seat,
@@ -795,7 +801,7 @@ impl Program for ZoomProgram {
                                     MenuAlignment::PREFER_CENTERED,
                                     Some(level.min(4.)),
                                     state.common.event_loop_handle.clone(),
-                                    state.common.theme.clone(),
+                                    theme,
                                 );
 
                                 std::mem::drop(shell);

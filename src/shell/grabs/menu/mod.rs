@@ -20,7 +20,7 @@ use cosmic::{
 use smithay::{
     backend::{
         input::{ButtonState, TouchSlot},
-        renderer::{ImportMem, Renderer, element::memory::MemoryRenderBufferRenderElement},
+        renderer::ImportMem,
     },
     desktop::space::SpaceElement,
     input::{
@@ -42,10 +42,11 @@ use smithay::{
 };
 
 use crate::{
+    backend::render::element::AsGlowRenderer,
     shell::{SeatExt, focus::target::PointerFocusTarget},
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
     },
 };
@@ -68,9 +69,9 @@ impl MenuGrabState {
         &self,
         renderer: &mut R,
         output: &Output,
-        push: &mut dyn FnMut(MemoryRenderBufferRenderElement<R>),
+        push: &mut dyn FnMut(IcedRenderElement<R>),
     ) where
-        R: Renderer + ImportMem,
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
         let scale = output.current_scale().fractional_scale();
@@ -83,7 +84,11 @@ impl MenuGrabState {
                     .to_physical_precise_round(scale),
                 scale.into(),
                 1.0,
+                elem.iced
+                    .with_theme(|theme| theme.cosmic().radius_s())
+                    .map(|x| x.round() as u8),
                 push,
+                None,
             )
         }
     }
@@ -274,11 +279,13 @@ impl Program for ContextMenu {
                             let mut elements = grab_state.elements.lock().unwrap();
 
                             let position = elements.last().unwrap().position;
+                            let mut theme = state.common.theme.clone();
+                            theme.transparent = theme.cosmic().frosted_system_interface;
                             let element = IcedElement::new(
                                 ContextMenu::new(items),
                                 Size::default(),
                                 state.common.event_loop_handle.clone(),
-                                state.common.theme.clone(),
+                                theme,
                             );
 
                             let min_size = element.minimum_size();
@@ -472,7 +479,7 @@ impl Program for ContextMenu {
         .padding(1)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
-            let component = &cosmic.background(false).component;
+            let component = &cosmic.background(theme.cosmic().frosted_windows).component;
             iced_widget::container::Style {
                 snap: true,
                 icon_color: Some(cosmic.accent.base.into()),
