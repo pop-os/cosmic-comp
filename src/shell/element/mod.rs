@@ -81,10 +81,11 @@ space_elements! {
     Stack=CosmicStack,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MaximizedState {
     pub original_geometry: Rectangle<i32, Local>,
     pub original_layer: ManagedLayer,
+    pub original_snapped: Option<TiledCorners>,
 }
 
 #[derive(Clone)]
