@@ -1,6 +1,7 @@
 use crate::{
+    backend::render::element::AsGlowRenderer,
     fl,
-    utils::iced::{IcedElement, Program},
+    utils::iced::{IcedElement, IcedRenderElement, Program},
 };
 
 use calloop::LoopHandle;
@@ -14,16 +15,72 @@ use cosmic::{
     theme,
     widget::{icon::from_name, space, text},
 };
-use smithay::utils::{Logical, Size};
+use smithay::{
+    backend::renderer::ImportMem,
+    desktop::space::SpaceElement,
+    output::Output,
+    utils::{Logical, Physical, Point, Rectangle, Scale, Size},
+};
 
-pub type StackHover = IcedElement<StackHoverInternal>;
+#[derive(Debug)]
+pub struct StackHover {
+    location: Point<i32, Logical>,
+    elem: IcedElement<StackHoverInternal>,
+}
 
-pub fn stack_hover(
-    evlh: LoopHandle<'static, crate::state::State>,
-    size: Size<i32, Logical>,
-    theme: cosmic::Theme,
-) -> StackHover {
-    StackHover::new(StackHoverInternal, size, evlh, theme)
+impl StackHover {
+    pub fn new(
+        evlh: LoopHandle<'static, crate::state::State>,
+        size: Size<i32, Logical>,
+        mut theme: cosmic::Theme,
+    ) -> StackHover {
+        theme.transparent = theme.cosmic().frosted_system_interface;
+
+        let elem = IcedElement::new(StackHoverInternal, size, evlh, theme);
+        let minimum = elem.minimum_size();
+        let new_size = Size::<i32, Logical>::new(size.w.min(minimum.w), size.h.min(minimum.h));
+        let location = Point::new(
+            size.w.saturating_sub(new_size.w) / 2,
+            size.h.saturating_sub(new_size.h) / 2,
+        );
+        elem.resize(new_size);
+
+        StackHover { location, elem }
+    }
+
+    pub fn push_render_elements<R>(
+        &self,
+        renderer: &mut R,
+        location: Point<i32, Physical>,
+        scale: Scale<f64>,
+        alpha: f32,
+        push_above: &mut dyn FnMut(IcedRenderElement<R>),
+        push_below: Option<&mut dyn FnMut(IcedRenderElement<R>)>,
+    ) where
+        R: AsGlowRenderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
+        self.elem.push_render_elements(
+            renderer,
+            location + self.location.to_physical_precise_round(scale),
+            scale,
+            alpha,
+            self.elem
+                .with_theme(|theme| theme.cosmic().radius_s())
+                .map(|x| x.round() as u8),
+            push_above,
+            push_below,
+        );
+    }
+
+    pub fn output_enter(&self, output: &Output) {
+        self.elem
+            .output_enter(output, Rectangle::default() /*unused*/);
+    }
+
+    pub fn output_leave(&self, output: &Output) {
+        self.elem.output_leave(output);
+    }
 }
 
 pub struct StackHoverInternal;
@@ -47,23 +104,27 @@ impl Program for StackHoverInternal {
         .align_y(Alignment::Center)
         .padding(16)
         .apply(container)
-        .class(theme::Container::custom(|theme| container::Style {
-            snap: true,
-            icon_color: Some(Color::from(theme.cosmic().accent.on)),
-            text_color: Some(Color::from(theme.cosmic().accent.on)),
-            background: Some(Background::Color(theme.cosmic().accent_color().into())),
-            border: Border {
-                radius: 18.0.into(),
-                width: 0.0,
-                color: Color::TRANSPARENT,
-            },
-            shadow: Default::default(),
+        .class(theme::Container::custom(|theme| {
+            let mut background = theme.cosmic().accent_color();
+            if theme.transparent {
+                background.alpha = theme.cosmic().frosted.alpha();
+            }
+
+            container::Style {
+                snap: true,
+                icon_color: Some(Color::from(theme.cosmic().accent.on)),
+                text_color: Some(Color::from(theme.cosmic().accent.on)),
+                background: Some(Background::Color(background.into())),
+                border: Border {
+                    radius: theme.cosmic().radius_s().into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
+            }
         }))
         .width(Length::Shrink)
         .height(Length::Shrink)
-        .apply(container)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
         .into()
     }
 }
