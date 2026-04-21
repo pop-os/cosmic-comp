@@ -4,14 +4,8 @@ use super::{
 };
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage,
-        cursor::CursorState,
-        element::AsGlowRenderer,
-        shadow::ShadowShader,
-        wayland::{
-            SurfaceRenderElement,
-            blur_effect::{BlurElement, BlurState},
-        },
+        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
+        shadow::ShadowShader, wayland::SurfaceRenderElement,
     },
     hooks::{Decorations, HOOKS},
     shell::{
@@ -22,7 +16,7 @@ use crate::{
     },
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
     },
 };
@@ -46,10 +40,7 @@ use smithay::{
         input::KeyState,
         renderer::{
             ImportAll, ImportMem, Renderer,
-            element::{
-                Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage,
-                memory::MemoryRenderBufferRenderElement,
-            },
+            element::{Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage},
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
             utils::{CommitCounter, DamageSet, OpaqueRegions},
@@ -127,7 +118,6 @@ pub struct CosmicStackInternal {
     tiled: AtomicBool,
     theme: Mutex<cosmic::Theme>,
     appearance_conf: Mutex<AppearanceConfig>,
-    blur_state: Mutex<BlurState>,
 }
 
 impl CosmicStackInternal {
@@ -154,9 +144,10 @@ impl CosmicStack {
     pub fn new<I: Into<CosmicSurface>>(
         windows: impl Iterator<Item = I>,
         handle: LoopHandle<'static, crate::state::State>,
-        theme: cosmic::Theme,
+        mut theme: cosmic::Theme,
         appearance: AppearanceConfig,
     ) -> CosmicStack {
+        theme.transparent = theme.cosmic().frosted_windows;
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
 
@@ -185,7 +176,6 @@ impl CosmicStack {
                 tiled: AtomicBool::new(false),
                 theme: Mutex::new(theme.clone()),
                 appearance_conf: Mutex::new(appearance),
-                blur_state: Default::default(),
             },
             (width, TAB_HEIGHT),
             handle,
@@ -797,11 +787,6 @@ impl CosmicStack {
             })
         });
 
-        self.0
-            .push_render_elements(renderer, stack_loc, scale, alpha, &mut |elem| {
-                push_above(elem.into())
-            });
-
         self.0.with_program(|p| {
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
@@ -847,31 +832,19 @@ impl CosmicStack {
             );
         });
 
-        if frosted > 0 {
-            let geometry = Rectangle::new(
-                stack_loc.to_f64().to_logical(scale),
-                Size::new(
-                    geometry.size.to_f64().to_logical(scale).w,
-                    TAB_HEIGHT as f64,
-                ),
-            );
-            if let Ok(Some(elem)) = self.0.with_program(|p| {
-                let mut state = p.blur_state.lock().unwrap();
-                BlurElement::from_state(
-                    renderer,
-                    &mut state,
-                    geometry,
-                    scale.x,
-                    radii.map(|[_, b, _, d]| [0, b, 0, d]).unwrap_or([0; 4]),
-                    frosted,
-                )
-            }) {
-                push_below(elem.into());
-            }
-        }
+        self.0.push_render_elements(
+            renderer,
+            stack_loc,
+            scale,
+            alpha,
+            radii.map(|[_, b, _, d]| [0, b, 0, d]).unwrap_or([0; 4]),
+            &mut |elem| push_above(elem.into()),
+            Some(&mut |elem| push_below(elem.into())),
+        );
     }
 
-    pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
+    pub(crate) fn set_theme(&self, mut theme: cosmic::Theme) {
+        theme.transparent = theme.cosmic().frosted_windows;
         self.0.with_program(|p| {
             *p.theme.lock().unwrap() = theme.clone();
         });
@@ -1907,24 +1880,17 @@ impl TouchTarget<State> for CosmicStack {
 }
 
 pub enum CosmicStackRenderElement<R: Renderer + ImportAll + ImportMem> {
-    Header(MemoryRenderBufferRenderElement<R>),
-    HeaderBlur(BlurElement),
+    Header(IcedRenderElement<R>),
     Shadow(PixelShaderElement),
     Border(PixelShaderElement),
     Window(SurfaceRenderElement<R>),
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R>>
+impl<R: Renderer + ImportAll + ImportMem> From<IcedRenderElement<R>>
     for CosmicStackRenderElement<R>
 {
-    fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
+    fn from(value: IcedRenderElement<R>) -> Self {
         Self::Header(value)
-    }
-}
-
-impl<R: Renderer + AsGlowRenderer> From<BlurElement> for CosmicStackRenderElement<R> {
-    fn from(value: BlurElement) -> Self {
-        Self::HeaderBlur(value)
     }
 }
 
@@ -1944,7 +1910,6 @@ where
     fn id(&self) -> &RendererId {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.id(),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.id(),
             CosmicStackRenderElement::Shadow(elem) => elem.id(),
             CosmicStackRenderElement::Border(elem) => elem.id(),
             CosmicStackRenderElement::Window(elem) => elem.id(),
@@ -1954,7 +1919,6 @@ where
     fn current_commit(&self) -> CommitCounter {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.current_commit(),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.current_commit(),
             CosmicStackRenderElement::Shadow(elem) => elem.current_commit(),
             CosmicStackRenderElement::Border(elem) => elem.current_commit(),
             CosmicStackRenderElement::Window(elem) => elem.current_commit(),
@@ -1964,7 +1928,6 @@ where
     fn src(&self) -> Rectangle<f64, Buffer> {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.src(),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.src(),
             CosmicStackRenderElement::Shadow(elem) => elem.src(),
             CosmicStackRenderElement::Border(elem) => elem.src(),
             CosmicStackRenderElement::Window(elem) => elem.src(),
@@ -1974,7 +1937,6 @@ where
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.geometry(scale),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Shadow(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Border(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Window(elem) => elem.geometry(scale),
@@ -1984,7 +1946,6 @@ where
     fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.location(scale),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.location(scale),
             CosmicStackRenderElement::Shadow(elem) => elem.location(scale),
             CosmicStackRenderElement::Border(elem) => elem.location(scale),
             CosmicStackRenderElement::Window(elem) => elem.location(scale),
@@ -1994,7 +1955,6 @@ where
     fn transform(&self) -> Transform {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.transform(),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.transform(),
             CosmicStackRenderElement::Shadow(elem) => elem.transform(),
             CosmicStackRenderElement::Border(elem) => elem.transform(),
             CosmicStackRenderElement::Window(elem) => elem.transform(),
@@ -2008,7 +1968,6 @@ where
     ) -> DamageSet<i32, Physical> {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.damage_since(scale, commit),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Shadow(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Border(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Window(elem) => elem.damage_since(scale, commit),
@@ -2018,7 +1977,6 @@ where
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.opaque_regions(scale),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Shadow(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Border(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Window(elem) => elem.opaque_regions(scale),
@@ -2028,7 +1986,6 @@ where
     fn alpha(&self) -> f32 {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.alpha(),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.alpha(),
             CosmicStackRenderElement::Shadow(elem) => elem.alpha(),
             CosmicStackRenderElement::Border(elem) => elem.alpha(),
             CosmicStackRenderElement::Window(elem) => elem.alpha(),
@@ -2038,7 +1995,6 @@ where
     fn kind(&self) -> Kind {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.kind(),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.kind(),
             CosmicStackRenderElement::Shadow(elem) => elem.kind(),
             CosmicStackRenderElement::Border(elem) => elem.kind(),
             CosmicStackRenderElement::Window(elem) => elem.kind(),
@@ -2048,7 +2004,6 @@ where
     fn is_framebuffer_effect(&self) -> bool {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.is_framebuffer_effect(),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Border(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Window(elem) => elem.is_framebuffer_effect(),
@@ -2074,9 +2029,6 @@ where
             CosmicStackRenderElement::Header(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
-            CosmicStackRenderElement::HeaderBlur(elem) => {
-                RenderElement::<R>::draw(elem, frame, src, dst, damage, opaque_regions, cache)
-            }
             CosmicStackRenderElement::Shadow(elem) | CosmicStackRenderElement::Border(elem) => {
                 RenderElement::<GlowRenderer>::draw(
                     elem,
@@ -2098,7 +2050,6 @@ where
     fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         match self {
             CosmicStackRenderElement::Header(elem) => elem.underlying_storage(renderer),
-            CosmicStackRenderElement::HeaderBlur(elem) => elem.underlying_storage(renderer),
             CosmicStackRenderElement::Shadow(elem) | CosmicStackRenderElement::Border(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
@@ -2116,9 +2067,6 @@ where
         match self {
             CosmicStackRenderElement::Header(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
-            }
-            CosmicStackRenderElement::HeaderBlur(elem) => {
-                RenderElement::<R>::capture_framebuffer(elem, frame, src, dst, cache)
             }
             CosmicStackRenderElement::Shadow(elem) | CosmicStackRenderElement::Border(elem) => {
                 RenderElement::<GlowRenderer>::capture_framebuffer(
