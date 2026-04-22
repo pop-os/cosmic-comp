@@ -440,6 +440,7 @@ impl Surface {
         self.overlay_plane_formats = overlay_plane_formats;
         self.feedback.clear();
         self.active.store(true, Ordering::SeqCst);
+        self.dpms = false;
 
         let _ = self
             .thread_command
