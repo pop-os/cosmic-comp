@@ -5,6 +5,7 @@ use crate::{
     shell::Shell,
     state::BackendData,
     utils::{env::dev_var, prelude::*},
+    wayland::protocols::output_power::OutputPowerState,
 };
 
 use anyhow::{Context, Result};
@@ -413,6 +414,8 @@ impl State {
                     }
                 }
             }
+
+            OutputPowerState::refresh(state);
             state.common.refresh();
         });
         loop_signal.wakeup();
