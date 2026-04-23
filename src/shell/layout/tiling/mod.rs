@@ -56,7 +56,7 @@ use smithay::{
         },
         glow::GlowRenderer,
     },
-    desktop::{PopupKind, WindowSurfaceType, layer_map_for_output, space::SpaceElement},
+    desktop::{WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
     output::Output,
     reexports::wayland_server::Client,
@@ -2847,10 +2847,7 @@ impl TilingLayout {
     ) -> Option<(NodeId, FocusedNodeData)> {
         // if the focus is currently on a popup, treat it's toplevel as the target
         if let KeyboardFocusTarget::Popup(popup) = target {
-            let toplevel_surface = match popup {
-                PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
-                PopupKind::InputMethod(_) => unreachable!(),
-            }?;
+            let toplevel_surface = get_popup_toplevel(&popup)?;
             let root_id = tree.root_node_id()?;
             let node =
                 tree.traverse_pre_order(root_id)

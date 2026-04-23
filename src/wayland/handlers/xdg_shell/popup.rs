@@ -24,7 +24,7 @@ use tracing::warn;
 
 impl Shell {
     pub fn unconstrain_popup(&self, surface: &PopupSurface) {
-        if let Some(parent) = get_popup_toplevel(surface) {
+        if let Some(parent) = get_popup_toplevel(&PopupKind::from(surface.clone())) {
             if let Some(elem) = self.element_for_surface(&parent) {
                 let (mut element_geo, output, is_tiled) =
                     if let Some(workspace) = self.space_for(elem) {
@@ -173,8 +173,11 @@ fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surfac
     });
 }
 
-pub fn get_popup_toplevel(popup: &PopupSurface) -> Option<WlSurface> {
-    let mut parent = popup.get_parent_surface()?;
+pub fn get_popup_toplevel(popup: &PopupKind) -> Option<WlSurface> {
+    let mut parent = match popup {
+        PopupKind::Xdg(popup) => popup.get_parent_surface()?,
+        PopupKind::InputMethod(popup) => popup.get_parent()?.surface.clone(),
+    };
     while get_role(&parent) == Some(XDG_POPUP_ROLE) {
         parent = with_states(&parent, |states| {
             states
