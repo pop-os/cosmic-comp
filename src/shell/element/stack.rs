@@ -106,6 +106,7 @@ pub struct CosmicStackInternal {
     windows: Mutex<Vec<CosmicSurface>>,
     active: AtomicUsize,
     activated: AtomicBool,
+    animations_enabled: AtomicBool,
     group_focused: AtomicBool,
     previous_index: Mutex<Option<(Serial, usize)>>,
     scroll_to_focus: AtomicBool,
@@ -147,6 +148,7 @@ impl CosmicStack {
         handle: LoopHandle<'static, crate::state::State>,
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
+        animations_enabled: bool,
     ) -> CosmicStack {
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
@@ -163,6 +165,7 @@ impl CosmicStack {
                 windows: Mutex::new(windows),
                 active: AtomicUsize::new(0),
                 activated: AtomicBool::new(false),
+                animations_enabled: AtomicBool::new(animations_enabled),
                 group_focused: AtomicBool::new(false),
                 previous_index: Mutex::new(None),
                 scroll_to_focus: AtomicBool::new(false),
@@ -856,6 +859,16 @@ impl CosmicStack {
         }
     }
 
+    pub fn update_animations_enabled(&self, enabled: bool) {
+        if self
+            .0
+            .with_program(|p| p.animations_enabled.swap(enabled, Ordering::SeqCst) != enabled)
+        {
+            self.0.force_redraw();
+            self.0.force_update();
+        }
+    }
+
     pub(crate) fn force_redraw(&self) {
         self.0.force_redraw();
     }
@@ -1297,6 +1310,7 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                     active,
                     windows[active].is_activated(false),
                     group_focused,
+                    stack.animations_enabled.load(Ordering::SeqCst),
                 )
                 .id(SCROLLABLE_ID.clone())
                 .force_visible(

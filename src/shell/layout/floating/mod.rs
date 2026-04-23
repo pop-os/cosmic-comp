@@ -54,6 +54,7 @@ pub struct FloatingLayout {
     last_output_size: Size<i32, Local>,
     spawn_order: Vec<CosmicMapped>,
     animations: HashMap<CosmicMapped, Animation>,
+    animations_enabled: bool,
     hovered_stack: Option<(CosmicMapped, Rectangle<i32, Local>)>,
     dirty: AtomicBool,
     pub theme: cosmic::Theme,
@@ -265,16 +266,26 @@ impl FloatingLayout {
     pub fn new(
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
+        animations_enabled: bool,
         output: &Output,
     ) -> FloatingLayout {
         let mut layout = Self {
             theme,
             last_output_size: output.geometry().size.as_local(),
+            animations_enabled,
             appearance,
             ..Default::default()
         };
         layout.space.map_output(output, (0, 0));
         layout
+    }
+
+    pub fn set_animations_enabled(&mut self, enabled: bool) {
+        self.animations_enabled = enabled;
+        if !enabled && !self.animations.is_empty() {
+            self.animations.clear();
+            self.dirty.store(true, Ordering::SeqCst);
+        }
     }
 
     pub fn set_output(&mut self, output: &Output) {
@@ -363,7 +374,7 @@ impl FloatingLayout {
 
         mapped.moved_since_mapped.store(true, Ordering::SeqCst);
 
-        if animate {
+        if animate && self.animations_enabled {
             if let Some(existing_anim) = self.animations.get_mut(&mapped) {
                 match existing_anim {
                     Animation::Unminimize {
@@ -599,13 +610,15 @@ impl FloatingLayout {
         mapped.configure();
 
         if let Some(previous_geometry) = prev.or(already_mapped) {
-            self.animations.insert(
-                mapped.clone(),
-                Animation::Tiled {
-                    start: Instant::now(),
-                    previous_geometry,
-                },
-            );
+            if self.animations_enabled {
+                self.animations.insert(
+                    mapped.clone(),
+                    Animation::Tiled {
+                        start: Instant::now(),
+                        previous_geometry,
+                    },
+                );
+            }
         }
         self.space.map_element(mapped, position.as_logical(), false);
         self.space.refresh();
@@ -638,14 +651,16 @@ impl FloatingLayout {
         self.space.refresh();
         let target_geometry = self.space.element_geometry(&mapped).unwrap().as_local();
 
-        self.animations.insert(
-            mapped,
-            Animation::Unminimize {
-                start: Instant::now(),
-                previous_geometry: from,
-                target_geometry,
-            },
-        );
+        if self.animations_enabled {
+            self.animations.insert(
+                mapped,
+                Animation::Unminimize {
+                    start: Instant::now(),
+                    previous_geometry: from,
+                    target_geometry,
+                },
+            );
+        }
     }
 
     pub fn unmap(
@@ -656,7 +671,9 @@ impl FloatingLayout {
         let mut mapped_geometry = self.space.element_geometry(window).map(RectExt::as_local)?;
         let _ = self.animations.remove(window);
 
-        if let Some(to) = to {
+        if self.animations_enabled
+            && let Some(to) = to
+        {
             self.animations.insert(
                 window.clone(),
                 Animation::Minimize {
@@ -1023,6 +1040,7 @@ impl FloatingLayout {
                 (&output, mapped.bbox()),
                 self.theme.clone(),
                 self.appearance,
+                self.animations_enabled,
             );
             self.map_internal(
                 mapped.clone(),
@@ -1604,7 +1622,7 @@ impl FloatingLayout {
                                 .as_logical()
                                 .to_physical_precise_round(output_scale),
                             output_scale.into(),
-                            alpha * mode.alpha().unwrap_or(1.0),
+                            alpha * mode.alpha(self.animations_enabled).unwrap_or(1.0),
                         )
                         .into_iter()
                         .map(CosmicMappedRenderElement::Window)
