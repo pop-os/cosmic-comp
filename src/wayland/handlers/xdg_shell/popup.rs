@@ -23,8 +23,8 @@ use smithay::{
 use tracing::warn;
 
 impl Shell {
-    pub fn unconstrain_popup(&self, surface: &PopupSurface) {
-        if let Some(parent) = get_popup_toplevel(&PopupKind::from(surface.clone())) {
+    pub fn unconstrain_popup(&self, surface: &PopupKind) {
+        if let Some(parent) = get_popup_toplevel(surface) {
             if let Some(elem) = self.element_for_surface(&parent) {
                 let (mut element_geo, output, is_tiled) =
                     if let Some(workspace) = self.space_for(elem) {
@@ -61,9 +61,11 @@ impl Shell {
                 let window_geo_offset = window.geometry().loc;
                 let window_loc: Point<i32, Global> =
                     element_geo.loc + offset.as_global() + window_geo_offset.as_global();
-                if is_tiled {
+                if let PopupKind::Xdg(xdg) = surface
+                    && is_tiled
+                {
                     element_geo.loc = (0, 0).into();
-                    if !unconstrain_xdg_popup_tile(surface, element_geo.as_logical()) {
+                    if !unconstrain_xdg_popup_tile(xdg, element_geo.as_logical()) {
                         unconstrain_xdg_popup(surface, window_loc, output.geometry());
                     }
                 } else {
@@ -110,7 +112,7 @@ pub fn update_reactive_popups<'a>(
                         .find(|geo| geo.contains(anchor_point))
                         .copied()
                     {
-                        unconstrain_xdg_popup(&surface, loc, rect);
+                        unconstrain_xdg_popup(&PopupKind::from(surface.clone()), loc, rect);
                         if let Err(err) = surface.send_configure() {
                             warn!(
                                 ?err,
@@ -142,35 +144,40 @@ fn unconstrain_xdg_popup_tile(surface: &PopupSurface, mut rect: Rectangle<i32, L
 }
 
 fn unconstrain_xdg_popup(
-    surface: &PopupSurface,
+    surface: &PopupKind,
     window_loc: Point<i32, Global>,
     mut rect: Rectangle<i32, Global>,
 ) {
     rect.loc -= window_loc;
-    rect.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(surface.clone())).as_global();
+    rect.loc -= get_popup_toplevel_coords(&surface.clone()).as_global();
     position_popup_within_rect(surface, rect);
 }
 
-fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surface: &LayerSurface) {
+fn unconstrain_layer_popup(surface: &PopupKind, output: &Output, layer_surface: &LayerSurface) {
     let map = layer_map_for_output(output);
     let layer_geo = map.layer_geometry(layer_surface).unwrap();
 
     // the output_rect represented relative to the parents coordinate system
     let mut relative = Rectangle::from_size(output.geometry().size).as_logical();
     relative.loc -= layer_geo.loc;
-    relative.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(surface.clone()));
+    relative.loc -= get_popup_toplevel_coords(&surface.clone());
     position_popup_within_rect(surface, relative.as_global());
 }
 
-fn position_popup_within_rect(surface: &PopupSurface, rect: Rectangle<i32, Global>) {
-    let geometry = surface.with_pending_state(|state| {
-        state
-            .positioner
-            .get_unconstrained_geometry(rect.as_logical())
-    });
-    surface.with_pending_state(|state| {
-        state.geometry = geometry;
-    });
+fn position_popup_within_rect(surface: &PopupKind, rect: Rectangle<i32, Global>) {
+    match surface {
+        PopupKind::Xdg(surface) => {
+            let geometry = surface.with_pending_state(|state| {
+                state
+                    .positioner
+                    .get_unconstrained_geometry(rect.as_logical())
+            });
+            surface.with_pending_state(|state| {
+                state.geometry = geometry;
+            });
+        }
+        PopupKind::InputMethod(_) => {}
+    }
 }
 
 pub fn get_popup_toplevel(popup: &PopupKind) -> Option<WlSurface> {
