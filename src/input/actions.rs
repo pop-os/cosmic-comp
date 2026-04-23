@@ -47,14 +47,56 @@ impl State {
     ) {
         // TODO: Detect if started from login manager or tty, and only allow
         // `Terminate` if it will return to login manager.
-        if self.common.shell.read().session_lock.is_some()
-            && !matches!(
+        if self.common.shell.read().session_lock.is_some() {
+            // Handle InputSourceSwitch inline under session lock so the
+            // locker UI can switch keyboard layouts. We call the
+            // cosmic-settings-daemon D-Bus method directly rather than
+            // routing through the generic System action handler, which
+            // would execute a user-configurable shell command from
+            // `system_actions` via `spawn_command`. A compromised
+            // `~/.config/cosmic/.../system_actions` file must not grant
+            // code execution under a locked screen.
+            if matches!(
+                action,
+                Action::Shortcut(shortcuts::Action::System(
+                    shortcuts::action::System::InputSourceSwitch
+                ))
+            ) {
+                self.common.async_executor.spawn_ok(async {
+                    match zbus::Connection::session().await {
+                        Ok(conn) => {
+                            if let Err(err) = conn
+                                .call_method(
+                                    Some("com.system76.CosmicSettingsDaemon"),
+                                    "/com/system76/CosmicSettingsDaemon",
+                                    Some("com.system76.CosmicSettingsDaemon"),
+                                    "InputSourceSwitch",
+                                    &(),
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    "failed to call InputSourceSwitch under session lock: {err}"
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "failed to connect to session bus for InputSourceSwitch: {err}"
+                            );
+                        }
+                    }
+                });
+                return;
+            }
+
+            if !matches!(
                 action,
                 Action::Shortcut(shortcuts::Action::Terminate)
                     | Action::Shortcut(shortcuts::Action::Debug)
-            )
-        {
-            return;
+            ) {
+                return;
+            }
         }
 
         match action {
