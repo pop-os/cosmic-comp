@@ -9,19 +9,18 @@ use std::{
 use calloop::LoopHandle;
 use cosmic::{
     Apply as _, Task,
-    iced::{Alignment, Background},
-    iced_core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
-    iced_widget::{self, Column, Row, text::Style as TextStyle},
+    iced::{
+        Alignment, Background,
+        core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
+        widget::{self as iced_widget, Column, Row, text::Style as TextStyle},
+    },
     theme,
     widget::{button, divider, icon::from_name, space, text},
 };
 use smithay::{
     backend::{
         input::{ButtonState, TouchSlot},
-        renderer::{
-            ImportMem, Renderer,
-            element::{AsRenderElements, memory::MemoryRenderBufferRenderElement},
-        },
+        renderer::ImportMem,
     },
     desktop::space::SpaceElement,
     input::{
@@ -43,10 +42,11 @@ use smithay::{
 };
 
 use crate::{
+    backend::render::element::AsGlowRenderer,
     shell::{SeatExt, focus::target::PointerFocusTarget},
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
     },
 };
@@ -65,29 +65,32 @@ pub struct MenuGrabState {
 pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
 impl MenuGrabState {
-    pub fn render<I, R>(&self, renderer: &mut R, output: &Output) -> Vec<I>
-    where
-        R: Renderer + ImportMem,
+    pub fn render<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        push: &mut dyn FnMut(IcedRenderElement<R>),
+    ) where
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
-        I: From<MemoryRenderBufferRenderElement<R>>,
     {
         let scale = output.current_scale().fractional_scale();
-        self.elements
-            .lock()
-            .unwrap()
-            .iter()
-            .flat_map(|elem| {
-                elem.iced.render_elements(
-                    renderer,
-                    elem.position
-                        .to_local(output)
-                        .as_logical()
-                        .to_physical_precise_round(scale),
-                    scale.into(),
-                    1.0,
-                )
-            })
-            .collect()
+        for elem in self.elements.lock().unwrap().iter() {
+            elem.iced.push_render_elements(
+                renderer,
+                elem.position
+                    .to_local(output)
+                    .as_logical()
+                    .to_physical_precise_round(scale),
+                scale.into(),
+                1.0,
+                elem.iced
+                    .with_theme(|theme| theme.cosmic().radius_s())
+                    .map(|x| x.round() as u8),
+                push,
+                None,
+            )
+        }
     }
 
     pub fn is_in_screen_space(&self) -> bool {
@@ -276,11 +279,13 @@ impl Program for ContextMenu {
                             let mut elements = grab_state.elements.lock().unwrap();
 
                             let position = elements.last().unwrap().position;
+                            let mut theme = state.common.theme.clone();
+                            theme.transparent = theme.cosmic().frosted_system_interface;
                             let element = IcedElement::new(
                                 ContextMenu::new(items),
                                 Size::default(),
                                 state.common.event_loop_handle.clone(),
-                                state.common.theme.clone(),
+                                theme,
                             );
 
                             let min_size = element.minimum_size();
@@ -428,7 +433,7 @@ impl Program for ContextMenu {
                             .width(mode)
                             .class(if *disabled {
                                 theme::Text::Custom(|theme| {
-                                    let mut color = theme.cosmic().background.component.on;
+                                    let mut color = theme.cosmic().background(false).component.on;
                                     color.alpha *= 0.5;
                                     TextStyle {
                                         color: Some(color.into()),
@@ -446,7 +451,7 @@ impl Program for ContextMenu {
                                 .align_x(Horizontal::Right)
                                 .width(Length::Shrink)
                                 .class(theme::Text::Custom(|theme| {
-                                    let mut color = theme.cosmic().background.component.on;
+                                    let mut color = theme.cosmic().background(false).component.on;
                                     color.alpha *= 0.75;
                                     TextStyle {
                                         color: Some(color.into()),
@@ -474,7 +479,7 @@ impl Program for ContextMenu {
         .padding(1)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
-            let component = &cosmic.background.component;
+            let component = &cosmic.background(theme.cosmic().frosted_windows).component;
             iced_widget::container::Style {
                 snap: true,
                 icon_color: Some(cosmic.accent.base.into()),

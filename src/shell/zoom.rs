@@ -3,15 +3,15 @@ use std::{sync::Mutex, time::Instant};
 use calloop::LoopHandle;
 use cosmic::{
     Apply,
-    iced::{Alignment, Background, Border, Length, alignment::Vertical},
-    iced_widget, theme,
+    iced::{Alignment, Background, Border, Length, alignment::Vertical, widget as iced_widget},
+    theme,
     widget::{self, icon::Named},
 };
 use cosmic_comp_config::ZoomMovement;
 use cosmic_config::ConfigSet;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::renderer::{ImportMem, Renderer, element::AsRenderElements},
+    backend::renderer::ImportMem,
     desktop::space::SpaceElement,
     input::{
         Seat,
@@ -32,9 +32,10 @@ use smithay::{
 use tracing::error;
 
 use crate::{
+    backend::render::element::AsGlowRenderer,
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
         tween::EasePoint,
     },
@@ -71,8 +72,9 @@ impl OutputZoomState {
         increment: u32,
         movement: ZoomMovement,
         loop_handle: LoopHandle<'static, State>,
-        theme: cosmic::Theme,
+        mut theme: cosmic::Theme,
     ) -> OutputZoomState {
+        theme.transparent = theme.cosmic().frosted_system_interface;
         let cursor_position = seat.get_pointer().unwrap().current_location().as_global();
         let output_geometry = output.geometry().to_f64();
         let focal_point = if output_geometry.contains(cursor_position) {
@@ -108,8 +110,7 @@ impl OutputZoomState {
         let program = ZoomProgram::new(level, movement, increment);
         let element = IcedElement::new(program, Size::default(), loop_handle, theme);
         let mut size = element.minimum_size();
-        size.w = (size.w + 32/*TODO: figure out why iced is calculating too little*/)
-            .min(output_geometry.size.w.round() as i32);
+        size.w = size.w.min(output_geometry.size.w.round() as i32);
         element.set_activate(true);
         element.resize(size);
         element.output_enter(output, Rectangle::new(Point::from((0, 0)), size));
@@ -192,10 +193,13 @@ impl OutputZoomState {
         });
     }
 
-    fn render<R, C>(&mut self, renderer: &mut R, output: &Output) -> Vec<C>
-    where
-        C: From<<IcedElement<ZoomProgram> as AsRenderElements<R>>::RenderElement>,
-        R: Renderer + ImportMem,
+    fn render<R>(
+        &mut self,
+        renderer: &mut R,
+        output: &Output,
+        push: &mut dyn FnMut(IcedRenderElement<R>),
+    ) where
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
         let size = self.element.current_size().to_f64();
@@ -208,8 +212,17 @@ impl OutputZoomState {
         .to_physical(scale.fractional_scale())
         .to_i32_round();
 
-        self.element
-            .render_elements(renderer, location, scale.fractional_scale().into(), 1.0)
+        self.element.push_render_elements(
+            renderer,
+            location,
+            scale.fractional_scale().into(),
+            1.0,
+            self.element
+                .with_theme(|theme| theme.cosmic().radius_s())
+                .map(|x| x.round() as u8),
+            push,
+            None,
+        )
     }
 }
 
@@ -389,14 +402,13 @@ impl ZoomState {
         None
     }
 
-    pub fn render<R, C>(renderer: &mut R, output: &Output) -> Vec<C>
+    pub fn render<R>(renderer: &mut R, output: &Output, push: &mut dyn FnMut(IcedRenderElement<R>))
     where
-        C: From<<IcedElement<ZoomProgram> as AsRenderElements<R>>::RenderElement>,
-        R: Renderer + ImportMem,
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
     {
         let output_state = output.user_data().get::<Mutex<OutputZoomState>>().unwrap();
-        output_state.lock().unwrap().render(renderer, output)
+        output_state.lock().unwrap().render(renderer, output, push)
     }
 }
 
@@ -512,7 +524,7 @@ impl Program for ZoomProgram {
         .padding(8)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
-            let component = &cosmic.background.component;
+            let component = &cosmic.background(theme.transparent).component;
             iced_widget::container::Style {
                 snap: true,
                 icon_color: Some(component.on.into()),
@@ -588,6 +600,8 @@ impl Program for ZoomProgram {
                                 let level = output_state_ref.level;
                                 std::mem::drop(output_state_ref);
 
+                                let mut theme = state.common.theme.clone();
+                                theme.transparent = theme.cosmic().frosted_system_interface;
                                 let grab = MenuGrab::new(
                                     start_data,
                                     &seat,
@@ -700,7 +714,7 @@ impl Program for ZoomProgram {
                                     ),
                                     Some(level.min(4.)),
                                     state.common.event_loop_handle.clone(),
-                                    state.common.theme.clone(),
+                                    theme,
                                 );
 
                                 std::mem::drop(shell);
@@ -753,6 +767,8 @@ impl Program for ZoomProgram {
                                 let level = output_state_ref.level;
                                 std::mem::drop(output_state_ref);
 
+                                let mut theme = state.common.theme.clone();
+                                theme.transparent = theme.cosmic().frosted_system_interface;
                                 let grab = MenuGrab::new(
                                     start_data,
                                     &seat,
@@ -785,7 +801,7 @@ impl Program for ZoomProgram {
                                     MenuAlignment::PREFER_CENTERED,
                                     Some(level.min(4.)),
                                     state.common.event_loop_handle.clone(),
-                                    state.common.theme.clone(),
+                                    theme,
                                 );
 
                                 std::mem::drop(shell);
