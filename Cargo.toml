@@ -24,8 +24,9 @@ cosmic-config = { git = "https://github.com/pop-os/libcosmic", features = [
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "160b086", default-features = false, features = [
     "server",
 ] }
-cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
-cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
+# TODO(karlskewes): Change back to upstream OSS when PR merged: https://github.com/pop-os/cosmic-settings-daemon/pull/137
+cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", rev ="refs/pull/137/head"}
+cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", rev = "refs/pull/137/head", features = [
     "greeter",
 ] }
 cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = [
@@ -136,10 +137,6 @@ inherits = "release"
 
 [profile.release]
 lto = "fat"
-
-[patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
-cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "e84a4ca" }
