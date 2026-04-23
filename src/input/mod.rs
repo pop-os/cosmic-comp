@@ -1271,6 +1271,12 @@ impl State {
                             time: event.time_msec(),
                         },
                     );
+
+                    let shell = self.common.shell.write();
+                    if let Some(target) = State::element_under(position, &output, &shell, &seat) {
+                        drop(shell);
+                        Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
+                    }
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
@@ -2061,6 +2067,7 @@ impl State {
                         layer,
                         popup,
                         location,
+                        ..
                     } => {
                         if layer.can_receive_keyboard_focus() {
                             let surface = popup.wl_surface();
@@ -2078,7 +2085,9 @@ impl State {
                             }
                         }
                     }
-                    Stage::LayerSurface { layer, location } => {
+                    Stage::LayerSurface {
+                        layer, location, ..
+                    } => {
                         if under_from_surface_tree(
                             layer.wl_surface(),
                             global_pos.as_logical(),
@@ -2230,7 +2239,9 @@ impl State {
                             ))));
                         }
                     }
-                    Stage::LayerSurface { layer, location } => {
+                    Stage::LayerSurface {
+                        layer, location, ..
+                    } => {
                         let surface = layer.wl_surface();
                         if let Some((surface, surface_loc)) = under_from_surface_tree(
                             surface,

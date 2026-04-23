@@ -103,5 +103,5 @@ impl KeyboardGrab<State> for SwapWindowGrab {
         &KeyboardGrabStartData { focus: None }
     }
 
-    fn unset(&mut self, _state: &mut State) {}
+    fn unset(&mut self, _state: &mut State, _handle: &mut KeyboardInnerHandle<'_, State>) {}
 }
