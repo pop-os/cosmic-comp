@@ -148,14 +148,7 @@ fn unconstrain_xdg_popup(
 ) {
     rect.loc -= window_loc;
     rect.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(surface.clone())).as_global();
-    let geometry = surface.with_pending_state(|state| {
-        state
-            .positioner
-            .get_unconstrained_geometry(rect.as_logical())
-    });
-    surface.with_pending_state(|state| {
-        state.geometry = geometry;
-    });
+    position_popup_within_rect(surface, rect);
 }
 
 fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surface: &LayerSurface) {
@@ -166,8 +159,15 @@ fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surfac
     let mut relative = Rectangle::from_size(output.geometry().size).as_logical();
     relative.loc -= layer_geo.loc;
     relative.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(surface.clone()));
-    let geometry =
-        surface.with_pending_state(|state| state.positioner.get_unconstrained_geometry(relative));
+    position_popup_within_rect(surface, relative.as_global());
+}
+
+fn position_popup_within_rect(surface: &PopupSurface, rect: Rectangle<i32, Global>) {
+    let geometry = surface.with_pending_state(|state| {
+        state
+            .positioner
+            .get_unconstrained_geometry(rect.as_logical())
+    });
     surface.with_pending_state(|state| {
         state.geometry = geometry;
     });
