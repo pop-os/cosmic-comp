@@ -2591,6 +2591,7 @@ impl Shell {
                     *state = Some(MaximizedState {
                         original_geometry: geometry,
                         original_layer: ManagedLayer::Floating,
+                        original_snapped: was_snapped,
                     });
                     std::mem::drop(state);
                     workspace.floating_layer.map_maximized(
@@ -2625,6 +2626,7 @@ impl Shell {
                         *state = Some(MaximizedState {
                             original_geometry: previous_geometry,
                             original_layer: ManagedLayer::Tiling,
+                            original_snapped: None,
                         });
                         std::mem::drop(state);
                         workspace.floating_layer.map_maximized(
@@ -2647,6 +2649,7 @@ impl Shell {
                         *state = Some(MaximizedState {
                             original_geometry: geometry,
                             original_layer: ManagedLayer::Floating,
+                            original_snapped: None,
                         });
                         std::mem::drop(state);
                         workspace.floating_layer.map_maximized(
@@ -3372,6 +3375,7 @@ impl Shell {
                 *mapped.maximized_state.lock().unwrap() = Some(MaximizedState {
                     original_geometry: geometry,
                     original_layer: ManagedLayer::Floating,
+                    original_snapped: was_snapped,
                 });
                 to_workspace
                     .floating_layer
@@ -4281,6 +4285,7 @@ impl Shell {
             *state = Some(MaximizedState {
                 original_geometry,
                 original_layer,
+                original_snapped: None,
             });
             std::mem::drop(state);
             floating_layer.map_maximized(mapped.clone(), original_geometry, animate);
@@ -4304,7 +4309,7 @@ impl Shell {
                     .iter_mut()
                     .find(|m| m.mapped().is_some_and(|m| m == mapped))
                 {
-                    minimized.unmaximize(state.original_geometry);
+                    minimized.unmaximize(state.original_geometry, state.original_snapped);
                 } else {
                     mapped.set_maximized(false);
                     set.sticky_layer.map_internal(
@@ -4313,6 +4318,10 @@ impl Shell {
                         Some(state.original_geometry.size.as_logical()),
                         None,
                     );
+                    // Re-apply the snap if the window was snapped when it was maximized.
+                    if let Some(corners) = state.original_snapped {
+                        set.sticky_layer.snap_to_corner(mapped, &corners);
+                    }
                 }
                 Some(state.original_geometry.size.as_logical())
             } else {
@@ -4575,11 +4584,13 @@ impl Shell {
             if let Some(MaximizedState {
                 original_geometry,
                 original_layer: _,
+                original_snapped,
             }) = *state
             {
                 *state = Some(MaximizedState {
                     original_geometry,
                     original_layer: ManagedLayer::Sticky,
+                    original_snapped,
                 });
                 std::mem::drop(state);
                 set.workspaces[set.active].floating_layer.map_maximized(
@@ -4623,11 +4634,13 @@ impl Shell {
             if let Some(MaximizedState {
                 original_geometry,
                 original_layer: _,
+                original_snapped,
             }) = *state
             {
                 *state = Some(MaximizedState {
                     original_geometry,
                     original_layer: previous_layer,
+                    original_snapped,
                 });
                 std::mem::drop(state);
                 workspace
