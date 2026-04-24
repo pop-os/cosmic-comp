@@ -453,8 +453,7 @@ impl Config {
                 .collect::<Vec<_>>();
 
             let mut found_outputs = Vec::new();
-            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs.into_iter())
-            {
+            for (name, output_config) in infos.iter().map(|o| &o.connector).zip(configs) {
                 let output = outputs.iter().find(|o| &o.name() == name).unwrap().clone();
                 let enabled = output_config.enabled.clone();
                 *output
@@ -478,11 +477,7 @@ impl Config {
             ) {
                 warn!(?err, "Failed to set new config.");
                 found_outputs.clear();
-                for (output, output_config) in outputs
-                    .clone()
-                    .into_iter()
-                    .zip(known_good_configs.into_iter())
-                {
+                for (output, output_config) in outputs.clone().into_iter().zip(known_good_configs) {
                     let enabled = output_config.enabled.clone();
                     *output
                         .user_data()
