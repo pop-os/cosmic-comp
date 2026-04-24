@@ -566,6 +566,13 @@ impl CosmicStack {
             .with_program(|p| (*p.geometry.lock().unwrap()).map(|geo| geo.size.as_logical()))
     }
 
+    pub fn last_server_size(&self) -> Option<Size<i32, Logical>> {
+        let mut size = self.active().last_server_size()?;
+        // if stacked the window doesn't have SSD, instead it has a tab
+        size.h += TAB_HEIGHT;
+        Some(size)
+    }
+
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
             let loc = (geo.loc.x, geo.loc.y + TAB_HEIGHT);

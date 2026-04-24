@@ -230,6 +230,16 @@ impl CosmicWindow {
         })
     }
 
+    pub fn last_server_size(&self) -> Option<Size<i32, Logical>> {
+        self.0.with_program(|p| {
+            let mut size = p.window.last_server_size()?;
+            if p.has_ssd(false) {
+                size.h += SSD_HEIGHT;
+            }
+            Some(size)
+        })
+    }
+
     pub fn set_geometry(&self, geo: Rectangle<i32, Global>) {
         self.0.with_program(|p| {
             let ssd_height = if p.has_ssd(true) { SSD_HEIGHT } else { 0 };
