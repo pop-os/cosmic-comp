@@ -35,13 +35,15 @@ use calloop::{
 use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
+#[cfg(feature = "systemd")]
+use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
         GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
-        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState, Switch,
-        SwitchState, SwitchToggleEvent, TabletToolButtonEvent, TabletToolEvent,
-        TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
+        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState,
+        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
+        TabletToolTipState, TouchEvent,
     },
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
@@ -68,7 +70,9 @@ use smithay::{
         tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
 };
-use tracing::{error, trace, warn};
+#[cfg(feature = "systemd")]
+use tracing::warn;
+use tracing::{error, trace};
 use xkbcommon::xkb::{Keycode, Keysym};
 
 use std::{
@@ -1245,10 +1249,12 @@ impl State {
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
-                            .cloned()
-                    else {
+                    let Some(output) = mapped_output_for_device(
+                        &self.common.config,
+                        &shell,
+                        &seat,
+                        &event.device(),
+                    ) else {
                         return;
                     };
 
@@ -1277,10 +1283,12 @@ impl State {
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
-                            .cloned()
-                    else {
+                    let Some(output) = mapped_output_for_device(
+                        &self.common.config,
+                        &shell,
+                        &seat,
+                        &event.device(),
+                    ) else {
                         return;
                     };
 
@@ -1360,10 +1368,12 @@ impl State {
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
-                            .cloned()
-                    else {
+                    let Some(output) = mapped_output_for_device(
+                        &self.common.config,
+                        &shell,
+                        &seat,
+                        &event.device(),
+                    ) else {
                         return;
                     };
 
@@ -1419,16 +1429,20 @@ impl State {
                             event.time_msec(),
                         );
                     }
+
+                    pointer.frame(self);
                 }
             }
             InputEvent::TabletToolProximity { event, .. } => {
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
-                            .cloned()
-                    else {
+                    let Some(output) = mapped_output_for_device(
+                        &self.common.config,
+                        &shell,
+                        &seat,
+                        &event.device(),
+                    ) else {
                         return;
                     };
 
@@ -1449,6 +1463,7 @@ impl State {
                             time: self.common.clock.now().as_millis(),
                         },
                     );
+                    pointer.frame(self);
 
                     let tablet_seat = seat.tablet_seat();
 
@@ -1489,7 +1504,34 @@ impl State {
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         match event.tip_state() {
                             TabletToolTipState::Down => {
-                                tool.tip_down(SERIAL_COUNTER.next_serial(), event.time_msec());
+                                let serial = SERIAL_COUNTER.next_serial();
+                                tool.tip_down(serial, event.time_msec());
+
+                                if let Some(pointer) = seat.get_pointer()
+                                    && !pointer.is_grabbed()
+                                {
+                                    let output = seat.active_output();
+                                    let global_position = pointer.current_location().as_global();
+                                    let target = {
+                                        let shell = self.common.shell.read();
+                                        State::element_under(
+                                            global_position,
+                                            &output,
+                                            &shell,
+                                            &seat,
+                                        )
+                                    };
+
+                                    if let Some(target) = target {
+                                        Shell::set_focus(
+                                            self,
+                                            Some(&target),
+                                            &seat,
+                                            Some(serial),
+                                            false,
+                                        );
+                                    }
+                                }
                             }
                             TabletToolTipState::Up => {
                                 tool.tip_up(event.time_msec());
@@ -1519,16 +1561,16 @@ impl State {
                 }
             }
             InputEvent::Special(_) => {}
-            InputEvent::SwitchToggle { event } => {
+            InputEvent::SwitchToggle { event: _event } => {
                 #[cfg(feature = "systemd")]
-                if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
+                if _event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
                     let backend = self.backend.lock();
                     let output = backend
                         .all_outputs()
                         .iter()
                         .find(|o| o.is_internal())
                         .cloned();
-                    let closed = event.state() == SwitchState::On;
+                    let closed = _event.state() == SwitchState::On;
 
                     if closed {
                         backend
@@ -2351,17 +2393,26 @@ where
 
 // TODO Is it possible to determine mapping for external touchscreen?
 // Support map_to_region like sway?
-fn mapped_output_for_device<'a, D: Device + 'static>(
+fn mapped_output_for_device<D: Device + 'static>(
     config: &Config,
-    shell: &'a Shell,
+    shell: &Shell,
+    seat: &Seat<State>,
     device: &D,
-) -> Option<&'a Output> {
+) -> Option<Output> {
     let map_to_output = if let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(device) {
         config
             .map_to_output(device)
             .and_then(|name| shell.outputs().find(|output| output.name() == name))
+            .cloned()
     } else {
         None
     };
-    map_to_output.or_else(|| shell.builtin_output())
+
+    map_to_output.or_else(|| {
+        if device.has_capability(DeviceCapability::TabletTool) {
+            Some(seat.focused_or_active_output())
+        } else {
+            shell.builtin_output().cloned()
+        }
+    })
 }
