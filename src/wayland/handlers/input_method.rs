@@ -12,6 +12,11 @@ use tracing::warn;
 
 impl InputMethodHandler for State {
     fn new_popup(&mut self, surface: PopupSurface) {
+        self.common
+            .shell
+            .read()
+            .unconstrain_popup(&PopupKind::from(surface.clone()));
+
         if let Err(err) = self.common.popups.track_popup(PopupKind::from(surface)) {
             warn!("Failed to track popup: {}", err);
         }
@@ -32,7 +37,9 @@ impl InputMethodHandler for State {
             .unwrap_or_default()
     }
 
-    fn popup_repositioned(&mut self, _: PopupSurface) {}
+    fn popup_repositioned(&mut self, popup: PopupSurface) {
+        self.common.shell.read().unconstrain_popup(&popup.into());
+    }
 }
 
 delegate_input_method_manager!(State);

@@ -4,7 +4,7 @@ use crate::{shell::Shell, utils::prelude::*};
 use smithay::{
     desktop::{
         LayerSurface, PopupKind, PopupManager, WindowSurfaceType, get_popup_toplevel_coords,
-        layer_map_for_output, space::SpaceElement,
+        layer_map_for_output, space::SpaceElement, utils,
     },
     output::Output,
     reexports::{
@@ -176,7 +176,33 @@ fn position_popup_within_rect(surface: &PopupKind, rect: Rectangle<i32, Global>)
                 state.geometry = geometry;
             });
         }
-        PopupKind::InputMethod(_) => {}
+        PopupKind::InputMethod(popup) => {
+            let input_rect = popup.text_input_rectangle();
+
+            // We basically place the IME popup below the input rect.
+            let mut ime_popup_loc =
+                Point::new(input_rect.loc.x, input_rect.loc.y + input_rect.size.h);
+            let popup_bbox = utils::bbox_from_surface_tree(popup.wl_surface(), ime_popup_loc);
+            // tracing::debug!(
+            //     "IME input_rect: {:?}, popup_bbox: {:?}",
+            //     input_rect,
+            //     popup_bbox
+            // );
+
+            // Handle the right edge overflow
+            let popup_right = popup_bbox.loc.x + popup_bbox.size.w;
+            let rect_right = rect.loc.x + rect.size.w;
+            ime_popup_loc.x -= (popup_right - rect_right).max(0);
+
+            // Flip vertically if the bottom edge overflows
+            let popup_bottom = popup_bbox.loc.y + popup_bbox.size.h;
+            let rect_bottom = rect.loc.y + rect.size.h;
+            if popup_bottom > rect_bottom {
+                ime_popup_loc.y = input_rect.loc.y - popup_bbox.size.h;
+            }
+
+            popup.set_location(ime_popup_loc);
+        }
     }
 }
 
