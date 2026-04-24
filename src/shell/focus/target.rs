@@ -695,7 +695,19 @@ impl KeyboardTarget<State> for KeyboardFocusTarget {
                 .x11_surface()
                 .is_some_and(|s| Some(s) == self.x11_surface())
         {
-            KeyboardTarget::leave(&replaced, seat, data, serial);
+            // When focus moves from an X11 surface to a non-X11 target,
+            // skip the X11 leave to preserve XWayland's internal keyboard
+            // focus. This allows XTest synthetic events and XRecord capture
+            // to continue working (e.g. Discord push-to-talk via iohook).
+            // Smithay's X11Surface::leave() sends SetInputFocus(None) which
+            // disables XWayland's keyboard event dispatch entirely.
+            // Exception: always leave for lock surfaces (security boundary).
+            let skip_leave = replaced.x11_surface().is_some()
+                && self.x11_surface().is_none()
+                && !matches!(self, KeyboardFocusTarget::LockSurface(_));
+            if !skip_leave {
+                KeyboardTarget::leave(&replaced, seat, data, serial);
+            }
             KeyboardTarget::enter(self, seat, data, keys, serial);
             KeyboardTarget::modifiers(self, seat, data, modifiers, serial);
         }
