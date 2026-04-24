@@ -72,6 +72,7 @@ use smithay::{
 };
 use std::{
     borrow::Cow,
+    collections::HashSet,
     fmt,
     hash::Hash,
     sync::{
@@ -104,6 +105,7 @@ impl fmt::Debug for CosmicStack {
 #[derive(Debug)]
 pub struct CosmicStackInternal {
     windows: Mutex<Vec<CosmicSurface>>,
+    fullscreened_tabs: Mutex<HashSet<CosmicSurface>>,
     active: AtomicUsize,
     activated: AtomicBool,
     group_focused: AtomicBool,
@@ -161,6 +163,7 @@ impl CosmicStack {
         CosmicStack(IcedElement::new(
             CosmicStackInternal {
                 windows: Mutex::new(windows),
+                fullscreened_tabs: Mutex::new(HashSet::new()),
                 active: AtomicUsize::new(0),
                 activated: AtomicBool::new(false),
                 group_focused: AtomicBool::new(false),
@@ -232,6 +235,7 @@ impl CosmicStack {
                 let window = windows.first().unwrap();
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
+                p.fullscreened_tabs.lock().unwrap().remove(window);
                 return;
             }
 
@@ -242,6 +246,7 @@ impl CosmicStack {
                 p.reenter.store(true, Ordering::SeqCst);
             }
             let window = windows.remove(idx);
+            p.fullscreened_tabs.lock().unwrap().remove(&window);
             window.try_force_undecorated(false);
             window.set_tiled(false);
 
@@ -260,6 +265,7 @@ impl CosmicStack {
                 let window = windows.first().unwrap();
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
+                p.fullscreened_tabs.lock().unwrap().remove(window);
                 return Some(window.clone());
             }
             if windows.len() <= idx {
@@ -269,6 +275,7 @@ impl CosmicStack {
                 p.reenter.store(true, Ordering::SeqCst);
             }
             let window = windows.remove(idx);
+            p.fullscreened_tabs.lock().unwrap().remove(&window);
             window.try_force_undecorated(false);
             window.set_tiled(false);
 
@@ -302,16 +309,25 @@ impl CosmicStack {
             match direction {
                 FocusDirection::Left => {
                     if !p.group_focused.load(Ordering::SeqCst) {
-                        if let Ok(old) =
-                            p.active
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                    val.checked_sub(1)
-                                })
-                        {
+                        // LOCK ORDER: windows first, fullscreened_tabs second
+                        let windows = p.windows.lock().unwrap();
+                        let fs = p.fullscreened_tabs.lock().unwrap();
+                        let current = p.active.load(Ordering::SeqCst);
+
+                        let next_visible = (0..current)
+                            .rev()
+                            .find(|&i| !fs.contains(&windows[i]));
+
+                        if let Some(next) = next_visible {
+                            drop(fs);
+                            drop(windows);
+                            let old = p.active.swap(next, Ordering::SeqCst);
                             p.previous_keyboard.store(old, Ordering::SeqCst);
                             p.scroll_to_focus.store(true, Ordering::SeqCst);
                             (true, true)
                         } else {
+                            drop(fs);
+                            drop(windows);
                             let new = prev_idx.unwrap().1;
                             let old = p.active.swap(new, Ordering::SeqCst);
                             if old != new {
@@ -328,17 +344,24 @@ impl CosmicStack {
                 }
                 FocusDirection::Right => {
                     if !p.group_focused.load(Ordering::SeqCst) {
-                        let max = p.windows.lock().unwrap().len();
-                        if let Ok(old) =
-                            p.active
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                    if val < max - 1 { Some(val + 1) } else { None }
-                                })
-                        {
+                        // LOCK ORDER: windows first, fullscreened_tabs second
+                        let windows = p.windows.lock().unwrap();
+                        let fs = p.fullscreened_tabs.lock().unwrap();
+                        let current = p.active.load(Ordering::SeqCst);
+
+                        let next_visible = ((current + 1)..windows.len())
+                            .find(|&i| !fs.contains(&windows[i]));
+
+                        if let Some(next) = next_visible {
+                            drop(fs);
+                            drop(windows);
+                            let old = p.active.swap(next, Ordering::SeqCst);
                             p.previous_keyboard.store(old, Ordering::SeqCst);
                             p.scroll_to_focus.store(true, Ordering::SeqCst);
                             (true, true)
                         } else {
+                            drop(fs);
+                            drop(windows);
                             let new = prev_idx.unwrap().1;
                             let old = p.active.swap(new, Ordering::SeqCst);
                             if old != new {
@@ -355,9 +378,14 @@ impl CosmicStack {
                 }
                 FocusDirection::Out if swap.is_none() => {
                     if !p.group_focused.swap(true, Ordering::SeqCst) {
-                        p.windows.lock().unwrap().iter().for_each(|w| {
-                            w.set_activated(false);
-                            w.send_configure();
+                        // LOCK ORDER: windows first, fullscreened_tabs second
+                        let windows = p.windows.lock().unwrap();
+                        let fs = p.fullscreened_tabs.lock().unwrap();
+                        windows.iter().for_each(|w| {
+                            if !fs.contains(w) {
+                                w.set_activated(false);
+                                w.send_configure();
+                            }
                         });
                         (true, true)
                     } else {
@@ -366,15 +394,15 @@ impl CosmicStack {
                 }
                 FocusDirection::In if swap.is_none() => {
                     if !p.group_focused.swap(false, Ordering::SeqCst) {
-                        p.windows
-                            .lock()
-                            .unwrap()
-                            .iter()
-                            .enumerate()
-                            .for_each(|(i, w)| {
+                        // LOCK ORDER: windows first, fullscreened_tabs second
+                        let windows = p.windows.lock().unwrap();
+                        let fs = p.fullscreened_tabs.lock().unwrap();
+                        windows.iter().enumerate().for_each(|(i, w)| {
+                            if !fs.contains(w) {
                                 w.set_activated(p.active.load(Ordering::SeqCst) == i);
                                 w.send_configure();
-                            });
+                            }
+                        });
 
                         (true, true)
                     } else {
@@ -384,12 +412,21 @@ impl CosmicStack {
                 FocusDirection::Up | FocusDirection::Down => {
                     if !p.group_focused.load(Ordering::SeqCst) {
                         let new = prev_idx.unwrap().1;
-                        let old = p.active.swap(new, Ordering::SeqCst);
-                        if old != new {
-                            p.previous_keyboard.store(old, Ordering::SeqCst);
-                            p.scroll_to_focus.store(true, Ordering::SeqCst);
+                        // LOCK ORDER: windows first, fullscreened_tabs second
+                        let windows = p.windows.lock().unwrap();
+                        let fs = p.fullscreened_tabs.lock().unwrap();
+                        if windows.get(new).is_some_and(|w| fs.contains(w)) {
+                            (false, false)
+                        } else {
+                            drop(fs);
+                            drop(windows);
+                            let old = p.active.swap(new, Ordering::SeqCst);
+                            if old != new {
+                                p.previous_keyboard.store(old, Ordering::SeqCst);
+                                p.scroll_to_focus.store(true, Ordering::SeqCst);
+                            }
+                            (false, true)
                         }
-                        (false, true)
                     } else {
                         (false, false)
                     }
@@ -492,6 +529,75 @@ impl CosmicStack {
         self.0.force_redraw()
     }
 
+    /// Mark a tab as fullscreened elsewhere. The tab stays in `windows`
+    /// but is hidden from rendering and tab bar interactions.
+    /// LOCK ORDER: windows first, fullscreened_tabs second.
+    pub fn mark_tab_fullscreened(&self, surface: &CosmicSurface) {
+        self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let mut fs = p.fullscreened_tabs.lock().unwrap();
+            fs.insert(surface.clone());
+            let active = p.active.load(Ordering::SeqCst);
+            if windows.get(active).is_some_and(|w| w == surface) {
+                let next = (0..windows.len())
+                    .filter(|&i| !fs.contains(&windows[i]))
+                    .min_by_key(|&i| (i as isize - active as isize).unsigned_abs())
+                    .unwrap_or(active);
+                if next != active {
+                    let old = p.active.swap(next, Ordering::SeqCst);
+                    p.previous_keyboard.store(old, Ordering::SeqCst);
+                }
+            }
+        });
+        self.0
+            .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
+        self.0.force_redraw()
+    }
+
+    /// Unmark a tab as fullscreened. Reactivates it in the stack.
+    pub fn unmark_tab_fullscreened(&self, surface: &CosmicSurface) {
+        self.0.with_program(|p| {
+            p.fullscreened_tabs.lock().unwrap().remove(surface);
+        });
+        self.set_active(surface);
+    }
+
+    /// Variant accepting generic surface reference for unmap paths.
+    pub fn unmark_tab_fullscreened_by_surface<S>(&self, surface: &S)
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        self.0.with_program(|p| {
+            p.fullscreened_tabs.lock().unwrap().retain(|s| s != surface);
+        });
+    }
+
+    pub fn is_tab_fullscreened(&self, surface: &CosmicSurface) -> bool {
+        self.0
+            .with_program(|p| p.fullscreened_tabs.lock().unwrap().contains(surface))
+    }
+
+    pub fn has_any_fullscreened_tab(&self) -> bool {
+        self.0
+            .with_program(|p| !p.fullscreened_tabs.lock().unwrap().is_empty())
+    }
+
+    /// Number of tabs not currently fullscreened elsewhere.
+    pub fn visible_tab_count(&self) -> usize {
+        self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let fs = p.fullscreened_tabs.lock().unwrap();
+            windows.iter().filter(|w| !fs.contains(w)).count()
+        })
+    }
+
+    /// Remove dead surfaces from fullscreened_tabs.
+    pub fn cleanup_dead_fullscreened_tabs(&self) {
+        self.0.with_program(|p| {
+            p.fullscreened_tabs.lock().unwrap().retain(|s| s.alive());
+        });
+    }
+
     pub fn set_tiled(&self, tiled: bool) {
         self.0
             .with_program(|p| p.tiled.store(tiled, Ordering::Release));
@@ -579,9 +685,16 @@ impl CosmicStack {
             let size = (geo.size.w, geo.size.h - TAB_HEIGHT);
 
             let win_geo = Rectangle::new(loc.into(), size.into());
-            for window in p.windows.lock().unwrap().iter() {
-                window.set_geometry(win_geo, TAB_HEIGHT as u32);
+            // LOCK ORDER: windows first, fullscreened_tabs second
+            let windows = p.windows.lock().unwrap();
+            let fs = p.fullscreened_tabs.lock().unwrap();
+            for window in windows.iter() {
+                if !fs.contains(window) {
+                    window.set_geometry(win_geo, TAB_HEIGHT as u32);
+                }
             }
+            drop(fs);
+            drop(windows);
 
             *p.geometry.lock().unwrap() = Some(geo);
             p.mask.lock().unwrap().take();
@@ -752,8 +865,27 @@ impl CosmicStack {
 
         let geometry = self
             .0
-            .with_program(|p| p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry())
-            .to_physical_precise_round(scale);
+            .with_program(|p| {
+                // LOCK ORDER: windows first, fullscreened_tabs second
+                let windows = p.windows.lock().unwrap();
+                let fs = p.fullscreened_tabs.lock().unwrap();
+                let raw_active = p.active.load(Ordering::SeqCst);
+                let visible_active =
+                    if windows.get(raw_active).is_some_and(|w| fs.contains(w)) {
+                        match windows.iter().position(|w| !fs.contains(w)) {
+                            Some(idx) => idx,
+                            None => return None,
+                        }
+                    } else {
+                        raw_active
+                    };
+                Some(windows[visible_active].geometry())
+            });
+        let Some(geometry) = geometry else {
+            // All tabs fullscreened — nothing to render for the stack content
+            return Vec::new();
+        };
+        let geometry = geometry.to_physical_precise_round(scale);
         let stack_loc = location + geometry.loc;
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
 
@@ -762,8 +894,20 @@ impl CosmicStack {
         );
 
         elements.extend(self.0.with_program(|p| {
+            // LOCK ORDER: windows first, fullscreened_tabs second
             let windows = p.windows.lock().unwrap();
-            let active = p.active.load(Ordering::SeqCst);
+            let fs = p.fullscreened_tabs.lock().unwrap();
+            let raw_active = p.active.load(Ordering::SeqCst);
+            let active = if windows.get(raw_active).is_some_and(|w| fs.contains(w)) {
+                match windows.iter().position(|w| !fs.contains(w)) {
+                    Some(idx) => idx,
+                    None => return Vec::new(),
+                }
+            } else {
+                raw_active
+            };
+            drop(fs);
+
             let theme = p.theme.lock().unwrap();
             let appearance = p.appearance_conf.lock().unwrap();
             let tiled = p.tiled.load(Ordering::Acquire);
@@ -829,6 +973,7 @@ impl CosmicStack {
                         }
                     }),
             )
+            .collect()
         }));
 
         elements.into_iter().map(C::from).collect()
@@ -1077,11 +1222,31 @@ impl Program for CosmicStackInternal {
                 }
             }
             Message::PotentialTabDragStart(idx) => {
-                *self.potential_drag.lock().unwrap() = Some(idx);
+                // LOCK ORDER: windows first, fullscreened_tabs second
+                let is_fs = {
+                    let windows = self.windows.lock().unwrap();
+                    let fs = self.fullscreened_tabs.lock().unwrap();
+                    windows.get(idx).is_some_and(|w| fs.contains(w))
+                };
+                if !is_fs {
+                    *self.potential_drag.lock().unwrap() = Some(idx);
+                }
             }
             Message::Activate(idx) => {
                 *self.potential_drag.lock().unwrap() = None;
-                if let Some(surface) = self.windows.lock().unwrap().get(idx).cloned() {
+                // LOCK ORDER: windows first, fullscreened_tabs second
+                let (surface, is_fs) = {
+                    let windows = self.windows.lock().unwrap();
+                    let fs = self.fullscreened_tabs.lock().unwrap();
+                    match windows.get(idx).cloned() {
+                        Some(s) => (Some(s.clone()), fs.contains(&s)),
+                        None => (None, false),
+                    }
+                };
+                if let Some(surface) = surface {
+                    if is_fs {
+                        return Task::none();
+                    }
                     loop_handle.insert_idle(move |state| {
                         if let Some(mapped) =
                             state.common.shell.read().element_for_surface(&surface)
@@ -1093,8 +1258,30 @@ impl Program for CosmicStackInternal {
                 }
             }
             Message::Close(idx) => {
-                if let Some(val) = self.windows.lock().unwrap().get(idx) {
-                    val.close()
+                // LOCK ORDER: windows first, fullscreened_tabs second
+                let (val, is_fs) = {
+                    let windows = self.windows.lock().unwrap();
+                    let fs = self.fullscreened_tabs.lock().unwrap();
+                    match windows.get(idx).cloned() {
+                        Some(w) => (Some(w.clone()), fs.contains(&w)),
+                        None => (None, false),
+                    }
+                };
+                if let Some(val) = val {
+                    if is_fs {
+                        // Can't acquire shell.write() inside Program::update (deadlock).
+                        // Both ops in single idle callback = sequential execution guaranteed.
+                        let surface = val.clone();
+                        loop_handle.insert_idle(move |state| {
+                            state.common.shell.write().unfullscreen_request(
+                                &surface,
+                                &state.common.event_loop_handle,
+                            );
+                            surface.close();
+                        });
+                    } else {
+                        val.close();
+                    }
                 }
             }
             Message::Scrolled => {
@@ -1250,11 +1437,18 @@ pub struct DefaultDecorations;
 
 impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
     fn view(&self, stack: &CosmicStackInternal) -> cosmic::Element<'_, Message> {
+        // LOCK ORDER: windows already first (held for duration), fs second
         let windows = stack.windows.lock().unwrap();
         if stack.geometry.lock().unwrap().is_none() {
             return iced_widget::row(Vec::new()).into();
         };
-        let active = stack.active.load(Ordering::SeqCst);
+        let fs = stack.fullscreened_tabs.lock().unwrap();
+        let raw_active = stack.active.load(Ordering::SeqCst);
+        let active = if windows.get(raw_active).is_some_and(|w| fs.contains(w)) {
+            windows.iter().position(|w| !fs.contains(w)).unwrap_or(0)
+        } else {
+            raw_active
+        };
         let group_focused = stack.group_focused.load(Ordering::SeqCst);
 
         let elements = vec![
@@ -1282,20 +1476,24 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 .into(),
             CosmicElement::new(
                 Tabs::new(
-                    windows.iter().enumerate().map(|(i, w)| {
-                        let user_data = w.user_data();
-                        user_data.insert_if_missing(Id::unique);
-                        Tab::new(
-                            w.title(),
-                            w.app_id(),
-                            user_data.get::<Id>().unwrap().clone(),
-                        )
-                        .on_press(Message::PotentialTabDragStart(i))
-                        .on_right_click(Message::TabMenu(i))
-                        .on_close(Message::Close(i))
-                    }),
+                    windows.iter().enumerate()
+                        .filter(|(_, w)| !fs.contains(w))
+                        .map(|(i, w)| {
+                            let user_data = w.user_data();
+                            user_data.insert_if_missing(Id::unique);
+                            Tab::new(
+                                w.title(),
+                                w.app_id(),
+                                user_data.get::<Id>().unwrap().clone(),
+                            )
+                            .on_press(Message::PotentialTabDragStart(i))
+                            .on_right_click(Message::TabMenu(i))
+                            .on_close(Message::Close(i))
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter(),
                     active,
-                    windows[active].is_activated(false),
+                    windows.get(active).is_some_and(|w| w.is_activated(false)),
                     group_focused,
                 )
                 .id(SCROLLABLE_ID.clone())
@@ -1318,7 +1516,7 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 .into(),
         ];
 
-        let radius = if windows[active].is_maximized(false)
+        let radius = if windows.get(active).is_some_and(|w| w.is_maximized(false))
             || (stack.tiled.load(Ordering::Acquire)
                 && !stack.appearance_conf.lock().unwrap().clip_tiled_windows)
         {
