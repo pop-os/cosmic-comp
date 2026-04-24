@@ -8,7 +8,7 @@ use crate::{
         x11::X11State,
     },
     config::{CompOutputConfig, Config, ScreenFilter},
-    dbus::a11y_keyboard_monitor::A11yKeyboardMonitorState,
+    dbus::{a11y_keyboard_monitor::A11yKeyboardMonitorState, color_picker::ColorPickerState},
     input::{PointerFocusState, gestures::GestureState},
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
@@ -279,6 +279,7 @@ pub struct Common {
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
     pub a11y_keyboard_monitor_state: A11yKeyboardMonitorState,
+    pub color_picker_state: ColorPickerState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -736,6 +737,28 @@ impl State {
 
         let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(&async_executor);
 
+        let (color_picker_tx, color_picker_rx) =
+            calloop::channel::channel::<crate::dbus::color_picker::Request>();
+        if let Err(err) = handle.insert_source(color_picker_rx, |event, _, state| {
+            if let calloop::channel::Event::Msg(req) = event {
+                match req {
+                    crate::dbus::color_picker::Request::PickPixel {
+                        output,
+                        x,
+                        y,
+                        reply,
+                    } => {
+                        let res = crate::utils::pick_pixel::pick_pixel(state, &output, x, y)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(res);
+                    }
+                }
+            }
+        }) {
+            tracing::warn!(?err, "Failed to insert color picker event source");
+        }
+        let color_picker_state = ColorPickerState::new(&async_executor, color_picker_tx);
+
         State {
             common: Common {
                 config,
@@ -794,6 +817,7 @@ impl State {
                 workspace_state,
                 a11y_state,
                 a11y_keyboard_monitor_state,
+                color_picker_state,
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
