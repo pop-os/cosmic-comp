@@ -12,6 +12,7 @@ use tracing::{error, warn};
 use zbus::blocking::{Connection, fdo::DBusProxy};
 
 pub mod a11y_keyboard_monitor;
+pub mod color_picker;
 #[cfg(feature = "systemd")]
 pub mod logind;
 mod name_owners;
