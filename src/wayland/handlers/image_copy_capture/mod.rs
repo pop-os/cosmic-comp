@@ -50,14 +50,13 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
-        let kind = source.user_data().get::<ImageCaptureSourceKind>().unwrap();
-        match kind {
+        match ImageCaptureSourceKind::from_source(source) {
             ImageCaptureSourceKind::Output(weak) => weak
                 .upgrade()
                 .and_then(|output| constraints_for_output(&output, &mut self.backend)),
             ImageCaptureSourceKind::Workspace(handle) => {
                 let shell = self.common.shell.read();
-                let output = shell.workspaces.space_for_handle(handle)?.output();
+                let output = shell.workspaces.space_for_handle(&handle)?.output();
                 constraints_for_output(output, &mut self.backend)
             }
             ImageCaptureSourceKind::Toplevel(window) => {
@@ -67,7 +66,7 @@ impl ImageCopyCaptureHandler for State {
                     None
                 }
             }
-            _ => None,
+            ImageCaptureSourceKind::Destroyed => None,
         }
     }
 
@@ -97,13 +96,7 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn new_session(&mut self, session: Session) {
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     session.stop();
@@ -180,13 +173,7 @@ impl ImageCopyCaptureHandler for State {
             )))
         });
 
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     return;
@@ -281,13 +268,7 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn frame(&mut self, session: &SessionRef, frame: Frame) {
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
                     return;
@@ -330,13 +311,7 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn session_destroyed(&mut self, session: SessionRef) {
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
                     output.remove_session(&session);
@@ -363,13 +338,7 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn cursor_session_destroyed(&mut self, session: CursorSessionRef) {
-        let kind = session
-            .source()
-            .user_data()
-            .get::<ImageCaptureSourceKind>()
-            .unwrap()
-            .clone();
-        match kind {
+        match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 if let Some(mut output) = weak.upgrade() {
                     output.remove_cursor_session(&session);

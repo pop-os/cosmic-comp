@@ -200,7 +200,7 @@ fn init_libinput(
                 .input_devices
                 .insert(device.name().into(), device.clone());
         } else if let InputEvent::DeviceRemoved { device } = &event {
-            state.backend.kms().input_devices.remove(device.name());
+            state.backend.kms().input_devices.remove(&*device.name());
         }
 
         state.process_input_event(event);
