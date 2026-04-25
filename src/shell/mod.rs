@@ -3882,10 +3882,7 @@ impl Shell {
 
         let Some(focused) = (match target {
             KeyboardFocusTarget::Popup(popup) => {
-                let Some(toplevel_surface) = (match popup {
-                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
-                    PopupKind::InputMethod(_) => unreachable!(),
-                }) else {
+                let Some(toplevel_surface) = get_popup_toplevel(&popup) else {
                     return FocusResult::None;
                 };
                 sticky_layer

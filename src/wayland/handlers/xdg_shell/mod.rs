@@ -65,7 +65,10 @@ impl XdgShellHandler for State {
 
         if surface.get_parent_surface().is_some() {
             // let other shells deal with their popups
-            self.common.shell.read().unconstrain_popup(&surface);
+            self.common
+                .shell
+                .read()
+                .unconstrain_popup(&PopupKind::from(surface.clone()));
 
             if let Err(err) = surface.send_configure() {
                 warn!("Unable to configure popup. {err:?}",);
@@ -165,7 +168,10 @@ impl XdgShellHandler for State {
             state.positioner = positioner;
         });
 
-        self.common.shell.read().unconstrain_popup(&surface);
+        self.common
+            .shell
+            .read()
+            .unconstrain_popup(&PopupKind::from(surface.clone()));
         surface.send_repositioned(token);
     }
 

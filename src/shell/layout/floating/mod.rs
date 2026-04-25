@@ -14,7 +14,7 @@ use smithay::{
         AsRenderElements, RenderElement,
         utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
     },
-    desktop::{PopupKind, Space, WindowSurfaceType, layer_map_for_output, space::SpaceElement},
+    desktop::{Space, WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
     output::Output,
     utils::{IsAlive, Logical, Point, Rectangle, Scale, Size},
@@ -1277,10 +1277,7 @@ impl FloatingLayout {
 
         let Some(focused) = (match target {
             KeyboardFocusTarget::Popup(popup) => {
-                let Some(toplevel_surface) = (match popup {
-                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
-                    PopupKind::InputMethod(_) => unreachable!(),
-                }) else {
+                let Some(toplevel_surface) = get_popup_toplevel(&popup) else {
                     return MoveResult::None;
                 };
                 self.space
