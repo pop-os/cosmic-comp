@@ -141,5 +141,11 @@ lto = "fat"
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
+# Patch to use the lilypad branch with Action::Snap(Direction) for window snapping
+# and DisplayBrightnessHotkey signal for hotkey-only brightness OSD.
+[patch."https://github.com/pop-os/cosmic-settings-daemon"]
+cosmic-settings-config = { git = "https://github.com/jibsta210/cosmic-settings-daemon", branch = "feat/lilypad-patches" }
+cosmic-settings-daemon-config = { git = "https://github.com/jibsta210/cosmic-settings-daemon", branch = "feat/lilypad-patches" }
+
 [patch.crates-io]
 smithay = { git = "https://github.com/smithay/smithay.git", rev = "e84a4ca" }

@@ -70,7 +70,7 @@ use wayland_backend::server::ObjectId;
 use super::CosmicSurface;
 
 pub const SSD_HEIGHT: i32 = 36;
-pub const RESIZE_BORDER: i32 = 10;
+pub const RESIZE_BORDER: i32 = 20;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CosmicWindow(pub(super) IcedElement<CosmicWindowInternal>);

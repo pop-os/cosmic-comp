@@ -967,7 +967,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#e37160f14d1e7ee428f973cd2848b4e95f83dfe1"
+source = "git+https://github.com/jibsta210/cosmic-settings-daemon?branch=feat%2Flilypad-patches#2505b3b359645f5080896741bf18a672c72076c8"
 dependencies = [
  "cosmic-config",
  "ron 0.11.0",
@@ -988,7 +988,7 @@ dependencies = [
 [[package]]
 name = "cosmic-settings-daemon-config"
 version = "0.1.0"
-source = "git+https://github.com/pop-os/cosmic-settings-daemon#e37160f14d1e7ee428f973cd2848b4e95f83dfe1"
+source = "git+https://github.com/jibsta210/cosmic-settings-daemon?branch=feat%2Flilypad-patches#2505b3b359645f5080896741bf18a672c72076c8"
 dependencies = [
  "cosmic-config",
  "cosmic-theme",

@@ -931,6 +931,33 @@ impl State {
                 &self.common.config,
                 self.common.event_loop_handle.clone(),
             ),
+
+            Action::Snap(direction) => {
+                // Use the same primitive that drag-to-edge snapping uses.
+                // `move_element` handles chained quarter snapping internally:
+                // calling it twice in sequence (e.g. Left, then Down) puts the
+                // window in the BottomLeft quarter automatically.
+                use crate::shell::ManagedLayer;
+                let theme = self.common.theme.clone();
+                let mut shell = self.common.shell.write();
+                let Some(focused_output) = seat.focused_output() else {
+                    return;
+                };
+                let Some(KeyboardFocusTarget::Element(window)) =
+                    seat.get_keyboard().unwrap().current_focus()
+                else {
+                    return;
+                };
+                if let Some(workspace) = shell.active_space_mut(&focused_output) {
+                    workspace.floating_layer.move_element(
+                        direction,
+                        &seat,
+                        ManagedLayer::Floating,
+                        &theme,
+                        &window,
+                    );
+                }
+            }
             // NOTE: implementation currently assumes actions that apply to outputs should apply to the active output
             // rather than the output that has keyboard focus
             Action::ToggleOrientation => {
