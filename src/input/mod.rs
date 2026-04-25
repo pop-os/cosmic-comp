@@ -348,7 +348,16 @@ impl State {
                         });
                     }
                     let original_position = position;
-                    position += event.delta().as_global();
+                    // Pointer sensitivity multiplier beyond libinput's built-in -1..=1 cap.
+                    // Configurable via COSMIC_POINTER_MULT env var (default 1.25).
+                    let ptr_mult: f64 = std::env::var("COSMIC_POINTER_MULT")
+                        .ok()
+                        .and_then(|v| v.parse::<f64>().ok())
+                        .unwrap_or(1.25);
+                    let mut scaled_delta = event.delta();
+                    scaled_delta.x *= ptr_mult;
+                    scaled_delta.y *= ptr_mult;
+                    position += scaled_delta.as_global();
 
                     let output = shell
                         .outputs()
