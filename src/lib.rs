@@ -332,3 +332,18 @@ fn refresh(state: &mut State) {
     state.common.update_x11_stacking_order();
     state.last_refresh = LastRefresh::At(Instant::now());
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_version() {
+        // Version specified in Cargo.toml should match latest tag (obtained in build.rs)
+        let version = env!("CARGO_PKG_VERSION");
+        if let Some(git_tag) = option_env!("GIT_TAG") {
+            // If this is a fork of only the master branch, tags won't exist. In this case, we ignore this test.
+            if !git_tag.is_empty() {
+                assert_eq!(version, git_tag);
+            }
+        }
+    }
+}
