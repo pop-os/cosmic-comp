@@ -646,9 +646,9 @@ fn pad_rect(
     padding: &Padding,
 ) -> Option<Rectangle<i32, Logical>> {
     rect.size.h = rect.size.h.checked_sub(padding.top)?;
-    rect.loc.x += padding.top;
+    rect.loc.x += padding.left;
     rect.size.w = rect.size.w.checked_sub(padding.left)?;
-    rect.loc.y += padding.left;
+    rect.loc.y += padding.top;
     rect.size.h = rect.size.h.checked_sub(padding.bottom)?;
     rect.size.w = rect.size.w.checked_sub(padding.right)?;
     Some(rect)

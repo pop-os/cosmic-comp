@@ -111,11 +111,11 @@ pub fn pad_rect(
     padding: &[i32; 4],
 ) -> Option<Rectangle<i32, Logical>> {
     rect.size.h = rect.size.h.checked_sub(padding[0])?;
-    rect.loc.x += padding[0];
+    rect.loc.x += padding[3];
     rect.size.w = rect.size.w.checked_sub(padding[1])?;
     rect.size.h = rect.size.h.checked_sub(padding[2])?;
     rect.size.w = rect.size.w.checked_sub(padding[3])?;
-    rect.loc.y += padding[3];
+    rect.loc.y += padding[0];
     Some(rect)
 }
 
