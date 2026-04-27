@@ -358,6 +358,14 @@ impl State {
     ) {
         let backend = self.backend.kms();
 
+        // recreate all graphics contexts
+        backend
+            .clear_used_devices()
+            .expect("This should never fail");
+        if let Err(err) = backend.refresh_used_devices() {
+            warn!(?err, "Failed to re-create graphics contexts");
+        }
+
         // resume input
         if let Err(err) = backend.libinput.resume() {
             error!(?err, "Failed to resume libinput context.");
@@ -588,6 +596,25 @@ impl KmsState {
         // that might not be available for any filters we currently expose.
         //
         // But we might conditionally fail here in the future.
+        Ok(())
+    }
+
+    fn clear_used_devices(&mut self) -> Result<()> {
+        let primary_node = self.primary_node.read().unwrap();
+        let empty_devices = HashSet::new();
+
+        for device in self.drm_devices.values_mut() {
+            if device.inner.egl.take().is_some() {
+                self.api.as_mut().remove_node(&device.inner.render_node);
+                device.inner.update_surface_nodes(&empty_devices, &[])?;
+            }
+        }
+
+        // trigger re-evaluation... urgh
+        if let Some(primary_node) = primary_node.as_ref() {
+            let _ = self.api.single_renderer(primary_node);
+        }
+
         Ok(())
     }
 
