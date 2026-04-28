@@ -449,5 +449,3 @@ fn constraints_for_renderer(
 
     constraints
 }
-
-smithay::delegate_image_copy_capture!(State);

@@ -2,7 +2,6 @@
 
 use crate::{shell::focus::target::KeyboardFocusTarget, state::State};
 use smithay::{
-    delegate_xwayland_keyboard_grab,
     input::Seat,
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     wayland::xwayland_keyboard_grab::{XWaylandKeyboardGrab, XWaylandKeyboardGrabHandler},
@@ -49,5 +48,3 @@ impl XWaylandGrabSeat for Seat<State> {
             .is_some_and(|(s, g)| g.grab().is_alive() && s == surface)
     }
 }
-
-delegate_xwayland_keyboard_grab!(State);

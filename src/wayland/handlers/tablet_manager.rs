@@ -2,8 +2,8 @@
 
 use crate::state::State;
 use smithay::{
-    backend::input::TabletToolDescriptor, delegate_tablet_manager,
-    input::pointer::CursorImageStatus, wayland::tablet_manager::TabletSeatHandler,
+    backend::input::TabletToolDescriptor, input::pointer::CursorImageStatus,
+    wayland::tablet_manager::TabletSeatHandler,
 };
 
 impl TabletSeatHandler for State {
@@ -11,5 +11,3 @@ impl TabletSeatHandler for State {
         // TODO display cursor for each tablet tool
     }
 }
-
-delegate_tablet_manager!(State);

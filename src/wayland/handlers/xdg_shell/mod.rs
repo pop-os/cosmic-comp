@@ -6,7 +6,6 @@ use crate::{
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::{
-    delegate_xdg_shell,
     desktop::{
         PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
         WindowSurfaceType, find_popup_root_surface,
@@ -391,5 +390,3 @@ impl XdgShellHandler for State {
         }
     }
 }
-
-delegate_xdg_shell!(State);

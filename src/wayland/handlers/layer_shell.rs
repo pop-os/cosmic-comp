@@ -2,7 +2,6 @@
 
 use crate::{shell::PendingLayer, utils::prelude::*};
 use smithay::{
-    delegate_layer_shell,
     desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
     output::Output,
     reexports::wayland_server::protocol::wl_output::WlOutput,
@@ -82,5 +81,3 @@ impl WlrLayerShellHandler for State {
         }
     }
 }
-
-delegate_layer_shell!(State);

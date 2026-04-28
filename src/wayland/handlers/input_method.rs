@@ -2,7 +2,6 @@
 
 use crate::state::State;
 use smithay::{
-    delegate_input_method_manager,
     desktop::{PopupKind, PopupManager, space::SpaceElement},
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::Rectangle,
@@ -41,5 +40,3 @@ impl InputMethodHandler for State {
         self.common.shell.read().unconstrain_popup(&popup.into());
     }
 }
-
-delegate_input_method_manager!(State);
