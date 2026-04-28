@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::State;
-use smithay::{
-    delegate_keyboard_shortcuts_inhibit,
-    wayland::keyboard_shortcuts_inhibit::{
-        KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
-    },
+use smithay::wayland::keyboard_shortcuts_inhibit::{
+    KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
 };
 
 impl KeyboardShortcutsInhibitHandler for State {
@@ -18,5 +15,3 @@ impl KeyboardShortcutsInhibitHandler for State {
         inhibitor.activate();
     }
 }
-
-delegate_keyboard_shortcuts_inhibit!(State);

@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::state::State;
-use smithay::{
-    delegate_primary_selection,
-    wayland::selection::primary_selection::{PrimarySelectionHandler, PrimarySelectionState},
+use smithay::wayland::selection::primary_selection::{
+    PrimarySelectionHandler, PrimarySelectionState,
 };
 
 impl PrimarySelectionHandler for State {
@@ -11,5 +10,3 @@ impl PrimarySelectionHandler for State {
         &mut self.common.primary_selection_state
     }
 }
-
-delegate_primary_selection!(State);

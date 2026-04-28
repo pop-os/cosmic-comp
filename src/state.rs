@@ -224,6 +224,7 @@ pub struct State {
     pub ready: Once,
     pub last_refresh: LastRefresh,
 }
+smithay::delegate_dispatch2!(State);
 
 #[derive(Debug)]
 pub struct Common {
