@@ -1,7 +1,6 @@
 use crate::state::{ClientState, State};
 use smithay::{
     backend::drm::DrmNode,
-    delegate_security_context,
     wayland::security_context::{
         SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
     },
@@ -54,4 +53,3 @@ impl SecurityContextHandler for State {
             .expect("Failed to init the wayland socket source.");
     }
 }
-delegate_security_context!(State);
