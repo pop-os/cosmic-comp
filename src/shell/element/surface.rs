@@ -45,7 +45,10 @@ use smithay::{
         IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, user_data::UserDataMap,
     },
     wayland::{
-        compositor::{SurfaceData, TraversalAction, with_states, with_surface_tree_downward},
+        compositor::{
+            SubsurfaceCachedState, SurfaceData, TraversalAction, with_states,
+            with_surface_tree_downward,
+        },
         seat::WaylandFocus,
         shell::xdg::{
             SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
@@ -650,6 +653,68 @@ impl CosmicSurface {
         } else {
             false
         }
+    }
+
+    pub fn surface_offset(&self, surface: &WlSurface) -> Option<Point<i32, Logical>> {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                Self::surface_tree_offset(toplevel.wl_surface(), surface)
+            }
+            WindowSurface::X11(surface_x11) => {
+                if surface_x11.wl_surface().as_ref() == Some(surface) {
+                    Some(Point::default())
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub fn surface_tree_offset(
+        root: &WlSurface,
+        surface: &WlSurface,
+    ) -> Option<Point<i32, Logical>> {
+        if root == surface {
+            return Some(Point::default());
+        }
+
+        let found = AtomicBool::new(false);
+        let mut found_offset = Point::<i32, Logical>::default();
+
+        with_surface_tree_downward(
+            root,
+            Point::<i32, Logical>::default(),
+            |s, states, parent_offset| {
+                let mut offset = *parent_offset;
+                if s != root {
+                    offset += states
+                        .cached_state
+                        .get::<SubsurfaceCachedState>()
+                        .current()
+                        .location;
+                }
+                TraversalAction::DoChildren(offset)
+            },
+            |s, _, offset| {
+                if s == surface {
+                    found_offset = *offset;
+                    found.store(true, Ordering::SeqCst);
+                }
+            },
+            |_, _, _| !found.load(Ordering::SeqCst),
+        );
+
+        if found.load(Ordering::SeqCst) {
+            return Some(found_offset);
+        }
+
+        for (popup, popup_offset) in PopupManager::popups_for_surface(root) {
+            if let Some(offset) = Self::surface_tree_offset(popup.wl_surface(), surface) {
+                return Some(popup_offset + offset);
+            }
+        }
+
+        None
     }
 
     pub fn focus_under(

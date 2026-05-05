@@ -254,6 +254,14 @@ impl CosmicMapped {
             .any(|(w, _)| w.has_surface(surface, surface_type))
     }
 
+    pub fn surface_offset(&self, surface: &WlSurface) -> Option<Point<i32, Logical>> {
+        self.windows().find_map(|(window, window_offset)| {
+            window
+                .surface_offset(surface)
+                .map(|offset| window_offset + offset)
+        })
+    }
+
     /// Give the pointer target under a relative offset into this element.
     ///
     /// Returns Target + Offset relative to the target
