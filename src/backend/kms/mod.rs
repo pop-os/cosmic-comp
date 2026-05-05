@@ -18,7 +18,7 @@ use smithay::{
         allocator::{Buffer, dmabuf::Dmabuf, format::FormatSet},
         drm::{DrmDeviceFd, DrmNode, NodeType, VrrSupport, output::DrmOutputRenderElements},
         egl::{EGLContext, EGLDevice, EGLDisplay},
-        input::InputEvent,
+        input::{InputEvent, KeyState},
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{glow::GlowRenderer, multigpu::GpuManager},
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
@@ -43,6 +43,7 @@ use smithay::{
 };
 use surface::GbmDrmOutput;
 use tracing::{debug, error, info, warn};
+use xkbcommon::xkb::Keycode;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -356,27 +357,82 @@ impl State {
         loop_handle: LoopHandle<'static, State>,
         loop_signal: LoopSignal,
     ) {
-        let backend = self.backend.kms();
+        {
+            let backend = self.backend.kms();
 
-        // recreate all graphics contexts
-        backend
-            .clear_used_devices()
-            .expect("This should never fail");
-        if let Err(err) = backend.refresh_used_devices() {
-            warn!(?err, "Failed to re-create graphics contexts");
-        }
-
-        // resume input
-        if let Err(err) = backend.libinput.resume() {
-            error!(?err, "Failed to resume libinput context.");
-        }
-        // active drm, resume leases
-        for device in backend.drm_devices.values_mut() {
-            if let Err(err) = device.drm.lock().activate(true) {
-                error!(?err, "Failed to resume drm device");
+            // recreate all graphics contexts
+            backend
+                .clear_used_devices()
+                .expect("This should never fail");
+            if let Err(err) = backend.refresh_used_devices() {
+                warn!(?err, "Failed to re-create graphics contexts");
             }
-            if let Some(lease_state) = device.inner.leasing_global.as_mut() {
-                lease_state.resume::<State>();
+
+            // resume input
+            if let Err(err) = backend.libinput.resume() {
+                error!(?err, "Failed to resume libinput context.");
+            }
+
+            // active drm, resume leases
+            for device in backend.drm_devices.values_mut() {
+                if let Err(err) = device.drm.lock().activate(true) {
+                    error!(?err, "Failed to resume drm device");
+                }
+                if let Some(lease_state) = device.inner.leasing_global.as_mut() {
+                    lease_state.resume::<State>();
+                }
+            }
+        }
+
+        // Clear any stuck keyboard modifiers after resume.
+        //
+        // During suspend, libinput closes all input devices. The compositor's
+        // xkb state retains whatever modifier state existed at suspend time.
+        // If any modifier key was pressed at suspend, or if the device state
+        // is inconsistent after re-enumeration, the compositor will think the
+        // modifier is still pressed. This manifests as a "stuck Shift" in the
+        // greeter after resume: number keys produce symbols, letters are
+        // uppercase, and passwords cannot be entered correctly.
+        //
+        // Fix: synthesize release events for all common modifier keycodes to
+        // reset the xkb state. xkbcommon counts key presses, so releasing a
+        // key that isn't pressed is a no-op, making this safe.
+        //
+        // TODO: Remove this workaround once the underlying smithay issue is
+        // resolved: https://github.com/Smithay/smithay/issues/1353
+        {
+            let keyboards: Vec<_> = {
+                let shell = self.common.shell.read();
+                shell
+                    .seats
+                    .iter()
+                    .filter_map(|seat| seat.get_keyboard())
+                    .collect()
+            };
+
+            for keyboard in &keyboards {
+                // Common modifier keycodes (xkb format = evdev keycode + 8)
+                let modifier_keycodes: &[Keycode] = &[
+                    Keycode::from(50u32),  // Shift_L   (KEY_LEFTSHIFT)
+                    Keycode::from(62u32),  // Shift_R   (KEY_RIGHTSHIFT)
+                    Keycode::from(37u32),  // Control_L (KEY_LEFTCTRL)
+                    Keycode::from(105u32), // Control_R (KEY_RIGHTCTRL)
+                    Keycode::from(64u32),  // Alt_L     (KEY_LEFTALT)
+                    Keycode::from(108u32), // Alt_R     (KEY_RIGHTALT)
+                    Keycode::from(133u32), // Super_L   (KEY_LEFTMETA)
+                    Keycode::from(134u32), // Super_R   (KEY_RIGHTMETA)
+                ];
+
+                let mut modifiers_changed = false;
+                for keycode in modifier_keycodes {
+                    let (_, changed) =
+                        keyboard.input_intercept(self, *keycode, KeyState::Released, |_, _, _| ());
+                    modifiers_changed |= changed;
+                }
+
+                if modifiers_changed {
+                    keyboard.advertise_modifier_state(self);
+                }
             }
         }
 
