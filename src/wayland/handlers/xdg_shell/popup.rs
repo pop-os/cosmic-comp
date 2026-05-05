@@ -128,17 +128,7 @@ pub fn update_reactive_popups<'a>(
 // Attempt to constraint to tile, without resize. Return `true` if it fits.
 fn unconstrain_xdg_popup_tile(surface: &PopupSurface, mut rect: Rectangle<i32, Logical>) -> bool {
     rect.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(surface.clone()));
-    let geometry = surface.with_pending_state(|state| {
-        let mut positioner_no_resize = state.positioner;
-        positioner_no_resize
-            .constraint_adjustment
-            .remove(ConstraintAdjustment::ResizeX | ConstraintAdjustment::ResizeY);
-        positioner_no_resize.get_unconstrained_geometry(rect)
-    });
-    surface.with_pending_state(|state| {
-        state.geometry = geometry;
-    });
-    rect.contains_rect(geometry)
+    position_popup_within_rect(surface, rect.as_global(), true)
 }
 
 fn unconstrain_xdg_popup(
@@ -148,7 +138,7 @@ fn unconstrain_xdg_popup(
 ) {
     rect.loc -= window_loc;
     rect.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(surface.clone())).as_global();
-    position_popup_within_rect(surface, rect);
+    position_popup_within_rect(surface, rect, false);
 }
 
 fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surface: &LayerSurface) {
@@ -159,18 +149,31 @@ fn unconstrain_layer_popup(surface: &PopupSurface, output: &Output, layer_surfac
     let mut relative = Rectangle::from_size(output.geometry().size).as_logical();
     relative.loc -= layer_geo.loc;
     relative.loc -= get_popup_toplevel_coords(&PopupKind::Xdg(surface.clone()));
-    position_popup_within_rect(surface, relative.as_global());
+    position_popup_within_rect(surface, relative.as_global(), false);
 }
 
-fn position_popup_within_rect(surface: &PopupSurface, rect: Rectangle<i32, Global>) {
+fn position_popup_within_rect(
+    surface: &PopupSurface,
+    rect: Rectangle<i32, Global>,
+    is_tiled: bool,
+) -> bool {
+    let rect = rect.as_logical();
     let geometry = surface.with_pending_state(|state| {
-        state
-            .positioner
-            .get_unconstrained_geometry(rect.as_logical())
+        let positioner = if is_tiled {
+            let mut positioner_no_resize = state.positioner;
+            positioner_no_resize
+                .constraint_adjustment
+                .remove(ConstraintAdjustment::ResizeX | ConstraintAdjustment::ResizeY);
+            positioner_no_resize
+        } else {
+            state.positioner
+        };
+        positioner.get_unconstrained_geometry(rect)
     });
     surface.with_pending_state(|state| {
         state.geometry = geometry;
     });
+    rect.contains_rect(geometry)
 }
 
 pub fn get_popup_toplevel(popup: &PopupKind) -> Option<WlSurface> {
