@@ -4698,6 +4698,7 @@ impl Shell {
                 let stack = mapped.stack_ref().unwrap();
                 let surface = stack.surfaces().find(|s| s == surface).unwrap();
                 stack.remove_window(&surface);
+                surface.set_fullscreen(true);
                 surface
             } else {
                 // Must be set before `map_internal`/`unmap` below, as both may call

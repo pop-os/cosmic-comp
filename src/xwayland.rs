@@ -809,12 +809,14 @@ impl XwmHandler for State {
             );
         }
         if !shell.pending_windows.iter().any(|w| w.surface == window) {
+            let is_fullscreen = window.is_fullscreen();
+            let is_maximized = window.is_maximized();
             let surface = CosmicSurface::from(window);
             shell.pending_windows.push(PendingWindow {
                 surface,
-                seat,
-                fullscreen: None,
-                maximized: false,
+                seat: seat.clone(),
+                fullscreen: is_fullscreen.then(|| seat.focused_or_active_output()),
+                maximized: is_maximized,
             })
         }
     }
@@ -913,7 +915,30 @@ impl XwmHandler for State {
         // We only allow floating X11 windows to resize themselves. Nothing else
         let shell = self.common.shell.read();
 
-        // TODO: Fullscreen
+        let is_fullscreen = window
+            .wl_surface()
+            .and_then(|wl| shell.workspace_for_surface(&wl))
+            .map(|(handle, _)| handle)
+            .or_else(|| {
+                shell
+                    .workspaces
+                    .spaces()
+                    .find(|w| w.get_fullscreen().is_some_and(|s| s == &window))
+                    .map(|w| w.handle)
+            })
+            .and_then(|handle| shell.workspaces.space_for_handle(&handle))
+            .is_some_and(|workspace| workspace.get_fullscreen().is_some_and(|s| s == &window));
+
+        if window.is_fullscreen() && !is_fullscreen {
+            std::mem::drop(shell);
+            self.fullscreen_request(_xwm, window);
+            return;
+        } else if !window.is_fullscreen() && is_fullscreen {
+            std::mem::drop(shell);
+            self.unfullscreen_request(_xwm, window);
+            return;
+        }
+
         if let Some(mapped) = shell
             .element_for_surface(&window)
             .filter(|mapped| !mapped.is_minimized())
