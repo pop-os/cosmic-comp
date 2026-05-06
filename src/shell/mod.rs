@@ -121,31 +121,22 @@ const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
 const MOVE_GRAB_Y_OFFSET: f64 = 16.;
 const ACTIVATION_TOKEN_EXPIRE_TIME: Duration = Duration::from_secs(5);
 
-pub(crate) fn animation_duration(enabled: bool) -> Duration {
-    enabled
-        .then_some(ANIMATION_DURATION)
-        .unwrap_or(Duration::ZERO)
-}
-
-pub(crate) fn animation_progress(start: Instant, duration: Duration) -> f32 {
-    if duration.is_zero() {
-        1.0
-    } else {
-        (Instant::now().duration_since(start).as_secs_f32() / duration.as_secs_f32())
-            .clamp(0.0, 1.0)
-    }
-}
-
-pub(crate) fn overview_fade_alpha(mode: &OverviewMode, animations_enabled: bool) -> f32 {
+pub(crate) fn overview_fade_alpha(mode: &OverviewMode) -> f32 {
     match mode {
-        OverviewMode::Started(_, start) if animations_enabled => {
-            (1.0 - animation_progress(*start, ANIMATION_DURATION)) * 0.4 + 0.6
+        OverviewMode::Started(_, start) => {
+            let percentage = (Instant::now().duration_since(*start).as_secs_f32()
+                / ANIMATION_DURATION.as_secs_f32())
+            .clamp(0.0, 1.0);
+            (1.0 - percentage) * 0.4 + 0.6
         }
-        OverviewMode::Started(_, _) | OverviewMode::Active(_) => 0.6,
-        OverviewMode::Ended(_, end) if animations_enabled => {
-            animation_progress(*end, ANIMATION_DURATION) * 0.4 + 0.6
+        OverviewMode::Active(_) => 0.6,
+        OverviewMode::Ended(_, end) => {
+            let percentage = (Instant::now().duration_since(*end).as_secs_f32()
+                / ANIMATION_DURATION.as_secs_f32())
+            .clamp(0.0, 1.0);
+            percentage * 0.4 + 0.6
         }
-        OverviewMode::Ended(_, _) | OverviewMode::None => 1.0,
+        OverviewMode::None => 1.0,
     }
 }
 
@@ -166,22 +157,20 @@ pub enum OverviewMode {
 }
 
 impl OverviewMode {
-    pub fn alpha(&self, animations_enabled: bool) -> Option<f32> {
+    pub fn alpha(&self) -> Option<f32> {
         match self {
-            OverviewMode::Started(_, start) => Some(if animations_enabled {
-                ease(
-                    EaseInOutCubic,
-                    0.0,
-                    1.0,
-                    animation_progress(*start, ANIMATION_DURATION),
-                )
-            } else {
-                1.0
-            }),
+            OverviewMode::Started(_, start) => {
+                let percentage = (Instant::now().duration_since(*start).as_secs_f32()
+                    / ANIMATION_DURATION.as_secs_f32())
+                .clamp(0.0, 1.0);
+                Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
+            }
             OverviewMode::Active(_) => Some(1.0),
             OverviewMode::Ended(_, end) => {
-                let percentage = animation_progress(*end, ANIMATION_DURATION);
-                if animations_enabled && percentage < 1.0 {
+                let percentage = (Instant::now().duration_since(*end).as_secs_f32()
+                    / ANIMATION_DURATION.as_secs_f32())
+                .clamp(0.0, 1.0);
+                if percentage < 1.0 {
                     Some(ease(EaseInOutCubic, 1.0, 0.0, percentage))
                 } else {
                     None
@@ -223,22 +212,20 @@ pub enum ResizeMode {
 }
 
 impl ResizeMode {
-    pub fn alpha(&self, animations_enabled: bool) -> Option<f32> {
+    pub fn alpha(&self) -> Option<f32> {
         match self {
-            ResizeMode::Started(_, start, _) => Some(if animations_enabled {
-                ease(
-                    EaseInOutCubic,
-                    0.0,
-                    1.0,
-                    animation_progress(*start, ANIMATION_DURATION),
-                )
-            } else {
-                1.0
-            }),
+            ResizeMode::Started(_, start, _) => {
+                let percentage = (Instant::now().duration_since(*start).as_secs_f32()
+                    / ANIMATION_DURATION.as_secs_f32())
+                .clamp(0.0, 1.0);
+                Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
+            }
             ResizeMode::Active(_, _) => Some(1.0),
             ResizeMode::Ended(end, _) => {
-                let percentage = animation_progress(*end, ANIMATION_DURATION);
-                if animations_enabled && percentage < 1.0 {
+                let percentage = (Instant::now().duration_since(*end).as_secs_f32()
+                    / ANIMATION_DURATION.as_secs_f32())
+                .clamp(0.0, 1.0);
+                if percentage < 1.0 {
                     Some(ease(EaseInOutCubic, 1.0, 0.0, percentage))
                 } else {
                     None
@@ -383,12 +370,11 @@ impl WorkspaceDelta {
         WorkspaceDelta::Shortcut(Instant::now())
     }
 
-    pub fn is_animating(&self, animations_enabled: bool) -> bool {
-        animations_enabled
-            && matches!(
-                self,
-                WorkspaceDelta::Shortcut(_) | WorkspaceDelta::GestureEnd { .. }
-            )
+    pub fn is_animating(&self) -> bool {
+        matches!(
+            self,
+            WorkspaceDelta::Shortcut(_) | WorkspaceDelta::GestureEnd { .. }
+        )
     }
 }
 
@@ -638,17 +624,15 @@ impl WorkspaceSet {
         if let Some((_, start)) = self.previously_active {
             match start {
                 WorkspaceDelta::Shortcut(st) => {
-                    if !self.animations_enabled
-                        || Instant::now().duration_since(st).as_millis() as f32
-                            >= ANIMATION_DURATION.as_millis() as f32
+                    if Instant::now().duration_since(st).as_millis() as f32
+                        >= ANIMATION_DURATION.as_millis() as f32
                     {
                         self.previously_active = None;
                     }
                 }
                 WorkspaceDelta::GestureEnd { start, spring, .. } => {
-                    if !self.animations_enabled
-                        || Instant::now().duration_since(start).as_millis()
-                            > spring.duration().as_millis()
+                    if Instant::now().duration_since(start).as_millis()
+                        > spring.duration().as_millis()
                     {
                         self.previously_active = None;
                     }
@@ -1641,29 +1625,6 @@ impl Common {
             mapped.update_appearance_conf(&self.config.cosmic_conf.appearance_settings);
             mapped.update_animations_enabled(shell_ref.animations_enabled);
         }
-
-        if !shell_ref.animations_enabled {
-            shell_ref.overview_mode = match &shell_ref.overview_mode {
-                OverviewMode::Started(trigger, _) | OverviewMode::Active(trigger) => {
-                    OverviewMode::Active(trigger.clone())
-                }
-                OverviewMode::Ended(_, _) | OverviewMode::None => OverviewMode::None,
-            };
-            if matches!(shell_ref.overview_mode, OverviewMode::None) {
-                shell_ref.swap_indicator = None;
-            }
-
-            shell_ref.resize_mode = match &shell_ref.resize_mode {
-                ResizeMode::Started(binding, _, direction)
-                | ResizeMode::Active(binding, direction) => {
-                    ResizeMode::Active(binding.clone(), *direction)
-                }
-                ResizeMode::Ended(_, _) | ResizeMode::None => ResizeMode::None,
-            };
-            if matches!(shell_ref.resize_mode, ResizeMode::None) {
-                shell_ref.resize_indicator = None;
-            }
-        }
     }
 
     #[profiling::function]
@@ -2353,22 +2314,18 @@ impl Shell {
         self.workspaces.sets.values().any(|set| {
             set.previously_active
                 .as_ref()
-                .is_some_and(|(_, delta)| delta.is_animating(self.animations_enabled))
+                .is_some_and(|(_, delta)| delta.is_animating())
                 || set.sticky_layer.animations_going()
-        }) || (self.animations_enabled
-            && !matches!(
-                self.overview_mode,
-                OverviewMode::None | OverviewMode::Active(_)
-            ))
-            || (self.animations_enabled
-                && !matches!(
-                    self.resize_mode,
-                    ResizeMode::None | ResizeMode::Active(_, _)
-                ))
-            || self
-                .workspaces
-                .spaces()
-                .any(|workspace| workspace.animations_going())
+        }) || !matches!(
+            self.overview_mode,
+            OverviewMode::None | OverviewMode::Active(_)
+        ) || !matches!(
+            self.resize_mode,
+            ResizeMode::None | ResizeMode::Active(_, _)
+        ) || self
+            .workspaces
+            .spaces()
+            .any(|workspace| workspace.animations_going())
             || self.zoom_state.as_ref().is_some_and(|_| {
                 self.outputs().any(|o| {
                     o.user_data()
@@ -2432,15 +2389,6 @@ impl Shell {
     }
 
     pub fn overview_mode(&self) -> (OverviewMode, Option<SwapIndicator>) {
-        if !self.animations_enabled {
-            return match &self.overview_mode {
-                OverviewMode::Started(trigger, _) | OverviewMode::Active(trigger) => (
-                    OverviewMode::Active(trigger.clone()),
-                    self.swap_indicator.clone(),
-                ),
-                OverviewMode::Ended(_, _) | OverviewMode::None => (OverviewMode::None, None),
-            };
-        }
         if let OverviewMode::Started(trigger, timestamp) = &self.overview_mode
             && Instant::now().duration_since(*timestamp) > ANIMATION_DURATION
         {
@@ -2495,16 +2443,6 @@ impl Shell {
     }
 
     pub fn resize_mode(&self) -> (ResizeMode, Option<ResizeIndicator>) {
-        if !self.animations_enabled {
-            return match &self.resize_mode {
-                ResizeMode::Started(binding, _, direction)
-                | ResizeMode::Active(binding, direction) => (
-                    ResizeMode::Active(binding.clone(), *direction),
-                    self.resize_indicator.clone(),
-                ),
-                ResizeMode::Ended(_, _) | ResizeMode::None => (ResizeMode::None, None),
-            };
-        }
         if let ResizeMode::Started(binding, timestamp, direction) = &self.resize_mode
             && Instant::now().duration_since(*timestamp) > ANIMATION_DURATION
         {
@@ -2653,14 +2591,12 @@ impl Shell {
     ) {
         match &self.overview_mode {
             OverviewMode::Started(trigger, timestamp)
-                if !self.animations_enabled
-                    || Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
             {
                 self.overview_mode = OverviewMode::Active(trigger.clone());
             }
             OverviewMode::Ended(_, timestamp)
-                if !self.animations_enabled
-                    || Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
             {
                 self.overview_mode = OverviewMode::None;
                 self.swap_indicator = None;
@@ -2670,14 +2606,12 @@ impl Shell {
 
         match &self.resize_mode {
             ResizeMode::Started(binding, timestamp, direction)
-                if !self.animations_enabled
-                    || Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
             {
                 self.resize_mode = ResizeMode::Active(binding.clone(), *direction);
             }
             ResizeMode::Ended(timestamp, _)
-                if !self.animations_enabled
-                    || Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
             {
                 self.resize_mode = ResizeMode::None;
                 self.resize_indicator = None;

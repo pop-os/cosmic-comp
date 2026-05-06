@@ -1644,7 +1644,7 @@ impl FloatingLayout {
                                 .as_logical()
                                 .to_physical_precise_round(output_scale),
                             output_scale.into(),
-                            alpha * mode.alpha(self.animations_enabled).unwrap_or(1.0),
+                            alpha * mode.alpha().unwrap_or(1.0),
                         )
                         .into_iter()
                         .map(CosmicMappedRenderElement::Window)

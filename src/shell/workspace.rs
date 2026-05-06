@@ -7,7 +7,7 @@ use crate::{
         element::{AsGlowRenderer, FromGlesError},
     },
     shell::{
-        OverviewMode, SeatMoveGrabState, animation_duration, animation_progress,
+        OverviewMode, SeatMoveGrabState,
         layout::{
             floating::{FloatingLayout, TiledCorners},
             tiling::TilingLayout,
@@ -73,6 +73,8 @@ use super::{
     grabs::ResizeEdge,
     layout::tiling::{Data, NodeDesc},
 };
+
+const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 // For stable workspace id, generate random 24-bit integer, as a hex string
 // Must be compared with existing workspaces work uniqueness.
@@ -471,11 +473,12 @@ impl Workspace {
             .previous_geometry
             .as_ref()
             .unwrap_or(&fullscreen_geo);
-        let duration = self.fullscreen_animation_duration();
 
         match (fullscreen.start_at, fullscreen.ended_at) {
             (Some(started), _) => {
-                let progress = animation_progress(started, duration) as f64;
+                let progress = (Instant::now().duration_since(started).as_secs_f64()
+                    / FULLSCREEN_ANIMATION_DURATION.as_secs_f64())
+                .clamp(0.0, 1.0);
                 (
                     ease(
                         EaseInOutCubic,
@@ -488,7 +491,9 @@ impl Workspace {
                 )
             }
             (_, Some(ended)) => {
-                let progress = animation_progress(ended, duration) as f64;
+                let progress = (Instant::now().duration_since(ended).as_secs_f64()
+                    / FULLSCREEN_ANIMATION_DURATION.as_secs_f64())
+                .clamp(0.0, 1.0);
                 (
                     ease(
                         EaseInOutCubic,
@@ -512,10 +517,6 @@ impl Workspace {
 
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
-    }
-
-    fn fullscreen_animation_duration(&self) -> Duration {
-        animation_duration(self.animations_enabled)
     }
 
     pub fn set_animations_enabled(&mut self, enabled: bool) {
@@ -586,11 +587,10 @@ impl Workspace {
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
-        let duration = self.fullscreen_animation_duration();
         for f in self.fullscreen_surfaces.iter_mut() {
             if let Some(start) = f.start_at.as_ref() {
                 let duration_since = Instant::now().duration_since(*start);
-                if duration_since >= duration {
+                if duration_since >= FULLSCREEN_ANIMATION_DURATION {
                     f.start_at.take();
                     self.dirty.store(true, Ordering::SeqCst);
                 }
@@ -599,7 +599,7 @@ impl Workspace {
 
         self.fullscreen_surfaces.retain(|f| {
             if let Some(end) = f.ended_at
-                && Instant::now().duration_since(end) >= duration
+                && Instant::now().duration_since(end) >= FULLSCREEN_ANIMATION_DURATION
             {
                 self.dirty.store(true, Ordering::SeqCst);
                 return false;
@@ -1094,18 +1094,21 @@ impl Workspace {
             .iter()
             .position(|f| f.ended_at.is_none() && &f.surface == surface)
         {
-            let duration = self.fullscreen_animation_duration();
             let fullscreen_state = self.fullscreen_surfaces.get(idx)?.clone();
             if self.animations_enabled {
                 let f = self.fullscreen_surfaces.get_mut(idx)?;
                 f.previous_geometry = Some(to);
                 f.ended_at = Some(
                     Instant::now()
-                        - (duration
+                        - (FULLSCREEN_ANIMATION_DURATION
                             - f.start_at
                                 .take()
-                                .map(|earlier| Instant::now().duration_since(earlier).min(duration))
-                                .unwrap_or(duration)),
+                                .map(|earlier| {
+                                    Instant::now()
+                                        .duration_since(earlier)
+                                        .min(FULLSCREEN_ANIMATION_DURATION)
+                                })
+                                .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
                 );
             } else {
                 self.fullscreen_surfaces.remove(idx);
@@ -1357,7 +1360,6 @@ impl Workspace {
         Option<FullscreenRestoreState>,
         Option<Rectangle<i32, Local>>,
     )> {
-        let duration = self.fullscreen_animation_duration();
         // if it doesn't exist we move on.
         let surface = self.fullscreen_surfaces.get_mut(idx)?;
         // if already being removed, do nothing
@@ -1383,12 +1385,16 @@ impl Workspace {
         if self.animations_enabled {
             surface.ended_at = Some(
                 Instant::now()
-                    - (duration
+                    - (FULLSCREEN_ANIMATION_DURATION
                         - surface
                             .start_at
                             .take()
-                            .map(|earlier| Instant::now().duration_since(earlier).min(duration))
-                            .unwrap_or(duration)),
+                            .map(|earlier| {
+                                Instant::now()
+                                    .duration_since(earlier)
+                                    .min(FULLSCREEN_ANIMATION_DURATION)
+                            })
+                            .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
             );
 
             Some((
@@ -1764,7 +1770,7 @@ impl Workspace {
                 .all(|f| !f.alive() || f.ended_at.is_some())
         {
             // floating surfaces
-            let alpha = overview_fade_alpha(&overview.0, self.animations_enabled);
+            let alpha = overview_fade_alpha(&overview.0);
 
             elements.extend(
                 self.floating_layer
@@ -1790,7 +1796,7 @@ impl Workspace {
                     .map(WorkspaceRenderElement::from),
             );
 
-            let alpha = overview.0.alpha(self.animations_enabled);
+            let alpha = overview.0.alpha();
 
             //tiling surfaces
             elements.extend(
@@ -1894,7 +1900,7 @@ impl Workspace {
                 .all(|f| !f.alive() || f.ended_at.is_some())
         {
             // floating surfaces
-            let alpha = overview_fade_alpha(&overview.0, self.animations_enabled);
+            let alpha = overview_fade_alpha(&overview.0);
 
             elements.extend(
                 self.floating_layer

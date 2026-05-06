@@ -116,12 +116,48 @@ struct TreeQueue {
 }
 
 impl TreeQueue {
+    fn clear_minimize_rects(tree: &mut Tree<Data>) {
+        if let Some(root_id) = tree.root_node_id() {
+            for node in tree
+                .traverse_pre_order_ids(root_id)
+                .unwrap()
+                .collect::<Vec<_>>()
+                .into_iter()
+            {
+                if let Data::Mapped { minimize_rect, .. } = tree.get_mut(&node).unwrap().data_mut()
+                {
+                    minimize_rect.take();
+                }
+            }
+        }
+    }
+
+    fn apply_tree(&mut self, mut tree: Tree<Data>) {
+        Self::clear_minimize_rects(&mut tree);
+        self.trees.clear();
+        self.trees.push_back((tree, Duration::ZERO, None));
+        self.animation_start = None;
+    }
+
+    fn finish_current_transition(&mut self) {
+        let _ = self.animation_start.take();
+        let _ = self.trees.pop_front();
+        let front = self.trees.front_mut().unwrap();
+        Self::clear_minimize_rects(&mut front.0);
+        let _ = front.2.take();
+    }
+
     pub fn push_tree(
         &mut self,
         tree: Tree<Data>,
         duration: impl Into<Option<Duration>>,
         blocker: Option<TilingBlocker>,
     ) {
+        if !self.animations_enabled && blocker.is_none() {
+            self.apply_tree(tree);
+            return;
+        }
+
         self.trees.push_back((
             tree,
             if self.animations_enabled {
@@ -385,11 +421,6 @@ impl TilingLayout {
 
     pub fn set_animations_enabled(&mut self, enabled: bool) {
         self.queue.animations_enabled = enabled;
-        if !enabled {
-            for (_, duration, _) in self.queue.trees.iter_mut().skip(1) {
-                *duration = Duration::ZERO;
-            }
-        }
     }
 
     pub fn set_output(&mut self, output: &Output) {
@@ -2384,7 +2415,7 @@ impl TilingLayout {
 
     pub fn update_animation_state(&mut self) -> HashMap<ClientId, Client> {
         let mut clients = HashMap::new();
-        let mut ready_trees = 0;
+        let mut ready_trees: usize = 0;
         for (_, _, blocker) in self.queue.trees.iter().skip(1) {
             if let Some(blocker) = blocker.as_ref() {
                 if blocker.is_processed() {
@@ -2410,26 +2441,8 @@ impl TilingLayout {
                     .expect("Animation going without second tree?")
                     .1
             {
-                let _ = self.queue.animation_start.take();
-                let _ = self.queue.trees.pop_front();
-                ready_trees -= 1;
-                let front = self.queue.trees.front_mut().unwrap();
-                if let Some(root_id) = front.0.root_node_id() {
-                    for node in front
-                        .0
-                        .traverse_pre_order_ids(root_id)
-                        .unwrap()
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                    {
-                        if let Data::Mapped { minimize_rect, .. } =
-                            front.0.get_mut(&node).unwrap().data_mut()
-                        {
-                            minimize_rect.take();
-                        }
-                    }
-                }
-                let _ = front.2.take();
+                self.queue.finish_current_transition();
+                ready_trees = ready_trees.saturating_sub(1);
             } else {
                 return clients;
             }
@@ -2456,7 +2469,11 @@ impl TilingLayout {
             *duration = other_duration
                 .map(|other| other.max(*duration))
                 .unwrap_or(*duration);
-            self.queue.animation_start = Some(Instant::now());
+            if duration.is_zero() {
+                self.queue.finish_current_transition();
+            } else {
+                self.queue.animation_start = Some(Instant::now());
+            }
         }
 
         clients
@@ -3391,7 +3408,6 @@ impl TilingLayout {
         overview: OverviewMode,
     ) {
         let gaps = self.gaps();
-        let animations_enabled = self.animations_enabled();
         let last_overview_hover = &mut self.last_overview_hover;
         let tree = &self.queue.trees.back().unwrap().0;
         let Some(root) = tree.root_node_id() else {
@@ -3442,7 +3458,7 @@ impl TilingLayout {
                 None,
                 self.output.current_scale().fractional_scale(),
                 1.0,
-                overview.alpha(animations_enabled).unwrap(),
+                overview.alpha().unwrap(),
                 &self.backdrop_id,
                 Some(None),
                 None,
@@ -4073,7 +4089,7 @@ impl TilingLayout {
         } else {
             1.0
         };
-        let draw_groups = overview.0.alpha(self.animations_enabled());
+        let draw_groups = overview.0.alpha();
 
         let mut elements = Vec::default();
 
@@ -4170,7 +4186,6 @@ impl TilingLayout {
             } else {
                 indicator_thickness
             },
-            self.animations_enabled(),
             overview,
             resize_indicator,
             swap_desc.clone(),
@@ -4230,7 +4245,7 @@ impl TilingLayout {
         } else {
             1.0
         };
-        let draw_groups = overview.0.alpha(self.animations_enabled());
+        let draw_groups = overview.0.alpha();
 
         let mut elements = Vec::default();
 
@@ -5288,7 +5303,6 @@ fn render_new_tree_windows<R>(
     percentage: f32,
     transition: Option<f32>,
     indicator_thickness: u8,
-    animations_enabled: bool,
     overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
     mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
     swap_desc: Option<NodeDesc>,
@@ -5556,7 +5570,7 @@ where
                                 renderer,
                                 geo.loc.as_logical().to_physical_precise_round(output_scale),
                                 output_scale.into(),
-                                alpha * overview.0.alpha(animations_enabled).unwrap_or(1.0),
+                                alpha * overview.0.alpha().unwrap_or(1.0),
                             )
                             .into_iter()
                             .map(CosmicMappedRenderElement::from),
@@ -5591,7 +5605,7 @@ where
                                     renderer,
                                     geo.loc.as_logical().to_physical_precise_round(output_scale),
                                     output_scale.into(),
-                                    alpha * mode.alpha(animations_enabled).unwrap_or(1.0),
+                                    alpha * mode.alpha().unwrap_or(1.0),
                                 )
                                 .into_iter()
                                 .map(CosmicMappedRenderElement::from)

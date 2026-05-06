@@ -885,7 +885,7 @@ where
                 }));
             }
             Stage::StickyPopups(layout) => {
-                let alpha = overview_fade_alpha(&overview.0, shell.animations_enabled());
+                let alpha = overview_fade_alpha(&overview.0);
 
                 elements.extend(
                     layout
@@ -897,7 +897,7 @@ where
                 );
             }
             Stage::Sticky(layout) => {
-                let alpha = overview_fade_alpha(&overview.0, shell.animations_enabled());
+                let alpha = overview_fade_alpha(&overview.0);
 
                 let current_focus = (!move_active && is_active_space)
                     .then_some(last_active_seat)

@@ -41,7 +41,7 @@ use crate::{
 };
 
 use super::{
-    animation_duration, animation_progress, check_grab_preconditions,
+    ANIMATION_DURATION, check_grab_preconditions,
     focus::target::PointerFocusTarget,
     grabs::{ContextMenu, Item, MenuAlignment, MenuGrab},
 };
@@ -134,13 +134,14 @@ impl OutputZoomState {
         }
 
         if let Some((old_point, start)) = self.previous_point.as_ref() {
-            let duration = animation_duration(self.animations_enabled);
-            if duration.is_zero() || Instant::now().duration_since(*start) > duration {
+            if Instant::now().duration_since(*start) > ANIMATION_DURATION {
                 self.previous_point.take();
                 return self.focal_point;
             }
 
-            let percentage = animation_progress(*start, duration);
+            let percentage = (Instant::now().duration_since(*start).as_secs_f32()
+                / ANIMATION_DURATION.as_secs_f32())
+            .clamp(0.0, 1.0);
             ease(
                 Linear,
                 EasePoint(*old_point),
@@ -167,8 +168,9 @@ impl OutputZoomState {
         }
 
         if let Some((old_level, start)) = self.previous_level.as_ref() {
-            let percentage =
-                animation_progress(*start, animation_duration(self.animations_enabled));
+            let percentage = (Instant::now().duration_since(*start).as_secs_f32()
+                / ANIMATION_DURATION.as_secs_f32())
+            .clamp(0.0, 1.0);
             ease(EaseInOutCubic, *old_level, self.level, percentage)
         } else {
             self.level
@@ -180,23 +182,18 @@ impl OutputZoomState {
     }
 
     pub fn refresh(&mut self) -> bool {
-        let duration = animation_duration(self.animations_enabled);
-        if duration.is_zero() {
+        if !self.animations_enabled {
             self.previous_level = None;
             self.previous_point = None;
         } else {
-            if self
-                .previous_level
-                .as_ref()
-                .is_some_and(|(_, start)| Instant::now().duration_since(*start) > duration)
-            {
+            if self.previous_level.as_ref().is_some_and(|(_, start)| {
+                Instant::now().duration_since(*start) > ANIMATION_DURATION
+            }) {
                 self.previous_level.take();
             }
-            if self
-                .previous_point
-                .as_ref()
-                .is_some_and(|(_, start)| Instant::now().duration_since(*start) > duration)
-            {
+            if self.previous_point.as_ref().is_some_and(|(_, start)| {
+                Instant::now().duration_since(*start) > ANIMATION_DURATION
+            }) {
                 self.previous_point.take();
             }
         }
