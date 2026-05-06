@@ -110,7 +110,6 @@ fn render_input_order_internal<R: 'static>(
         return ControlFlow::Break(Err(OutputNoMode));
     };
     let output_size = output.geometry().size;
-    let animations_enabled = shell.animations_enabled();
 
     // this is more hacky than I would like..
     let fullscreen = workspace.fullscreen.as_ref().filter(|f| !f.is_animating());
@@ -150,17 +149,13 @@ fn render_input_order_internal<R: 'static>(
             let (forward, percentage) = match start {
                 WorkspaceDelta::Shortcut(st) => (
                     *previous_idx < current.1,
-                    if animations_enabled {
-                        ease(
-                            EaseInOutCubic,
-                            0.0,
-                            1.0,
-                            Instant::now().duration_since(*st).as_millis() as f32
-                                / ANIMATION_DURATION.as_millis() as f32,
-                        )
-                    } else {
-                        1.0
-                    },
+                    ease(
+                        EaseInOutCubic,
+                        0.0,
+                        1.0,
+                        Instant::now().duration_since(*st).as_millis() as f32
+                            / ANIMATION_DURATION.as_millis() as f32,
+                    ),
                 ),
                 WorkspaceDelta::Gesture {
                     percentage: prog,
@@ -172,12 +167,7 @@ fn render_input_order_internal<R: 'static>(
                     forward,
                 } => (
                     *forward,
-                    if animations_enabled {
-                        (spring.value_at(Instant::now().duration_since(*start)) as f32)
-                            .clamp(0.0, 1.0)
-                    } else {
-                        1.0
-                    },
+                    (spring.value_at(Instant::now().duration_since(*start)) as f32).clamp(0.0, 1.0),
                 ),
             };
 
