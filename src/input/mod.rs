@@ -2319,6 +2319,7 @@ impl State {
     }
 }
 
+// Output and workspace sessions for the given output
 fn cursor_sessions_for_output<'a>(
     shell: &'a Shell,
     output: &'a Output,
@@ -2327,16 +2328,9 @@ fn cursor_sessions_for_output<'a>(
         .active_space(output)
         .into_iter()
         .flat_map(|workspace| {
-            let maybe_fullscreen = workspace.get_fullscreen();
             workspace
                 .cursor_sessions()
                 .into_iter()
-                .chain(
-                    maybe_fullscreen
-                        .map(|w| w.cursor_sessions())
-                        .into_iter()
-                        .flatten(),
-                )
                 .chain(output.cursor_sessions())
         })
 }
