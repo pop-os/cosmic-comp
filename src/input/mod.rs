@@ -60,7 +60,7 @@ use smithay::{
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
     },
-    utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Point, Rectangle, SERIAL_COUNTER, Serial, Size},
     wayland::{
         image_copy_capture::{BufferConstraints, CursorSessionRef},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
@@ -603,8 +603,13 @@ impl State {
                                 .map(|constraint| constraint.size != geometry.size)
                                 .unwrap_or(true)
                             {
+                                let mut cursor_size = geometry.size;
+                                // Client shouldn't try to allocate 0x0 buffer
+                                if cursor_size == Size::new(0, 0) {
+                                    cursor_size = Size::new(1, 1);
+                                }
                                 session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
+                                    size: cursor_size,
                                     shm: vec![ShmFormat::Argb8888],
                                     dma: None,
                                 });
@@ -667,8 +672,13 @@ impl State {
                                 .map(|constraint| constraint.size != geometry.size)
                                 .unwrap_or(true)
                             {
+                                let mut cursor_size = geometry.size;
+                                // Client shouldn't try to allocate 0x0 buffer
+                                if cursor_size == Size::new(0, 0) {
+                                    cursor_size = Size::new(1, 1);
+                                }
                                 session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
+                                    size: cursor_size,
                                     shm: vec![ShmFormat::Argb8888],
                                     dma: None,
                                 });
