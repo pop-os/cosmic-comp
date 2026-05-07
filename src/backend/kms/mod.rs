@@ -394,15 +394,37 @@ impl State {
                         continue;
                     }
                 };
+                let dh = state.common.display_handle.clone();
+
                 if state.backend.kms().drm_devices.contains_key(&drm_node) {
                     match state.device_changed(dev) {
                         Ok(outputs) => added.extend(outputs),
                         Err(err) => {
-                            error!(?err, "Failed to update drm device {}.", path.display(),)
+                            error!(
+                                ?err,
+                                "Failed to update drm device {}. Re-opening",
+                                path.display(),
+                            );
+                            match state.reopen_device(dev, path, &dh) {
+                                Ok(outputs) => added.extend(outputs),
+                                Err(err) => {
+                                    error!(
+                                        ?err,
+                                        "Failed to re-open drm device {}. Device lost",
+                                        path.display(),
+                                    );
+                                    if let Err(err) = state.device_removed(dev, &dh) {
+                                        error!(
+                                            ?err,
+                                            "Failed to close drm device {}.",
+                                            path.display(),
+                                        );
+                                    };
+                                }
+                            }
                         }
                     }
                 } else {
-                    let dh = state.common.display_handle.clone();
                     match state.device_added(dev, path, &dh) {
                         Ok(outputs) => added.extend(outputs),
                         Err(err) => error!(?err, "Failed to add drm device {}.", path.display(),),
