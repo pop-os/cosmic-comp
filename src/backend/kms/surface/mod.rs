@@ -464,7 +464,7 @@ impl Surface {
 
     pub fn drop_and_join(mut self) {
         let thread = self.thread.take();
-        let _ = self;
+        std::mem::drop(self);
         if let Some(thread) = thread {
             let name = thread.thread().name().unwrap().to_string();
             let _ = thread.join();
