@@ -2481,6 +2481,7 @@ impl State {
     }
 }
 
+// Output and workspace sessions for the given output
 fn cursor_sessions_for_output<'a>(
     shell: &'a Shell,
     output: &'a Output,
@@ -2489,14 +2490,9 @@ fn cursor_sessions_for_output<'a>(
         .active_space(output)
         .into_iter()
         .flat_map(|workspace| {
-            let fullscreen_cursors: Vec<_> = workspace
-                .get_fullscreen_surfaces()
-                .flat_map(|f| f.surface.cursor_sessions())
-                .collect();
             workspace
                 .cursor_sessions()
                 .into_iter()
-                .chain(fullscreen_cursors)
                 .chain(output.cursor_sessions())
         })
 }
