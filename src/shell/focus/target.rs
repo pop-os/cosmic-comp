@@ -281,6 +281,18 @@ impl KeyboardFocusTarget {
             false
         }
     }
+
+    pub fn has_surface(&self, shell: &Shell, surface: &WlSurface) -> bool {
+        if let Some(fe) = shell.focused_element(self) {
+            fe.has_surface(surface, WindowSurfaceType::ALL)
+        } else if let KeyboardFocusTarget::Fullscreen(s) = self {
+            s.has_surface(surface, WindowSurfaceType::ALL)
+        } else if let Some(root) = WaylandFocus::wl_surface(self) {
+            CosmicSurface::surface_tree_offset(&root, surface).is_some()
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
