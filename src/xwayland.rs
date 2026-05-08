@@ -180,6 +180,7 @@ impl State {
                     if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
                         xwayland_state.xwm = None;
                     }
+                    data.common.xwayland_scale = None;
                     data.notify_ready();
                 }
             }) {
@@ -721,15 +722,15 @@ impl Common {
             // update cursor
             xwayland.reload_cursor(new_scale);
 
-            if let Some(geometries) = geometries {
-                // update client scale
-                xwayland
-                    .client
-                    .get_data::<XWaylandClientData>()
-                    .unwrap()
-                    .compositor_state
-                    .set_client_scale(new_scale);
+            // update client scale
+            xwayland
+                .client
+                .get_data::<XWaylandClientData>()
+                .unwrap()
+                .compositor_state
+                .set_client_scale(new_scale);
 
+            if let Some(geometries) = geometries {
                 // update wl/xdg_outputs
                 for output in self.shell.read().outputs() {
                     output.change_current_state(None, None, None, None);
