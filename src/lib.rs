@@ -1,7 +1,8 @@
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,
-    clippy::len_without_is_empty
+    clippy::len_without_is_empty,
+    clippy::collapsible_match
 )]
 // SPDX-License-Identifier: GPL-3.0-only
 

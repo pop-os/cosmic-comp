@@ -3883,7 +3883,7 @@ impl Shell {
         let Some(focused) = (match target {
             KeyboardFocusTarget::Popup(popup) => {
                 let Some(toplevel_surface) = (match popup {
-                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                    PopupKind::Xdg(_) => get_popup_toplevel(&popup),
                     PopupKind::InputMethod(_) => unreachable!(),
                 }) else {
                     return FocusResult::None;
@@ -4341,6 +4341,20 @@ impl Shell {
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_maximized(true) {
+            return None;
+        }
+
+        // Reject duplicate resize requests (e.g. Steam sends two
+        // _NET_WM_MOVERESIZE messages). Creating a new grab while one is
+        // already active would corrupt the resize state when the old grab's
+        // ungrab() overwrites the freshly-set Resizing state.
+        if let Some(ResizeState::Resizing(data)) = *mapped.resize_state.lock().unwrap() {
+            tracing::warn!(
+                app_id = mapped.active_window().app_id(),
+                active_edges = ?data.edges,
+                requested_edges = ?edges,
+                "Rejecting duplicate resize request while resize is already active",
+            );
             return None;
         }
 
@@ -4859,6 +4873,7 @@ impl Shell {
                     |surface, _| {
                         surface_presentation_feedback_flags_from_states(
                             surface,
+                            None,
                             render_element_states,
                         )
                     },
@@ -4875,6 +4890,7 @@ impl Shell {
                     |surface, _| {
                         surface_presentation_feedback_flags_from_states(
                             surface,
+                            None,
                             render_element_states,
                         )
                     },
@@ -4888,7 +4904,11 @@ impl Shell {
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
-                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                    surface_presentation_feedback_flags_from_states(
+                        surface,
+                        None,
+                        render_element_states,
+                    )
                 },
             );
         }
