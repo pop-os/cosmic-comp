@@ -99,6 +99,7 @@ pub struct CosmicCompConfig {
     pub edge_snap_threshold: u32,
     pub accessibility_zoom: ZoomConfig,
     pub appearance_settings: AppearanceConfig,
+    pub activation_policy: ActivationPolicy,
 }
 
 impl Default for CosmicCompConfig {
@@ -135,6 +136,7 @@ impl Default for CosmicCompConfig {
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
+            activation_policy: ActivationPolicy::default(),
         }
     }
 }
@@ -222,6 +224,14 @@ pub enum EavesdroppingKeyboardMode {
     Modifiers,
     Combinations,
     All,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ActivationPolicy {
+    #[default]
+    Focus,
+    FocusIfActiveWorkspace,
+    Urgent,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
