@@ -52,16 +52,21 @@ use smithay::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
             GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            PointerGrab, RelativeMotionEvent,
+            PointerGrab, PointerHandle, RelativeMotionEvent,
         },
         touch::{DownEvent, MotionEvent as TouchMotionEvent, UpEvent},
     },
     output::Output,
     reexports::{
-        input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
+        input::Device as InputDevice,
+        wayland_server::{
+            Resource as _,
+            protocol::{wl_shm::Format as ShmFormat, wl_surface::WlSurface},
+        },
     },
-    utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
+        compositor::CompositorHandler,
         image_copy_capture::{BufferConstraints, CursorSessionRef},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{PointerConstraint, with_pointer_constraint},
@@ -2316,6 +2321,130 @@ impl State {
         )
         .ok()
         .flatten()
+    }
+
+    pub fn apply_cursor_hint(
+        &mut self,
+        surface: &WlSurface,
+        pointer: &PointerHandle<Self>,
+        mut location: Point<f64, Logical>,
+    ) {
+        if let Some(client) = surface.client() {
+            let scale = self.client_compositor_state(&client).client_scale();
+            location.x /= scale;
+            location.y /= scale;
+        }
+
+        let point_and_output = {
+            let shell = self.common.shell.read();
+            let found = shell.workspaces.sets.iter().find_map(|(out, set)| {
+                set.surface_geometry_offset_from_toplevel(surface)
+                    .map(|(geometry, surface_offset)| (out, geometry, surface_offset))
+            });
+
+            if let Some((output, geometry, surface_offset)) = found {
+                let mut pos_in_element = location + surface_offset.to_f64();
+                let window_size = geometry.size.to_f64();
+
+                let is_legal = |p: Point<f64, Logical>| {
+                    let in_window = p.x >= 0.0
+                        && p.y >= 0.0
+                        // hack: prevent the cursor from touching the edge of the window
+                        && p.x <= window_size.w - 1.
+                        && p.y <= window_size.h - 1.;
+                    if !in_window {
+                        return false;
+                    }
+
+                    with_pointer_constraint(surface, pointer, |constraint| {
+                        if let Some(constraint) = constraint
+                            && let Some(region) = constraint.region()
+                        {
+                            let point_in_surface = (p - surface_offset.to_f64()).to_i32_round();
+                            return region.contains(point_in_surface);
+                        }
+                        true
+                    })
+                };
+
+                let workspace_origin = output.geometry().loc.to_f64();
+                let origin = geometry.loc.to_f64();
+
+                if !is_legal(pos_in_element) {
+                    let original_global = pointer.current_location();
+
+                    let original_pos_in_element = Point::new(
+                        original_global.x - workspace_origin.x - origin.x,
+                        original_global.y - workspace_origin.y - origin.y,
+                    );
+
+                    let y_only_pos = Point::new(original_pos_in_element.x, pos_in_element.y);
+                    let x_only_pos = Point::new(pos_in_element.x, original_pos_in_element.y);
+
+                    if is_legal(y_only_pos) {
+                        pos_in_element = y_only_pos;
+                    } else if is_legal(x_only_pos) {
+                        pos_in_element = x_only_pos;
+                    } else {
+                        pos_in_element = original_pos_in_element;
+                    }
+                }
+
+                let x = workspace_origin.x + origin.x + pos_in_element.x;
+                let y = workspace_origin.y + origin.y + pos_in_element.y;
+                Some((Point::new(x, y), output.clone()))
+            } else {
+                None
+            }
+        };
+
+        if let Some((point, output)) = point_and_output {
+            let original_position = pointer.current_location();
+            pointer.set_location(point);
+
+            let mut shell = self.common.shell.write();
+            shell.update_pointer_position(point.as_global().to_local(&output), &output);
+
+            let seat = shell
+                .seats
+                .iter()
+                .find(|s| s.get_pointer().as_ref() == Some(pointer))
+                .cloned();
+
+            if let Some(seat) = seat {
+                shell.update_focal_point(
+                    &seat,
+                    original_position.as_global(),
+                    self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                );
+
+                let output_geometry = output.geometry();
+                for session in cursor_sessions_for_output(&shell, &output) {
+                    if let Some((geometry, offset)) = seat.cursor_geometry(
+                        point.to_buffer(
+                            output.current_scale().fractional_scale(),
+                            output.current_transform(),
+                            &output_geometry.size.to_f64().as_logical(),
+                        ),
+                        self.common.clock.now(),
+                    ) {
+                        if session
+                            .current_constraints()
+                            .map(|constraint| constraint.size != geometry.size)
+                            .unwrap_or(true)
+                        {
+                            session.update_constraints(BufferConstraints {
+                                size: geometry.size,
+                                shm: vec![ShmFormat::Argb8888],
+                                dma: None,
+                            });
+                        }
+                        session.set_cursor_hotspot(offset);
+                        session.set_cursor_pos(Some(geometry.loc));
+                    }
+                }
+            }
+        }
     }
 }
 
