@@ -737,22 +737,23 @@ impl WorkspaceSet {
         surface: &WlSurface,
     ) -> Option<(Rectangle<i32, Local>, Point<i32, Logical>)> {
         let mut root = surface.clone();
-        loop {
-            while let Some(parent) = get_parent(&root) {
+
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+
+        while smithay::wayland::compositor::get_role(&root) == Some(XDG_POPUP_ROLE) {
+            let parent = with_states(&root, |states| {
+                states
+                    .data_map
+                    .get::<XdgPopupSurfaceData>()
+                    .and_then(|m| m.lock().unwrap().parent.as_ref().cloned())
+            });
+            if let Some(parent) = parent {
                 root = parent;
+            } else {
+                break;
             }
-            if smithay::wayland::compositor::get_role(&root) == Some(XDG_POPUP_ROLE)
-                && let Some(parent) = with_states(&root, |states| {
-                    states
-                        .data_map
-                        .get::<XdgPopupSurfaceData>()
-                        .and_then(|m| m.lock().unwrap().parent.as_ref().cloned())
-                })
-            {
-                root = parent;
-                continue;
-            }
-            break;
         }
 
         self.sticky_layer

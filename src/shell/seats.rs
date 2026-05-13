@@ -17,8 +17,11 @@ use smithay::{
         pointer::{CursorImageAttributes, CursorImageStatus},
     },
     output::Output,
-    reexports::{input::Device as InputDevice, wayland_server::DisplayHandle},
-    utils::{Buffer, IsAlive, Monotonic, Point, Rectangle, Serial, Time, Transform},
+    reexports::{
+        input::Device as InputDevice,
+        wayland_server::{DisplayHandle, protocol::wl_surface::WlSurface},
+    },
+    utils::{Buffer, IsAlive, Logical, Monotonic, Point, Rectangle, Serial, Time, Transform},
     wayland::compositor::with_states,
 };
 use tracing::warn;
@@ -179,6 +182,9 @@ struct ActiveOutput(pub Mutex<Output>);
 struct FocusedOutput(pub Mutex<Option<Output>>);
 
 #[derive(Default)]
+pub struct PointerConstraintHint(pub Mutex<Option<(WlSurface, Point<f64, Logical>)>>);
+
+#[derive(Default)]
 pub struct LastModifierChange(pub Mutex<Option<Serial>>);
 
 pub fn create_seat(
@@ -201,6 +207,7 @@ pub fn create_seat(
     userdata.insert_if_missing_threadsafe(CursorState::default);
     userdata.insert_if_missing_threadsafe(|| ActiveOutput(Mutex::new(output.clone())));
     userdata.insert_if_missing_threadsafe(|| FocusedOutput(Mutex::new(None)));
+    userdata.insert_if_missing_threadsafe(PointerConstraintHint::default);
     userdata.insert_if_missing_threadsafe(|| Mutex::new(CursorImageStatus::default_named()));
 
     // A lot of clients bind keyboard and pointer unconditionally once on launch..
@@ -252,6 +259,8 @@ pub trait SeatExt {
     fn supressed_buttons(&self) -> &SupressedButtons;
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue;
     fn last_modifier_change(&self) -> Option<Serial>;
+    fn pointer_constraint_hint(&self) -> Option<(WlSurface, Point<f64, Logical>)>;
+    fn set_pointer_constraint_hint(&self, hint: Option<(WlSurface, Point<f64, Logical>)>);
 
     fn cursor_geometry(
         &self,
@@ -335,6 +344,23 @@ impl SeatExt for Seat<State> {
             .0
             .lock()
             .unwrap()
+    }
+
+    fn pointer_constraint_hint(&self) -> Option<(WlSurface, Point<f64, Logical>)> {
+        let lock = self.user_data().get::<PointerConstraintHint>().unwrap();
+        let mut hint = lock.0.lock().unwrap();
+        // Check if alive
+        if let Some((ref surface, _)) = *hint
+            && !surface.alive()
+        {
+            *hint = None;
+        }
+        hint.clone()
+    }
+
+    fn set_pointer_constraint_hint(&self, hint: Option<(WlSurface, Point<f64, Logical>)>) {
+        let lock = self.user_data().get::<PointerConstraintHint>().unwrap();
+        *lock.0.lock().unwrap() = hint;
     }
 
     fn cursor_geometry(
