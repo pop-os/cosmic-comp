@@ -505,12 +505,12 @@ impl State {
                             let new_under = State::surface_under(pos, &output, shell)
                                 .map(|(target, pos)| (target, pos.as_logical()));
 
-                            //We should only check size, not the surface, so that we can move the mouse over the OSD in confined mode
-                            // if new_under.as_ref().and_then(|(under, _)| under.wl_surface())
-                            //     != surface.wl_surface()
-                            // {
-                            //     return (false, None);
-                            // }
+                            // TODO: We might need a solution that allows constraints to bypass the surface without affecting the constraints themselves
+                            if new_under.as_ref().and_then(|(under, _)| under.wl_surface())
+                                != surface.wl_surface()
+                            {
+                                return (false, None);
+                            }
 
                             match surface {
                                 PointerFocusTarget::WlSurface { surface, .. } => {
@@ -2375,11 +2375,10 @@ impl State {
         pointer: &PointerHandle<Self>,
         mut location: Point<f64, Logical>,
     ) {
-        if let Some(client) = surface.client() {
-            let scale = self.client_compositor_state(&client).client_scale();
-            location.x /= scale;
-            location.y /= scale;
-        }
+        let Some(client) = surface.client() else {
+            return;
+        };
+        location = location.downscale(self.client_compositor_state(&client).client_scale());
 
         let point_and_output = {
             let shell = self.common.shell.read();
