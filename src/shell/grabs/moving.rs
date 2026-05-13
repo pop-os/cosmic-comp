@@ -642,7 +642,7 @@ impl PointerGrab<State> for MoveGrab {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, _data: &mut State, _handle: &mut PointerInnerHandle<'_, State>) {}
 }
 
 impl TouchGrab<State> for MoveGrab {
@@ -721,7 +721,7 @@ impl TouchGrab<State> for MoveGrab {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, _data: &mut State, _handle: &mut TouchInnerHandle<'_, State>) {}
 }
 
 impl MoveGrab {

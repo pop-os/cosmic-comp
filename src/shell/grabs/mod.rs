@@ -372,10 +372,10 @@ impl PointerGrab<State> for ResizeGrab {
         }
     }
 
-    fn unset(&mut self, data: &mut State) {
+    fn unset(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
         match self {
-            ResizeGrab::Floating(grab) => PointerGrab::unset(grab, data),
-            ResizeGrab::Tiling(grab) => PointerGrab::unset(grab, data),
+            ResizeGrab::Floating(grab) => PointerGrab::unset(grab, data, handle),
+            ResizeGrab::Tiling(grab) => PointerGrab::unset(grab, data, handle),
         }
     }
 }
@@ -469,10 +469,10 @@ impl TouchGrab<State> for ResizeGrab {
         }
     }
 
-    fn unset(&mut self, data: &mut State) {
+    fn unset(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::unset(grab, data),
-            ResizeGrab::Tiling(grab) => TouchGrab::unset(grab, data),
+            ResizeGrab::Floating(grab) => TouchGrab::unset(grab, data, handle),
+            ResizeGrab::Tiling(grab) => TouchGrab::unset(grab, data, handle),
         }
     }
 }
@@ -714,10 +714,10 @@ impl PointerGrab<State> for MoveGrab {
         }
     }
 
-    fn unset(&mut self, data: &mut State) {
+    fn unset(&mut self, data: &mut State, handle: &mut PointerInnerHandle<'_, State>) {
         match self {
-            MoveGrab::Move(grab) => PointerGrab::unset(grab, data),
-            MoveGrab::Delayed(grab) => PointerGrab::unset(grab, data),
+            MoveGrab::Move(grab) => PointerGrab::unset(grab, data, handle),
+            MoveGrab::Delayed(grab) => PointerGrab::unset(grab, data, handle),
         }
     }
 }
@@ -811,10 +811,10 @@ impl TouchGrab<State> for MoveGrab {
         }
     }
 
-    fn unset(&mut self, data: &mut State) {
+    fn unset(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::unset(grab, data),
-            MoveGrab::Delayed(grab) => TouchGrab::unset(grab, data),
+            MoveGrab::Move(grab) => TouchGrab::unset(grab, data, handle),
+            MoveGrab::Delayed(grab) => TouchGrab::unset(grab, data, handle),
         }
     }
 }

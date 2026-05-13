@@ -708,7 +708,7 @@ impl PointerGrab<State> for MenuGrab {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, _data: &mut State, _handle: &mut PointerInnerHandle<'_, State>) {}
 }
 
 impl TouchGrab<State> for MenuGrab {
@@ -843,7 +843,7 @@ impl TouchGrab<State> for MenuGrab {
         }
     }
 
-    fn unset(&mut self, _data: &mut State) {}
+    fn unset(&mut self, _data: &mut State, _handle: &mut TouchInnerHandle<'_, State>) {}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

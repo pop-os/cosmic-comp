@@ -2,7 +2,6 @@
 
 use crate::state::State;
 use smithay::{
-    delegate_pointer_constraints,
     input::pointer::PointerHandle,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point},
@@ -34,4 +33,3 @@ impl PointerConstraintsHandler for State {
         // TODO
     }
 }
-delegate_pointer_constraints!(State);
