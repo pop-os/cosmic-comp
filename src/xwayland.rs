@@ -809,12 +809,14 @@ impl XwmHandler for State {
             );
         }
         if !shell.pending_windows.iter().any(|w| w.surface == window) {
+            let fullscreen = window.is_fullscreen().then(|| seat.active_output());
+            let maximized = window.is_maximized();
             let surface = CosmicSurface::from(window);
             shell.pending_windows.push(PendingWindow {
                 surface,
                 seat,
-                fullscreen: None,
-                maximized: false,
+                fullscreen,
+                maximized,
                 sticky: false,
             })
         }
