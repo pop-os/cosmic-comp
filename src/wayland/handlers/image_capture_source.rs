@@ -52,8 +52,4 @@ impl ToplevelCaptureSourceHandler for State {
     }
 }
 
-smithay::delegate_image_capture_source!(State);
-smithay::delegate_output_capture_source!(State);
-smithay::delegate_toplevel_capture_source!(State);
-
 delegate_cosmic_image_capture_source!(State);

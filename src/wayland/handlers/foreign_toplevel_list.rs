@@ -10,5 +10,3 @@ impl ForeignToplevelListHandler for State {
         &mut self.toplevel_info_state_mut().foreign_toplevel_list
     }
 }
-
-smithay::delegate_foreign_toplevel_list!(State);

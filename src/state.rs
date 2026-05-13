@@ -1406,3 +1406,5 @@ impl Common {
         }
     }
 }
+
+smithay::delegate_dispatch2!(State);
