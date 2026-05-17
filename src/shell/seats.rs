@@ -194,6 +194,7 @@ pub fn create_seat(
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(SupressedButtons::default);
+    userdata.insert_if_missing(crate::input::kinetic::KineticScroller::default);
     userdata.insert_if_missing(ModifiersShortcutQueue::default);
     userdata.insert_if_missing(LastModifierChange::default);
     userdata.insert_if_missing_threadsafe(SeatMoveGrabState::default);
