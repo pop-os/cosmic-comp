@@ -18,7 +18,7 @@ use smithay::{
     utils::{Logical, Point},
 };
 use std::{cell::RefCell, collections::VecDeque, time::Duration};
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// Maximum age of samples retained for velocity calculation. Kept slightly
 /// larger than [`VELOCITY_WINDOW`] so a momentary pause near lift doesn't
@@ -151,7 +151,12 @@ impl KineticScroller {
             return None;
         }
 
-        let last = inner.last_tick.unwrap_or(now);
+        // The first tick fires TICK after `start_fling` scheduled it, so
+        // back-date `last_tick` accordingly — otherwise dt_ms == 0 and we emit
+        // an empty Continuous axis frame that wakes clients for no reason.
+        let last = inner
+            .last_tick
+            .unwrap_or_else(|| now.saturating_sub(TICK));
         let dt_ms = now.saturating_sub(last).as_secs_f64() * 1000.0;
         inner.last_tick = Some(now);
 
@@ -267,14 +272,22 @@ pub fn try_start_fling(state: &mut State, seat: &Seat<State>) -> bool {
 }
 
 fn schedule_tick(state: &mut State, seat: &Seat<State>) {
-    let seat = seat.clone();
-    let _ = state.common.event_loop_handle.insert_source(
+    let seat_for_tick = seat.clone();
+    let res = state.common.event_loop_handle.insert_source(
         Timer::from_duration(TICK),
         move |_, _, state| {
-            tick_handler(state, &seat);
+            tick_handler(state, &seat_for_tick);
             TimeoutAction::Drop
         },
     );
+    // If the timer fails to register the fling would otherwise stay `active`
+    // with no further ticks — the synthetic axis_stop would never reach the
+    // client, leaving kinetic-aware toolkits stuck in "still scrolling".
+    if let Err(err) = res {
+        warn!("failed to schedule kinetic-scroll tick: {err}");
+        let time_msec = state.common.clock.now().as_millis();
+        cancel_with_stop(state, seat, time_msec);
+    }
 }
 
 fn tick_handler(state: &mut State, seat: &Seat<State>) {
