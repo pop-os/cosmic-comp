@@ -470,6 +470,9 @@ impl CosmicSurface {
             .get_or_insert_threadsafe(Sticky::default)
             .0
             .store(sticky, Ordering::SeqCst);
+        if let WindowSurface::X11(surface) = self.0.underlying_surface() {
+            let _ = surface.set_sticky(sticky);
+        }
     }
 
     pub fn set_suspended(&self, suspended: bool) {
