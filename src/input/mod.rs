@@ -59,7 +59,7 @@ use smithay::{
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
     },
-    utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
         image_copy_capture::{BufferConstraints, CursorSessionRef},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
@@ -82,6 +82,7 @@ use std::{
 
 pub mod actions;
 pub mod gestures;
+pub mod kinetic;
 
 /// Used for debouncing focus updates due to pointer motion, if after the focus change is
 /// triggered the event will cancel if the pointer moves to the original target
@@ -213,6 +214,10 @@ impl State {
                     let keycode = event.key_code();
                     let state = event.state();
                     trace!(?keycode, ?state, "key");
+
+                    if state == KeyState::Pressed {
+                        kinetic::cancel(&seat);
+                    }
 
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time_msec(&event);
@@ -370,6 +375,15 @@ impl State {
                         .map(|(target, pos)| (target, pos.as_logical()));
 
                     std::mem::drop(shell);
+
+                    // Cancel any kinetic fling when the cursor crosses a
+                    // surface boundary — kinetic scroll routes to the pointer
+                    // focus, so without this the fling would silently keep
+                    // scrolling whichever window the cursor moved onto.
+                    if under.as_ref().map(|(t, _)| t) != new_under.as_ref().map(|(t, _)| t) {
+                        kinetic::cancel(&seat);
+                    }
+
                     ptr.relative_motion(
                         self,
                         under.clone(),
@@ -705,6 +719,7 @@ impl State {
 
                 let mut pass_event = !seat.supressed_buttons().remove(button);
                 if event.state() == ButtonState::Pressed {
+                    kinetic::cancel(&seat);
                     // change the keyboard focus unless the pointer is grabbed
                     // We test for any matching surface type here but always use the root
                     // (in case of a window the toplevel) surface for the focus.
@@ -882,11 +897,14 @@ impl State {
                 }
             }
             InputEvent::PointerAxis { event, .. } => {
-                let scroll_factor =
+                let (scroll_factor, kinetic_enabled) =
                     if let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(&event.device()) {
-                        self.common.config.scroll_factor(device)
+                        (
+                            self.common.config.scroll_factor(device),
+                            self.common.config.kinetic_scroll_enabled(device),
+                        )
                     } else {
-                        1.0
+                        (1.0, false)
                     };
 
                 let maybe_seat = self
@@ -907,6 +925,7 @@ impl State {
                             .accessibility_zoom
                             .enable_mouse_zoom_shortcuts
                     {
+                        kinetic::cancel(&seat);
                         seat.modifiers_shortcut_queue().clear();
                         if let Some(mut percentage) = event
                             .amount_v120(Axis::Vertical)
@@ -922,7 +941,46 @@ impl State {
                             self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
                         }
                     } else {
-                        let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
+                        // Kinetic-scroll hook. When `kinetic_enabled` and the
+                        // event is a Finger-source touchpad scroll, we feed
+                        // samples to the scroller and (on lift) try to start a
+                        // fling. The live frame below is re-emitted with
+                        // `AxisSource::Continuous` so the fling's source
+                        // matches and clients don't see any source transitions
+                        // or `axis_stop` frames mid-gesture.
+                        let mut suppress_frame = false;
+                        if event.source() != AxisSource::Finger {
+                            kinetic::cancel(&seat);
+                        } else if kinetic_enabled {
+                            let t = Duration::from_millis(event.time_msec() as u64);
+                            let dx_raw = event.amount(Axis::Horizontal).unwrap_or(0.0);
+                            let dy_raw = event.amount(Axis::Vertical).unwrap_or(0.0);
+                            if dx_raw == 0.0 && dy_raw == 0.0 {
+                                // Finger lift — no frame to emit either way;
+                                // a fling, if it starts, takes over from here.
+                                suppress_frame = true;
+                                if kinetic::try_start_fling(self, &seat) {
+                                    return;
+                                }
+                            } else {
+                                let delta = Point::<f64, Logical>::from((
+                                    dx_raw * scroll_factor,
+                                    dy_raw * scroll_factor,
+                                ));
+                                kinetic::push(&seat, delta, t);
+                            }
+                        }
+                        if suppress_frame {
+                            return;
+                        }
+
+                        let frame_source =
+                            if kinetic_enabled && event.source() == AxisSource::Finger {
+                                AxisSource::Continuous
+                            } else {
+                                event.source()
+                            };
+                        let mut frame = AxisFrame::new(event.time_msec()).source(frame_source);
                         if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
                             if horizontal_amount != 0.0 {
                                 frame = frame
@@ -933,7 +991,7 @@ impl State {
                                         (discrete * scroll_factor).round() as i32,
                                     );
                                 }
-                            } else if event.source() == AxisSource::Finger {
+                            } else if event.source() == AxisSource::Finger && !kinetic_enabled {
                                 frame = frame.stop(Axis::Horizontal);
                             }
                         }
@@ -947,7 +1005,7 @@ impl State {
                                         (discrete * scroll_factor).round() as i32,
                                     );
                                 }
-                            } else if event.source() == AxisSource::Finger {
+                            } else if event.source() == AxisSource::Finger && !kinetic_enabled {
                                 frame = frame.stop(Axis::Vertical);
                             }
                         }
@@ -1206,6 +1264,12 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    if event.fingers() == 2 {
+                        // 2 fingers landing on the touchpad — the user is about
+                        // to scroll; stop any in-flight fling immediately so it
+                        // doesn't fight the new gesture.
+                        kinetic::cancel(&seat);
+                    }
                     let serial = SERIAL_COUNTER.next_serial();
                     let pointer = seat.get_pointer().unwrap();
                     pointer.gesture_hold_begin(

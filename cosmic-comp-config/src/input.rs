@@ -47,6 +47,8 @@ pub struct ScrollConfig {
     pub natural_scroll: Option<bool>,
     pub scroll_button: Option<u32>,
     pub scroll_factor: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub kinetic: Option<bool>,
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
