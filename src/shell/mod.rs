@@ -249,6 +249,7 @@ pub struct PendingWindow {
     pub seat: Seat<State>,
     pub fullscreen: Option<Output>,
     pub maximized: bool,
+    pub sticky: bool,
 }
 
 #[derive(Debug)]
@@ -2684,23 +2685,19 @@ impl Shell {
             seat,
             fullscreen: output,
             maximized: should_be_maximized,
+            sticky: mut should_be_sticky,
         } = self.pending_windows.remove(pos);
 
-        let parent_is_sticky = if let Some(toplevel) = window.0.toplevel() {
-            if let Some(parent) = toplevel.parent() {
-                if let Some(elem) = self.element_for_surface(&parent) {
-                    self.workspaces
-                        .sets
-                        .values()
-                        .any(|set| set.sticky_layer.mapped().any(|m| m == elem))
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
+        if !should_be_sticky
+            && let Some(toplevel) = window.0.toplevel()
+            && let Some(parent) = toplevel.parent()
+            && let Some(elem) = self.element_for_surface(&parent)
+        {
+            should_be_sticky = self
+                .workspaces
+                .sets
+                .values()
+                .any(|set| set.sticky_layer.mapped().any(|m| m == elem));
         };
 
         let pending_activation = self.pending_activations.remove(&(&window).into());
@@ -2814,7 +2811,7 @@ impl Shell {
                 .map(mapped.clone(), Some(focus_stack.iter()), None);
         }
 
-        if parent_is_sticky {
+        if should_be_sticky {
             self.toggle_sticky(&seat, &mapped);
         }
 
@@ -2824,7 +2821,7 @@ impl Shell {
 
         let new_target = if (workspace_output == seat.active_output()
             && active_handle == workspace_handle)
-            || parent_is_sticky
+            || should_be_sticky
         {
             // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
             Some(KeyboardFocusTarget::from(mapped.clone()))
@@ -2955,6 +2952,7 @@ impl Shell {
                     seat: seat.clone(),
                     fullscreen: None,
                     maximized: false,
+                    sticky: false,
                 });
             }
         }
