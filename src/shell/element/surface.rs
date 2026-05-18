@@ -235,7 +235,7 @@ impl CosmicSurface {
                 toplevel.with_pending_state(|state| state.size = Some(geo.size.as_logical()))
             }
             WindowSurface::X11(surface) => {
-                let _ = surface.configure(geo.as_logical());
+                let _ = surface.configure_with_sync(geo.as_logical(), None);
             }
         }
     }
@@ -342,7 +342,7 @@ impl CosmicSurface {
                     state.is_some_and(|state| state.states.contains(ToplevelState::Resizing))
                 }))
             }
-            WindowSurface::X11(_surface) => None,
+            WindowSurface::X11(surface) => surface.pending_geometry().map(|_| true),
         }
     }
 
@@ -589,7 +589,7 @@ impl CosmicSurface {
                     }
                 })
             }
-            WindowSurface::X11(_) => true,
+            WindowSurface::X11(surface) => surface.pending_geometry().is_none(),
         }
     }
 
