@@ -926,7 +926,7 @@ impl State {
                             }
 
                             let change = -(percentage / 100.);
-                            self.update_zoom(&seat, change, false);
+                            self.update_zoom(&seat, change, event.source() == AxisSource::Wheel);
                         }
                     } else {
                         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
