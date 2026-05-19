@@ -66,6 +66,17 @@ impl Default for AppearanceConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnimationConfig {
+    pub enabled: bool,
+}
+
+impl Default for AnimationConfig {
+    fn default() -> Self {
+        AnimationConfig { enabled: true }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, CosmicConfigEntry)]
 #[version = 1]
 pub struct CosmicCompConfig {
@@ -97,6 +108,7 @@ pub struct CosmicCompConfig {
     pub xwayland_eavesdropping: XwaylandEavesdropping,
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
+    pub animations: AnimationConfig,
     pub accessibility_zoom: ZoomConfig,
     pub appearance_settings: AppearanceConfig,
 }
@@ -133,6 +145,7 @@ impl Default for CosmicCompConfig {
             descale_xwayland: XwaylandDescaling::Fractional,
             xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
+            animations: AnimationConfig::default(),
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
         }
