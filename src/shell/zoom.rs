@@ -9,7 +9,7 @@ use cosmic::{
 };
 use cosmic_comp_config::ZoomMovement;
 use cosmic_config::ConfigSet;
-use keyframe::{ease, functions::EaseInOutCubic};
+use keyframe::{ease, functions::Linear};
 use smithay::{
     backend::renderer::{ImportMem, Renderer, element::AsRenderElements},
     desktop::space::SpaceElement,
@@ -135,7 +135,7 @@ impl OutputZoomState {
             let percentage =
                 duration_since.as_millis() as f32 / ANIMATION_DURATION.as_millis() as f32;
             ease(
-                EaseInOutCubic,
+                Linear,
                 EasePoint(*old_point),
                 EasePoint(self.focal_point),
                 percentage,
@@ -159,7 +159,7 @@ impl OutputZoomState {
             let percentage = Instant::now().duration_since(*start).as_millis() as f32
                 / ANIMATION_DURATION.as_millis() as f32;
 
-            ease(EaseInOutCubic, *old_level, self.level, percentage)
+            ease(Linear, *old_level, self.level, percentage)
         } else {
             self.level
         }

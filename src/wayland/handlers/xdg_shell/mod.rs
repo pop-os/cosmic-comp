@@ -6,7 +6,6 @@ use crate::{
 };
 use smithay::desktop::layer_map_for_output;
 use smithay::{
-    delegate_xdg_shell,
     desktop::{
         PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
         WindowSurfaceType, find_popup_root_surface,
@@ -52,6 +51,7 @@ impl XdgShellHandler for State {
                 seat,
                 fullscreen: None,
                 maximized: false,
+                sticky: false,
             })
         }
         // We will position the window after the first commit, when we know its size hints
@@ -391,5 +391,3 @@ impl XdgShellHandler for State {
         }
     }
 }
-
-delegate_xdg_shell!(State);

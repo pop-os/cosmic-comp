@@ -1,7 +1,6 @@
 use std::{cell::RefCell, sync::Mutex};
 
 use smithay::{
-    delegate_kde_decoration, delegate_xdg_decoration,
     desktop::Window,
     reexports::{
         wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as XdgMode,
@@ -186,6 +185,3 @@ impl KdeDecorationHandler for State {
         });
     }
 }
-
-delegate_xdg_decoration!(State);
-delegate_kde_decoration!(State);

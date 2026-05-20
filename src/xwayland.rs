@@ -815,6 +815,7 @@ impl XwmHandler for State {
                 seat,
                 fullscreen: None,
                 maximized: false,
+                sticky: false,
             })
         }
     }
@@ -1164,6 +1165,28 @@ impl XwmHandler for State {
             .find(|pending| pending.surface.x11_surface() == Some(&window))
         {
             pending.fullscreen.take();
+        }
+    }
+
+    fn stick_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let mut shell = self.common.shell.write();
+        if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.sticky = true;
+        }
+    }
+
+    fn unstick_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let mut shell = self.common.shell.write();
+        if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|pending| pending.surface.x11_surface() == Some(&window))
+        {
+            pending.sticky = false;
         }
     }
 
