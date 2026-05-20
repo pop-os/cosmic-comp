@@ -128,10 +128,14 @@ fn render_input_order_internal<R: 'static>(
     let overview_is_open = workspace_overview_is_open(output);
     let has_focused_fullscreen = if is_active_workspace {
         let current_focus = seat.get_keyboard().unwrap().current_focus();
-        matches!(current_focus, Some(KeyboardFocusTarget::Fullscreen(_)))
-            || (current_focus.is_none()
-                && focus_stack_is_valid_fullscreen
-                && !workspace_overview_is_open(output))
+        current_focus.as_ref().is_some_and(|target| match target {
+            KeyboardFocusTarget::Fullscreen(s) => Some(s) == fullscreen.map(|f| &f.surface),
+            KeyboardFocusTarget::Element(m) => fullscreen
+                .is_some_and(|f| m.windows().any(|(s, _)| s == &f.surface)),
+            _ => false,
+        }) || (current_focus.is_none()
+            && focus_stack_is_valid_fullscreen
+            && !workspace_overview_is_open(output))
     } else {
         focus_stack_is_valid_fullscreen && !overview_is_open
     };
