@@ -1,9 +1,9 @@
 [Unit]
 Description=Cosmic wayland compositor
-BindsTo=cosmic-session.target
-Wants=cosmic-session-pre.target
-After=cosmic-session-pre.target
-Before=cosmic-session.target
+BindsTo=cosmic-comp-session.target
+Wants=cosmic-comp-session-pre.target
+After=cosmic-comp-session-pre.target
+Before=cosmic-comp-session.target
 
 [Service]
 Type=notify

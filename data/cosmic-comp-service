@@ -6,7 +6,7 @@
 # reset them so that they don't break this startup
 for unit in $(systemctl --user --no-legend --state=failed --plain list-units | cut -f1 -d' '); do
 	partof="$(systemctl --user show -p PartOf --value "$unit")"
-	for target in cosmic-session.target graphical-session.target; do
+	for target in cosmic-comp-session.target graphical-session.target; do
 		if [ "$partof" = "$target" ]; then
 			systemctl --user reset-failed "$unit"
 			break
