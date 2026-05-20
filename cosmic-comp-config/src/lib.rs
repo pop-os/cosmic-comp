@@ -99,6 +99,8 @@ pub struct CosmicCompConfig {
     pub edge_snap_threshold: u32,
     pub accessibility_zoom: ZoomConfig,
     pub appearance_settings: AppearanceConfig,
+    /// Hide the cursor after this many seconds of pointer inactivity (None disables)
+    pub cursor_hide_timeout: Option<u32>,
 }
 
 impl Default for CosmicCompConfig {
@@ -135,6 +137,7 @@ impl Default for CosmicCompConfig {
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
+            cursor_hide_timeout: None,
         }
     }
 }

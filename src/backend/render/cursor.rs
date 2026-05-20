@@ -17,14 +17,25 @@ use smithay::{
         Seat,
         pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
     },
-    reexports::wayland_server::protocol::wl_surface,
+    reexports::{
+        calloop::{
+            RegistrationToken,
+            timer::{TimeoutAction, Timer},
+        },
+        wayland_server::protocol::wl_surface,
+    },
     render_elements,
     utils::{
         Buffer as BufferCoords, Logical, Monotonic, Physical, Point, Scale, Size, Time, Transform,
     },
     wayland::compositor::{get_role, with_states},
 };
-use std::{collections::HashMap, io::Read, sync::Mutex};
+use std::{
+    collections::HashMap,
+    io::Read,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 use tracing::warn;
 use xcursor::{
     CursorTheme,
@@ -196,6 +207,10 @@ pub struct CursorStateInner {
     cursors: HashMap<CursorIcon, Cursor>,
     current_image: Option<Image>,
     image_cache: Vec<(Image, MemoryRenderBuffer)>,
+
+    hidden: bool,
+    idle_timer: Option<RegistrationToken>,
+    last_armed: Option<Instant>,
 }
 
 impl CursorStateInner {
@@ -246,6 +261,10 @@ impl Default for CursorStateInner {
             cursors: HashMap::new(),
             current_image: None,
             image_cache: Vec::new(),
+
+            hidden: false,
+            idle_timer: None,
+            last_armed: None,
         }
     }
 }
@@ -270,6 +289,10 @@ where
     let seat_userdata = seat.user_data();
     let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
     let state = &mut *state_ref;
+
+    if state.hidden {
+        return Vec::new();
+    }
 
     let named_cursor = state.current_cursor.or(match cursor_status {
         CursorImageStatus::Named(named_cursor) => Some(named_cursor),
@@ -333,5 +356,73 @@ where
         return draw_surface_cursor(renderer, wl_surface, location, scale);
     } else {
         Vec::new()
+    }
+}
+
+const ACTIVITY_THROTTLE: Duration = Duration::from_millis(100);
+
+/// Reveal the cursor and (re)arm the idle-hide timer; returns true if it was previously hidden
+pub fn notify_cursor_activity(state: &State, seat: &Seat<State>) -> bool {
+    let timeout = state.common.config.cosmic_conf.cursor_hide_timeout;
+    let loop_handle = &state.common.event_loop_handle;
+    let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+    let now = Instant::now();
+
+    let (was_hidden, old_token) = {
+        let mut inner = cursor_state.lock().unwrap();
+        let was_hidden = inner.hidden;
+        inner.hidden = false;
+
+        let throttled = timeout.is_some()
+            && !was_hidden
+            && inner.idle_timer.is_some()
+            && inner
+                .last_armed
+                .is_some_and(|t| now.duration_since(t) < ACTIVITY_THROTTLE);
+        if throttled {
+            return was_hidden;
+        }
+
+        let old_token = inner.idle_timer.take();
+        inner.last_armed = None;
+        (was_hidden, old_token)
+    };
+
+    if let Some(token) = old_token {
+        loop_handle.remove(token);
+    }
+
+    if let Some(secs) = timeout {
+        let timer = Timer::from_duration(Duration::from_secs(secs as u64));
+        let seat = seat.clone();
+        if let Ok(token) = loop_handle.insert_source(timer, move |_, _, state| {
+            hide_cursor(state, &seat);
+            TimeoutAction::Drop
+        }) {
+            let mut inner = cursor_state.lock().unwrap();
+            inner.idle_timer = Some(token);
+            inner.last_armed = Some(now);
+        }
+    }
+
+    was_hidden
+}
+
+fn hide_cursor(state: &mut State, seat: &Seat<State>) {
+    if let Some(ptr) = seat.get_pointer()
+        && ptr.is_grabbed()
+    {
+        return;
+    }
+    let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+    {
+        let mut inner = cursor_state.lock().unwrap();
+        inner.hidden = true;
+        inner.idle_timer = None;
+        inner.last_armed = None;
+    }
+    let outputs: Vec<_> = state.common.shell.read().outputs().cloned().collect();
+    for output in outputs {
+        state.backend.schedule_render(&output);
     }
 }
