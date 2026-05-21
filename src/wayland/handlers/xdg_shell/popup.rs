@@ -68,7 +68,7 @@ impl Shell {
                     unconstrain_xdg_popup(surface, window_loc, output.geometry());
                 }
             } else if let Some(output) = self.workspaces.spaces().find_map(|w| {
-                w.fullscreen.as_ref().and_then(|f| {
+                w.fullscreen.iter().find_map(|f| {
                     (f.surface.wl_surface().as_deref() == Some(&parent)).then_some(w.output())
                 })
             }) {
