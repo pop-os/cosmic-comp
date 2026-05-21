@@ -1329,6 +1329,25 @@ impl Workspace {
         ))
     }
 
+    #[must_use]
+    pub fn remove_fullscreen_surface<S>(
+        &mut self,
+        surface: &S,
+    ) -> Option<(
+        CosmicSurface,
+        Option<FullscreenRestoreState>,
+        Option<Rectangle<i32, Local>>,
+    )>
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        let idx = self
+            .fullscreen
+            .iter()
+            .position(|f| f.ended_at.is_none() && &f.surface == surface)?;
+        self.remove_fullscreen_at(idx)
+    }
+
     pub fn get_fullscreen(&self, seat: &Seat<State>) -> Option<&FullscreenSurface> {
         let stack = self.focus_stack.get(seat);
         stack
@@ -1348,6 +1367,12 @@ impl Workspace {
                     .rev()
                     .find(|f| f.alive() && f.ended_at.is_none())
             })
+    }
+
+    pub fn get_fullscreen_surfaces(&self) -> impl Iterator<Item = &FullscreenSurface> {
+        self.fullscreen
+            .iter()
+            .filter(|f| f.alive() && f.ended_at.is_none())
     }
 
     pub fn resize(
