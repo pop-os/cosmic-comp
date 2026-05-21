@@ -809,12 +809,14 @@ impl XwmHandler for State {
             );
         }
         if !shell.pending_windows.iter().any(|w| w.surface == window) {
+            let fullscreen = window.is_fullscreen().then(|| seat.active_output());
+            let maximized = window.is_maximized();
             let surface = CosmicSurface::from(window);
             shell.pending_windows.push(PendingWindow {
                 surface,
                 seat,
-                fullscreen: None,
-                maximized: false,
+                fullscreen,
+                maximized,
                 sticky: false,
             })
         }
@@ -914,7 +916,11 @@ impl XwmHandler for State {
         // We only allow floating X11 windows to resize themselves. Nothing else
         let shell = self.common.shell.read();
 
-        // TODO: Fullscreen
+        if window.is_fullscreen() {
+            let _ = window.configure(None);
+            return;
+        }
+
         if let Some(mapped) = shell
             .element_for_surface(&window)
             .filter(|mapped| !mapped.is_minimized())
