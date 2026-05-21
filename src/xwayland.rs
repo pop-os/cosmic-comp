@@ -916,7 +916,11 @@ impl XwmHandler for State {
         // We only allow floating X11 windows to resize themselves. Nothing else
         let shell = self.common.shell.read();
 
-        // TODO: Fullscreen
+        if window.is_fullscreen() {
+            let _ = window.configure(None);
+            return;
+        }
+
         if let Some(mapped) = shell
             .element_for_surface(&window)
             .filter(|mapped| !mapped.is_minimized())
