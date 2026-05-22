@@ -482,23 +482,30 @@ fn blit_from_active_fb(
     to_texture: &mut GlesTexture,
 ) -> Result<SyncPoint, GlesError> {
     if transform != Transform::Normal {
+        let dst = dst
+            .to_logical(1)
+            .to_buffer(1, transform, &frame.output_size().to_logical(1));
         let tex_size = to_texture
             .size()
             .to_logical(1, Transform::Normal)
             .to_physical(1);
         let mut renderer = frame.renderer();
-        let mut tmp_texture = renderer.as_mut().create_buffer(
-            Fourcc::Abgr8888,
-            dst.size.to_logical(1).to_buffer(1, Transform::Normal),
-        )?;
+        let mut tmp_texture = renderer
+            .as_mut()
+            .create_buffer(Fourcc::Abgr8888, dst.size)?;
         let mut fb_tmp = renderer.as_mut().bind(&mut tmp_texture)?;
         let mut fb = renderer.as_mut().bind(to_texture)?;
         std::mem::drop(renderer);
 
+        // TODO: Why does blit not take buffer coordinates?
+        let dst_phys = Rectangle::<_, Physical>::new(
+            Point::new(dst.loc.x, dst.loc.y),
+            dst.size.to_logical(1, Transform::Normal).to_physical(1),
+        );
         let sync = frame.blit_to(
             &mut fb_tmp,
-            dst,
-            Rectangle::from_size(dst.size),
+            dst_phys,
+            Rectangle::from_size(dst_phys.size),
             TextureFilter::Linear,
         )?;
         std::mem::drop(fb_tmp);
@@ -511,18 +518,13 @@ fn blit_from_active_fb(
         Frame::render_texture_from_to(
             &mut frame,
             &tmp_texture,
-            Rectangle::from_size(
-                dst.size
-                    .to_logical(1)
-                    .to_buffer(1, Transform::Normal)
-                    .to_f64(),
-            ),
+            Rectangle::from_size(dst.size.to_f64()),
             src.to_logical(1., Transform::Normal, &src.size)
                 .to_physical(1.)
                 .to_i32_round(),
-            &[Rectangle::from_size(dst.size)],
-            &[Rectangle::from_size(dst.size)],
-            transform,
+            &[Rectangle::from_size(dst_phys.size)],
+            &[Rectangle::from_size(dst_phys.size)],
+            transform.invert(),
             1.0,
         )?;
         std::mem::drop(tmp_texture);
