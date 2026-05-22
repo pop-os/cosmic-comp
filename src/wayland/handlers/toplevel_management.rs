@@ -42,7 +42,7 @@ impl ToplevelManagementHandler for State {
                 .spaces_for_output(output)
                 .enumerate()
                 .find(|(_, w)| {
-                    w.get_fullscreen().is_some_and(|f| f == window)
+                    w.get_fullscreen_surfaces().any(|f| &f.surface == window)
                         || w.mapped()
                             .flat_map(|m| m.windows().map(|(s, _)| s))
                             .any(|w| &w == window)
