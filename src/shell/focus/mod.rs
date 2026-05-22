@@ -288,22 +288,18 @@ impl Shell {
             }
 
             let workspace = &mut set.workspaces[set.active];
-            if let Some(fullscreen) = workspace.get_fullscreen() {
-                if self.seats.iter().any(|seat| {
+            for fs in workspace.get_fullscreen_surfaces() {
+                let is_focused = self.seats.iter().any(|seat| {
                     if let Some(KeyboardFocusTarget::Fullscreen(s)) =
                         seat.get_keyboard().unwrap().current_focus()
                     {
-                        &s == fullscreen
+                        s == fs.surface
                     } else {
                         false
                     }
-                }) {
-                    fullscreen.set_activated(true);
-                    fullscreen.send_configure();
-                } else {
-                    fullscreen.set_activated(false);
-                    fullscreen.send_configure();
-                }
+                });
+                fs.surface.set_activated(is_focused);
+                fs.surface.send_configure();
             }
             for focused in focused_windows.iter() {
                 raise_with_children(&mut workspace.floating_layer, focused);
@@ -661,7 +657,9 @@ fn focus_target_is_valid(
             .has_node(&node),
         KeyboardFocusTarget::Fullscreen(window) => {
             let workspace = shell.active_space(output).unwrap();
-            workspace.get_fullscreen().is_some_and(|w| w == &window)
+            workspace
+                .get_fullscreen_surfaces()
+                .any(|f| f.surface == window)
         }
         KeyboardFocusTarget::Popup(_) => true,
         KeyboardFocusTarget::LockSurface(_) => false,
@@ -714,9 +712,9 @@ fn update_focus_target(
                     .map(KeyboardFocusTarget::Element)
                     .or_else(|| {
                         workspace
-                            .get_fullscreen()
+                            .get_fullscreen(seat)
                             .cloned()
-                            .map(KeyboardFocusTarget::Fullscreen)
+                            .map(|fs| KeyboardFocusTarget::Fullscreen(fs.surface))
                     })
             })
     }

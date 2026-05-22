@@ -3696,7 +3696,7 @@ impl Shell {
                 .find(|f| &f.surface == surface)
                 .unwrap();
             element_geo = Some(workspace.fullscreen_geometry_for(fs));
-            let (surface, state, _) = workspace.remove_fullscreen().unwrap();
+            let (surface, state, _) = workspace.remove_fullscreen_surface(surface).unwrap();
             self.remap_unfullscreened_window(surface, state, evlh);
         };
 
@@ -3909,19 +3909,15 @@ impl Shell {
     /// Get the window geometry of a keyboard focus target
     pub fn focused_geometry(&self, target: &KeyboardFocusTarget) -> Option<Rectangle<i32, Global>> {
         match target {
-            KeyboardFocusTarget::Fullscreen(surface) => {
-                if let Some(workspace) = surface
-                    .wl_surface()
-                    .and_then(|s| self.workspace_for_surface(&s))
-                    .and_then(|(handle, _)| self.workspaces.space_for_handle(&handle))
-                {
+            KeyboardFocusTarget::Fullscreen(surface) => surface
+                .wl_surface()
+                .and_then(|s| self.workspace_for_surface(&s))
+                .and_then(|(handle, _)| self.workspaces.space_for_handle(&handle))
+                .map(|workspace| {
                     workspace
-                        .fullscreen_geometry()
-                        .map(|f| f.to_global(workspace.output()))
-                } else {
-                    None
-                }
-            }
+                        .fullscreen_geometry_for_surface(surface)
+                        .to_global(workspace.output())
+                }),
             _ => {
                 if let Some(element) = self.focused_element(target) {
                     self.element_geometry(&element)

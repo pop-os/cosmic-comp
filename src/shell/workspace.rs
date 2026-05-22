@@ -727,8 +727,11 @@ impl Workspace {
         Some((mapped.active_window(), layer))
     }
 
-    pub fn fullscreen_geometry_for(&self, fullscreen: &FullscreenSurface) -> Rectangle<i32, Local> {
-        let bbox = fullscreen.surface.bbox().as_local();
+    pub fn fullscreen_geometry_for_surface(
+        &self,
+        surface: &CosmicSurface,
+    ) -> Rectangle<i32, Local> {
+        let bbox = surface.bbox().as_local();
 
         let mut full_geo = Rectangle::from_size(self.output.geometry().size.as_local());
         if bbox != full_geo {
@@ -743,6 +746,9 @@ impl Workspace {
         }
 
         full_geo
+    }
+    pub fn fullscreen_geometry_for(&self, fullscreen: &FullscreenSurface) -> Rectangle<i32, Local> {
+        return self.fullscreen_geometry_for_surface(&fullscreen.surface);
     }
 
     pub fn element_for_surface<S>(&self, surface: &S) -> Option<&CosmicMapped>
@@ -831,11 +837,10 @@ impl Workspace {
         let stack = self.focus_stack.get(seat);
         let last_focused = stack.last();
 
-        if let Some(fullscreen) = self.fullscreen.iter().find(|f| {
-            !f.is_animating()
-                && last_focused.is_some_and(
-                    |t| matches!(t, FocusTarget::Fullscreen(f) if f == &fullscreen.surface),
-                )
+        if let Some(fullscreen) = self.fullscreen.iter().find(|fs| {
+            !fs.is_animating()
+                && last_focused
+                    .is_some_and(|t| matches!(t, FocusTarget::Fullscreen(f) if f == &fs.surface))
         }) {
             let geometry = self.fullscreen_geometry_for(fullscreen);
             return fullscreen_element_under(fullscreen, geometry);

@@ -219,8 +219,8 @@ impl State {
                     .workspaces
                     .space_for_handle(&workspace)
                     .unwrap()
-                    .get_fullscreen()
-                    .cloned()
+                    .get_fullscreen(&seat)
+                    .map(|f| f.surface.clone())
                     .map(KeyboardFocusTarget::Fullscreen)
                 else {
                     return;
@@ -232,8 +232,8 @@ impl State {
                 if let Some(surface) = shell
                     .workspaces
                     .space_for_handle(&workspace)
-                    .and_then(|w| w.get_fullscreen())
-                    .cloned()
+                    .and_then(|w| w.get_fullscreen(&seat))
+                    .map(|f| f.surface.clone())
                 {
                     shell.append_focus_stack(surface, &seat)
                 }
