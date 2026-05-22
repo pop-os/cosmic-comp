@@ -481,21 +481,32 @@ fn blit_from_active_fb(
     transform: Transform,
     to_texture: &mut GlesTexture,
 ) -> Result<SyncPoint, GlesError> {
+    let tex_size = to_texture
+        .size()
+        .to_logical(1, Transform::Normal)
+        .to_physical(1);
+    let fb_size = frame.output_size();
+
+    let mut renderer = frame.renderer();
+    let mut fb = renderer.as_mut().bind(to_texture)?;
+    let sync = {
+        let mut subframe = renderer
+            .as_mut()
+            .render(&mut fb, tex_size, Transform::Normal)?;
+        subframe.clear(Color32F::TRANSPARENT, &[Rectangle::from_size(tex_size)])?;
+        subframe.finish()?
+    };
+
     if transform != Transform::Normal {
         let dst = dst
             .to_logical(1)
-            .to_buffer(1, transform, &frame.output_size().to_logical(1));
-        let tex_size = to_texture
-            .size()
-            .to_logical(1, Transform::Normal)
-            .to_physical(1);
-        let mut renderer = frame.renderer();
+            .to_buffer(1, transform, &fb_size.to_logical(1));
         let mut tmp_texture = renderer
             .as_mut()
             .create_buffer(Fourcc::Abgr8888, dst.size)?;
         let mut fb_tmp = renderer.as_mut().bind(&mut tmp_texture)?;
-        let mut fb = renderer.as_mut().bind(to_texture)?;
         std::mem::drop(renderer);
+        frame.wait(&sync)?;
 
         // TODO: Why does blit not take buffer coordinates?
         let dst_phys = Rectangle::<_, Physical>::new(
@@ -508,6 +519,7 @@ fn blit_from_active_fb(
             Rectangle::from_size(dst_phys.size),
             TextureFilter::Linear,
         )?;
+        frame.wait(&sync)?;
         std::mem::drop(fb_tmp);
 
         let mut renderer = frame.renderer();
@@ -530,8 +542,8 @@ fn blit_from_active_fb(
         std::mem::drop(tmp_texture);
         frame.finish()
     } else {
-        let mut fb = frame.renderer().as_mut().bind(to_texture)?;
-
+        std::mem::drop(renderer);
+        frame.wait(&sync)?;
         frame.blit_to(
             &mut fb,
             dst,
