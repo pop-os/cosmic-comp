@@ -840,6 +840,7 @@ dependencies = [
  "cosmic-text",
  "egui",
  "egui_plot",
+ "futures-channel",
  "futures-executor",
  "futures-util",
  "i18n-embed",
