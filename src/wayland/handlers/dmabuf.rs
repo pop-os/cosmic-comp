@@ -51,7 +51,7 @@ impl DmabufHandler for State {
         let is_fullscreen = shell
             .workspaces
             .space_for_handle(&handle)?
-            .fullscreen
+            .fullscreen_surfaces
             .iter()
             .any(|f| f.surface.has_surface(surface, WindowSurfaceType::all()));
         //HOJJAT  do we need to f.ended_at.is_none()?

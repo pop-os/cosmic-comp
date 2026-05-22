@@ -108,7 +108,7 @@ pub struct Workspace {
     pub floating_layer: FloatingLayout,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub tiling_enabled: bool,
-    pub fullscreen: Vec<FullscreenSurface>,
+    pub fullscreen_surfaces: Vec<FullscreenSurface>,
     pub pinned: bool,
     pub id: Option<String>,
 
@@ -383,7 +383,7 @@ impl Workspace {
             floating_layer,
             tiling_enabled,
             minimized_windows: Vec::new(),
-            fullscreen: Vec::new(),
+            fullscreen_surfaces: Vec::new(),
             pinned: false,
             id: None,
             handle,
@@ -416,7 +416,7 @@ impl Workspace {
             floating_layer,
             tiling_enabled: pinned.tiling_enabled,
             minimized_windows: Vec::new(),
-            fullscreen: Vec::new(),
+            fullscreen_surfaces: Vec::new(),
             pinned: true,
             id: pinned.id.clone(),
             handle,
@@ -456,7 +456,7 @@ impl Workspace {
     pub fn refresh(&mut self) {
         // seems it removes dead windows
         // self.fullscreen.take_if(|w| !w.alive());
-        self.fullscreen.retain(|w| w.alive());
+        self.fullscreen_surfaces.retain(|w| w.alive());
 
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
@@ -485,7 +485,7 @@ impl Workspace {
     pub fn refresh_focus_stack(&mut self) {
         for (seat, stack) in self.focus_stack.0.iter_mut() {
             let fullscreen_surfaces: Vec<&CosmicSurface> = self
-                .fullscreen
+                .fullscreen_surfaces
                 .iter()
                 .filter(|f| f.alive() && f.ended_at.is_none())
                 .map(|f| &f.surface)
@@ -519,12 +519,12 @@ impl Workspace {
     pub fn animations_going(&self) -> bool {
         self.tiling_layer.animations_going()
             || self.floating_layer.animations_going()
-            || self.fullscreen.iter().any(|f| f.is_animating())
+            || self.fullscreen_surfaces.iter().any(|f| f.is_animating())
             || self.dirty.swap(false, Ordering::SeqCst)
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
-        for f in self.fullscreen.iter_mut() {
+        for f in self.fullscreen_surfaces.iter_mut() {
             if let Some(start) = f.start_at.as_ref() {
                 let duration_since = Instant::now().duration_since(*start);
                 if duration_since > FULLSCREEN_ANIMATION_DURATION {
@@ -534,7 +534,7 @@ impl Workspace {
             }
         }
 
-        self.fullscreen.retain(|f| {
+        self.fullscreen_surfaces.retain(|f| {
             if let Some(end) = f.ended_at
                 && Instant::now().duration_since(end) >= FULLSCREEN_ANIMATION_DURATION
             {
@@ -577,7 +577,11 @@ impl Workspace {
                 toplevel_enter_output(&surface, output);
             }
         }
-        for f in self.fullscreen.iter().filter(|f| f.ended_at.is_none()) {
+        for f in self
+            .fullscreen_surfaces
+            .iter()
+            .filter(|f| f.ended_at.is_none())
+        {
             toplevel_leave_output(&f.surface, &self.output);
             toplevel_enter_output(&f.surface, output);
         }
@@ -669,7 +673,7 @@ impl Workspace {
         CosmicSurface: PartialEq<S>,
     {
         if let Some(idx) = self
-            .fullscreen
+            .fullscreen_surfaces
             .iter()
             .position(|f| f.ended_at.is_none() && &f.surface == surface)
         {
@@ -788,7 +792,7 @@ impl Workspace {
         let stack = self.focus_stack.get(seat);
         let last_focused = stack.last();
 
-        if let Some(fullscreen) = self.fullscreen.iter().find(|f| {
+        if let Some(fullscreen) = self.fullscreen_surfaces.iter().find(|f| {
             !f.is_animating()
                 && last_focused
                     .is_some_and(|t| matches!(t, FocusTarget::Fullscreen(s) if s == &f.surface))
@@ -837,7 +841,7 @@ impl Workspace {
         let stack = self.focus_stack.get(seat);
         let last_focused = stack.last();
 
-        if let Some(fullscreen) = self.fullscreen.iter().find(|fs| {
+        if let Some(fullscreen) = self.fullscreen_surfaces.iter().find(|fs| {
             !fs.is_animating()
                 && last_focused
                     .is_some_and(|t| matches!(t, FocusTarget::Fullscreen(f) if f == &fs.surface))
@@ -897,7 +901,7 @@ impl Workspace {
         let stack = self.focus_stack.get(seat);
         let last_focused = stack.last();
 
-        self.fullscreen
+        self.fullscreen_surfaces
             .iter()
             .find(|f| last_focused.is_some_and(|t| t == &f.surface))
             .and_then(check_fullscreen)
@@ -941,7 +945,7 @@ impl Workspace {
         let stack = self.focus_stack.get(seat);
         let last_focused = stack.last();
 
-        self.fullscreen
+        self.fullscreen_surfaces
             .iter()
             .find(|f| last_focused.is_some_and(|t| t == &f.surface))
             .and_then(check_fullscreen)
@@ -1023,13 +1027,13 @@ impl Workspace {
         CosmicSurface: PartialEq<S>,
     {
         if let Some(idx) = self
-            .fullscreen
+            .fullscreen_surfaces
             .iter()
             .position(|f| f.ended_at.is_none() && &f.surface == surface)
         {
-            let fullscreen_state = self.fullscreen.get(idx)?.clone();
+            let fullscreen_state = self.fullscreen_surfaces.get(idx)?.clone();
             {
-                let f = self.fullscreen.get_mut(idx)?;
+                let f = self.fullscreen_surfaces.get_mut(idx)?;
                 f.previous_geometry = Some(to);
                 f.ended_at = Some(
                     Instant::now()
@@ -1138,7 +1142,7 @@ impl Workspace {
                 self.focus_stack
                     .get_mut(seat)
                     .append(FocusTarget::Fullscreen(surface.clone()));
-                self.fullscreen.push(FullscreenSurface {
+                self.fullscreen_surfaces.push(FullscreenSurface {
                     surface,
                     previous_state: previous.clone().map(|p| p.previous_state),
                     previous_geometry: previous.map(|p| p.previous_geometry),
@@ -1248,7 +1252,7 @@ impl Workspace {
         }
 
         self.dirty.store(true, Ordering::SeqCst);
-        self.fullscreen.push(FullscreenSurface {
+        self.fullscreen_surfaces.push(FullscreenSurface {
             surface: window.clone(),
             previous_state: restore,
             previous_geometry,
@@ -1270,10 +1274,10 @@ impl Workspace {
         CosmicSurface: PartialEq<S>,
     {
         let idx = self
-            .fullscreen
+            .fullscreen_surfaces
             .iter()
             .position(|f| f.ended_at.is_none() && &f.surface == surface)?;
-        let fs = self.fullscreen.remove(idx);
+        let fs = self.fullscreen_surfaces.remove(idx);
 
         for focus_stack in self.focus_stack.0.values_mut() {
             focus_stack.retain(|t| t != &fs.surface);
@@ -1292,7 +1296,7 @@ impl Workspace {
         Option<Rectangle<i32, Local>>,
     )> {
         // if it doesn't exist we move on.
-        let surface = self.fullscreen.get_mut(idx)?;
+        let surface = self.fullscreen_surfaces.get_mut(idx)?;
         // if already being removed, do nothing
         if surface.ended_at.is_some() {
             return None;
@@ -1347,7 +1351,7 @@ impl Workspace {
         CosmicSurface: PartialEq<S>,
     {
         let idx = self
-            .fullscreen
+            .fullscreen_surfaces
             .iter()
             .position(|f| f.ended_at.is_none() && &f.surface == surface)?;
         self.remove_fullscreen_at(idx)
@@ -1359,7 +1363,7 @@ impl Workspace {
             .iter()
             .find_map(|t| {
                 if let FocusTarget::Fullscreen(s) = t {
-                    self.fullscreen
+                    self.fullscreen_surfaces
                         .iter()
                         .find(|f| f.alive() && f.ended_at.is_none() && &f.surface == s)
                 } else {
@@ -1367,7 +1371,7 @@ impl Workspace {
                 }
             })
             .or_else(|| {
-                self.fullscreen
+                self.fullscreen_surfaces
                     .iter()
                     .rev()
                     .find(|f| f.alive() && f.ended_at.is_none())
@@ -1375,7 +1379,7 @@ impl Workspace {
     }
 
     pub fn get_fullscreen_surfaces(&self) -> impl Iterator<Item = &FullscreenSurface> {
-        self.fullscreen
+        self.fullscreen_surfaces
             .iter()
             .filter(|f| f.alive() && f.ended_at.is_none())
     }
@@ -1504,14 +1508,14 @@ impl Workspace {
         self.floating_layer.mapped().count()
             + self.tiling_layer.mapped().count()
             + self.minimized_windows.len()
-            + self.fullscreen.len() // HOJJAT: should we check if they're animating to close?!
+            + self.fullscreen_surfaces.len() // HOJJAT: should we check if they're animating to close?!
     }
 
     pub fn is_empty(&self) -> bool {
         self.floating_layer.mapped().next().is_none()
             && self.tiling_layer.mapped().next().is_none()
             && self.minimized_windows.is_empty()
-            && self.fullscreen.is_empty() // HOJJAT: should we check if it's alive and not closing?!
+            && self.fullscreen_surfaces.is_empty() // HOJJAT: should we check if it's alive and not closing?!
     }
 
     pub fn is_floating<S>(&self, surface: &S) -> bool
@@ -1701,7 +1705,7 @@ impl Workspace {
             fullscreen_elements.extend(render_fullscreen(fs, renderer, output_scale));
         }
         // Also render any animating (entering/exiting) fullscreens
-        for fs in self.fullscreen.iter().filter(|f| f.is_animating()) {
+        for fs in self.fullscreen_surfaces.iter().filter(|f| f.is_animating()) {
             if top_fullscreen.is_none_or(|top| top.surface != fs.surface) {
                 fullscreen_elements.extend(render_fullscreen(fs, renderer, output_scale));
             };
@@ -1712,13 +1716,13 @@ impl Workspace {
         }
 
         let any_fullscreen_animating = self
-            .fullscreen
+            .fullscreen_surfaces
             .iter()
             .any(|f| f.start_at.is_some() || f.ended_at.is_some());
         if !matches!(focused, Some(FocusTarget::Fullscreen(_)))
             || any_fullscreen_animating
             || self
-                .fullscreen
+                .fullscreen_surfaces
                 .iter()
                 .all(|f| !f.alive() || f.ended_at.is_some())
         {
@@ -1900,13 +1904,13 @@ impl Workspace {
         }
 
         let any_fullscreen_animating = self
-            .fullscreen
+            .fullscreen_surfaces
             .iter()
             .any(|f| f.start_at.is_some() || f.ended_at.is_some());
         if !matches!(focus_stack.last(), Some(FocusTarget::Fullscreen(_)))
             || any_fullscreen_animating
             || self
-                .fullscreen
+                .fullscreen_surfaces
                 .iter()
                 .all(|f| !f.alive() || f.ended_at.is_some())
         {
