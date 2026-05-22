@@ -35,14 +35,15 @@ use calloop::{
 use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
+#[cfg(feature = "systemd")]
+use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, Device, DeviceCapability,
         GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
         GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
-        PointerAxisEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
-        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-        TabletToolTipState, TouchEvent,
+        PointerAxisEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
+        TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
     },
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
@@ -74,7 +75,7 @@ use smithay::{
         tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
 };
-use tracing::{error, trace, warn};
+use tracing::{error, trace};
 use xkbcommon::xkb::{Keycode, Keysym};
 
 use std::{
@@ -1599,6 +1600,7 @@ impl State {
                 }
             }
             InputEvent::Special(_) => {}
+            #[allow(unused_variables)]
             InputEvent::SwitchToggle { event } => {
                 #[cfg(feature = "logind")]
                 if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
@@ -1620,7 +1622,7 @@ impl State {
 
                     if let Err(err) = self.refresh_output_config() {
                         if !closed {
-                            warn!(?err, "Failed to re-enable internal connector");
+                            tracing::warn!(?err, "Failed to re-enable internal connector");
                             if let Some(output) = output {
                                 use cosmic_comp_config::output::comp::OutputState;
 
