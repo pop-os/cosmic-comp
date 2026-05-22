@@ -436,9 +436,9 @@ impl Workspace {
     }
 
     pub fn to_pinned(&self) -> Option<PinnedWorkspace> {
-        debug_assert!(self.id.is_some());
         let output = self.explicit_output().clone();
         if self.pinned {
+            debug_assert!(self.id.is_some());
             Some(PinnedWorkspace {
                 output: cosmic_comp_config::workspace::OutputMatch {
                     name: output.name,
