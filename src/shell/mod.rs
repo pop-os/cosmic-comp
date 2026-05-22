@@ -4770,7 +4770,7 @@ impl Shell {
         &mut self,
         surface: &S,
         output: Output,
-        loop_handle: &LoopHandle<'static, State>,
+        _loop_handle: &LoopHandle<'static, State>,
     ) -> Option<KeyboardFocusTarget>
     where
         CosmicSurface: PartialEq<S>,

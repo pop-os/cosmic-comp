@@ -752,7 +752,7 @@ impl Workspace {
         full_geo
     }
     pub fn fullscreen_geometry_for(&self, fullscreen: &FullscreenSurface) -> Rectangle<i32, Local> {
-        return self.fullscreen_geometry_for_surface(&fullscreen.surface);
+        self.fullscreen_geometry_for_surface(&fullscreen.surface)
     }
 
     pub fn element_for_surface<S>(&self, surface: &S) -> Option<&CosmicMapped>
