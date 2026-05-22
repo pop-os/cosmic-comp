@@ -101,6 +101,7 @@ pub struct CosmicCompConfig {
     pub appearance_settings: AppearanceConfig,
     /// Hide the cursor after this many seconds of pointer inactivity (None disables)
     pub cursor_hide_timeout: Option<u32>,
+    pub activation_policy: ActivationPolicy,
 }
 
 impl Default for CosmicCompConfig {
@@ -138,6 +139,7 @@ impl Default for CosmicCompConfig {
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
             cursor_hide_timeout: None,
+            activation_policy: ActivationPolicy::default(),
         }
     }
 }
@@ -225,6 +227,14 @@ pub enum EavesdroppingKeyboardMode {
     Modifiers,
     Combinations,
     All,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ActivationPolicy {
+    #[default]
+    Focus,
+    FocusIfActiveWorkspace,
+    Urgent,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
