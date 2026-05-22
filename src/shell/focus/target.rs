@@ -362,12 +362,13 @@ impl PointerTarget<State> for PointerFocusTarget {
         let toplevel = self.toplevel(&data.common.shell.read());
         if let Some(element) = toplevel {
             for session in element.cursor_sessions() {
-                session.set_cursor_pos(Some(
-                    event
-                        .location
+                let offset = self.wl_surface().and_then(|s| element.surface_offset(&s));
+                // XXX What does None do? leave?
+                session.set_cursor_pos(offset.map(|offset| {
+                    (event.location - offset.to_f64())
                         .to_buffer(1.0, Transform::Normal, &element.geometry().size.to_f64())
-                        .to_i32_round(),
-                ));
+                        .to_i32_round()
+                }));
                 if let Some((_, hotspot)) = seat
                     .cursor_geometry((0.0, 0.0), Duration::from_millis(event.time as u64).into())
                 {
