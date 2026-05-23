@@ -25,6 +25,7 @@ pub mod output_configuration;
 pub mod output_power;
 pub mod overlap_notify;
 pub mod pointer_constraints;
+pub mod pointer_warp;
 pub mod primary_selection;
 pub mod seat;
 pub mod security_context;
