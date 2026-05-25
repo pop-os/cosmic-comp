@@ -197,7 +197,7 @@ impl PointerFocusTarget {
             PointerFocusTarget::WlSurface {
                 toplevel: Some(PointerFocusToplevel::Popup(PopupKind::Xdg(popup))),
                 ..
-            } => get_popup_toplevel(popup)
+            } => get_popup_toplevel(&PopupKind::Xdg(popup.clone()))
                 .and_then(|s| shell.element_for_surface(&s).map(|mapped| (mapped, s)))
                 .and_then(|(m, s)| {
                     m.windows()
@@ -243,7 +243,7 @@ impl KeyboardFocusTarget {
         match self {
             KeyboardFocusTarget::Element(mapped) => mapped.wl_surface(),
             KeyboardFocusTarget::Popup(PopupKind::Xdg(xdg)) => {
-                get_popup_toplevel(xdg).map(Cow::Owned)
+                get_popup_toplevel(&PopupKind::Xdg(xdg.clone())).map(Cow::Owned)
             }
             _ => None,
         }

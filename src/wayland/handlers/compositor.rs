@@ -7,7 +7,6 @@ use smithay::{
         element::{Kind, surface::KindEvaluation},
         utils::{on_commit_buffer_handler, with_renderer_surface_state},
     },
-    delegate_compositor,
     desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
     reexports::wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
     utils::{Clock, Logical, Monotonic, SERIAL_COUNTER, Size, Time},
@@ -281,6 +280,10 @@ impl CompositorHandler for State {
 
         if let Some(popup) = self.common.popups.find_popup(surface) {
             xdg_popup_ensure_initial_configure(&popup);
+            // The IME popup need to be repositioned when the size changed
+            if let PopupKind::InputMethod(_) = popup {
+                shell.unconstrain_popup(&popup);
+            }
             return;
         }
 
@@ -430,5 +433,3 @@ impl State {
         false
     }
 }
-
-delegate_compositor!(State);

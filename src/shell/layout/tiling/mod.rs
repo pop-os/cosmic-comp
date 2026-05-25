@@ -2877,7 +2877,7 @@ impl TilingLayout {
         // if the focus is currently on a popup, treat it's toplevel as the target
         if let KeyboardFocusTarget::Popup(popup) = target {
             let toplevel_surface = match popup {
-                PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                PopupKind::Xdg(_) => get_popup_toplevel(&popup),
                 PopupKind::InputMethod(_) => unreachable!(),
             }?;
             let root_id = tree.root_node_id()?;

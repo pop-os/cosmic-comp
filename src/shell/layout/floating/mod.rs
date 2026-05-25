@@ -385,11 +385,13 @@ impl FloatingLayout {
         } else {
             self.animations.remove(&mapped);
         }
-        if mapped.floating_tiled.lock().unwrap().take().is_some()
+        // Restore to the corner this was snapped to if any
+        let snapped = mapped.floating_tiled.lock().unwrap().take();
+        if let Some(snapped) = snapped
             && let Some(state) = mapped.maximized_state.lock().unwrap().as_mut()
-            && let Some(real_old_geo) = *mapped.last_geometry.lock().unwrap()
+            && state.original_snapped.is_none()
         {
-            state.original_geometry = real_old_geo;
+            state.original_snapped = Some(snapped);
         };
         self.space
             .map_element(mapped, geometry.loc.as_logical(), true);
@@ -686,7 +688,7 @@ impl FloatingLayout {
                 && let Some(pending_size) = window.pending_size()
             {
                 mapped_geometry.size = pending_size.as_local();
-            } else if let Some(server_size) = window.active_window().last_server_size() {
+            } else if let Some(server_size) = window.last_server_size() {
                 mapped_geometry.size = server_size.as_local();
             }
             *window.last_geometry.lock().unwrap() = Some(mapped_geometry);
@@ -1198,6 +1200,7 @@ impl FloatingLayout {
                         *maximized_state = Some(MaximizedState {
                             original_geometry: start_rectangle,
                             original_layer: layer,
+                            original_snapped: None,
                         });
                         std::mem::drop(maximized_state);
 
@@ -1278,7 +1281,7 @@ impl FloatingLayout {
         let Some(focused) = (match target {
             KeyboardFocusTarget::Popup(popup) => {
                 let Some(toplevel_surface) = (match popup {
-                    PopupKind::Xdg(xdg) => get_popup_toplevel(&xdg),
+                    PopupKind::Xdg(_) => get_popup_toplevel(&popup),
                     PopupKind::InputMethod(_) => unreachable!(),
                 }) else {
                     return MoveResult::None;

@@ -6,7 +6,6 @@ use crate::{
 };
 use smithay::{
     backend::{allocator::dmabuf::Dmabuf, renderer::element::Kind},
-    delegate_dmabuf,
     desktop::WindowSurfaceType,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::{
@@ -89,5 +88,3 @@ impl DmabufHandler for State {
         }))
     }
 }
-
-delegate_dmabuf!(State);

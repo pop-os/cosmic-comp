@@ -5,6 +5,7 @@ use crate::{
     shell::Shell,
     state::BackendData,
     utils::{env::dev_var, prelude::*},
+    wayland::protocols::output_power::OutputPowerState,
 };
 
 use anyhow::{Context, Result};
@@ -200,7 +201,7 @@ fn init_libinput(
                 .input_devices
                 .insert(device.name().into(), device.clone());
         } else if let InputEvent::DeviceRemoved { device } = &event {
-            state.backend.kms().input_devices.remove(device.name());
+            state.backend.kms().input_devices.remove(&*device.name());
         }
 
         state.process_input_event(event);
@@ -357,6 +358,14 @@ impl State {
     ) {
         let backend = self.backend.kms();
 
+        // recreate all graphics contexts
+        backend
+            .clear_used_devices()
+            .expect("This should never fail");
+        if let Err(err) = backend.refresh_used_devices() {
+            warn!(?err, "Failed to re-create graphics contexts");
+        }
+
         // resume input
         if let Err(err) = backend.libinput.resume() {
             error!(?err, "Failed to resume libinput context.");
@@ -385,15 +394,37 @@ impl State {
                         continue;
                     }
                 };
+                let dh = state.common.display_handle.clone();
+
                 if state.backend.kms().drm_devices.contains_key(&drm_node) {
                     match state.device_changed(dev) {
                         Ok(outputs) => added.extend(outputs),
                         Err(err) => {
-                            error!(?err, "Failed to update drm device {}.", path.display(),)
+                            error!(
+                                ?err,
+                                "Failed to update drm device {}. Re-opening",
+                                path.display(),
+                            );
+                            match state.reopen_device(dev, path, &dh) {
+                                Ok(outputs) => added.extend(outputs),
+                                Err(err) => {
+                                    error!(
+                                        ?err,
+                                        "Failed to re-open drm device {}. Device lost",
+                                        path.display(),
+                                    );
+                                    if let Err(err) = state.device_removed(dev, &dh) {
+                                        error!(
+                                            ?err,
+                                            "Failed to close drm device {}.",
+                                            path.display(),
+                                        );
+                                    };
+                                }
+                            }
                         }
                     }
                 } else {
-                    let dh = state.common.display_handle.clone();
                     match state.device_added(dev, path, &dh) {
                         Ok(outputs) => added.extend(outputs),
                         Err(err) => error!(?err, "Failed to add drm device {}.", path.display(),),
@@ -413,6 +444,8 @@ impl State {
                     }
                 }
             }
+
+            OutputPowerState::refresh(state);
             state.common.refresh();
         });
         loop_signal.wakeup();
@@ -585,6 +618,25 @@ impl KmsState {
         // that might not be available for any filters we currently expose.
         //
         // But we might conditionally fail here in the future.
+        Ok(())
+    }
+
+    fn clear_used_devices(&mut self) -> Result<()> {
+        let primary_node = self.primary_node.read().unwrap();
+        let empty_devices = HashSet::new();
+
+        for device in self.drm_devices.values_mut() {
+            if device.inner.egl.take().is_some() {
+                self.api.as_mut().remove_node(&device.inner.render_node);
+                device.inner.update_surface_nodes(&empty_devices, &[])?;
+            }
+        }
+
+        // trigger re-evaluation... urgh
+        if let Some(primary_node) = primary_node.as_ref() {
+            let _ = self.api.single_renderer(primary_node);
+        }
+
         Ok(())
     }
 

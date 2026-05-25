@@ -224,6 +224,7 @@ pub struct State {
     pub ready: Once,
     pub last_refresh: LastRefresh,
 }
+smithay::delegate_dispatch2!(State);
 
 #[derive(Debug)]
 pub struct Common {
@@ -940,6 +941,7 @@ impl Common {
                 surface,
                 output,
                 states,
+                None,
                 render_element_states,
                 primary_scanout_output_compare,
             );

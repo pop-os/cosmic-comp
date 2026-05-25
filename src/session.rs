@@ -72,18 +72,24 @@ pub fn get_env(common: &Common) -> Result<HashMap<String, String>> {
     Ok(env)
 }
 
-pub fn setup_socket(handle: LoopHandle<State>, common: &Common) -> Result<()> {
+pub fn setup_socket() -> Result<()> {
+    if let Ok(fd_num) = std::env::var("COSMIC_SESSION_SOCK")
+        && let Ok(fd) = fd_num.parse::<RawFd>()
+    {
+        let res = unsafe { set_cloexec(fd) }.with_context(|| "Failed to setup session socket");
+        if res.is_err() {
+            unsafe { rustix::io::close(fd) };
+        }
+        res
+    } else {
+        Ok(())
+    }
+}
+
+pub fn run_socket(handle: LoopHandle<State>, common: &Common) -> Result<()> {
     if let Ok(fd_num) = std::env::var("COSMIC_SESSION_SOCK") {
         if let Ok(fd) = fd_num.parse::<RawFd>() {
-            let mut session_socket = match unsafe { set_cloexec(fd) } {
-                // CLOEXEC worked and we can startup with session IPC
-                Ok(_) => unsafe { UnixStream::from_raw_fd(fd) },
-                // CLOEXEC didn't work, something is wrong with the fd, just close it
-                Err(err) => {
-                    unsafe { rustix::io::close(fd) };
-                    return Err(err).with_context(|| "Failed to setup session socket");
-                }
-            };
+            let mut session_socket = unsafe { UnixStream::from_raw_fd(fd) };
 
             let env = get_env(common)?;
             let message = serde_json::to_string(&Message::SetEnv { variables: env })

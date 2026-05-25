@@ -1,5 +1,5 @@
 use smithay::reexports::input::{
-    Device as InputDevice, DeviceConfigError, ScrollMethod, SendEventsMode,
+    Device as InputDevice, DeviceConfigError, DragLockState, ScrollMethod, SendEventsMode,
 };
 use tracing::warn;
 
@@ -210,7 +210,15 @@ pub fn update_device(
         if let Err(err) = device.config_tap_set_drag_enabled(tap.drag) {
             config_set_error(device, "tap-drag", tap.drag, err, is_default);
         }
-        if let Err(err) = device.config_tap_set_drag_lock_enabled(tap.drag_lock) {
+        // TODO: Use `DragLockState::EnabledStick` by default on libinput 1.27.0+, but
+        // make it configurable:
+        // https://lore.freedesktop.org/wayland-devel/20241119043937.GA2118681@quokka
+        let drag_lock_state = if tap.drag_lock {
+            DragLockState::EnabledTimeout
+        } else {
+            DragLockState::Disabled
+        };
+        if let Err(err) = device.config_tap_set_drag_lock_enabled(drag_lock_state) {
             config_set_error(device, "tap-drag-lock", tap.drag_lock, err, is_default);
         }
     }

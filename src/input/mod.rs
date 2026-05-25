@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::ElementFilter,
+    backend::render::{ElementFilter, cursor::notify_cursor_activity},
     config::{
         Action, Config, PrivateAction,
         key_bindings::{
@@ -37,11 +37,12 @@ use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, Device, DeviceCapability, GestureBeginEvent,
-        GestureEndEvent, GesturePinchUpdateEvent as _, GestureSwipeUpdateEvent as _, InputBackend,
-        InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, ProximityState, Switch,
-        SwitchState, SwitchToggleEvent, TabletToolButtonEvent, TabletToolEvent,
-        TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
+        AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, Device, DeviceCapability,
+        GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
+        GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
+        PointerAxisEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
+        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
+        TabletToolTipState, TouchEvent,
     },
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
@@ -308,6 +309,7 @@ impl State {
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    notify_cursor_activity(self, &seat);
                     let current_output = seat.active_output();
 
                     let mut position = seat.get_pointer().unwrap().current_location().as_global();
@@ -621,6 +623,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    notify_cursor_activity(self, &seat);
                     let output = seat.active_output();
                     let geometry = output.geometry();
                     let position = geometry.loc.to_f64()
@@ -687,6 +690,7 @@ impl State {
                     return;
                 };
                 self.common.idle_notifier_state.notify_activity(&seat);
+                notify_cursor_activity(self, &seat);
 
                 let current_focus = seat.get_keyboard().unwrap().current_focus();
                 let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
@@ -898,6 +902,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    notify_cursor_activity(self, &seat);
 
                     if seat.get_keyboard().unwrap().modifier_state().logo
                         && self
@@ -914,6 +919,12 @@ impl State {
                             .or_else(|| event.amount(Axis::Vertical))
                             .map(|val| val * scroll_factor)
                         {
+                            if event.relative_direction(Axis::Vertical)
+                                == AxisRelativeDirection::Inverted
+                            {
+                                percentage *= -1.;
+                            }
+
                             if event.source() == AxisSource::Wheel {
                                 percentage *= 5.;
                             }
@@ -1360,6 +1371,7 @@ impl State {
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    notify_cursor_activity(self, &seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
                             .cloned()
@@ -1425,6 +1437,7 @@ impl State {
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    notify_cursor_activity(self, &seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
                             .cloned()
@@ -1486,6 +1499,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    notify_cursor_activity(self, &seat);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         match event.tip_state() {
                             TabletToolTipState::Down => {
@@ -1508,6 +1522,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
+                    notify_cursor_activity(self, &seat);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         tool.button(
                             event.button(),
@@ -1774,25 +1789,31 @@ impl State {
                 && handle.modified_sym() == Keysym::Caps_Lock
                 && (modifiers.serialized.locked & 2) != 0
             {
-                let serial = SERIAL_COUNTER.next_serial();
-                let time = self.common.clock.now().as_millis();
-                keyboard.input(
-                    self,
-                    event.key_code(),
-                    KeyState::Pressed,
-                    serial,
-                    time,
-                    |_, _, _| FilterResult::<()>::Forward,
-                );
-                let serial = SERIAL_COUNTER.next_serial();
-                keyboard.input(
-                    self,
-                    event.key_code(),
-                    KeyState::Released,
-                    serial,
-                    time,
-                    |_, _, _| FilterResult::<()>::Forward,
-                );
+                let seat = seat.clone();
+                let key_code = event.key_code();
+                self.common.event_loop_handle.insert_idle(move |state| {
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let time = state.common.clock.now().as_millis();
+                        keyboard.input(
+                            state,
+                            key_code,
+                            KeyState::Pressed,
+                            serial,
+                            time,
+                            |_, _, _| FilterResult::<()>::Forward,
+                        );
+                        let serial = SERIAL_COUNTER.next_serial();
+                        keyboard.input(
+                            state,
+                            key_code,
+                            KeyState::Released,
+                            serial,
+                            time,
+                            |_, _, _| FilterResult::<()>::Forward,
+                        );
+                    }
+                });
             }
         } else if event.state() == KeyState::Pressed
             && self

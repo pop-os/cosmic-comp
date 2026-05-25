@@ -31,7 +31,9 @@ use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::Tiling
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smithay::backend::renderer::element::Kind;
 use smithay::output::WeakOutput;
+use smithay::utils::user_data::UserDataMap;
 use smithay::{
     backend::renderer::{
         element::{
@@ -180,7 +182,11 @@ impl MinimizedWindow {
         }
     }
 
-    pub fn unmaximize(&mut self, original_geometry: Rectangle<i32, Local>) {
+    pub fn unmaximize(
+        &mut self,
+        original_geometry: Rectangle<i32, Local>,
+        original_snapped: Option<TiledCorners>,
+    ) {
         match self {
             MinimizedWindow::Fullscreen { .. } => {}
             MinimizedWindow::Tiling {
@@ -194,6 +200,7 @@ impl MinimizedWindow {
                 window, previous, ..
             } => {
                 previous.geometry = original_geometry;
+                previous.was_snapped = original_snapped;
                 window.set_maximized(false);
                 window.configure();
             }
@@ -972,7 +979,7 @@ impl Workspace {
         let mut state = elem.maximized_state.lock().unwrap();
         if let Some(state) = state.take() {
             if let Some(minimized) = self.minimized_windows.iter_mut().find(|m| *m == elem) {
-                minimized.unmaximize(state.original_geometry);
+                minimized.unmaximize(state.original_geometry, state.original_snapped);
                 Some(state.original_geometry)
             } else {
                 match state.original_layer {
@@ -998,6 +1005,10 @@ impl Workspace {
                             use_geometry.then_some(state.original_geometry.size.as_logical()),
                             None,
                         );
+                        // Re-apply the snap if the window was snapped before maximizing
+                        if let Some(corners) = state.original_snapped {
+                            self.floating_layer.snap_to_corner(elem, &corners);
+                        }
                         Some(state.original_geometry)
                     }
                 }
@@ -1052,6 +1063,7 @@ impl Workspace {
         let was_maximized = if let Some(MaximizedState {
             original_geometry,
             original_layer,
+            original_snapped,
         }) = mapped.maximized_state.lock().unwrap().take()
         {
             // we need to do this manually instead of calling `self.unmaximize_request`
@@ -1064,6 +1076,10 @@ impl Workspace {
             }
             mapped.set_geometry(original_geometry.to_global(&self.output));
             mapped.set_maximized(false);
+            // Restore the snap marker to lett unminimize re-apply it.
+            if let Some(corners) = original_snapped {
+                *mapped.floating_tiled.lock().unwrap() = Some(corners);
+            }
             Some(original_geometry)
         } else {
             None
@@ -1138,6 +1154,7 @@ impl Workspace {
                     *state = Some(MaximizedState {
                         original_geometry: geometry,
                         original_layer: ManagedLayer::Floating,
+                        original_snapped: previous.was_snapped,
                     });
                     std::mem::drop(state);
                     self.floating_layer.map_maximized(window, geometry, true);
@@ -1171,6 +1188,7 @@ impl Workspace {
                         *state = Some(MaximizedState {
                             original_geometry: previous_geometry,
                             original_layer: ManagedLayer::Tiling,
+                            original_snapped: None,
                         });
                         std::mem::drop(state);
                         self.floating_layer.map_maximized(window, from, true);
@@ -1187,6 +1205,7 @@ impl Workspace {
                         *state = Some(MaximizedState {
                             original_geometry: geometry,
                             original_layer: ManagedLayer::Tiling,
+                            original_snapped: None,
                         });
                         std::mem::drop(state);
                         self.floating_layer.map_maximized(window, from, true);
@@ -1393,6 +1412,7 @@ impl Workspace {
             *state = Some(MaximizedState {
                 original_geometry,
                 original_layer,
+                original_snapped: None,
             });
             std::mem::drop(state);
 
@@ -1989,6 +2009,26 @@ where
             WorkspaceRenderElement::Backdrop(elem) => elem.alpha(),
         }
     }
+
+    fn kind(&self) -> Kind {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => elem.kind(),
+            WorkspaceRenderElement::Fullscreen(elem) => elem.kind(),
+            WorkspaceRenderElement::FullscreenPopup(elem) => elem.kind(),
+            WorkspaceRenderElement::Window(elem) => elem.kind(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.kind(),
+        }
+    }
+
+    fn is_framebuffer_effect(&self) -> bool {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Fullscreen(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::FullscreenPopup(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Window(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Backdrop(elem) => elem.is_framebuffer_effect(),
+        }
+    }
 }
 
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
@@ -2004,19 +2044,20 @@ where
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, smithay::utils::Physical>],
         opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Fullscreen(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::FullscreenPopup(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions)
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Backdrop(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
@@ -2025,6 +2066,7 @@ where
                 dst,
                 damage,
                 opaque_regions,
+                cache,
             )
             .map_err(FromGlesError::from_gles_error),
         }
@@ -2041,6 +2083,39 @@ where
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Backdrop(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
+            }
+        }
+    }
+
+    fn capture_framebuffer(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, BufferCoords>,
+        dst: Rectangle<i32, Physical>,
+        cache: &UserDataMap,
+    ) -> Result<(), R::Error> {
+        match self {
+            WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::Fullscreen(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::FullscreenPopup(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::Window(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
+            WorkspaceRenderElement::Backdrop(elem) => {
+                RenderElement::<GlowRenderer>::capture_framebuffer(
+                    elem,
+                    R::glow_frame_mut(frame),
+                    src,
+                    dst,
+                    cache,
+                )
+                .map_err(FromGlesError::from_gles_error)
             }
         }
     }

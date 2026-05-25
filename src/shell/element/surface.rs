@@ -235,7 +235,7 @@ impl CosmicSurface {
                 toplevel.with_pending_state(|state| state.size = Some(geo.size.as_logical()))
             }
             WindowSurface::X11(surface) => {
-                let _ = surface.configure(geo.as_logical());
+                let _ = surface.configure_with_sync(geo.as_logical(), None);
             }
         }
     }
@@ -342,7 +342,7 @@ impl CosmicSurface {
                     state.is_some_and(|state| state.states.contains(ToplevelState::Resizing))
                 }))
             }
-            WindowSurface::X11(_surface) => None,
+            WindowSurface::X11(surface) => surface.pending_geometry().map(|_| true),
         }
     }
 
@@ -453,10 +453,6 @@ impl CosmicSurface {
             .store(minimized, Ordering::SeqCst);
         if let WindowSurface::X11(surface) = self.0.underlying_surface() {
             let _ = surface.set_hidden(minimized);
-            if !minimized && surface.is_fullscreen() {
-                let _ = surface.set_mapped(false);
-                let _ = surface.set_mapped(true);
-            }
         }
     }
 
@@ -474,6 +470,9 @@ impl CosmicSurface {
             .get_or_insert_threadsafe(Sticky::default)
             .0
             .store(sticky, Ordering::SeqCst);
+        if let WindowSurface::X11(surface) = self.0.underlying_surface() {
+            let _ = surface.set_sticky(sticky);
+        }
     }
 
     pub fn set_suspended(&self, suspended: bool) {
@@ -589,7 +588,7 @@ impl CosmicSurface {
                     }
                 })
             }
-            WindowSurface::X11(_) => true,
+            WindowSurface::X11(surface) => surface.pending_geometry().is_none(),
         }
     }
 

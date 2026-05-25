@@ -158,6 +158,8 @@ pub struct CosmicCompConfig {
     /// Ratio for the very first vertical split on a workspace (overrides default_v_split_ratio
     /// for that split only). Set to 0.0 (or leave absent) to use the default ratio.
     pub first_v_split_ratio: f64,
+    /// Hide the cursor after this many seconds of pointer inactivity (None disables)
+    pub cursor_hide_timeout: Option<u32>,
 }
 
 impl Default for CosmicCompConfig {
@@ -198,6 +200,7 @@ impl Default for CosmicCompConfig {
             default_v_split_ratio: 0.5,
             first_h_split_ratio: 0.0,
             first_v_split_ratio: 0.0,
+            cursor_hide_timeout: None,
         }
     }
 }

@@ -2,7 +2,6 @@
 
 use crate::{shell::PendingLayer, utils::prelude::*};
 use smithay::{
-    delegate_layer_shell,
     desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
     output::Output,
     reexports::wayland_server::protocol::wl_output::WlOutput,
@@ -40,7 +39,10 @@ impl WlrLayerShellHandler for State {
     }
 
     fn new_popup(&mut self, _parent: WlrLayerSurface, popup: PopupSurface) {
-        self.common.shell.read().unconstrain_popup(&popup);
+        self.common
+            .shell
+            .read()
+            .unconstrain_popup(&PopupKind::from(popup.clone()));
 
         if let Err(err) = popup.send_configure() {
             tracing::warn!("Unable to configure popup. {err:?}",);
@@ -79,5 +81,3 @@ impl WlrLayerShellHandler for State {
         }
     }
 }
-
-delegate_layer_shell!(State);

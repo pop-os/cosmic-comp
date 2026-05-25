@@ -15,7 +15,7 @@ use smithay::{
     reexports::wayland_server::{
         Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource,
     },
-    wayland::image_capture_source::{ImageCaptureSource, ImageCaptureSourceData},
+    wayland::{image_capture_source::{ImageCaptureSource, ImageCaptureSourceData}, Dispatch2, GlobalDispatch2},
 };
 use wayland_backend::server::GlobalId;
 
@@ -37,9 +37,13 @@ pub enum ImageCaptureSourceKind {
 }
 
 impl ImageCaptureSourceKind {
-    pub fn from_resource(resource: &ExtImageCaptureSourceV1) -> Option<Self> {
-        let source = ImageCaptureSource::from_resource(resource)?;
-        source.user_data().get::<ImageCaptureSourceKind>().cloned()
+    pub fn from_source(source: &ImageCaptureSource) -> Self {
+        // If no user-data, assume source was created for a destroyed output, etc.
+        source
+            .user_data()
+            .get::<ImageCaptureSourceKind>()
+            .cloned()
+            .unwrap_or(Self::Destroyed)
     }
 }
 
@@ -49,7 +53,7 @@ impl CosmicImageCaptureSourceState {
         D: GlobalDispatch<
                 ZcosmicWorkspaceImageCaptureSourceManagerV1,
                 WorkspaceImageCaptureSourceManagerGlobalData,
-            > + Dispatch<ZcosmicWorkspaceImageCaptureSourceManagerV1, ()>
+            > + Dispatch<ZcosmicWorkspaceImageCaptureSourceManagerV1, CaptureSourceManagerData>
             + Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData>
             + WorkspaceHandler
             + 'static,
@@ -71,53 +75,41 @@ impl CosmicImageCaptureSourceState {
     }
 }
 
-impl<D>
-    GlobalDispatch<
-        ZcosmicWorkspaceImageCaptureSourceManagerV1,
-        WorkspaceImageCaptureSourceManagerGlobalData,
-        D,
-    > for CosmicImageCaptureSourceState
+pub struct CaptureSourceManagerData;
+
+impl<D> GlobalDispatch2<ZcosmicWorkspaceImageCaptureSourceManagerV1, D>
+    for WorkspaceImageCaptureSourceManagerGlobalData
 where
-    D: GlobalDispatch<
-            ZcosmicWorkspaceImageCaptureSourceManagerV1,
-            WorkspaceImageCaptureSourceManagerGlobalData,
-        > + Dispatch<ZcosmicWorkspaceImageCaptureSourceManagerV1, ()>
+    D: Dispatch<ZcosmicWorkspaceImageCaptureSourceManagerV1, CaptureSourceManagerData>
         + Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData>
         + 'static,
 {
     fn bind(
+        &self,
         _state: &mut D,
         _handle: &DisplayHandle,
         _client: &Client,
         resource: New<ZcosmicWorkspaceImageCaptureSourceManagerV1>,
-        _global_data: &WorkspaceImageCaptureSourceManagerGlobalData,
         data_init: &mut DataInit<'_, D>,
     ) {
-        data_init.init(resource, ());
+        data_init.init(resource, CaptureSourceManagerData);
     }
 
-    fn can_view(
-        client: Client,
-        global_data: &WorkspaceImageCaptureSourceManagerGlobalData,
-    ) -> bool {
-        (global_data.filter)(&client)
+    fn can_view(&self, client: &Client) -> bool {
+        (self.filter)(client)
     }
 }
 
-impl<D> Dispatch<ZcosmicWorkspaceImageCaptureSourceManagerV1, (), D>
-    for CosmicImageCaptureSourceState
+impl<D> Dispatch2<ZcosmicWorkspaceImageCaptureSourceManagerV1, D> for CaptureSourceManagerData
 where
-    D: Dispatch<ZcosmicWorkspaceImageCaptureSourceManagerV1, ()>
-        + Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData>
-        + WorkspaceHandler
-        + 'static,
+    D: Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData> + WorkspaceHandler + 'static,
 {
     fn request(
+        &self,
         state: &mut D,
         _client: &Client,
         _resource: &ZcosmicWorkspaceImageCaptureSourceManagerV1,
         request: <ZcosmicWorkspaceImageCaptureSourceManagerV1 as Resource>::Request,
-        _data: &(),
         _dhandle: &DisplayHandle,
         data_init: &mut DataInit<'_, D>,
     ) {
@@ -142,15 +134,3 @@ where
         }
     }
 }
-
-macro_rules! delegate_cosmic_image_capture_source {
-    ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
-        smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::image_capture_source::v1::server::zcosmic_workspace_image_capture_source_manager_v1::ZcosmicWorkspaceImageCaptureSourceManagerV1: $crate::wayland::protocols::image_capture_source::WorkspaceImageCaptureSourceManagerGlobalData
-        ] => $crate::wayland::protocols::image_capture_source::CosmicImageCaptureSourceState);
-        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
-            cosmic_protocols::image_capture_source::v1::server::zcosmic_workspace_image_capture_source_manager_v1::ZcosmicWorkspaceImageCaptureSourceManagerV1: ()
-        ] => $crate::wayland::protocols::image_capture_source::CosmicImageCaptureSourceState);
-    };
-}
-pub(crate) use delegate_cosmic_image_capture_source;

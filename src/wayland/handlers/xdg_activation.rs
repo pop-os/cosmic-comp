@@ -6,7 +6,6 @@ use crate::{
     wayland::protocols::workspace::{State as WState, WorkspaceHandle},
 };
 use smithay::{
-    delegate_xdg_activation,
     input::Seat,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     wayland::xdg_activation::{
@@ -246,5 +245,3 @@ impl State {
         };
     }
 }
-
-delegate_xdg_activation!(State);
