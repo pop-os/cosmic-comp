@@ -826,7 +826,7 @@ where
                 });
             }
             Stage::SessionLock(lock_surface) => {
-                session_lock_elements(renderer, output, lock_surface, &mut |elem| {
+                session_lock_elements(renderer, output, lock_surface, blur_strength, &mut |elem| {
                     elements.extend(crop_to_output(elem.into()).map(Into::into))
                 })
             }
@@ -1060,6 +1060,7 @@ fn session_lock_elements<R>(
     renderer: &mut R,
     output: &Output,
     lock_surface: Option<&LockSurface>,
+    blur_strength: usize,
     push: &mut dyn FnMut(SurfaceRenderElement<R>),
 ) where
     R: AsGlowRenderer,
@@ -1077,7 +1078,7 @@ fn session_lock_elements<R>(
             false,
             [0; 4],
             None,
-            0,
+            blur_strength,
             FRAME_TIME_FILTER,
             push,
             None,
