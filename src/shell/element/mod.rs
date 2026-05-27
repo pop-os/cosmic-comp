@@ -1,7 +1,10 @@
 use crate::{
-    backend::render::element::{AsGlowRenderer, FromGlesError},
+    backend::render::element::AsGlowRenderer,
     state::State,
-    utils::{iced::IcedElementInternal, prelude::*},
+    utils::{
+        iced::{IcedElementInternal, IcedRenderElement},
+        prelude::*,
+    },
 };
 use calloop::LoopHandle;
 use cosmic_comp_config::AppearanceConfig;
@@ -12,7 +15,6 @@ use smithay::{
         renderer::{
             element::{
                 Element, Kind, RenderElement, UnderlyingStorage,
-                memory::MemoryRenderBufferRenderElement,
                 utils::{CropRenderElement, RelocateRenderElement, RescaleRenderElement},
             },
             gles::element::PixelShaderElement,
@@ -572,33 +574,31 @@ impl CosmicMapped {
         }
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
         scale: smithay::utils::Scale<f64>,
         alpha: f32,
-    ) -> Vec<C>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        C: From<CosmicMappedRenderElement<R>>,
     {
         match &self.element {
-            CosmicMappedInternal::Stack(s) => s
-                .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
-                    renderer, location, scale, alpha,
-                ),
-            CosmicMappedInternal::Window(w) => w
-                .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
-                    renderer, location, scale, alpha,
-                ),
+            CosmicMappedInternal::Stack(s) => {
+                s.push_popup_render_elements(renderer, location, scale, alpha, &mut |elem| {
+                    push(elem.into())
+                })
+            }
+            CosmicMappedInternal::Window(w) => {
+                w.push_popup_render_elements(renderer, location, scale, alpha, &mut |elem| {
+                    push(elem.into())
+                })
+            }
             _ => unreachable!(),
         }
-        .into_iter()
-        .map(C::from)
-        .collect()
     }
 
     pub fn shadow_render_element<R, C>(
@@ -645,7 +645,7 @@ impl CosmicMapped {
         }
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: smithay::utils::Point<i32, smithay::utils::Physical>,
@@ -653,15 +653,15 @@ impl CosmicMapped {
         scale: smithay::utils::Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
-    ) -> Vec<C>
-    where
+        push_above: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+        push_below: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        C: From<CosmicMappedRenderElement<R>>,
     {
         #[cfg(feature = "debug")]
-        let mut elements = if let Some(debug) = self.debug.lock().unwrap().as_mut() {
+        if let Some(debug) = self.debug.lock().unwrap().as_mut() {
             let window = self.active_window();
             let window_geo = window.geometry();
             let (min_size, max_size, size) = (
@@ -822,41 +822,36 @@ impl CosmicMapped {
                 scale.x,
                 0.8,
             ) {
-                Ok(element) => vec![CosmicMappedRenderElement::from(element)],
+                Ok(element) => push_above(element.into()),
                 Err(err) => {
                     debug!(?err, "Error rendering debug overlay.");
-                    Vec::new()
                 }
             }
-        } else {
-            Vec::new()
         };
-        #[cfg(not(feature = "debug"))]
-        let mut elements = Vec::new();
 
-        #[cfg_attr(not(feature = "debug"), allow(unused_mut))]
-        elements.extend(match &self.element {
-            CosmicMappedInternal::Stack(s) => s.render_elements::<R, CosmicMappedRenderElement<R>>(
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.push_render_elements(
                 renderer,
                 location,
                 max_size,
                 scale,
                 alpha,
                 scanout_override,
+                &mut |elem| push_above(elem.into()),
+                &mut |elem| push_below(elem.into()),
             ),
-            CosmicMappedInternal::Window(w) => w
-                .render_elements::<R, CosmicMappedRenderElement<R>>(
-                    renderer,
-                    location,
-                    max_size,
-                    scale,
-                    alpha,
-                    scanout_override,
-                ),
+            CosmicMappedInternal::Window(w) => w.push_render_elements(
+                renderer,
+                location,
+                max_size,
+                scale,
+                alpha,
+                scanout_override,
+                &mut |elem| push_above(elem.into()),
+                &mut |elem| push_below(elem.into()),
+            ),
             _ => unreachable!(),
-        });
-
-        elements.into_iter().map(C::from).collect()
+        }
     }
 
     pub(crate) fn update_theme(&self, theme: cosmic::Theme) {
@@ -1098,7 +1093,7 @@ where
     GrabbedWindow(RescaleRenderElement<self::window::CosmicWindowRenderElement<R>>),
     FocusIndicator(PixelShaderElement),
     Overlay(PixelShaderElement),
-    StackHoverIndicator(MemoryRenderBufferRenderElement<R>),
+    StackHoverIndicator(IcedRenderElement<R>),
     #[cfg(feature = "debug")]
     Egui(TextureRenderElement<GlesTexture>),
 }
@@ -1328,7 +1323,6 @@ impl<R> RenderElement<R> for CosmicMappedRenderElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: 'static,
-    R::Error: FromGlesError,
 {
     fn draw(
         &self,
@@ -1361,7 +1355,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
             CosmicMappedRenderElement::MovingStack(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
@@ -1383,7 +1377,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
             CosmicMappedRenderElement::Overlay(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
                 R::glow_frame_mut(frame),
@@ -1393,7 +1387,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
@@ -1409,7 +1403,7 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
@@ -1472,7 +1466,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicMappedRenderElement::MovingStack(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
@@ -1494,7 +1488,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicMappedRenderElement::Overlay(elem) => {
                 RenderElement::<GlowRenderer>::capture_framebuffer(
@@ -1504,7 +1498,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicMappedRenderElement::StackHoverIndicator(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
@@ -1515,7 +1509,7 @@ where
                 RenderElement::<GlowRenderer>::capture_framebuffer(
                     elem, glow_frame, src, dst, cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
@@ -1553,13 +1547,13 @@ where
     }
 }
 
-impl<R> From<MemoryRenderBufferRenderElement<R>> for CosmicMappedRenderElement<R>
+impl<R> From<IcedRenderElement<R>> for CosmicMappedRenderElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: MemoryRenderBufferRenderElement<R>) -> Self {
+    fn from(elem: IcedRenderElement<R>) -> Self {
         CosmicMappedRenderElement::StackHoverIndicator(elem)
     }
 }
