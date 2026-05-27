@@ -953,6 +953,7 @@ impl Drop for MoveGrab {
                     if let Some((target, offset)) = mapped.focus_under(
                         current_location - position.as_logical().to_f64(),
                         WindowSurfaceType::ALL,
+                        &seat,
                     ) {
                         pointer.motion(
                             state,

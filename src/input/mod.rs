@@ -2168,14 +2168,14 @@ impl State {
                     }
                     Stage::StickyPopups(layout) => {
                         if let Some(element) =
-                            layout.popup_element_under(global_pos.to_local(output))
+                            layout.popup_element_under(global_pos.to_local(output), seat)
                         {
                             return ControlFlow::Break(Ok(Some(element)));
                         }
                     }
                     Stage::Sticky(layout) => {
                         if let Some(element) =
-                            layout.toplevel_element_under(global_pos.to_local(output))
+                            layout.toplevel_element_under(global_pos.to_local(output), seat)
                         {
                             return ControlFlow::Break(Ok(Some(element)));
                         }
@@ -2330,7 +2330,7 @@ impl State {
                     }
                     Stage::StickyPopups(floating_layer) => {
                         if let Some(under) = floating_layer
-                            .popup_surface_under(relative_pos)
+                            .popup_surface_under(relative_pos, seat)
                             .map(|(target, point)| (target, point.to_global(output)))
                         {
                             return ControlFlow::Break(Ok(Some(under)));
@@ -2338,7 +2338,7 @@ impl State {
                     }
                     Stage::Sticky(floating_layer) => {
                         if let Some(under) = floating_layer
-                            .toplevel_surface_under(relative_pos)
+                            .toplevel_surface_under(relative_pos, seat)
                             .map(|(target, point)| (target, point.to_global(output)))
                         {
                             return ControlFlow::Break(Ok(Some(under)));
@@ -2392,11 +2392,8 @@ impl State {
                 let window_size = geometry.size.to_f64();
 
                 let is_legal = |p: Point<f64, Logical>| {
-                    let in_window = p.x >= 0.0
-                        && p.y >= 0.0
-                        // hack: prevent the cursor from touching the edge of the window
-                        && p.x <= window_size.w - 1.
-                        && p.y <= window_size.h - 1.;
+                    let in_window =
+                        p.x >= 0.0 && p.y >= 0.0 && p.x < window_size.w && p.y < window_size.h;
                     if !in_window {
                         return false;
                     }

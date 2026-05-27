@@ -3714,7 +3714,11 @@ impl Shell {
             if old_mapped.is_maximized(false) {
                 new_mapped.set_maximized(false);
             }
-            start_data.set_focus(new_mapped.focus_under((0., 0.).into(), WindowSurfaceType::ALL));
+            start_data.set_focus(new_mapped.focus_under(
+                (0., 0.).into(),
+                WindowSurfaceType::ALL,
+                seat,
+            ));
             new_mapped
         } else {
             old_mapped.clone()
@@ -4185,7 +4189,7 @@ impl Shell {
 
         let element_offset = (new_loc - geometry.loc).as_logical();
         let focus = mapped
-            .focus_under(element_offset.to_f64(), WindowSurfaceType::ALL)
+            .focus_under(element_offset.to_f64(), WindowSurfaceType::ALL, seat)
             .map(|(target, surface_offset)| (target, (surface_offset + element_offset.to_f64())));
         start_data.set_location(new_loc.as_logical().to_f64());
         start_data.set_focus(focus.clone());
