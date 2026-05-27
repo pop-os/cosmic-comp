@@ -5,6 +5,7 @@ use crate::{
     state::State,
     wayland::protocols::workspace::{State as WState, WorkspaceHandle},
 };
+use cosmic_comp_config::ActivationPolicy;
 use smithay::{
     input::Seat,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
@@ -115,10 +116,45 @@ impl XdgActivationHandler for State {
                 }
             }
             ActivationContext::Workspace(_) => {
-                self.activate_surface(
-                    &surface,
-                    Some((ActivationKey::Wayland(surface.clone()), *context)),
-                );
+                match self.common.config.cosmic_conf.activation_policy {
+                    ActivationPolicy::Focus => {
+                        self.activate_surface(
+                            &surface,
+                            Some((ActivationKey::Wayland(surface.clone()), *context)),
+                        );
+                    }
+                    ActivationPolicy::FocusIfActiveWorkspace => {
+                        let shell = self.common.shell.write();
+
+                        let Some((target_workspace, _)) = shell.workspace_for_surface(&surface)
+                        else {
+                            // surface not found, maybe log warning?
+                            return;
+                        };
+
+                        let seat = shell.seats.last_active().clone();
+                        let current_output = seat.active_output();
+                        let current_workspace = shell.active_space(&current_output).unwrap().handle;
+
+                        if target_workspace == current_workspace {
+                            std::mem::drop(shell);
+                            self.activate_surface(
+                                &surface,
+                                Some((ActivationKey::Wayland(surface.clone()), *context)),
+                            );
+                        } else {
+                            let mut workspace_guard = self.common.workspace_state.update();
+                            workspace_guard.add_workspace_state(&target_workspace, WState::Urgent);
+                        }
+                    }
+                    ActivationPolicy::Urgent => {
+                        let shell = self.common.shell.write();
+                        if let Some((workspace, _output)) = shell.workspace_for_surface(&surface) {
+                            let mut workspace_guard = self.common.workspace_state.update();
+                            workspace_guard.add_workspace_state(&workspace, WState::Urgent);
+                        }
+                    }
+                }
             }
         }
     }
