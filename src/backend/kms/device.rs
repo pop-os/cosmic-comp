@@ -610,7 +610,8 @@ impl State {
             if let Some(mut leasing_global) = device.inner.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
-            for (_, surface) in device.inner.surfaces.drain() {
+            for (crtc, surface) in device.inner.surfaces.drain() {
+                backend.gamma_props.remove(&crtc);
                 outputs_removed.push(surface.output.clone());
                 surface.drop_and_join();
             }
