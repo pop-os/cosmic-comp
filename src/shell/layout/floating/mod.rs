@@ -619,6 +619,10 @@ impl FloatingLayout {
         from: Rectangle<i32, Local>,
         position: Point<i32, Local>,
     ) {
+        if !mapped.alive() {
+            return;
+        }
+
         let output = self.space.outputs().next().unwrap().clone();
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone().as_local();
