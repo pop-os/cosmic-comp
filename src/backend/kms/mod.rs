@@ -502,12 +502,18 @@ impl KmsState {
     /// linear ramp.
     pub fn set_gamma(&mut self, output: &Output, ramp: Option<Vec<u16>>) -> Option<()> {
         for device in self.drm_devices.values_mut() {
-            let crtc = device
+            let Some(crtc) = device
                 .inner
                 .surfaces
                 .iter()
-                .find_map(|(c, s)| (&s.output == output).then_some(*c))?;
-            let gamma_length = device.drm.device().get_crtc(crtc).ok()?.gamma_length() as usize;
+                .find_map(|(c, s)| (&s.output == output).then_some(*c))
+            else {
+                continue;
+            };
+            let gamma_length = match device.drm.device().get_crtc(crtc) {
+                Ok(info) => info.gamma_length() as usize,
+                Err(_) => continue,
+            };
             if gamma_length == 0 {
                 return None;
             }
