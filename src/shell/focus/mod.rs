@@ -6,7 +6,7 @@ use crate::{
 };
 use indexmap::IndexSet;
 use smithay::{
-    desktop::{PopupUngrabStrategy, layer_map_for_output},
+    desktop::{PopupUngrabStrategy, layer_map_for_output, space::SpaceElement},
     input::{Seat, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
@@ -288,6 +288,7 @@ impl Shell {
             }
 
             let workspace = &mut set.workspaces[set.active];
+
             for fs in workspace.get_fullscreen_surfaces() {
                 let is_focused = self.seats.iter().any(|seat| {
                     if let Some(KeyboardFocusTarget::Fullscreen(s)) =
@@ -301,6 +302,56 @@ impl Shell {
                 fs.surface.set_activated(is_focused);
                 fs.surface.send_configure();
             }
+
+            let overview_is_open = crate::utils::quirks::workspace_overview_is_open(&output);
+            let has_foreground_fullscreen = self.seats.iter().any(|seat| {
+                if let Some(fs) = workspace.get_fullscreen(seat) {
+                    let focus_stack = workspace.focus_stack.get(seat);
+                    let last_focused = focus_stack.last();
+                    let focus_stack_is_valid_fullscreen =
+                        last_focused.is_some_and(|target| match target {
+                            FocusTarget::Fullscreen(s) => s == &fs.surface,
+                            FocusTarget::Window(w) => w.active_window() == fs.surface,
+                        });
+
+                    let seat_active_here = seat
+                        .focused_output()
+                        .is_some_and(|active_output| active_output == output);
+
+                    let is_foreground = {
+                        let is_focused = if seat_active_here {
+                            seat.get_keyboard()
+                                .and_then(|k| k.current_focus())
+                                .and_then(|focus| focus.active_window())
+                                .is_some_and(|surface| surface == fs.surface)
+                        } else {
+                            focus_stack_is_valid_fullscreen
+                        };
+                        is_focused && !overview_is_open
+                    };
+
+                    let bbox = SpaceElement::bbox(&fs.surface);
+                    let output_geo = output.geometry();
+                    let geometry_matches = bbox.loc.x == output_geo.loc.x
+                        && bbox.loc.y == output_geo.loc.y
+                        && bbox.size.w == output_geo.size.w
+                        && bbox.size.h == output_geo.size.h;
+
+                    if is_foreground && geometry_matches {
+                        output.set_fullscreen_occupied(Some(fs.surface.clone()));
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            });
+
+            if !has_foreground_fullscreen {
+                output.set_fullscreen_occupied(None);
+            }
+
             for focused in focused_windows.iter() {
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
