@@ -623,6 +623,10 @@ impl FloatingLayout {
         from: Rectangle<i32, Local>,
         position: Point<i32, Local>,
     ) {
+        if !mapped.alive() {
+            return;
+        }
+
         let output = self.space.outputs().next().unwrap().clone();
         let layers = layer_map_for_output(&output);
         let geometry = layers.non_exclusive_zone().as_local();
@@ -642,14 +646,7 @@ impl FloatingLayout {
         self.space
             .map_element(mapped.clone(), position.as_logical(), true);
         self.space.refresh();
-        // The window can disappear between `map_element` and the geometry
-        // lookup if the client crashes mid-unminimize (race observed in
-        // pop-os/cosmic-comp#2332). Skip the animation rather than panic —
-        // the window is already gone, there's nothing to animate.
-        let Some(target_geometry) = self.space.element_geometry(&mapped) else {
-            return;
-        };
-        let target_geometry = target_geometry.as_local();
+        let target_geometry = self.space.element_geometry(&mapped).unwrap().as_local();
 
         self.animations.insert(
             mapped,
