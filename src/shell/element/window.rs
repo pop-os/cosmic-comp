@@ -57,7 +57,7 @@ use smithay::{
         Buffer, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, Transform,
         user_data::UserDataMap,
     },
-    wayland::seat::WaylandFocus,
+    wayland::{pointer_constraints::with_pointer_constraint, seat::WaylandFocus},
 };
 use std::{
     borrow::Cow,
@@ -274,12 +274,25 @@ impl CosmicWindow {
         &self,
         mut relative_pos: Point<f64, Logical>,
         surface_type: WindowSurfaceType,
+        seat: Option<&Seat<State>>,
     ) -> Option<(PointerFocusTarget, Point<f64, Logical>)> {
+        let has_constraint = if let Some(seat) = seat
+            && let Some(pointer) = seat.get_pointer()
+            && let Some(surface) = self.wl_surface()
+            && with_pointer_constraint(&surface, &pointer, |constraint| {
+                constraint.is_some_and(|c| c.is_active())
+            }) {
+            true
+        } else {
+            false
+        };
+
         self.0.with_program(|p| {
             let mut offset = Point::from((0., 0.));
             let mut window_ui = None;
             let has_ssd = p.has_ssd(false);
-            if (has_ssd || p.has_tiled_state())
+
+            if (!has_constraint && (has_ssd || p.has_tiled_state()))
                 && surface_type.contains(WindowSurfaceType::TOPLEVEL)
             {
                 let geo = p.window.geometry();
@@ -877,7 +890,8 @@ impl SpaceElement for CosmicWindow {
         })
     }
     fn is_in_input_region(&self, point: &Point<f64, Logical>) -> bool {
-        self.focus_under(*point, WindowSurfaceType::ALL).is_some()
+        self.focus_under(*point, WindowSurfaceType::ALL, None)
+            .is_some()
     }
     fn set_activate(&self, activated: bool) {
         if self

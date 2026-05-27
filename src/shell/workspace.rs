@@ -791,8 +791,8 @@ impl Workspace {
         }
 
         self.floating_layer
-            .popup_element_under(location)
-            .or_else(|| self.tiling_layer.popup_element_under(location))
+            .popup_element_under(location, seat)
+            .or_else(|| self.tiling_layer.popup_element_under(location, seat))
             .or_else(|| {
                 if last_focused.is_none_or(|t| !matches!(t, FocusTarget::Fullscreen(_)))
                     && let Some(fullscreen) = self.fullscreen.as_ref()
@@ -841,8 +841,8 @@ impl Workspace {
         }
 
         self.floating_layer
-            .toplevel_element_under(location)
-            .or_else(|| self.tiling_layer.toplevel_element_under(location))
+            .toplevel_element_under(location, seat)
+            .or_else(|| self.tiling_layer.toplevel_element_under(location, seat))
             .or_else(|| {
                 if last_focused.is_none_or(|t| !matches!(t, FocusTarget::Fullscreen(_)))
                     && let Some(fullscreen) = self.fullscreen.as_ref()
@@ -895,8 +895,11 @@ impl Workspace {
             .as_ref()
             .filter(|f| last_focused.is_some_and(|t| t == &f.surface))
             .and_then(check_fullscreen)
-            .or_else(|| self.floating_layer.popup_surface_under(location))
-            .or_else(|| self.tiling_layer.popup_surface_under(location, overview))
+            .or_else(|| self.floating_layer.popup_surface_under(location, seat))
+            .or_else(|| {
+                self.tiling_layer
+                    .popup_surface_under(location, overview, seat)
+            })
             .or_else(|| {
                 self.fullscreen
                     .as_ref()
@@ -941,8 +944,11 @@ impl Workspace {
             .as_ref()
             .filter(|f| last_focused.is_some_and(|t| t == &f.surface))
             .and_then(check_fullscreen)
-            .or_else(|| self.floating_layer.toplevel_surface_under(location))
-            .or_else(|| self.tiling_layer.toplevel_surface_under(location, overview))
+            .or_else(|| self.floating_layer.toplevel_surface_under(location, seat))
+            .or_else(|| {
+                self.tiling_layer
+                    .toplevel_surface_under(location, overview, seat)
+            })
             .or_else(|| {
                 self.fullscreen
                     .as_ref()
