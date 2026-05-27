@@ -29,7 +29,7 @@ use smithay::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
         drm::{
             Device as _,
-            control::{Device as _, connector::Interface, crtc},
+            control::{Device as ControlDevice, connector::Interface, crtc, property},
         },
         input::{self, Libinput},
         wayland_server::{Client, DisplayHandle},
@@ -46,9 +46,167 @@ use tracing::{debug, error, info, warn};
 
 use std::{
     collections::{HashMap, HashSet},
+    os::fd::AsFd,
     path::Path,
     sync::{Arc, RwLock, atomic::AtomicBool},
 };
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct DrmColorLut {
+    red: u16,
+    green: u16,
+    blue: u16,
+    reserved: u16,
+}
+
+#[derive(Debug)]
+struct GammaProps {
+    crtc: crtc::Handle,
+    gamma_lut: property::Handle,
+    gamma_lut_size: property::Handle,
+    previous_blob: Option<u64>,
+}
+
+impl GammaProps {
+    fn new<D: ControlDevice>(device: &D, crtc: crtc::Handle) -> Option<Self> {
+        let props = device.get_properties(crtc).ok()?;
+        let mut gamma_lut = None;
+        let mut gamma_lut_size = None;
+
+        for (prop, _) in props {
+            let Ok(info) = device.get_property(prop) else {
+                continue;
+            };
+            let Ok(name) = info.name().to_str() else {
+                continue;
+            };
+            match name {
+                "GAMMA_LUT" => {
+                    if matches!(info.value_type(), property::ValueType::Blob) {
+                        gamma_lut = Some(prop);
+                    }
+                }
+                "GAMMA_LUT_SIZE" => {
+                    if matches!(info.value_type(), property::ValueType::UnsignedRange(_, _)) {
+                        gamma_lut_size = Some(prop);
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        Some(Self {
+            crtc,
+            gamma_lut: gamma_lut?,
+            gamma_lut_size: gamma_lut_size?,
+            previous_blob: None,
+        })
+    }
+
+    fn gamma_size<D: ControlDevice>(&self, device: &D) -> Option<u32> {
+        let props = device.get_properties(self.crtc).ok()?;
+        for (prop, val) in props {
+            if prop == self.gamma_lut_size {
+                return Some(val as u32);
+            }
+        }
+        None
+    }
+
+    fn set_gamma<D: ControlDevice + AsFd>(
+        &mut self,
+        device: &D,
+        ramp: Option<&[u16]>,
+    ) -> Option<()> {
+        let blob_id = if let Some(ramp) = ramp {
+            let gamma_size = self.gamma_size(device)? as usize;
+            if ramp.len() != gamma_size * 3 {
+                return None;
+            }
+
+            let (red, rest) = ramp.split_at(gamma_size);
+            let (green, blue) = rest.split_at(gamma_size);
+            let mut data: Vec<DrmColorLut> = red
+                .iter()
+                .zip(green.iter())
+                .zip(blue.iter())
+                .map(|((&r, &g), &b)| DrmColorLut {
+                    red: r,
+                    green: g,
+                    blue: b,
+                    reserved: 0,
+                })
+                .collect();
+
+            let bytes: &mut [u8] = unsafe {
+                std::slice::from_raw_parts_mut(
+                    data.as_mut_ptr() as *mut u8,
+                    data.len() * std::mem::size_of::<DrmColorLut>(),
+                )
+            };
+            let blob = drm_ffi::mode::create_property_blob(device.as_fd(), bytes).ok()?;
+            Some(u64::from(blob.blob_id))
+        } else {
+            None
+        };
+
+        let value = blob_id.unwrap_or(0);
+        if let Err(err) = device.set_property(self.crtc, self.gamma_lut, value) {
+            warn!(?err, "failed to set GAMMA_LUT");
+            if let Some(id) = blob_id {
+                let _ = device.destroy_property_blob(id);
+            }
+            return None;
+        }
+
+        if let Some(old) = self.previous_blob.take() {
+            let _ = device.destroy_property_blob(old);
+        }
+        self.previous_blob = blob_id;
+        Some(())
+    }
+
+    fn restore_gamma<D: ControlDevice>(&self, device: &D) -> Option<()> {
+        let value = self.previous_blob.unwrap_or(0);
+        device
+            .set_property(self.crtc, self.gamma_lut, value)
+            .ok()
+            .map(|_| ())
+    }
+}
+
+fn legacy_set_gamma<D: ControlDevice>(
+    device: &mut D,
+    crtc: crtc::Handle,
+    ramp: Option<&[u16]>,
+) -> Option<()> {
+    let gamma_length = device.get_crtc(crtc).ok()?.gamma_length() as usize;
+    if gamma_length == 0 {
+        return None;
+    }
+    match ramp {
+        Some(ramp) if ramp.len() == gamma_length * 3 => {
+            let (red, rest) = ramp.split_at(gamma_length);
+            let (green, blue) = rest.split_at(gamma_length);
+            device.set_gamma(crtc, red, green, blue).ok().map(|_| ())
+        }
+        Some(_) => None,
+        None => {
+            let denom = (gamma_length as u64).saturating_sub(1).max(1);
+            let mut red = vec![0u16; gamma_length];
+            let mut green = vec![0u16; gamma_length];
+            let mut blue = vec![0u16; gamma_length];
+            for i in 0..gamma_length {
+                let v = (0xFFFFu64 * i as u64 / denom) as u16;
+                red[i] = v;
+                green[i] = v;
+                blue[i] = v;
+            }
+            device.set_gamma(crtc, &red, &green, &blue).ok().map(|_| ())
+        }
+    }
+}
 
 mod device;
 mod drm_helpers;
@@ -74,6 +232,8 @@ pub struct KmsState {
     libinput: Libinput,
 
     pub syncobj_state: Option<DrmSyncobjState>,
+
+    gamma_props: HashMap<crtc::Handle, GammaProps>,
 }
 
 pub struct KmsGuard<'a> {
@@ -131,6 +291,8 @@ pub fn init_backend(
         libinput: libinput_context,
 
         syncobj_state: None,
+
+        gamma_props: HashMap::new(),
     });
 
     // manually add already present gpus
@@ -380,6 +542,20 @@ impl State {
             }
         }
 
+        // restore gamma ramps that were active before suspend
+        for (crtc, gp) in backend.gamma_props.iter() {
+            if gp.previous_blob.is_some() {
+                for device in backend.drm_devices.values() {
+                    if device.inner.surfaces.contains_key(crtc) {
+                        if gp.restore_gamma(device.drm.device()).is_none() {
+                            warn!(?crtc, "failed to restore gamma after session resume");
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         // update state and schedule new render,
         // after processing the rest of the pending event loop events
         let dispatcher = dispatcher.clone();
@@ -467,6 +643,61 @@ impl State {
 }
 
 impl KmsState {
+    fn find_crtc_for_output(&self, output: &Output) -> Option<(DrmNode, crtc::Handle)> {
+        for (node, device) in &self.drm_devices {
+            for (crtc, surface) in device.inner.surfaces.iter() {
+                if &surface.output == output {
+                    return Some((*node, *crtc));
+                }
+            }
+        }
+        None
+    }
+
+    fn ensure_gamma_props(&mut self, node: &DrmNode, crtc: crtc::Handle) {
+        if self.gamma_props.contains_key(&crtc) {
+            return;
+        }
+        if let Some(device) = self.drm_devices.get(node) {
+            if let Some(props) = GammaProps::new(device.drm.device(), crtc) {
+                debug!(?crtc, "initialized atomic GAMMA_LUT properties");
+                self.gamma_props.insert(crtc, props);
+            } else {
+                debug!(?crtc, "no atomic GAMMA_LUT, will use legacy gamma path");
+            }
+        }
+    }
+
+    pub fn get_gamma_size(&mut self, output: &Output) -> Option<u32> {
+        let (node, crtc) = self.find_crtc_for_output(output)?;
+        self.ensure_gamma_props(&node, crtc);
+
+        if let Some(gp) = self.gamma_props.get(&crtc) {
+            if let Some(device) = self.drm_devices.get(&node) {
+                return gp.gamma_size(device.drm.device());
+            }
+        }
+
+        let device = self.drm_devices.get(&node)?;
+        let info = device.drm.device().get_crtc(crtc).ok()?;
+        let len = info.gamma_length();
+        (len > 0).then_some(len)
+    }
+
+    pub fn set_gamma(&mut self, output: &Output, ramp: Option<Vec<u16>>) -> Option<()> {
+        let (node, crtc) = self.find_crtc_for_output(output)?;
+        self.ensure_gamma_props(&node, crtc);
+
+        if let Some(gp) = self.gamma_props.get_mut(&crtc) {
+            if let Some(device) = self.drm_devices.get(&node) {
+                return gp.set_gamma(device.drm.device(), ramp.as_deref());
+            }
+        }
+
+        let device = self.drm_devices.get_mut(&node)?;
+        legacy_set_gamma(device.drm.device_mut(), crtc, ramp.as_deref())
+    }
+
     fn select_primary_gpu(&mut self, dh: &DisplayHandle) -> Result<()> {
         // We don't have to check the allow/blocklist here,
         // as any disallowed devices won't be in `self.drm_devices`.

@@ -1448,6 +1448,8 @@ impl Common {
     }
 
     pub fn remove_output(&mut self, output: &Output) {
+        self.gamma_control_manager_state.output_removed(output);
+
         let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
         shell_ref.workspaces.remove_output(

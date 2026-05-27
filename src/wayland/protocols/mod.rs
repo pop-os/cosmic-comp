@@ -3,6 +3,7 @@
 pub mod a11y;
 pub mod corner_radius;
 pub mod drm;
+pub mod gamma_control;
 pub mod image_capture_source;
 pub mod output_configuration;
 pub mod output_power;
