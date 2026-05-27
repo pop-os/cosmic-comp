@@ -1,4 +1,5 @@
 use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
+use parking_lot::RwLock;
 use smithay::{
     backend::drm::VrrSupport as Support,
     output::{Output, WeakOutput},
@@ -9,7 +10,10 @@ pub use super::geometry::*;
 pub use crate::shell::{SeatExt, Shell, Workspace};
 pub use crate::state::{Common, State};
 pub use crate::wayland::handlers::xdg_shell::popup::update_reactive_popups;
-use crate::{config::EdidProduct, shell::zoom::OutputZoomState};
+use crate::{
+    config::EdidProduct,
+    shell::{CosmicSurface, element::surface::WeakCosmicSurface, zoom::OutputZoomState},
+};
 
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -36,11 +40,15 @@ pub trait OutputExt {
     fn config_mut(&self) -> RefMut<'_, OutputConfig>;
 
     fn edid(&self) -> Option<&EdidProduct>;
+
+    fn set_fullscreen_occupied(&self, surface: Option<CosmicSurface>);
+    fn is_foreground_fullscreen_occupied(&self) -> Option<CosmicSurface>;
 }
 
 struct Vrr(AtomicU8);
 struct VrrSupport(AtomicU8);
 struct Mirroring(Mutex<Option<WeakOutput>>);
+struct FullscreenOccupied(RwLock<Option<WeakCosmicSurface>>);
 
 impl OutputExt for Output {
     fn is_internal(&self) -> bool {
@@ -166,5 +174,22 @@ impl OutputExt for Output {
 
     fn edid(&self) -> Option<&EdidProduct> {
         self.user_data().get()
+    }
+
+    fn set_fullscreen_occupied(&self, surface: Option<CosmicSurface>) {
+        let user_data = self.user_data();
+        user_data
+            .insert_if_missing_threadsafe(|| FullscreenOccupied(parking_lot::RwLock::new(None)));
+        let lock = &user_data.get::<FullscreenOccupied>().unwrap().0;
+        if lock.read().as_ref().and_then(|weak| weak.upgrade()) == surface {
+            return;
+        }
+        *lock.write() = surface.map(|s| s.downgrade());
+    }
+
+    fn is_foreground_fullscreen_occupied(&self) -> Option<CosmicSurface> {
+        self.user_data()
+            .get::<FullscreenOccupied>()
+            .and_then(|state| state.0.read().as_ref().and_then(|weak| weak.upgrade()))
     }
 }
