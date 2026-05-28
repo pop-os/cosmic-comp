@@ -225,6 +225,42 @@ impl PointerFocusTarget {
             _ => false,
         }
     }
+
+    // Update image copy cursor position/hotspot for enter/motion event
+    fn update_image_copy_cursor_position(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        event: &PointerMotionEvent,
+    ) {
+        let Some(toplevel) = self.toplevel(&data.common.shell.read()) else {
+            return;
+        };
+        let cursor_sessions = toplevel.cursor_sessions();
+        if cursor_sessions.is_empty() {
+            return;
+        }
+
+        let cursor_pos = Some(
+            event
+                .location
+                .to_buffer(1.0, Transform::Normal, &toplevel.geometry().size.to_f64())
+                .to_i32_round(),
+        );
+
+        let cursor_hotspot = if let Some((_, hotspot)) =
+            seat.cursor_geometry((0.0, 0.0), Duration::from_millis(event.time as u64).into())
+        {
+            hotspot
+        } else {
+            Point::from((0, 0))
+        };
+
+        for session in cursor_sessions {
+            session.set_cursor_pos(cursor_pos);
+            session.set_cursor_hotspot(cursor_hotspot);
+        }
+    }
 }
 
 impl KeyboardFocusTarget {
@@ -325,47 +361,11 @@ impl IsAlive for KeyboardFocusTarget {
 
 impl PointerTarget<State> for PointerFocusTarget {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
-        let toplevel = self.toplevel(&data.common.shell.read());
-        if let Some(element) = toplevel {
-            for session in element.cursor_sessions() {
-                session.set_cursor_pos(Some(
-                    event
-                        .location
-                        .to_buffer(1.0, Transform::Normal, &element.geometry().size.to_f64())
-                        .to_i32_round(),
-                ));
-                if let Some((_, hotspot)) = seat
-                    .cursor_geometry((0.0, 0.0), Duration::from_millis(event.time as u64).into())
-                {
-                    session.set_cursor_hotspot(hotspot);
-                } else {
-                    session.set_cursor_hotspot((0, 0));
-                }
-            }
-        }
-
+        self.update_image_copy_cursor_position(seat, data, event);
         self.inner_pointer_target().enter(seat, data, event);
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
-        let toplevel = self.toplevel(&data.common.shell.read());
-        if let Some(element) = toplevel {
-            for session in element.cursor_sessions() {
-                session.set_cursor_pos(Some(
-                    event
-                        .location
-                        .to_buffer(1.0, Transform::Normal, &element.geometry().size.to_f64())
-                        .to_i32_round(),
-                ));
-                if let Some((_, hotspot)) = seat
-                    .cursor_geometry((0.0, 0.0), Duration::from_millis(event.time as u64).into())
-                {
-                    session.set_cursor_hotspot(hotspot);
-                } else {
-                    session.set_cursor_hotspot((0, 0));
-                }
-            }
-        }
-
+        self.update_image_copy_cursor_position(seat, data, event);
         self.inner_pointer_target().motion(seat, data, event);
     }
     fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
