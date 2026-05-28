@@ -60,7 +60,7 @@ use smithay::{
     reexports::{
         input::Device as InputDevice, wayland_server::protocol::wl_shm::Format as ShmFormat,
     },
-    utils::{Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Point, Rectangle, SERIAL_COUNTER, Serial, Size},
     wayland::{
         image_copy_capture::{BufferConstraints, CursorSessionRef},
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
@@ -589,11 +589,13 @@ impl State {
 
                     for session in cursor_sessions_for_output(&shell, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
-                            position.as_logical().to_buffer(
-                                output.current_scale().fractional_scale(),
-                                output.current_transform(),
-                                &output_geometry.size.to_f64().as_logical(),
-                            ),
+                            (position - output_geometry.loc.to_f64())
+                                .as_logical()
+                                .to_buffer(
+                                    output.current_scale().fractional_scale(),
+                                    output.current_transform(),
+                                    &output_geometry.size.to_f64().as_logical(),
+                                ),
                             self.common.clock.now(),
                         ) {
                             if session
@@ -601,8 +603,13 @@ impl State {
                                 .map(|constraint| constraint.size != geometry.size)
                                 .unwrap_or(true)
                             {
+                                let mut cursor_size = geometry.size;
+                                // Client shouldn't try to allocate 0x0 buffer
+                                if cursor_size == Size::new(0, 0) {
+                                    cursor_size = Size::new(1, 1);
+                                }
                                 session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
+                                    size: cursor_size,
                                     shm: vec![ShmFormat::Argb8888],
                                     dma: None,
                                 });
@@ -625,11 +632,11 @@ impl State {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let output = seat.active_output();
-                    let geometry = output.geometry();
-                    let position = geometry.loc.to_f64()
+                    let output_geometry = output.geometry();
+                    let position = output_geometry.loc.to_f64()
                         + smithay::backend::input::AbsolutePositionEvent::position_transformed(
                             &event,
-                            geometry.size.as_logical(),
+                            output_geometry.size.as_logical(),
                         )
                         .as_global();
                     let serial = SERIAL_COUNTER.next_serial();
@@ -651,11 +658,13 @@ impl State {
                     let shell = self.common.shell.read();
                     for session in cursor_sessions_for_output(&shell, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
-                            position.as_logical().to_buffer(
-                                output.current_scale().fractional_scale(),
-                                output.current_transform(),
-                                &geometry.size.to_f64().as_logical(),
-                            ),
+                            (position - output_geometry.loc.to_f64())
+                                .as_logical()
+                                .to_buffer(
+                                    output.current_scale().fractional_scale(),
+                                    output.current_transform(),
+                                    &output_geometry.size.to_f64().as_logical(),
+                                ),
                             self.common.clock.now(),
                         ) {
                             if session
@@ -663,8 +672,13 @@ impl State {
                                 .map(|constraint| constraint.size != geometry.size)
                                 .unwrap_or(true)
                             {
+                                let mut cursor_size = geometry.size;
+                                // Client shouldn't try to allocate 0x0 buffer
+                                if cursor_size == Size::new(0, 0) {
+                                    cursor_size = Size::new(1, 1);
+                                }
                                 session.update_constraints(BufferConstraints {
-                                    size: geometry.size,
+                                    size: cursor_size,
                                     shm: vec![ShmFormat::Argb8888],
                                     dma: None,
                                 });
@@ -2319,6 +2333,7 @@ impl State {
     }
 }
 
+// Output and workspace sessions for the given output
 fn cursor_sessions_for_output<'a>(
     shell: &'a Shell,
     output: &'a Output,
@@ -2327,16 +2342,9 @@ fn cursor_sessions_for_output<'a>(
         .active_space(output)
         .into_iter()
         .flat_map(|workspace| {
-            let maybe_fullscreen = workspace.get_fullscreen();
             workspace
                 .cursor_sessions()
                 .into_iter()
-                .chain(
-                    maybe_fullscreen
-                        .map(|w| w.cursor_sessions())
-                        .into_iter()
-                        .flatten(),
-                )
                 .chain(output.cursor_sessions())
         })
 }
