@@ -220,12 +220,12 @@ fn render_input_order_internal<R: 'static>(
             .rev()
             .filter(|or| {
                 (*or)
-                    .geometry()
+                    .last_configure()
                     .as_global()
                     .intersection(output.geometry())
                     .is_some()
             })
-            .map(|or| (or, or.geometry().loc.as_global()))
+            .map(|or| (or, or.last_configure().loc.as_global()))
         {
             callback(Stage::OverrideRedirect { surface, location })?;
         }
