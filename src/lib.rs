@@ -16,7 +16,7 @@ use smithay::{
 };
 
 use anyhow::{Context, Result};
-use state::{LastRefresh, State};
+use state::{BackendData, LastRefresh, State};
 use std::{
     env,
     ffi::OsString,
@@ -216,19 +216,17 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                 // Kiosk child exited with status
                 Ok(Some(exit_status)) => {
                     info!("Command exited with status {:?}", exit_status);
-                    match exit_status.code() {
-                        // Exiting with the same status as the kiosk child
-                        Some(code) => process::exit(code),
-                        // The kiosk child exited with signal, exiting with error
-                        None => process::exit(1),
-                    }
+                    let code = exit_status.code().unwrap_or(1);
+                    state.common.kiosk_exit_code = Some(code);
+                    state.common.should_stop = true;
                 }
                 // Command still running
                 Ok(None) => {}
                 // Kiosk child disappeared, exiting with error
                 Err(err) => {
                     warn!(?err, "Failed to wait for command");
-                    process::exit(1);
+                    state.common.kiosk_exit_code = Some(1);
+                    state.common.should_stop = true;
                 }
             }
         }
@@ -239,11 +237,21 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         let _ = child.kill();
     }
 
-    // drop eventloop & state before logger
-    std::mem::drop(event_loop);
-    std::mem::drop(state);
+    let exit_code = state.common.kiosk_exit_code.unwrap_or(0);
 
-    Ok(())
+    // Release DRM master so the next compositor can acquire it immediately;
+    // pause() does not block.
+    if let BackendData::Kms(kms) = &mut state.backend {
+        for device in kms.drm_devices.values_mut() {
+            device.drm.pause();
+        }
+    }
+
+    // _exit() skips libc atexit handlers, avoiding the Mesa util_queue/EGL
+    // teardown race that aborts the process: https://github.com/pop-os/cosmic-comp/issues/2375
+    drop(event_loop);
+    drop(state);
+    unsafe { libc::_exit(exit_code) };
 }
 
 fn print_help(version: &str, git_rev: &str) {

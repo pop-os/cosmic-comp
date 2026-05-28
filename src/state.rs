@@ -242,6 +242,7 @@ pub struct Common {
     pub clock: Clock<Monotonic>,
     pub startup_done: Arc<AtomicBool>,
     pub should_stop: bool,
+    pub kiosk_exit_code: Option<i32>,
 
     pub gesture_state: Option<GestureState>,
 
@@ -752,6 +753,7 @@ impl State {
                 clock,
                 startup_done: Arc::new(AtomicBool::new(false)),
                 should_stop: false,
+                kiosk_exit_code: None,
                 gesture_state: None,
 
                 kiosk_child: None,

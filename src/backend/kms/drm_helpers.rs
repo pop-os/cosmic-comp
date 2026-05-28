@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow};
 use libdisplay_info::{edid::DisplayDescriptorTag, info::Info};
 use smithay::{
     reexports::drm::control::{
-        AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType, ResourceHandle,
+        AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, ResourceHandle,
         atomic::AtomicModeReq,
         connector::{self, State as ConnectorState},
         crtc,
@@ -73,7 +73,7 @@ pub fn display_configuration(
     }
 
     // And then cleanup
-    if supports_atomic {
+    if supports_atomic && !cleanup.is_empty() {
         let mut req = AtomicModeReq::new();
         let plane_handles = device.plane_handles()?;
 
@@ -100,15 +100,7 @@ pub fn display_configuration(
         for plane in plane_handles {
             let info = device.get_plane(plane)?;
             if let Some(crtc) = info.crtc() {
-                let is_primary = get_property_val(device, plane, "type").map(
-                    |(val_type, val)| match val_type.convert_value(val) {
-                        property::Value::Enum(Some(val)) => {
-                            val.value() == PlaneType::Primary as u64
-                        }
-                        _ => false,
-                    },
-                )?;
-                if cleanup.contains(&crtc) || !is_primary {
+                if cleanup.contains(&crtc) {
                     let crtc_id = get_prop(device, plane, "CRTC_ID")?;
                     let fb_id = get_prop(device, plane, "FB_ID")?;
                     req.add_property(plane, crtc_id, property::Value::CRTC(None));
@@ -124,7 +116,15 @@ pub fn display_configuration(
             req.add_property(crtc, mode_id, property::Value::Unknown(0));
         }
 
-        device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)?;
+        // EPERM/EACCES means we don't hold DRM master; skip cleanup rather than
+        // aborting device_changed() with a hard error.
+        if let Err(err) = device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req) {
+            if err.kind() == std::io::ErrorKind::PermissionDenied {
+                tracing::warn!(?err, "Failed to clean up DRM device state (no master), skipping");
+                return Ok(map);
+            }
+            return Err(err.into());
+        }
     } else {
         for crtc in res_handles.crtcs() {
             #[allow(deprecated)]
