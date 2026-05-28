@@ -37,7 +37,10 @@ use smithay::{
         Client, DisplayHandle, Resource, backend::ObjectId, protocol::wl_surface::WlSurface,
     },
     utils::{IsAlive, Logical, Point, Serial, Transform},
-    wayland::{seat::WaylandFocus, selection::data_device::WlOfferData, session_lock::LockSurface},
+    wayland::{
+        compositor::with_states, seat::WaylandFocus, selection::data_device::WlOfferData,
+        session_lock::LockSurface, shell::xdg::SurfaceCachedState,
+    },
     xwayland::{
         X11Surface,
         xwm::{XwmId, XwmOfferData},
@@ -241,10 +244,19 @@ impl PointerFocusTarget {
             return;
         }
 
-        let cursor_pos = if let Some(_wl_surface) = self.wl_surface() {
+        let cursor_pos = if let Some(wl_surface) = self.wl_surface() {
+            let geometry_loc = with_states(&wl_surface, |states| {
+                states
+                    .cached_state
+                    .get::<SurfaceCachedState>()
+                    .current()
+                    .geometry
+                    .map(|g| g.loc.to_f64())
+            })
+            .unwrap_or_default();
+
             Some(
-                event
-                    .location
+                (event.location - geometry_loc)
                     .to_buffer(1.0, Transform::Normal, &toplevel.geometry().size.to_f64())
                     .to_i32_round(),
             )
