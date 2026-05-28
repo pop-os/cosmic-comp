@@ -345,6 +345,13 @@ fn update_focus_state(
     serial: Option<Serial>,
     should_update_cursor: bool,
 ) {
+    // Cancel any in-flight kinetic fling on focus change so it doesn't keep
+    // scrolling the previously-focused surface.
+    let prev_focus = seat.get_keyboard().and_then(|k| k.current_focus());
+    if prev_focus.as_ref() != target {
+        crate::input::kinetic::cancel(seat);
+    }
+
     // update keyboard focus
     if let Some(keyboard) = seat.get_keyboard() {
         if should_update_cursor

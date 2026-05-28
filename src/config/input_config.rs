@@ -65,6 +65,7 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
                     None
                 },
                 scroll_factor: None,
+                kinetic: None,
             })
         } else {
             None

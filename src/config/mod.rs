@@ -622,6 +622,14 @@ impl Config {
         .map_or(1.0, |x| x.0)
     }
 
+    pub fn kinetic_scroll_enabled(&self, device: &InputDevice) -> bool {
+        let (device_config, default_config) = self.get_device_config(device);
+        input_config::get_config(device_config.as_ref(), default_config, |x| {
+            x.scroll_config.as_ref()?.kinetic
+        })
+        .is_some_and(|x| x.0)
+    }
+
     pub fn map_to_output(&self, device: &InputDevice) -> Option<String> {
         let (device_config, default_config) = self.get_device_config(device);
         Some(

@@ -5,7 +5,7 @@ use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex};
 use crate::{
     backend::render::cursor::CursorState,
     config::{Config, xkb_config_to_wl},
-    input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
+    input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys, kinetic::KineticScroller},
     state::State,
 };
 use smithay::{
@@ -194,6 +194,7 @@ pub fn create_seat(
     userdata.insert_if_missing(Devices::default);
     userdata.insert_if_missing(SupressedKeys::default);
     userdata.insert_if_missing(SupressedButtons::default);
+    userdata.insert_if_missing(KineticScroller::default);
     userdata.insert_if_missing(ModifiersShortcutQueue::default);
     userdata.insert_if_missing(LastModifierChange::default);
     userdata.insert_if_missing_threadsafe(SeatMoveGrabState::default);
