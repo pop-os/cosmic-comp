@@ -241,12 +241,17 @@ impl PointerFocusTarget {
             return;
         }
 
-        let cursor_pos = Some(
-            event
-                .location
-                .to_buffer(1.0, Transform::Normal, &toplevel.geometry().size.to_f64())
-                .to_i32_round(),
-        );
+        let cursor_pos = if let Some(_wl_surface) = self.wl_surface() {
+            Some(
+                event
+                    .location
+                    .to_buffer(1.0, Transform::Normal, &toplevel.geometry().size.to_f64())
+                    .to_i32_round(),
+            )
+        } else {
+            // If cursor is in SSD, instead of a `wl_surface`, it is outside the captured bounds
+            None
+        };
 
         let cursor_hotspot = if let Some((_, hotspot)) =
             seat.cursor_geometry((0.0, 0.0), Duration::from_millis(event.time as u64).into())
