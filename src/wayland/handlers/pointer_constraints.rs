@@ -24,6 +24,8 @@ impl PointerConstraintsHandler for State {
         }
     }
 
+    fn remove_constraint(&mut self, _surface: &WlSurface, _pointer: &PointerHandle<Self>) {}
+
     fn cursor_position_hint(
         &mut self,
         _surface: &WlSurface,

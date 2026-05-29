@@ -2327,16 +2327,14 @@ fn cursor_sessions_for_output<'a>(
         .active_space(output)
         .into_iter()
         .flat_map(|workspace| {
-            let maybe_fullscreen = workspace.get_fullscreen();
+            let fullscreen_cursors: Vec<_> = workspace
+                .get_fullscreen_surfaces()
+                .flat_map(|f| f.surface.cursor_sessions())
+                .collect();
             workspace
                 .cursor_sessions()
                 .into_iter()
-                .chain(
-                    maybe_fullscreen
-                        .map(|w| w.cursor_sessions())
-                        .into_iter()
-                        .flatten(),
-                )
+                .chain(fullscreen_cursors)
                 .chain(output.cursor_sessions())
         })
 }

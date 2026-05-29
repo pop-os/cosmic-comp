@@ -51,9 +51,10 @@ impl DmabufHandler for State {
         let is_fullscreen = shell
             .workspaces
             .space_for_handle(&handle)?
-            .fullscreen
-            .as_ref()
-            .is_some_and(|f| f.surface.has_surface(surface, WindowSurfaceType::all()));
+            .fullscreen_surfaces
+            .iter()
+            .any(|f| f.surface.has_surface(surface, WindowSurfaceType::all()));
+        //HOJJAT  do we need to f.ended_at.is_none()?
 
         let node = kms
             .drm_devices
