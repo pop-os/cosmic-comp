@@ -50,10 +50,13 @@ use smithay::{
     },
     utils::{IsAlive, Logical, Point, Rectangle, Serial, Size},
     wayland::{
-        compositor::{SurfaceAttributes, with_states},
+        compositor::{SurfaceAttributes, get_parent, with_states},
         seat::WaylandFocus,
         session_lock::LockSurface,
-        shell::wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
+        shell::{
+            wlr_layer::{KeyboardInteractivity, Layer, LayerSurfaceCachedState},
+            xdg::{XDG_POPUP_ROLE, XdgPopupSurfaceData},
+        },
         xdg_activation::XdgActivationState,
         xwayland_keyboard_grab::XWaylandKeyboardGrab,
     },
@@ -727,6 +730,82 @@ impl WorkspaceSet {
         self.workspaces = doesnt;
         self.post_remove_workspace(workspace_state, &previous_active_handle);
         prefers
+    }
+
+    pub fn surface_geometry_offset_from_toplevel(
+        &self,
+        surface: &WlSurface,
+    ) -> Option<(Rectangle<i32, Local>, Point<i32, Logical>)> {
+        let mut root = surface.clone();
+
+        while let Some(parent) = get_parent(&root) {
+            root = parent;
+        }
+
+        while smithay::wayland::compositor::get_role(&root) == Some(XDG_POPUP_ROLE) {
+            let parent = with_states(&root, |states| {
+                states
+                    .data_map
+                    .get::<XdgPopupSurfaceData>()
+                    .and_then(|m| m.lock().unwrap().parent.as_ref().cloned())
+            });
+            if let Some(parent) = parent {
+                root = parent;
+            } else {
+                break;
+            }
+        }
+
+        self.sticky_layer
+            .mapped()
+            .find(|w| {
+                w.windows()
+                    .any(|(w, _)| w.wl_surface().as_deref() == Some(&root))
+            })
+            .and_then(|w| {
+                w.surface_offset(surface).and_then(|offset| {
+                    self.sticky_layer
+                        .element_geometry(w)
+                        .map(|geom| (geom, offset))
+                })
+            })
+            .or_else(|| {
+                self.workspaces.iter().find_map(|workspace| {
+                    workspace
+                        .get_fullscreen()
+                        .and_then(|fullscreen| {
+                            (fullscreen.wl_surface().as_deref() == Some(&root))
+                                .then(|| {
+                                    fullscreen.surface_offset(surface).and_then(|offset| {
+                                        workspace.fullscreen_geometry().map(|geom| (geom, offset))
+                                    })
+                                })
+                                .flatten()
+                        })
+                        .or_else(|| {
+                            workspace.mapped().find_map(|w| {
+                                w.windows()
+                                    .any(|(w, _)| w.wl_surface().as_deref() == Some(&root))
+                                    .then(|| {
+                                        w.surface_offset(surface).and_then(|offset| {
+                                            workspace.element_geometry(w).map(|geom| (geom, offset))
+                                        })
+                                    })
+                                    .flatten()
+                            })
+                        })
+                })
+            })
+            .or_else(|| {
+                layer_map_for_output(&self.output).layers().find_map(|l| {
+                    (l.wl_surface() == &root)
+                        .then(|| {
+                            CosmicSurface::surface_tree_offset(l.wl_surface(), surface)
+                                .map(|offset| (l.geometry().as_local(), offset))
+                        })
+                        .flatten()
+                })
+            })
     }
 }
 
@@ -3635,7 +3714,11 @@ impl Shell {
             if old_mapped.is_maximized(false) {
                 new_mapped.set_maximized(false);
             }
-            start_data.set_focus(new_mapped.focus_under((0., 0.).into(), WindowSurfaceType::ALL));
+            start_data.set_focus(new_mapped.focus_under(
+                (0., 0.).into(),
+                WindowSurfaceType::ALL,
+                seat,
+            ));
             new_mapped
         } else {
             old_mapped.clone()
@@ -4106,7 +4189,7 @@ impl Shell {
 
         let element_offset = (new_loc - geometry.loc).as_logical();
         let focus = mapped
-            .focus_under(element_offset.to_f64(), WindowSurfaceType::ALL)
+            .focus_under(element_offset.to_f64(), WindowSurfaceType::ALL, seat)
             .map(|(target, surface_offset)| (target, (surface_offset + element_offset.to_f64())));
         start_data.set_location(new_loc.as_logical().to_f64());
         start_data.set_focus(focus.clone());

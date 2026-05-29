@@ -731,7 +731,11 @@ impl FloatingLayout {
         self.space.element_geometry(elem).map(RectExt::as_local)
     }
 
-    pub fn popup_element_under(&self, location: Point<f64, Local>) -> Option<KeyboardFocusTarget> {
+    pub fn popup_element_under(
+        &self,
+        location: Point<f64, Local>,
+        seat: &Seat<State>,
+    ) -> Option<KeyboardFocusTarget> {
         self.space
             .elements()
             .rev()
@@ -752,6 +756,7 @@ impl FloatingLayout {
                 if e.focus_under(
                     point.as_logical(),
                     WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 )
                 .is_some()
                 {
@@ -765,6 +770,7 @@ impl FloatingLayout {
     pub fn toplevel_element_under(
         &self,
         location: Point<f64, Local>,
+        seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
         self.space
             .elements()
@@ -786,6 +792,7 @@ impl FloatingLayout {
                 if e.focus_under(
                     point.as_logical(),
                     WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 )
                 .is_some()
                 {
@@ -799,6 +806,7 @@ impl FloatingLayout {
     pub fn popup_surface_under(
         &self,
         location: Point<f64, Local>,
+        seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         self.space
             .elements()
@@ -820,6 +828,7 @@ impl FloatingLayout {
                 e.focus_under(
                     point.as_logical(),
                     WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 )
                 .map(|(surface, surface_offset)| {
                     (surface, render_location + surface_offset.as_local())
@@ -830,6 +839,7 @@ impl FloatingLayout {
     pub fn toplevel_surface_under(
         &self,
         location: Point<f64, Local>,
+        seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         self.space
             .elements()
@@ -851,6 +861,7 @@ impl FloatingLayout {
                 e.focus_under(
                     point.as_logical(),
                     WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 )
                 .map(|(surface, surface_offset)| {
                     (surface, render_location + surface_offset.as_local())
