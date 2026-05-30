@@ -436,6 +436,11 @@ fn create_workspace_from_pinned(
             | WorkspaceCapabilities::Pin
             | WorkspaceCapabilities::Move,
     );
+
+    if let Some(ref name) = pinned.name {
+        state.set_workspace_name(&workspace_handle, name);
+    }
+
     Workspace::from_pinned(
         pinned,
         workspace_handle,
@@ -616,6 +621,7 @@ impl WorkspaceSet {
             state,
             self.workspaces.len() as u8 + 1,
             &workspace.handle,
+            workspace.name.as_deref(),
             // this method is only used by code paths related to dynamic workspaces, so this should be fine
         );
         self.workspaces.push(workspace);
@@ -677,7 +683,7 @@ impl WorkspaceSet {
 
     fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
         for (i, workspace) in self.workspaces.iter().enumerate() {
-            workspace_set_idx(state, i as u8 + 1, &workspace.handle);
+            workspace_set_idx(state, i as u8 + 1, &workspace.handle, workspace.name.as_deref());
         }
     }
 
@@ -4944,8 +4950,12 @@ fn workspace_set_idx(
     state: &mut WorkspaceUpdateGuard<'_, State>,
     idx: u8,
     handle: &WorkspaceHandle,
+    name: Option<&str>,
 ) {
-    state.set_workspace_name(handle, format!("{}", idx));
+    state.set_workspace_name(
+        handle,
+        name.unwrap_or(&format!("{}", idx)),
+    );
     state.set_workspace_coordinates(handle, &[idx as u32]);
 }
 
