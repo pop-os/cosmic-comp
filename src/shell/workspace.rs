@@ -1508,14 +1508,18 @@ impl Workspace {
         self.floating_layer.mapped().count()
             + self.tiling_layer.mapped().count()
             + self.minimized_windows.len()
-            + self.fullscreen_surfaces.len() // HOJJAT: should we check if they're animating to close?!
+            + self
+                .fullscreen_surfaces
+                .iter()
+                .filter(|f| f.ended_at.is_none())
+                .count()
     }
 
     pub fn is_empty(&self) -> bool {
         self.floating_layer.mapped().next().is_none()
             && self.tiling_layer.mapped().next().is_none()
             && self.minimized_windows.is_empty()
-            && self.fullscreen_surfaces.is_empty() // HOJJAT: should we check if it's alive and not closing?!
+            && self.fullscreen_surfaces.is_empty()
     }
 
     pub fn is_floating<S>(&self, surface: &S) -> bool

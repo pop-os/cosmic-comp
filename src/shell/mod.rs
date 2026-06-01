@@ -763,21 +763,19 @@ impl WorkspaceSet {
                     .any(|(w, _)| w.wl_surface().as_deref() == Some(&root))
             })
             .and_then(|w| {
-                w.surface_offset(surface).and_then(|offset| {
-                    self.sticky_layer
-                        .element_geometry(w)
-                        .map(|geom| (geom, offset))
-                })
+                self.sticky_layer
+                    .element_geometry(w)
+                    .zip(w.surface_offset(surface))
             })
             .or_else(|| {
                 self.workspaces.iter().find_map(|workspace| {
                     workspace
-                        .get_fullscreen()
-                        .and_then(|fullscreen| {
-                            (fullscreen.wl_surface().as_deref() == Some(&root))
+                        .get_fullscreen_surfaces()
+                        .find_map(|fs| {
+                            (fs.surface.wl_surface().as_deref() == Some(&root))
                                 .then(|| {
-                                    fullscreen.surface_offset(surface).and_then(|offset| {
-                                        workspace.fullscreen_geometry().map(|geom| (geom, offset))
+                                    fs.surface.surface_offset(surface).map(|offset| {
+                                        (workspace.fullscreen_geometry_for(fs), offset)
                                     })
                                 })
                                 .flatten()
@@ -787,9 +785,7 @@ impl WorkspaceSet {
                                 w.windows()
                                     .any(|(w, _)| w.wl_surface().as_deref() == Some(&root))
                                     .then(|| {
-                                        w.surface_offset(surface).and_then(|offset| {
-                                            workspace.element_geometry(w).map(|geom| (geom, offset))
-                                        })
+                                        workspace.element_geometry(w).zip(w.surface_offset(surface))
                                     })
                                     .flatten()
                             })
