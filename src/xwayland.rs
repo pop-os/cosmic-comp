@@ -575,16 +575,15 @@ impl Common {
                                         .filter(|(i, _)| *i != set.active),
                                 )
                                 .flat_map(|(_, workspace)| {
+                                    let focus_last =
+                                        workspace.focus_stack.get(seat).last().cloned();
                                     workspace
-                                        .get_fullscreen()
+                                        .get_fullscreen_surfaces()
                                         .filter(|f| {
-                                            workspace
-                                                .focus_stack
-                                                .get(seat)
-                                                .last()
-                                                .is_some_and(|t| &t == f)
+                                            focus_last.as_ref().is_some_and(|t| t == &f.surface)
                                         })
-                                        .cloned()
+                                        .map(|f| f.surface.clone())
+                                        .collect::<Vec<_>>()
                                         .into_iter()
                                         .chain(workspace.mapped().flat_map(|mapped| {
                                             let active = mapped.active_window();
@@ -603,15 +602,14 @@ impl Common {
                                         }))
                                         .chain(
                                             workspace
-                                                .get_fullscreen()
+                                                .get_fullscreen_surfaces()
                                                 .filter(|f| {
-                                                    workspace
-                                                        .focus_stack
-                                                        .get(seat)
-                                                        .last()
-                                                        .is_none_or(|t| &t != f)
+                                                    focus_last
+                                                        .as_ref()
+                                                        .is_none_or(|t| t != &f.surface)
                                                 })
-                                                .cloned()
+                                                .map(|f| f.surface.clone())
+                                                .collect::<Vec<_>>()
                                                 .into_iter(),
                                         )
                                         .chain(
