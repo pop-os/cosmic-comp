@@ -238,7 +238,8 @@ impl CosmicSurface {
                 toplevel.with_pending_state(|state| state.size = Some(geo.size.as_logical()))
             }
             WindowSurface::X11(surface) => {
-                let _ = surface.configure_with_sync(geo.as_logical(), None);
+                let _ =
+                    surface.configure_with_sync(geo.as_logical() + surface.frame_extents(), None);
             }
         }
     }
