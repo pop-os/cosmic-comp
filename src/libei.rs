@@ -8,16 +8,16 @@ use smithay::reexports::calloop;
 use crate::config::xkb_config_to_wl;
 use crate::state::State;
 
-pub fn listen_eis(handle: &calloop::LoopHandle<'static, State>) {
+pub fn listen_eis(handle: &calloop::LoopHandle<'static, State>) -> Option<String> {
     let listener = match eis::Listener::bind_auto() {
         Ok(listener) => listener,
         Err(err) => {
             tracing::error!("Failed to bind EI listener socket: {}", err);
-            return;
+            return None;
         }
     };
 
-    unsafe { std::env::set_var("LIBEI_SOCKET", listener.path()) };
+    let socket_path = listener.path().to_string_lossy().into_owned();
 
     let listener_source = EisListenerSource::new(listener);
     let handle_clone = handle.clone();
@@ -43,4 +43,6 @@ pub fn listen_eis(handle: &calloop::LoopHandle<'static, State>) {
             Ok(calloop::PostAction::Continue)
         })
         .unwrap();
+
+    Some(socket_path)
 }
