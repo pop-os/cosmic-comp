@@ -495,35 +495,18 @@ where
         .unwrap()
         .lock()
         .unwrap();
-    let foreign_toplevel_handle = state.foreign_handle.as_ref();
     let mut changed = false;
 
-    if handle_state.title != window.title() {
-        handle_state.title = window.title();
-        if instance.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE {
-            instance.title(handle_state.title.clone());
-        }
-        if let Some(handle) = foreign_toplevel_handle {
-            handle.send_title(&handle_state.title);
-        }
-        changed = true;
-    }
-    if handle_state.app_id != window.app_id() {
-        handle_state.app_id = window.app_id();
-        if instance.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE {
-            instance.app_id(handle_state.app_id.clone());
-        }
-        if let Some(handle) = foreign_toplevel_handle {
-            handle.send_app_id(&handle_state.app_id);
-        }
-        changed = true;
-    }
+    let new_title = (handle_state.title != window.title()).then(|| window.title());
+    let new_app_id = (handle_state.app_id != window.app_id()).then(|| window.app_id());
 
-    if handle_state.states.as_ref().is_none_or(|states| {
+    let new_states = if handle_state.states.as_ref().is_none_or(|states| {
         (states.contains(&States::Maximized) != window.is_maximized())
             || (states.contains(&States::Fullscreen) != window.is_fullscreen())
             || (states.contains(&States::Activated) != window.is_activated())
             || (states.contains(&States::Minimized) != window.is_minimized())
+            || (instance.version() >= zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
+                && states.contains(&States::Sticky) != window.is_sticky())
     }) {
         let mut states = Vec::new();
         if window.is_maximized() {
@@ -543,8 +526,64 @@ where
         {
             states.push(States::Sticky);
         }
-        handle_state.states = Some(states.clone());
+        Some(states)
+    } else {
+        None
+    };
 
+    let geometry_changed = if !window.is_resizing() {
+        let geometry = window.global_geometry();
+        if handle_state.geometry != geometry {
+            handle_state.geometry = geometry;
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    let outputs_changed = state.outputs != handle_state.outputs
+        || handle_state.wl_outputs.iter().any(|o| !o.is_alive());
+
+    let workspaces_changed = state.workspaces != handle_state.workspaces;
+
+    if new_title.is_none()
+        && new_app_id.is_none()
+        && new_states.is_none()
+        && !geometry_changed
+        && !outputs_changed
+        && !workspaces_changed
+    {
+        return false;
+    }
+
+    let foreign_toplevel_handle = state.foreign_handle.as_ref();
+
+    if let Some(title) = new_title {
+        handle_state.title = title;
+        if instance.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE {
+            instance.title(handle_state.title.clone());
+        }
+        if let Some(handle) = foreign_toplevel_handle {
+            handle.send_title(&handle_state.title);
+        }
+        changed = true;
+    }
+
+    if let Some(app_id) = new_app_id {
+        handle_state.app_id = app_id;
+        if instance.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE {
+            instance.app_id(handle_state.app_id.clone());
+        }
+        if let Some(handle) = foreign_toplevel_handle {
+            handle.send_app_id(&handle_state.app_id);
+        }
+        changed = true;
+    }
+
+    if let Some(states) = new_states {
+        handle_state.states = Some(states.clone());
         let states = states
             .iter()
             .flat_map(|state| (*state as u32).to_ne_bytes())
@@ -553,17 +592,9 @@ where
         changed = true;
     }
 
-    let mut geometry_changed = false;
-    if !window.is_resizing() {
-        let geometry = window.global_geometry();
-        if handle_state.geometry != geometry {
-            handle_state.geometry = geometry;
-            changed = true;
-            geometry_changed = true;
-        }
-    }
-
-    if let Ok(client) = dh.get_client(instance.id()) {
+    if (outputs_changed || geometry_changed)
+        && let Ok(client) = dh.get_client(instance.id())
+    {
         handle_state.outputs = state.outputs.clone();
 
         let handle_state = &mut *handle_state;
@@ -599,27 +630,29 @@ where
         });
     }
 
-    for new_workspace in state
-        .workspaces
-        .iter()
-        .filter(|w| !handle_state.workspaces.contains(w))
-    {
-        for handle in workspace_state.raw_ext_workspace_handles(new_workspace, &instance.id()) {
-            instance.ext_workspace_enter(handle);
-            changed = true;
+    if workspaces_changed {
+        for new_workspace in state
+            .workspaces
+            .iter()
+            .filter(|w| !handle_state.workspaces.contains(w))
+        {
+            for handle in workspace_state.raw_ext_workspace_handles(new_workspace, &instance.id()) {
+                instance.ext_workspace_enter(handle);
+                changed = true;
+            }
         }
-    }
-    for old_workspace in handle_state
-        .workspaces
-        .iter()
-        .filter(|w| !state.workspaces.contains(w))
-    {
-        for handle in workspace_state.raw_ext_workspace_handles(old_workspace, &instance.id()) {
-            instance.ext_workspace_leave(handle);
-            changed = true;
+        for old_workspace in handle_state
+            .workspaces
+            .iter()
+            .filter(|w| !state.workspaces.contains(w))
+        {
+            for handle in workspace_state.raw_ext_workspace_handles(old_workspace, &instance.id()) {
+                instance.ext_workspace_leave(handle);
+                changed = true;
+            }
         }
+        handle_state.workspaces = state.workspaces.clone();
     }
-    handle_state.workspaces = state.workspaces.clone();
 
     if changed {
         if instance.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE {
