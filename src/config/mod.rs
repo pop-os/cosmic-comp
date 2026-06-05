@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    input::InputBackendId,
     shell::Shell,
     state::{BackendData, State},
     utils::prelude::OutputExt,
@@ -819,6 +820,27 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                             change_modifier_state(&keyboard, CAPSLOCK_SCANCODE, state);
                         }
                     }
+                }
+                let ei_connections = state
+                    .common
+                    .ei_keyboard_source
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for conn in &ei_connections {
+                    state.release_ei_keyboard(conn);
+                    state.clear_input_source_state(&InputBackendId::Ei(conn.clone()));
+                }
+                for ei_seat in state.common.ei_seats.values() {
+                    if let Err(err) =
+                        ei_seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&value))
+                    {
+                        warn!(?err, "Failed to update libei keyboard keymap");
+                    }
+                }
+                if !state.common.ei_seats.is_empty() {
+                    let seat = state.common.shell.read().seats.last_active().clone();
+                    state.broadcast_ei_keyboard_modifiers(&seat);
                 }
                 state.common.config.cosmic_conf.xkb_config = value;
             }

@@ -248,6 +248,28 @@ pub struct Common {
 
     pub gesture_state: Option<GestureState>,
 
+    /// Active libei sender seats, keyed by their `eis` connection. Tracked so their virtual
+    /// keyboards can be re-created when the keyboard configuration changes at runtime.
+    pub ei_seats: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        smithay::backend::libei::EiInputSeat,
+    >,
+
+    /// The shared-seat [`KeyboardSource`] assigned to each libei connection, so its
+    /// `ei_keyboard` key events feed the seat keyboard with independent per-source hold
+    /// tracking (and can be released together on disconnect). Keyed by connection.
+    pub ei_keyboard_source: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        smithay::input::keyboard::KeyboardSource,
+    >,
+
+    /// Pointer buttons currently held by each libei connection, so they can be released when the
+    /// connection drops
+    pub ei_pointer_buttons: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        std::collections::HashSet<u32>,
+    >,
+
     pub kiosk_child: Option<Child>,
     pub theme: cosmic::Theme,
 
@@ -757,6 +779,9 @@ impl State {
                 should_stop: false,
                 kiosk_exit_code: None,
                 gesture_state: None,
+                ei_seats: std::collections::HashMap::new(),
+                ei_keyboard_source: std::collections::HashMap::new(),
+                ei_pointer_buttons: std::collections::HashMap::new(),
 
                 kiosk_child: None,
                 theme: cosmic::theme::system_preference(),
