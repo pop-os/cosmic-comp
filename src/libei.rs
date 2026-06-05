@@ -3,9 +3,9 @@ use reis::eis;
 use smithay::reexports::reis;
 
 use smithay::backend::libei::{EiInput, EiInputEvent};
-use smithay::input::keyboard::XkbConfig;
 use smithay::reexports::calloop;
 
+use crate::config::xkb_config_to_wl;
 use crate::state::State;
 
 pub fn listen_eis(handle: &calloop::LoopHandle<'static, State>) {
@@ -28,10 +28,10 @@ pub fn listen_eis(handle: &calloop::LoopHandle<'static, State>) {
                 .insert_source(source, |event, connection, data| match event {
                     EiInputEvent::Connected => {
                         let seat = connection.add_seat("default");
-                        // TODO config
-                        let _ = seat.add_keyboard("virtual keyboard", XkbConfig::default());
+                        let conf = data.common.config.xkb_config();
+                        let _ = seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&conf));
                         seat.add_pointer("virtual pointer");
-                        seat.add_pointer_absolute("virtual absoulte pointer");
+                        seat.add_pointer_absolute("virtual absolute pointer");
                         seat.add_touch("virtual touch");
                     }
                     EiInputEvent::Disconnected => {}
