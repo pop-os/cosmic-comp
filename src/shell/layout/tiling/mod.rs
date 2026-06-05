@@ -3178,6 +3178,7 @@ impl TilingLayout {
     pub fn popup_element_under(
         &self,
         location_f64: Point<f64, Local>,
+        seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
@@ -3190,6 +3191,7 @@ impl TilingLayout {
                 .focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 )
                 .is_some()
             {
@@ -3203,6 +3205,7 @@ impl TilingLayout {
     pub fn toplevel_element_under(
         &self,
         location_f64: Point<f64, Local>,
+        seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
         let location = location_f64.to_i32_round();
 
@@ -3215,6 +3218,7 @@ impl TilingLayout {
                 .focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 )
                 .is_some()
             {
@@ -3229,6 +3233,7 @@ impl TilingLayout {
         &self,
         location_f64: Point<f64, Local>,
         overview: OverviewMode,
+        seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let location = location_f64.to_i32_round();
 
@@ -3243,6 +3248,7 @@ impl TilingLayout {
                 if let Some((target, surface_offset)) = mapped.focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 ) {
                     return Some((
                         target,
@@ -3260,6 +3266,7 @@ impl TilingLayout {
         &self,
         location_f64: Point<f64, Local>,
         overview: OverviewMode,
+        seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let tree = &self.queue.trees.back().unwrap().0;
         let root = tree.root_node_id()?;
@@ -3276,6 +3283,7 @@ impl TilingLayout {
                 if let Some((target, surface_offset)) = mapped.focus_under(
                     (location_f64 - geo.loc.to_f64()).as_logical() + mapped.geometry().loc.to_f64(),
                     WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    seat,
                 ) {
                     return Some((
                         target,
@@ -3326,6 +3334,7 @@ impl TilingLayout {
                         .focus_under(
                             test_point,
                             WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                            seat,
                         )
                         .map(|(surface, surface_offset)| {
                             (

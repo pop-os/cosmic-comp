@@ -1,6 +1,6 @@
 use crate::{
     shell::{CosmicSurface, MinimizedWindow, Shell, Trigger, element::CosmicMapped},
-    state::Common,
+    state::{Common, State},
     utils::prelude::*,
     wayland::handlers::{xdg_shell::PopupGrabData, xwayland_keyboard_grab::XWaylandGrabSeatData},
 };
@@ -12,6 +12,7 @@ use smithay::{
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     utils::{IsAlive, Point, SERIAL_COUNTER, Serial},
     wayland::{
+        pointer_constraints::with_pointer_constraint,
         seat::WaylandFocus,
         selection::{data_device::set_data_device_focus, primary_selection::set_primary_focus},
         shell::wlr_layer::{KeyboardInteractivity, Layer},
@@ -287,22 +288,18 @@ impl Shell {
             }
 
             let workspace = &mut set.workspaces[set.active];
-            if let Some(fullscreen) = workspace.get_fullscreen() {
-                if self.seats.iter().any(|seat| {
+            for fs in workspace.get_fullscreen_surfaces() {
+                let is_focused = self.seats.iter().any(|seat| {
                     if let Some(KeyboardFocusTarget::Fullscreen(s)) =
                         seat.get_keyboard().unwrap().current_focus()
                     {
-                        &s == fullscreen
+                        s == fs.surface
                     } else {
                         false
                     }
-                }) {
-                    fullscreen.set_activated(true);
-                    fullscreen.send_configure();
-                } else {
-                    fullscreen.set_activated(false);
-                    fullscreen.send_configure();
-                }
+                });
+                fs.surface.set_activated(is_focused);
+                fs.surface.send_configure();
             }
             for focused in focused_windows.iter() {
                 raise_with_children(&mut workspace.floating_layer, focused);
@@ -347,6 +344,20 @@ fn update_focus_state(
 ) {
     // update keyboard focus
     if let Some(keyboard) = seat.get_keyboard() {
+        // remove constraint when target changed
+        let old_focus = keyboard.current_focus();
+        if let Some(old_target) = old_focus
+            && target != Some(&old_target)
+            && let Some(surface) = old_target.wl_surface()
+            && let Some(pointer) = seat.get_pointer()
+        {
+            with_pointer_constraint(&surface, &pointer, |constraint| {
+                if let Some(constraint) = constraint {
+                    constraint.deactivate();
+                }
+            });
+        }
+
         if should_update_cursor
             && state.common.config.cosmic_conf.cursor_follows_focus
             && target.is_some()
@@ -646,7 +657,9 @@ fn focus_target_is_valid(
             .has_node(&node),
         KeyboardFocusTarget::Fullscreen(window) => {
             let workspace = shell.active_space(output).unwrap();
-            workspace.get_fullscreen().is_some_and(|w| w == &window)
+            workspace
+                .get_fullscreen_surfaces()
+                .any(|f| f.surface == window)
         }
         KeyboardFocusTarget::Popup(_) => true,
         KeyboardFocusTarget::LockSurface(_) => false,
@@ -699,9 +712,9 @@ fn update_focus_target(
                     .map(KeyboardFocusTarget::Element)
                     .or_else(|| {
                         workspace
-                            .get_fullscreen()
+                            .get_fullscreen(seat)
                             .cloned()
-                            .map(KeyboardFocusTarget::Fullscreen)
+                            .map(|fs| KeyboardFocusTarget::Fullscreen(fs.surface))
                     })
             })
     }

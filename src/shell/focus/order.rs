@@ -112,8 +112,8 @@ fn render_input_order_internal<R: 'static>(
     let output_size = output.geometry().size;
 
     // this is more hacky than I would like..
-    let fullscreen = workspace.fullscreen.as_ref().filter(|f| !f.is_animating());
     let seat = shell.seats.last_active();
+    let fullscreen = workspace.get_fullscreen(seat);
     let is_active_workspace = seat.focused_output().is_some_and(|output| {
         shell
             .active_space(&output)
@@ -144,7 +144,7 @@ fn render_input_order_internal<R: 'static>(
             let Some(workspace) = shell.workspaces.space_for_handle(previous) else {
                 return ControlFlow::Break(Err(OutputNoMode));
             };
-            let has_fullscreen = workspace.fullscreen.is_some();
+            let has_fullscreen = workspace.get_fullscreen(seat).is_some();
 
             let (forward, percentage) = match start {
                 WorkspaceDelta::Shortcut(st) => (
@@ -220,12 +220,12 @@ fn render_input_order_internal<R: 'static>(
             .rev()
             .filter(|or| {
                 (*or)
-                    .geometry()
+                    .last_configure()
                     .as_global()
                     .intersection(output.geometry())
                     .is_some()
             })
-            .map(|or| (or, or.geometry().loc.as_global()))
+            .map(|or| (or, or.last_configure().loc.as_global()))
         {
             callback(Stage::OverrideRedirect { surface, location })?;
         }

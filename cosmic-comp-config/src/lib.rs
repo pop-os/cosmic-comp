@@ -160,6 +160,7 @@ pub struct CosmicCompConfig {
     pub first_v_split_ratio: f64,
     /// Hide the cursor after this many seconds of pointer inactivity (None disables)
     pub cursor_hide_timeout: Option<u32>,
+    pub activation_policy: ActivationPolicy,
 }
 
 impl Default for CosmicCompConfig {
@@ -201,6 +202,7 @@ impl Default for CosmicCompConfig {
             first_h_split_ratio: 0.0,
             first_v_split_ratio: 0.0,
             cursor_hide_timeout: None,
+            activation_policy: ActivationPolicy::default(),
         }
     }
 }
@@ -300,6 +302,14 @@ pub enum EavesdroppingKeyboardMode {
     Modifiers,
     Combinations,
     All,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ActivationPolicy {
+    #[default]
+    Focus,
+    FocusIfActiveWorkspace,
+    Urgent,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
