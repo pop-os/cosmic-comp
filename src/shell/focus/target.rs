@@ -245,18 +245,25 @@ impl PointerFocusTarget {
         }
 
         let cursor_pos = if let Some(wl_surface) = self.wl_surface() {
-            let geometry_loc = with_states(&wl_surface, |states| {
-                states
-                    .cached_state
-                    .get::<SurfaceCachedState>()
-                    .current()
-                    .geometry
-                    .map(|g| g.loc.to_f64())
-            })
-            .unwrap_or_default();
-
+            let surface_offset = toplevel
+                .surface_offset(&wl_surface)
+                .unwrap_or(Point::from((0, 0)))
+                .to_f64();
+            let geometry_loc = toplevel
+                .wl_surface()
+                .and_then(|s| {
+                    with_states(&s, |states| {
+                        states
+                            .cached_state
+                            .get::<SurfaceCachedState>()
+                            .current()
+                            .geometry
+                            .map(|g| g.loc.to_f64())
+                    })
+                })
+                .unwrap_or_default();
             Some(
-                (event.location - geometry_loc)
+                (event.location - geometry_loc + surface_offset)
                     .to_buffer(1.0, Transform::Normal, &toplevel.geometry().size.to_f64())
                     .to_i32_round(),
             )
