@@ -308,8 +308,8 @@ impl FloatingLayout {
                     Some(geometry.size.as_logical()),
                     None,
                 );
-            } else {
-                let geometry = self.space.element_geometry(&mapped).unwrap().to_f64();
+            } else if let Some(geometry) = self.space.element_geometry(&mapped) {
+                let geometry = geometry.to_f64();
                 let new_loc = (
                     ((geometry.loc.x - old_output_geometry.loc.x).max(0.)
                         / old_output_geometry.size.w
