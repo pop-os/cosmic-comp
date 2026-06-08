@@ -42,6 +42,14 @@ impl DBusState {
             a11y_keyboard_monitor: RefCell::new(None),
         }));
         evlh.insert_source(source, |_, _, _| {}).unwrap();
+
+        if let Err(err) = futures_executor::block_on(state.session_conn()) {
+            tracing::error!("Failed to connect to session bus: {}", err);
+        }
+        if let Err(err) = futures_executor::block_on(state.system_conn()) {
+            tracing::error!("Failed to connect to system bus: {}", err);
+        }
+
         let state_clone = state.clone();
         state.spawn(async move {
             if let Err(err) = init_session(&state_clone).await {
