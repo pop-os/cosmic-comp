@@ -46,7 +46,7 @@ use smithay::{
     },
     wayland::{
         compositor::{
-            SubsurfaceCachedState, SurfaceData, TraversalAction, with_states,
+            SubsurfaceCachedState, SurfaceData, TraversalAction, get_parent, with_states,
             with_surface_tree_downward,
         },
         seat::WaylandFocus,
@@ -674,38 +674,24 @@ impl CosmicSurface {
         root: &WlSurface,
         surface: &WlSurface,
     ) -> Option<Point<i32, Logical>> {
-        if root == surface {
-            return Some(Point::default());
-        }
-
-        let found = AtomicBool::new(false);
-        let mut found_offset = Point::<i32, Logical>::default();
-
-        with_surface_tree_downward(
-            root,
-            Point::<i32, Logical>::default(),
-            |s, states, parent_offset| {
-                let mut offset = *parent_offset;
-                if s != root {
-                    offset += states
+        let mut offset = Point::<i32, Logical>::default();
+        let mut parent = surface.clone();
+        loop {
+            if parent == *root {
+                return Some(offset);
+            } else if let Some(s) = get_parent(&parent) {
+                offset += with_states(&parent, |states| {
+                    states
                         .cached_state
                         .get::<SubsurfaceCachedState>()
                         .current()
-                        .location;
-                }
-                TraversalAction::DoChildren(offset)
-            },
-            |s, _, offset| {
-                if s == surface {
-                    found_offset = *offset;
-                    found.store(true, Ordering::SeqCst);
-                }
-            },
-            |_, _, _| !found.load(Ordering::SeqCst),
-        );
-
-        if found.load(Ordering::SeqCst) {
-            return Some(found_offset);
+                        .location
+                });
+                parent = s;
+            } else {
+                // `parent` is now root of subsurface tree; `surface` is not a subsurface child of `root`
+                break;
+            }
         }
 
         for (popup, popup_offset) in PopupManager::popups_for_surface(root) {
