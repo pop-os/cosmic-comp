@@ -295,6 +295,7 @@ impl FloatingLayout {
         for mapped in self
             .space
             .elements()
+            .filter(|w| w.alive())
             .cloned()
             .collect::<Vec<_>>()
             .into_iter()
@@ -309,7 +310,10 @@ impl FloatingLayout {
                     None,
                 );
             } else {
-                let geometry = self.space.element_geometry(&mapped).unwrap().to_f64();
+                let Some(geometry) = self.space.element_geometry(&mapped) else {
+                    continue;
+                };
+                let geometry = geometry.to_f64();
                 let new_loc = (
                     ((geometry.loc.x - old_output_geometry.loc.x).max(0.)
                         / old_output_geometry.size.w
