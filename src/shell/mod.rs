@@ -13,6 +13,7 @@ use wayland_backend::server::ClientId;
 
 use crate::{
     shell::{focus::FocusTarget, grabs::fullscreen_items, layout::tiling::PlaceholderType},
+    utils,
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
         protocols::workspace::{State as WState, WorkspaceCapabilities},
@@ -1507,12 +1508,31 @@ impl Workspaces {
 #[derive(Debug)]
 pub struct InvalidWorkspaceIndex;
 
+utils::id_gen!(next_output_id, OUTPUT_ID, OUTPUT_IDS);
+pub struct OutputId(usize);
+
+impl OutputId {
+    pub fn namespace_for_workspace(&self, idx: usize) -> usize {
+        self.0 | (idx << 32)
+    }
+}
+
+impl Drop for OutputId {
+    fn drop(&mut self) {
+        OUTPUT_IDS.lock().unwrap().remove(&self.0);
+    }
+}
+
 impl Common {
     pub fn add_output(&mut self, output: &Output) {
         let mut shell = self.shell.write();
         shell
             .workspaces
             .add_output(output, &mut self.workspace_state.update());
+
+        output
+            .user_data()
+            .insert_if_missing_threadsafe(|| OutputId(next_output_id()));
 
         if let Some(state) = shell.zoom_state.as_ref() {
             output.user_data().insert_if_missing_threadsafe(|| {
