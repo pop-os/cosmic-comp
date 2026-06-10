@@ -27,7 +27,7 @@ use crate::{
     },
     config::ScreenFilter,
     shell::{
-        CosmicMappedRenderElement, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
+        CosmicMappedRenderElement, OutputId, OverviewMode, SeatExt, Trigger, WorkspaceDelta,
         WorkspaceRenderElement,
         element::CosmicMappedKey,
         focus::{FocusTarget, Stage, render_input_order, target::WindowGroup},
@@ -839,6 +839,12 @@ where
                 })
                 .unwrap_or([0; 4]);
 
+                let namespace = output
+                    .user_data()
+                    .get::<OutputId>()
+                    .map(|id| id.namespace_for_workspace(workspace_idx))
+                    .unwrap_or(workspace_idx);
+
                 push_render_elements_from_surface_tree(
                     renderer,
                     popup.wl_surface(),
@@ -856,7 +862,7 @@ where
                     FRAME_TIME_FILTER,
                     &mut |elem| {
                         elements.extend(
-                            crop_to_output(NamespacedElement::new(elem, workspace_idx).into())
+                            crop_to_output(NamespacedElement::new(elem, namespace).into())
                                 .map(Into::into),
                         )
                     },
@@ -882,6 +888,12 @@ where
                 })
                 .unwrap_or([0; 4]);
 
+                let namespace = output
+                    .user_data()
+                    .get::<OutputId>()
+                    .map(|id| id.namespace_for_workspace(workspace_idx))
+                    .unwrap_or(workspace_idx);
+
                 push_render_elements_from_surface_tree(
                     renderer,
                     layer.wl_surface(),
@@ -899,7 +911,7 @@ where
                     FRAME_TIME_FILTER,
                     &mut |elem| {
                         elements.extend(
-                            crop_to_output(NamespacedElement::new(elem, workspace_idx).into())
+                            crop_to_output(NamespacedElement::new(elem, namespace).into())
                                 .map(Into::into),
                         )
                     },
