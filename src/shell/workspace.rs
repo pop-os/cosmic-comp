@@ -1954,7 +1954,7 @@ pub struct OutputNotMapped;
 pub enum WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     OverrideRedirect(SurfaceRenderElement<R>),
     LowerLayerShell(NamespacedElement<SurfaceRenderElement<R>>),
@@ -1967,7 +1967,7 @@ where
 impl<R> Element for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
@@ -2098,7 +2098,7 @@ where
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,
@@ -2194,7 +2194,7 @@ where
 impl<R> From<RescaleRenderElement<CosmicWindowRenderElement<R>>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: RescaleRenderElement<CosmicWindowRenderElement<R>>) -> Self {
@@ -2205,7 +2205,7 @@ where
 impl<R> From<CosmicWindowRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicWindowRenderElement<R>) -> Self {
@@ -2216,7 +2216,7 @@ where
 impl<R> From<SurfaceRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: SurfaceRenderElement<R>) -> Self {
@@ -2227,7 +2227,7 @@ where
 impl<R> From<NamespacedElement<SurfaceRenderElement<R>>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: NamespacedElement<SurfaceRenderElement<R>>) -> Self {
@@ -2238,7 +2238,7 @@ where
 impl<R> From<CosmicMappedRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicMappedRenderElement<R>) -> Self {
@@ -2249,7 +2249,7 @@ where
 impl<R> From<TextureRenderElement<GlesTexture>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {

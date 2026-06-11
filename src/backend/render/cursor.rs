@@ -136,7 +136,7 @@ fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error
 }
 
 render_elements! {
-    pub CursorRenderElement<R> where R: ImportAll + ImportMem + AsGlowRenderer;
+    pub CursorRenderElement<R> where R: ImportAll + ImportMem + AsGlowRenderer, R::TextureId: Send;
     Static=MemoryRenderBufferRenderElement<R>,
     Surface=SurfaceRenderElement<R>,
 }

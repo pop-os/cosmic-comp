@@ -20,7 +20,7 @@ pub mod blur_effect;
 pub mod clipped_surface;
 
 render_elements! {
-    pub SurfaceRenderElement<R> where R: AsGlowRenderer + ImportAll;
+    pub SurfaceRenderElement<R> where R: AsGlowRenderer + ImportAll, R::TextureId: Send;
     Blur=BlurElement,
     Clipped=ClippedSurfaceRenderElement<R>,
     Wayland=WaylandSurfaceRenderElement<R>,

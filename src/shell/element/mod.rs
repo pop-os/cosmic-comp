@@ -1112,7 +1112,7 @@ where
 impl<R> Element for CosmicMappedRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
@@ -1333,7 +1333,7 @@ where
 impl<R> RenderElement<R> for CosmicMappedRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,

@@ -1270,7 +1270,7 @@ impl<R: AsGlowRenderer + ImportAll + ImportMem> From<SurfaceRenderElement<R>>
 impl<R> Element for CosmicWindowRenderElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &RendererId {
         match self {
@@ -1379,7 +1379,7 @@ where
 impl<R> RenderElement<R> for CosmicWindowRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,
