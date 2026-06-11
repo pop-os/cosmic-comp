@@ -11,27 +11,22 @@ use crate::{
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::{
     backend::{
-        allocator::{Fourcc, dmabuf::Dmabuf},
+        allocator::dmabuf::Dmabuf,
         drm::DrmDeviceFd,
         renderer::{
-            Bind, Blit, ContextId, ExportMem, Frame as _, FrameContext, ImportAll, ImportMem,
-            Offscreen, Renderer, RendererSuper,
+            Bind, Blit, ContextId, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
             element::{
                 Element, Id, Kind, RenderElement, UnderlyingStorage,
                 utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
             },
             gles::{GlesError, GlesRenderbuffer, GlesTexture, element::TextureShaderElement},
             glow::{GlowFrame, GlowRenderer},
-            multigpu::{
-                MultiTexture,
-                gbm::{GbmGlesBackend, GbmGlesDevice},
-            },
+            multigpu::MultiTexture,
             utils::{CommitCounter, DamageSet, OpaqueRegions},
         },
     },
     utils::{
-        Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, Size,
-        user_data::UserDataMap,
+        Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, user_data::UserDataMap,
     },
 };
 
