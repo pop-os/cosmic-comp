@@ -218,7 +218,7 @@ impl BlurElement {
         radii: [u8; 4],
         strength: usize,
     ) -> Result<Option<Self>, R::Error> {
-        if strength == 0 {
+        if strength == 0 || geometry.size.w == 0. || geometry.size.h == 0. {
             return Ok(None);
         }
 
@@ -237,12 +237,10 @@ impl BlurElement {
         };
         let geo_translation = {
             let offset = geo.loc - extended_geo.loc;
-            Matrix3::from_translation(Vector2::new(
+            Matrix3::from_translation(-Vector2::new(
                 (offset.x / extended_geo.size.w) as f32,
                 (offset.y / extended_geo.size.h) as f32,
             ))
-            .invert()
-            .unwrap()
         };
         let input_to_geo = geo_scale * geo_translation;
 
