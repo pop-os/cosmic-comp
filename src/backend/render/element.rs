@@ -8,20 +8,27 @@ use crate::{
 use smithay::backend::renderer::element::texture::TextureRenderElement;
 use smithay::{
     backend::{
-        allocator::dmabuf::Dmabuf,
+        allocator::{Fourcc, dmabuf::Dmabuf},
+        drm::DrmDeviceFd,
         renderer::{
-            Bind, Blit, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
+            Bind, Blit, ContextId, ExportMem, Frame as _, FrameContext, ImportAll, ImportMem,
+            Offscreen, Renderer, RendererSuper,
             element::{
                 Element, Id, Kind, RenderElement, UnderlyingStorage,
                 utils::{CropRenderElement, Relocate, RelocateRenderElement, RescaleRenderElement},
             },
             gles::{GlesError, GlesRenderbuffer, GlesTexture, element::TextureShaderElement},
             glow::{GlowFrame, GlowRenderer},
+            multigpu::{
+                MultiTexture,
+                gbm::{GbmGlesBackend, GbmGlesDevice},
+            },
             utils::{CommitCounter, DamageSet, OpaqueRegions},
         },
     },
     utils::{
-        Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, user_data::UserDataMap,
+        Buffer as BufferCoords, Logical, Physical, Point, Rectangle, Scale, Size,
+        user_data::UserDataMap,
     },
 };
 
@@ -396,6 +403,11 @@ pub trait AsGlowRenderer:
     fn glow_frame_mut<'a, 'frame, 'buffer>(
         frame: &'a mut Self::Frame<'frame, 'buffer>,
     ) -> &'a mut GlowFrame<'frame, 'buffer>;
+    fn tex_from_gl(context: &ContextId<GlesTexture>, texture: GlesTexture) -> Self::TextureId;
+    fn tex_to_gl(
+        context: &ContextId<GlesTexture>,
+        texture: &Self::TextureId,
+    ) -> Option<GlesTexture>;
     fn from_gles_error(err: GlesError) -> Self::Error;
 }
 
@@ -415,6 +427,15 @@ impl AsGlowRenderer for GlowRenderer {
         frame: &'a mut Self::Frame<'frame, 'buffer>,
     ) -> &'a mut GlowFrame<'frame, 'buffer> {
         frame
+    }
+    fn tex_from_gl(_context: &ContextId<GlesTexture>, texture: GlesTexture) -> Self::TextureId {
+        texture
+    }
+    fn tex_to_gl(
+        _context: &ContextId<GlesTexture>,
+        texture: &Self::TextureId,
+    ) -> Option<GlesTexture> {
+        Some(texture.clone())
     }
     fn from_gles_error(err: GlesError) -> Self::Error {
         err
@@ -437,6 +458,15 @@ impl AsGlowRenderer for GlMultiRenderer<'_> {
         frame: &'b mut Self::Frame<'frame, 'buffer>,
     ) -> &'b mut GlowFrame<'frame, 'buffer> {
         frame.as_mut()
+    }
+    fn tex_from_gl(context: &ContextId<GlesTexture>, texture: GlesTexture) -> Self::TextureId {
+        MultiTexture::from_native_texture::<GbmGlowBackend<DrmDeviceFd>>(context, texture).unwrap()
+    }
+    fn tex_to_gl(
+        context: &ContextId<GlesTexture>,
+        texture: &Self::TextureId,
+    ) -> Option<GlesTexture> {
+        texture.get::<GbmGlowBackend<DrmDeviceFd>>(context)
     }
     fn from_gles_error(err: GlesError) -> Self::Error {
         GlMultiError::Render(err)
