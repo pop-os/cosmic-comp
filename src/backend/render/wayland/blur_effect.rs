@@ -9,7 +9,7 @@ use smithay::{
         allocator::Fourcc,
         renderer::{
             Bind, BlitFrame, Color32F, ContextId, Frame, FrameContext, ImportAll, Offscreen,
-            Renderer, RendererSuper, Texture, TextureFilter,
+            Renderer, Texture, TextureFilter,
             element::{Element, Id, Kind, RenderElement},
             gles::{
                 GlesError, GlesFrame, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
@@ -115,7 +115,7 @@ impl BlurShaders {
     }
 }
 
-type BlurTexture<T: Texture> = Mutex<Option<T>>;
+type BlurTexture<T> = Mutex<Option<T>>;
 
 #[derive(Debug)]
 pub struct BlurState {
@@ -473,7 +473,7 @@ where
                 src,
                 dst,
                 &damage,
-                &opaque_regions,
+                opaque_regions,
                 Transform::Normal,
                 1.0,
             )?;
