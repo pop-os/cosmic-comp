@@ -1,5 +1,8 @@
 use crate::{
-    backend::render::{GlMultiError, wayland::SurfaceRenderElement},
+    backend::{
+        kms::render::gles::GbmGlowBackend,
+        render::{GlMultiError, wayland::SurfaceRenderElement},
+    },
     shell::{CosmicMappedRenderElement, WorkspaceRenderElement},
     utils::iced::IcedRenderElement,
 };
@@ -37,7 +40,7 @@ use super::{GlMultiRenderer, cursor::CursorRenderElement};
 pub enum CosmicElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     Workspace(
@@ -58,7 +61,7 @@ where
 impl<R> Element for CosmicElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn id(&self) -> &Id {
@@ -223,7 +226,7 @@ where
 impl<R> RenderElement<R> for CosmicElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn draw(
@@ -339,7 +342,7 @@ impl<R> From<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>
     for CosmicElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>) -> Self {
@@ -354,7 +357,7 @@ where
 impl<R> From<IcedRenderElement<R>> for CosmicElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(value: IcedRenderElement<R>) -> Self {
@@ -365,7 +368,7 @@ where
 impl<R> From<DamageElement> for CosmicElement<R>
 where
     R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(value: DamageElement) -> Self {
@@ -377,7 +380,7 @@ where
 impl<R> From<TextureRenderElement<GlesTexture>> for CosmicElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {

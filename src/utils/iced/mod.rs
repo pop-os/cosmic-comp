@@ -1112,7 +1112,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 }
 
 render_elements! {
-    pub IcedRenderElement<R> where R: ImportMem + AsGlowRenderer;
+    pub IcedRenderElement<R> where R: ImportMem + AsGlowRenderer, R::TextureId: Send;
     UI=MemoryRenderBufferRenderElement<R>,
     Blur=BlurElement,
 }

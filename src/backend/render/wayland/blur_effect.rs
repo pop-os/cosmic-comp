@@ -9,7 +9,7 @@ use smithay::{
         allocator::Fourcc,
         renderer::{
             Bind, BlitFrame, Color32F, ContextId, Frame, FrameContext, ImportAll, Offscreen,
-            Renderer, Texture, TextureFilter,
+            Renderer, RendererSuper, Texture, TextureFilter,
             element::{Element, Id, Kind, RenderElement},
             gles::{
                 GlesError, GlesFrame, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
@@ -115,7 +115,7 @@ impl BlurShaders {
     }
 }
 
-type BlurTexture = Mutex<Option<GlesTexture>>;
+type BlurTexture<T: Texture> = Mutex<Option<T>>;
 
 #[derive(Debug)]
 pub struct BlurState {
@@ -369,7 +369,10 @@ impl Element for BlurElement {
     }
 }
 
-impl<R: Renderer + AsGlowRenderer> RenderElement<R> for BlurElement {
+impl<R: Renderer + AsGlowRenderer> RenderElement<R> for BlurElement
+where
+    R::TextureId: Send + 'static,
+{
     fn capture_framebuffer(
         &self,
         frame: &mut <R>::Frame<'_, '_>,
@@ -377,41 +380,48 @@ impl<R: Renderer + AsGlowRenderer> RenderElement<R> for BlurElement {
         dst: Rectangle<i32, Physical>,
         cache: &UserDataMap,
     ) -> Result<(), <R>::Error> {
+        let transform = frame.transformation();
+        let tex_size = self.src.to_i32_round();
         let glow_frame = <R as AsGlowRenderer>::glow_frame_mut(frame);
         let gles_frame = BorrowMut::<GlesFrame<'_, '_>>::borrow_mut(glow_frame);
-        let transform = gles_frame.transformation();
-        let tex_size = self.src.to_i32_round();
+        let mut renderer = gles_frame.renderer();
 
-        let texture_ref = cache.get_or_insert_threadsafe(BlurTexture::default);
+        let texture_ref = cache.get_or_insert_threadsafe(BlurTexture::<R::TextureId>::default);
         let mut texture_entry = texture_ref.lock().unwrap();
-        if texture_entry
-            .as_ref()
-            .is_some_and(|tex| tex.size() != tex_size)
-        {
+        if texture_entry.as_ref().is_some_and(|tex| {
+            tex.size() != tex_size
+                || R::tex_to_gl(
+                    &renderer.as_ref().context_id(),
+                    texture_entry.as_ref().unwrap(),
+                )
+                .is_none()
+        }) {
             texture_entry.take();
         }
-
-        let mut renderer = gles_frame.renderer();
         if texture_entry.is_none() {
-            *texture_entry = Some(
-                renderer
-                    .as_mut()
-                    .create_buffer(Fourcc::Abgr8888, tex_size)
-                    .map_err(R::from_gles_error)?,
-            );
+            let gl_texture = renderer
+                .as_mut()
+                .create_buffer(Fourcc::Abgr8888, tex_size)
+                .map_err(R::from_gles_error)?;
+            *texture_entry = Some(R::tex_from_gl(&renderer.as_ref().context_id(), gl_texture));
         }
-        let texture = texture_entry.as_mut().unwrap();
+
+        let mut texture = R::tex_to_gl(
+            &renderer.as_ref().context_id(),
+            texture_entry.as_ref().unwrap(),
+        )
+        .unwrap();
         let mut off_texture = renderer
             .as_mut()
             .create_buffer(Fourcc::Abgr8888, tex_size)
             .map_err(R::from_gles_error)?;
         std::mem::drop(renderer);
 
-        let sync = blit_from_active_fb(gles_frame, src, dst, transform, texture)
+        let sync = blit_from_active_fb(gles_frame, src, dst, transform, &mut texture)
             .map_err(R::from_gles_error)?;
         gles_frame.wait(&sync).map_err(R::from_gles_error)?;
 
-        let mut textures = [texture, &mut off_texture];
+        let mut textures = [&mut texture, &mut off_texture];
         render_blur(
             gles_frame.renderer().as_mut(),
             &self.scaling_shaders,
@@ -433,7 +443,6 @@ impl<R: Renderer + AsGlowRenderer> RenderElement<R> for BlurElement {
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
-        let glow_frame = <R as AsGlowRenderer>::glow_frame_mut(frame);
         let src_to_geo = self.geometry.size / self.src;
         let src_log = src
             .upscale(src_to_geo)
@@ -451,26 +460,27 @@ impl<R: Renderer + AsGlowRenderer> RenderElement<R> for BlurElement {
             .flat_map(|rect| damage.iter().flat_map(move |r| r.intersection(rect)))
             .collect::<Vec<_>>();
         let cache = cache.expect("Framebuffer element without cache?");
-        let Some(texture) = cache.get::<BlurTexture>() else {
+        let Some(texture) = cache.get::<BlurTexture<R::TextureId>>() else {
             return Err(R::from_gles_error(GlesError::BlitError));
         };
         let texture_ref = texture.lock().unwrap();
 
-        BorrowMut::<GlesFrame<'_, '_>>::borrow_mut(glow_frame)
-            .render_texture_from_to(
-                texture_ref
-                    .as_ref()
-                    .ok_or(R::from_gles_error(GlesError::BlitError))?,
+        if let Some(tex) = texture_ref.as_ref() {
+            BorrowMut::<GlesFrame>::borrow_mut(<R as AsGlowRenderer>::glow_frame_mut(frame))
+                .override_default_tex_program(self.render_shader.clone(), self.uniforms.clone());
+            frame.render_texture_from_to(
+                tex,
                 src,
                 dst,
                 &damage,
-                opaque_regions,
+                &opaque_regions,
                 Transform::Normal,
                 1.0,
-                Some(&self.render_shader),
-                &self.uniforms,
-            )
-            .map_err(R::from_gles_error)
+            )?;
+            BorrowMut::<GlesFrame>::borrow_mut(<R as AsGlowRenderer>::glow_frame_mut(frame))
+                .clear_tex_program_override();
+        }
+        Ok(())
     }
 }
 
