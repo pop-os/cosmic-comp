@@ -23,7 +23,7 @@ struct Circle {
     color: Color,
 }
 
-impl<Message, Theme, Renderer: cosmic::iced::renderer::geometry::Renderer>
+impl<Message, Theme, Renderer: iced_graphics::geometry::Renderer>
     canvas::Program<Message, Theme, Renderer> for Circle
 {
     type State = ();
