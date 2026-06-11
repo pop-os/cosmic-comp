@@ -26,19 +26,21 @@ pub struct DBusState(Rc<DBusStateInner>);
 struct DBusStateInner {
     evlh: LoopHandle<'static, State>,
     executor: calloop::futures::Scheduler<()>,
-    session_conn: async_once_cell::OnceCell<zbus::Connection>,
-    system_conn: async_once_cell::OnceCell<zbus::Connection>,
+    session_conn: zbus::Result<zbus::Connection>,
+    system_conn: zbus::Result<zbus::Connection>,
     a11y_keyboard_monitor: RefCell<Option<a11y_keyboard_monitor::A11yKeyboardMonitorState>>,
 }
 
 impl DBusState {
     pub fn init(evlh: &LoopHandle<'static, State>) -> Self {
         let (source, executor) = calloop::futures::executor().unwrap();
+        let session_conn = futures_executor::block_on(zbus::Connection::session());
+        let system_conn = futures_executor::block_on(zbus::Connection::system());
         let state = Self(Rc::new(DBusStateInner {
             evlh: evlh.clone(),
             executor,
-            session_conn: async_once_cell::OnceCell::new(),
-            system_conn: async_once_cell::OnceCell::new(),
+            session_conn,
+            system_conn,
             a11y_keyboard_monitor: RefCell::new(None),
         }));
         evlh.insert_source(source, |_, _, _| {}).unwrap();
@@ -63,18 +65,13 @@ impl DBusState {
         RefMut::filter_map(self.0.a11y_keyboard_monitor.borrow_mut(), |x| x.as_mut()).ok()
     }
 
+    // TODO Lazy async init when we don't have anything blocking main thread
     async fn session_conn(&self) -> zbus::Result<&zbus::Connection> {
-        self.0
-            .session_conn
-            .get_or_try_init(zbus::Connection::session())
-            .await
+        self.0.session_conn.as_ref().map_err(|err| err.clone())
     }
 
     async fn system_conn(&self) -> zbus::Result<&zbus::Connection> {
-        self.0
-            .system_conn
-            .get_or_try_init(zbus::Connection::system())
-            .await
+        self.0.system_conn.as_ref().map_err(|err| err.clone())
     }
 
     fn spawn(&self, fut: impl Future<Output = ()> + 'static) {

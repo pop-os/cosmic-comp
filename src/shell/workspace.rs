@@ -1753,13 +1753,17 @@ impl Workspace {
                 self.floating_layer
                     .render::<R>(
                         renderer,
-                        focused.as_ref().and_then(|target| {
-                            if let FocusTarget::Window(mapped) = target {
-                                Some(mapped)
-                            } else {
-                                None
-                            }
-                        }),
+                        render_focus
+                            .then(|| {
+                                focused.as_ref().and_then(|target| {
+                                    if let FocusTarget::Window(mapped) = target {
+                                        Some(mapped)
+                                    } else {
+                                        None
+                                    }
+                                })
+                            })
+                            .flatten(),
                         resize_indicator.clone(),
                         indicator_thickness,
                         alpha,
