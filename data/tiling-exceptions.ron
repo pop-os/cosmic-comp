@@ -48,5 +48,5 @@
 	(appid: "zoom", titles: [".*"]),
 	(appid: "Tor Browser", titles: [".*"]),
 	(appid: "^.*?action=join.*$", titles: [".*"]),
-
+	(appid: "^(slack|com.slack.Slack)", titles: ["^.*?(Huddle Preview).*"]),
 ]
