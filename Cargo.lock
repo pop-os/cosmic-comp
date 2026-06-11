@@ -806,6 +806,7 @@ dependencies = [
  "futures-util",
  "i18n-embed",
  "i18n-embed-fl",
+ "iced_graphics",
  "iced_tiny_skia",
  "id_tree",
  "indexmap 2.13.0",
