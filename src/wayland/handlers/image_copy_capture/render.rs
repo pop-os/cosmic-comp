@@ -502,7 +502,7 @@ pub fn render_workspace_to_buffer(
 }
 
 smithay::render_elements! {
-    pub WindowCaptureElement<R> where R: ImportAll + ImportMem + AsGlowRenderer;
+    pub WindowCaptureElement<R> where R: ImportAll + ImportMem + AsGlowRenderer, R::TextureId: Send;
     WaylandElement=SurfaceRenderElement<R>,
     CursorElement=RelocateRenderElement<cursor::CursorRenderElement<R>>,
     DamageElement=DamageElement,
