@@ -1,6 +1,6 @@
 use cosmic::{
     iced::{
-        Element,
+        Alignment, Element,
         core::{
             Background, Border, Clipboard, Color, Event, Layout, Length, Rectangle,
             Renderer as IcedRenderer, Shell, Size, layout, mouse, overlay,
@@ -75,11 +75,26 @@ where
         viewport: &Rectangle,
     ) {
         let widget_state = state.state.downcast_ref::<State>();
-        let styling = if widget_state.cursor_over {
+        let mut styling = if widget_state.cursor_over {
             theme.hovered(true, false, &self.styling)
         } else {
             theme.active(true, false, &self.styling)
         };
+        if matches!(self.styling, cosmic::theme::Button::MenuItem) {
+            match theme.list_item_position {
+                Some((Alignment::Start, _)) => {
+                    styling.border_radius =
+                        styling.border_radius.bottom(theme.cosmic().radius_0()[3]);
+                }
+                Some((Alignment::End, _)) => {
+                    styling.border_radius = styling.border_radius.top(theme.cosmic().radius_0()[0]);
+                }
+                Some((Alignment::Center, _)) => {}
+                None => {
+                    styling.border_radius = theme.cosmic().radius_0().into();
+                }
+            };
+        }
 
         renderer.fill_quad(
             Quad {
@@ -87,7 +102,7 @@ where
                 bounds: layout.bounds(),
                 border: Border {
                     radius: styling.border_radius,
-                    width: styling.border_width,
+                    width: 0.,
                     color: styling.border_color,
                 },
                 shadow: Default::default(),
