@@ -12,10 +12,10 @@ use cosmic::{
     iced::{
         Alignment, Background,
         core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
-        widget::{self as iced_widget, Column, Row, text::Style as TextStyle},
+        widget::{self as iced_widget, Row, text::Style as TextStyle},
     },
     theme,
-    widget::{button, divider, icon::from_name, space, text},
+    widget::{button, divider, icon::from_name, menu::menu_column::MenuColumn, space, text},
 };
 use smithay::{
     backend::{
@@ -300,7 +300,7 @@ impl Program for ContextMenu {
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            bounds.width.ceil() as i32,
+                                            bounds.width.floor() as i32,
                                             bounds.y.ceil() as i32,
                                         )),
                                     min_size.as_global(),
@@ -309,7 +309,7 @@ impl Program for ContextMenu {
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            bounds.width.ceil() as i32,
+                                            bounds.width.floor() as i32,
                                             bounds.y.ceil() as i32 + bounds.height.ceil() as i32
                                                 - min_size.h,
                                         )),
@@ -317,14 +317,15 @@ impl Program for ContextMenu {
                                 ),
                                 // to the left -> down
                                 Rectangle::new(
-                                    position + Point::from((-min_size.w, bounds.y.ceil() as i32)),
+                                    position
+                                        + Point::from((-min_size.w + 1, bounds.y.ceil() as i32)),
                                     min_size.as_global(),
                                 ),
                                 // to the left -> up
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            -min_size.w,
+                                            -min_size.w + 1,
                                             bounds.y.ceil() as i32 + bounds.height.ceil() as i32
                                                 - min_size.h,
                                         )),
@@ -390,9 +391,11 @@ impl Program for ContextMenu {
             _ => Length::Fill,
         };
 
-        Column::with_children(self.items.iter().enumerate().map(|(idx, item)| {
+        MenuColumn::with_children(self.items.iter().enumerate().map(|(idx, item)| {
             match item {
-                Item::Separator => divider::horizontal::light().into(),
+                Item::Separator => divider::horizontal::light()
+                    .class(theme::Rule::Default)
+                    .into(),
                 Item::Submenu { title, .. } => Row::with_children(vec![
                     space::horizontal().width(16).into(),
                     text::body(title).width(mode).into(),
@@ -561,8 +564,11 @@ impl PointerGrab<State> for MenuGrab {
                     PointerTarget::motion(&element.iced, &self.seat, state, &new_event);
                 }
             } else {
-                elements.iter_mut().for_each(|element| {
-                    if element.pointer_entered {
+                elements
+                    .iter_mut()
+                    .filter(|element| element.pointer_entered)
+                    .skip(1)
+                    .for_each(|element| {
                         PointerTarget::leave(
                             &element.iced,
                             &self.seat,
@@ -571,8 +577,7 @@ impl PointerGrab<State> for MenuGrab {
                             event.time,
                         );
                         element.pointer_entered = false;
-                    }
-                })
+                    })
             }
         }
         handle.motion(state, None, event);
