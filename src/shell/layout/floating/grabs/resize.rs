@@ -543,7 +543,7 @@ impl ResizeSurfaceGrab {
                             );
                         }
                         WindowSurface::X11(surface) => {
-                            let mut geometry = surface.geometry();
+                            let mut geometry = surface.last_configure();
                             geometry.loc += (location - new_location).as_logical();
                             let _ = surface.configure(geometry);
                         }
