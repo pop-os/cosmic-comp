@@ -231,9 +231,7 @@ fn render_input_order_internal<R: 'static>(
         }
 
         // sticky window popups
-        if !has_focused_fullscreen {
-            callback(Stage::StickyPopups(&set.sticky_layer))?;
-        }
+        callback(Stage::StickyPopups(&set.sticky_layer))?;
     }
 
     if element_filter != ElementFilter::LayerShellOnly {
@@ -313,11 +311,11 @@ fn render_input_order_internal<R: 'static>(
         for (layer, location) in layer_surfaces(output, Layer::Top, element_filter) {
             callback(Stage::LayerSurface { layer, location })?;
         }
+    }
 
-        // sticky windows
-        if element_filter != ElementFilter::LayerShellOnly {
-            callback(Stage::Sticky(&set.sticky_layer))?;
-        }
+    // sticky windows
+    if element_filter != ElementFilter::LayerShellOnly {
+        callback(Stage::Sticky(&set.sticky_layer))?;
     }
 
     if element_filter != ElementFilter::LayerShellOnly {
