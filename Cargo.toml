@@ -60,7 +60,7 @@ tracing = { version = "0.1.44", features = [
     "max_level_debug",
     "release_max_level_info",
 ] }
-tracing-journald = "0.3.2"
+tracing-journald = { version = "0.3.2", optional = true }
 tracing-subscriber = { version = "0.3.22", features = [
     "env-filter",
     "tracing-log",
@@ -117,7 +117,7 @@ optional = true
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
-systemd = ["libsystemd", "logind-zbus"]
+systemd = ["libsystemd", "logind-zbus", "tracing-journald"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
 profile-with-tracy-gpu = ["profile-with-tracy", "smithay/tracy_gpu_profiling"]
 
