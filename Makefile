@@ -39,6 +39,7 @@ vendor:
 	mkdir -p .cargo
 	cargo vendor | head -n -1 > .cargo/config
 	echo 'directory = "vendor"' >> .cargo/config
+	[ -n "$(SOURCE_GIT_HASH)" ] && printf '\n[env]\nGIT_HASH = "%s"\n' "$(SOURCE_GIT_HASH)" >> .cargo/config || true
 	tar pcf vendor.tar vendor
 	rm -rf vendor
 
