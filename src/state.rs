@@ -100,7 +100,7 @@ use smithay::{
         shell::{
             kde::decoration::KdeDecorationState,
             wlr_layer::WlrLayerShellState,
-            xdg::{XdgShellState, decoration::XdgDecorationState},
+            xdg::{XdgShellState, decoration::XdgDecorationState, dialog::XdgDialogState},
         },
         shm::ShmState,
         single_pixel_buffer::SinglePixelBufferState,
@@ -711,6 +711,7 @@ impl State {
                 WmCapabilities::WindowMenu,
             ],
         );
+        XdgDialogState::new::<State>(dh);
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(dh, client_not_sandboxed);
