@@ -15,6 +15,11 @@ pub mod floating;
 pub mod tiling;
 
 pub fn is_dialog(window: &CosmicSurface) -> bool {
+    // Modal dialogs are always floating
+    if window.is_modal_dialog() {
+        return true;
+    }
+
     // Check "window type"
     match window.0.underlying_surface() {
         WindowSurface::Wayland(toplevel) => {
