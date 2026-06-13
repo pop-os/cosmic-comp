@@ -1003,6 +1003,10 @@ impl State {
                         if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
                             if horizontal_amount != 0.0 {
                                 frame = frame
+                                    .relative_direction(
+                                        Axis::Horizontal,
+                                        event.relative_direction(Axis::Horizontal),
+                                    )
                                     .value(Axis::Horizontal, scroll_factor * horizontal_amount);
                                 if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
                                     frame = frame.v120(
@@ -1016,8 +1020,12 @@ impl State {
                         }
                         if let Some(vertical_amount) = event.amount(Axis::Vertical) {
                             if vertical_amount != 0.0 {
-                                frame =
-                                    frame.value(Axis::Vertical, scroll_factor * vertical_amount);
+                                frame = frame
+                                    .relative_direction(
+                                        Axis::Vertical,
+                                        event.relative_direction(Axis::Vertical),
+                                    )
+                                    .value(Axis::Vertical, scroll_factor * vertical_amount);
                                 if let Some(discrete) = event.amount_v120(Axis::Vertical) {
                                     frame = frame.v120(
                                         Axis::Vertical,
