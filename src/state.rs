@@ -116,7 +116,7 @@ use smithay::{
 };
 use tracing::warn;
 
-#[cfg(feature = "systemd")]
+#[cfg(feature = "logind")]
 use std::os::fd::OwnedFd;
 
 use std::{
@@ -292,7 +292,7 @@ pub struct Common {
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
 
-    #[cfg(feature = "systemd")]
+    #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
 
     pub with_xwayland: bool,
@@ -791,7 +791,7 @@ impl State {
                 pointer_focus_state: None,
                 dbus_state,
 
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
 
                 with_xwayland,
@@ -816,7 +816,7 @@ impl State {
     }
 
     fn update_inhibitor_locks(&mut self) {
-        #[cfg(feature = "systemd")]
+        #[cfg(feature = "logind")]
         {
             use smithay::backend::session::Session;
             use tracing::{debug, error, warn};

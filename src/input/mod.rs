@@ -1600,7 +1600,7 @@ impl State {
             }
             InputEvent::Special(_) => {}
             InputEvent::SwitchToggle { event } => {
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
                     let backend = self.backend.lock();
                     let output = backend
