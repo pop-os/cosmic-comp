@@ -11,7 +11,7 @@ use crate::{
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
-        CursorGeometry, LastModifierChange, SeatExt, Trigger,
+        LastModifierChange, SeatExt, Trigger,
         focus::{
             Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -25,7 +25,8 @@ use crate::{
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::handlers::{
-        image_copy_capture::SessionHolder, xwayland_keyboard_grab::XWaylandGrabSeat,
+        image_copy_capture::{SessionHolder, cursor_capture_constraints},
+        xwayland_keyboard_grab::XWaylandGrabSeat,
     },
 };
 use calloop::{
@@ -60,15 +61,12 @@ use smithay::{
     output::Output,
     reexports::{
         input::Device as InputDevice,
-        wayland_server::{
-            Resource as _,
-            protocol::{wl_shm::Format as ShmFormat, wl_surface::WlSurface},
-        },
+        wayland_server::{Resource as _, protocol::wl_surface::WlSurface},
     },
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size},
+    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
         compositor::CompositorHandler,
-        image_copy_capture::{BufferConstraints, CursorSessionRef},
+        image_copy_capture::CursorSessionRef,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{PointerConstraint, with_pointer_constraint},
         seat::WaylandFocus,
@@ -651,7 +649,7 @@ impl State {
                     }
 
                     for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some(CursorGeometry { geometry, hotspot }) = seat.cursor_geometry(
+                        if let Some(cursor_geometry) = seat.cursor_geometry(
                             (position - output_geometry.loc.to_f64())
                                 .as_logical()
                                 .to_buffer(
@@ -661,24 +659,18 @@ impl State {
                                 ),
                             self.common.clock.now(),
                         ) {
+                            let constraints = cursor_capture_constraints(Some(cursor_geometry));
                             if session
                                 .current_constraints()
-                                .map(|constraint| constraint.size != geometry.size)
+                                .map(|current_constraints| {
+                                    current_constraints.size != constraints.size
+                                })
                                 .unwrap_or(true)
                             {
-                                let mut cursor_size = geometry.size;
-                                // Client shouldn't try to allocate 0x0 buffer
-                                if cursor_size == Size::new(0, 0) {
-                                    cursor_size = Size::new(1, 1);
-                                }
-                                session.update_constraints(BufferConstraints {
-                                    size: cursor_size,
-                                    shm: vec![ShmFormat::Argb8888],
-                                    dma: None,
-                                });
+                                session.update_constraints(constraints);
                             }
-                            session.set_cursor_hotspot(hotspot);
-                            session.set_cursor_pos(Some(geometry.loc));
+                            session.set_cursor_hotspot(cursor_geometry.hotspot);
+                            session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
                         }
                     }
                 }
@@ -720,7 +712,7 @@ impl State {
 
                     let shell = self.common.shell.read();
                     for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some(CursorGeometry { geometry, hotspot }) = seat.cursor_geometry(
+                        if let Some(cursor_geometry) = seat.cursor_geometry(
                             (position - output_geometry.loc.to_f64())
                                 .as_logical()
                                 .to_buffer(
@@ -730,24 +722,18 @@ impl State {
                                 ),
                             self.common.clock.now(),
                         ) {
+                            let constraints = cursor_capture_constraints(Some(cursor_geometry));
                             if session
                                 .current_constraints()
-                                .map(|constraint| constraint.size != geometry.size)
+                                .map(|current_constraints| {
+                                    current_constraints.size != constraints.size
+                                })
                                 .unwrap_or(true)
                             {
-                                let mut cursor_size = geometry.size;
-                                // Client shouldn't try to allocate 0x0 buffer
-                                if cursor_size == Size::new(0, 0) {
-                                    cursor_size = Size::new(1, 1);
-                                }
-                                session.update_constraints(BufferConstraints {
-                                    size: cursor_size,
-                                    shm: vec![ShmFormat::Argb8888],
-                                    dma: None,
-                                });
+                                session.update_constraints(constraints);
                             }
-                            session.set_cursor_hotspot(hotspot);
-                            session.set_cursor_pos(Some(geometry.loc));
+                            session.set_cursor_hotspot(cursor_geometry.hotspot);
+                            session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
                         }
                     }
                 }
@@ -2482,7 +2468,7 @@ impl State {
 
                 let output_geometry = output.geometry();
                 for session in cursor_sessions_for_output(&shell, &output) {
-                    if let Some(CursorGeometry { geometry, hotspot }) = seat.cursor_geometry(
+                    if let Some(cursor_geometry) = seat.cursor_geometry(
                         point.to_buffer(
                             output.current_scale().fractional_scale(),
                             output.current_transform(),
@@ -2490,19 +2476,16 @@ impl State {
                         ),
                         self.common.clock.now(),
                     ) {
+                        let constraints = cursor_capture_constraints(Some(cursor_geometry));
                         if session
                             .current_constraints()
-                            .map(|constraint| constraint.size != geometry.size)
+                            .map(|current_constraints| current_constraints.size != constraints.size)
                             .unwrap_or(true)
                         {
-                            session.update_constraints(BufferConstraints {
-                                size: geometry.size,
-                                shm: vec![ShmFormat::Argb8888],
-                                dma: None,
-                            });
+                            session.update_constraints(constraints);
                         }
-                        session.set_cursor_hotspot(hotspot);
-                        session.set_cursor_pos(Some(geometry.loc));
+                        session.set_cursor_hotspot(cursor_geometry.hotspot);
+                        session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
                     }
                 }
             }
