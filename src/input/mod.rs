@@ -11,7 +11,7 @@ use crate::{
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
-        LastModifierChange, SeatExt, Trigger,
+        CursorGeometry, LastModifierChange, SeatExt, Trigger,
         focus::{
             Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -651,7 +651,7 @@ impl State {
                     }
 
                     for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some((geometry, offset)) = seat.cursor_geometry(
+                        if let Some(CursorGeometry { geometry, hotspot }) = seat.cursor_geometry(
                             (position - output_geometry.loc.to_f64())
                                 .as_logical()
                                 .to_buffer(
@@ -677,7 +677,7 @@ impl State {
                                     dma: None,
                                 });
                             }
-                            session.set_cursor_hotspot(offset);
+                            session.set_cursor_hotspot(hotspot);
                             session.set_cursor_pos(Some(geometry.loc));
                         }
                     }
@@ -720,7 +720,7 @@ impl State {
 
                     let shell = self.common.shell.read();
                     for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some((geometry, offset)) = seat.cursor_geometry(
+                        if let Some(CursorGeometry { geometry, hotspot }) = seat.cursor_geometry(
                             (position - output_geometry.loc.to_f64())
                                 .as_logical()
                                 .to_buffer(
@@ -746,7 +746,7 @@ impl State {
                                     dma: None,
                                 });
                             }
-                            session.set_cursor_hotspot(offset);
+                            session.set_cursor_hotspot(hotspot);
                             session.set_cursor_pos(Some(geometry.loc));
                         }
                     }
@@ -2482,7 +2482,7 @@ impl State {
 
                 let output_geometry = output.geometry();
                 for session in cursor_sessions_for_output(&shell, &output) {
-                    if let Some((geometry, offset)) = seat.cursor_geometry(
+                    if let Some(CursorGeometry { geometry, hotspot }) = seat.cursor_geometry(
                         point.to_buffer(
                             output.current_scale().fractional_scale(),
                             output.current_transform(),
@@ -2501,7 +2501,7 @@ impl State {
                                 dma: None,
                             });
                         }
-                        session.set_cursor_hotspot(offset);
+                        session.set_cursor_hotspot(hotspot);
                         session.set_cursor_pos(Some(geometry.loc));
                     }
                 }
