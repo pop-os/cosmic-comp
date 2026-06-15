@@ -132,6 +132,24 @@ impl SupressedKeys {
     }
 }
 
+const REPEATABLE_ACTION_DELAY: Duration = Duration::from_millis(500);
+const REPEATABLE_ACTION_INTERVAL: Duration = Duration::from_millis(120);
+
+fn repeatable_action_interval(action: &shortcuts::Action) -> Option<Duration> {
+    matches!(
+        action,
+        shortcuts::Action::System(
+            shortcuts::action::System::VolumeRaise
+                | shortcuts::action::System::VolumeLower
+                | shortcuts::action::System::BrightnessUp
+                | shortcuts::action::System::BrightnessDown
+                | shortcuts::action::System::KeyboardBrightnessUp
+                | shortcuts::action::System::KeyboardBrightnessDown
+        )
+    )
+    .then_some(REPEATABLE_ACTION_INTERVAL)
+}
+
 impl SupressedButtons {
     fn add(&self, button: u32) {
         self.0.borrow_mut().insert(button);
@@ -1639,6 +1657,42 @@ impl State {
         }
     }
 
+    fn schedule_repeat_action(
+        &self,
+        seat: &Seat<State>,
+        handle: &KeysymHandle<'_>,
+        action: Action,
+        binding: shortcuts::Binding,
+        serial: Serial,
+        time: u32,
+        initial_delay: Duration,
+        interval: Duration,
+    ) {
+        let seat_clone = seat.clone();
+        let start = Instant::now();
+        let token = self
+            .common
+            .event_loop_handle
+            .insert_source(
+                Timer::from_duration(initial_delay),
+                move |current, _, state| {
+                    let elapsed = current.duration_since(start).as_millis() as u32;
+                    state.handle_action(
+                        action.clone(),
+                        &seat_clone,
+                        serial,
+                        time.overflowing_add(elapsed).0,
+                        binding.clone(),
+                        None,
+                    );
+                    TimeoutAction::ToDuration(interval)
+                },
+            )
+            .ok();
+
+        seat.supressed_keys().add(handle, token);
+    }
+
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
     #[profiling::function]
     pub fn filter_keyboard_input<B: InputBackend, E: KeyboardKeyEvent<B>>(
@@ -1790,32 +1844,16 @@ impl State {
                         }
                     }
                 } else {
-                    let seat_clone = seat.clone();
-                    let action_clone = action.clone();
-                    let key_pattern_clone = key_pattern.clone();
-                    let start = Instant::now();
-                    let time = event.time_msec();
-                    let token = self
-                        .common
-                        .event_loop_handle
-                        .insert_source(
-                            Timer::from_duration(Duration::from_millis(200)),
-                            move |current, _, state| {
-                                let duration = current.duration_since(start).as_millis();
-                                state.handle_action(
-                                    action_clone.clone(),
-                                    &seat_clone,
-                                    serial,
-                                    time.overflowing_add(duration as u32).0,
-                                    key_pattern_clone.clone(),
-                                    None,
-                                );
-                                calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(25))
-                            },
-                        )
-                        .ok();
-
-                    seat.supressed_keys().add(&handle, token);
+                    self.schedule_repeat_action(
+                        seat,
+                        &handle,
+                        action.clone(),
+                        key_pattern.clone(),
+                        serial,
+                        event.time_msec(),
+                        Duration::from_millis(200),
+                        Duration::from_millis(25),
+                    );
                 }
                 return FilterResult::Intercept(Some((action, key_pattern)));
             }
@@ -1968,7 +2006,22 @@ impl State {
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
                     modifiers_queue.clear();
-                    seat.supressed_keys().add(&handle, None);
+
+                    if let Some(interval) = repeatable_action_interval(action) {
+                        self.schedule_repeat_action(
+                            seat,
+                            &handle,
+                            Action::Shortcut(action.clone()),
+                            binding.clone(),
+                            serial,
+                            event.time_msec(),
+                            REPEATABLE_ACTION_DELAY,
+                            interval,
+                        );
+                    } else {
+                        seat.supressed_keys().add(&handle, None);
+                    }
+
                     return FilterResult::Intercept(Some((
                         Action::Shortcut(action.clone()),
                         binding.clone(),
