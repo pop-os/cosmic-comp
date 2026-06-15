@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     shell::{
-        CosmicSurface, SeatExt,
+        CosmicSurface, CursorGeometry, SeatExt,
         element::{CosmicMapped, CosmicStack, CosmicWindow},
         layout::tiling::ResizeForkTarget,
         zoom::ZoomFocusTarget,
@@ -272,7 +272,7 @@ impl PointerFocusTarget {
             None
         };
 
-        let cursor_hotspot = if let Some((_, hotspot)) =
+        let cursor_hotspot = if let Some(CursorGeometry { hotspot, .. }) =
             seat.cursor_geometry((0.0, 0.0), Duration::from_millis(event.time as u64).into())
         {
             hotspot

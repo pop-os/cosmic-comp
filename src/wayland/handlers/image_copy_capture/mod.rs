@@ -31,7 +31,7 @@ use smithay::{
 };
 
 use crate::{
-    shell::{CosmicSurface, Shell},
+    shell::{CosmicSurface, CursorGeometry, Shell},
     state::{BackendData, State},
     utils::prelude::{
         OutputExt, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt, SeatExt,
@@ -86,7 +86,7 @@ impl ImageCopyCaptureHandler for State {
     ) -> Option<BufferConstraints> {
         let shell = self.common.shell.read();
         let seat = seat_for_wl_pointer(&shell, pointer)?;
-        let size = if let Some((geometry, _)) =
+        let size = if let Some(CursorGeometry { geometry, .. }) =
             seat.cursor_geometry((0.0, 0.0), self.common.clock.now())
         {
             geometry.size
@@ -160,7 +160,7 @@ impl ImageCopyCaptureHandler for State {
                 let pointer = seat.get_pointer().unwrap();
                 let pointer_loc = pointer.current_location().to_i32_round().as_global();
 
-                let (pointer_size, hotspot) = if let Some((geometry, hotspot)) =
+                let (pointer_size, hotspot) = if let Some(CursorGeometry { geometry, hotspot }) =
                     seat.cursor_geometry((0.0, 0.0), self.common.clock.now())
                 {
                     (geometry.size, hotspot)
