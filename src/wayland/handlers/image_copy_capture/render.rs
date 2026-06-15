@@ -20,16 +20,14 @@ use smithay::{
     desktop::space::SpaceElement,
     input::Seat,
     output::{Output, OutputNoMode},
-    reexports::wayland_server::protocol::{wl_buffer::WlBuffer, wl_shm::Format as ShmFormat},
+    reexports::wayland_server::protocol::wl_buffer::WlBuffer,
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size,
         Transform,
     },
     wayland::{
         dmabuf::get_dmabuf,
-        image_copy_capture::{
-            BufferConstraints, CaptureFailureReason, CursorSessionRef, Frame, SessionRef,
-        },
+        image_copy_capture::{CaptureFailureReason, CursorSessionRef, Frame, SessionRef},
         seat::WaylandFocus,
         shm::{shm_format_to_fourcc, with_buffer_contents, with_buffer_contents_mut},
     },
@@ -45,7 +43,7 @@ use crate::{
         render_workspace,
         wayland::SurfaceRenderElement,
     },
-    shell::{CosmicMappedRenderElement, CosmicSurface, CursorGeometry, WorkspaceRenderElement},
+    shell::{CosmicMappedRenderElement, CosmicSurface, WorkspaceRenderElement},
     state::{Common, KmsNodes, State},
     utils::prelude::{PointExt, PointGlobalExt, RectExt, RectLocalExt, SeatExt},
     wayland::{
@@ -56,7 +54,9 @@ use crate::{
     },
 };
 
-use super::{super::data_device::get_dnd_icon, user_data::SessionHolder};
+use super::{
+    super::data_device::get_dnd_icon, cursor_capture_constraints, user_data::SessionHolder,
+};
 
 pub fn render_element_buffers<R, E>(
     renderer: &mut R,
@@ -802,25 +802,17 @@ pub fn render_cursor_to_buffer(
     seat: &Seat<State>,
 ) {
     let buffer = frame.buffer();
-    let mut cursor_size = seat
-        .cursor_geometry((0.0, 0.0), state.common.clock.now())
-        .map(|CursorGeometry { geometry, .. }| geometry.size)
-        .unwrap_or_else(|| Size::from((64, 64)));
+    let cursor_geometry = seat.cursor_geometry((0.0, 0.0), state.common.clock.now());
+    let constraints = cursor_capture_constraints(cursor_geometry);
     let buffer_size = buffer_dimensions(&buffer).unwrap();
-    // Client shouldn't try to allocate 0x0 buffer
-    if cursor_size == Size::new(0, 0) {
-        cursor_size = Size::new(1, 1);
-    }
-    if buffer_size != cursor_size {
-        let constraints = BufferConstraints {
-            size: cursor_size,
-            shm: vec![ShmFormat::Argb8888],
-            dma: None,
-        };
-        session.update_constraints(constraints);
+    if buffer_size != constraints.size {
+        session.update_constraints(constraints.clone());
         if let Some(data) = session.user_data().get::<SessionData>() {
             *data.lock().unwrap() = SessionUserData::new(OutputDamageTracker::new(
-                cursor_size.to_logical(1, Transform::Normal).to_physical(1),
+                constraints
+                    .size
+                    .to_logical(1, Transform::Normal)
+                    .to_physical(1),
                 1.0,
                 Transform::Normal,
             ));

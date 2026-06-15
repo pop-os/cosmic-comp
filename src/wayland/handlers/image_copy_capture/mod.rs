@@ -45,12 +45,34 @@ pub use self::render::*;
 use self::user_data::*;
 pub use self::user_data::{FrameHolder, ImageCopySessions, SessionData, SessionHolder};
 
+fn default_cursor_size() -> Size<i32, BufferCoords> {
+    Size::new(64, 64)
+}
+
 fn seat_for_wl_pointer<'a>(shell: &'a Shell, pointer: &WlPointer) -> Option<&'a Seat<State>> {
     let pointer_handle = PointerHandle::<State>::from_resource(pointer)?;
     shell
         .seats
         .iter()
         .find(|seat| seat.get_pointer().is_some_and(|p| p == pointer_handle))
+}
+
+pub fn cursor_capture_constraints(cursor_geometry: Option<CursorGeometry>) -> BufferConstraints {
+    let size = if let Some(cursor_geometry) = cursor_geometry {
+        let mut size = cursor_geometry.geometry.size;
+        // Client shouldn't try to allocate 0x0 buffer
+        if size == Size::new(0, 0) {
+            size = Size::new(1, 1);
+        }
+        size
+    } else {
+        default_cursor_size()
+    };
+    BufferConstraints {
+        size,
+        shm: vec![ShmFormat::Argb8888],
+        dma: None,
+    }
 }
 
 impl ImageCopyCaptureHandler for State {
@@ -86,19 +108,8 @@ impl ImageCopyCaptureHandler for State {
     ) -> Option<BufferConstraints> {
         let shell = self.common.shell.read();
         let seat = seat_for_wl_pointer(&shell, pointer)?;
-        let size = if let Some(CursorGeometry { geometry, .. }) =
-            seat.cursor_geometry((0.0, 0.0), self.common.clock.now())
-        {
-            geometry.size
-        } else {
-            Size::from((64, 64))
-        };
-
-        Some(BufferConstraints {
-            size,
-            shm: vec![ShmFormat::Argb8888],
-            dma: None,
-        })
+        let cursor_geometry = seat.cursor_geometry((0.0, 0.0), self.common.clock.now());
+        Some(cursor_capture_constraints(cursor_geometry))
     }
 
     fn new_session(&mut self, session: Session) {
@@ -165,12 +176,12 @@ impl ImageCopyCaptureHandler for State {
                 {
                     (geometry.size, hotspot)
                 } else {
-                    (Size::from((64, 64)), Point::from((0, 0)))
+                    (default_cursor_size(), Point::from((0, 0)))
                 };
 
                 (pointer_loc, pointer_size, hotspot)
             } else {
-                (Point::new(0, 0), Size::from((64, 64)), Point::from((0, 0)))
+                (Point::new(0, 0), default_cursor_size(), Point::from((0, 0)))
             }
         };
 
