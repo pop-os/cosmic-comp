@@ -10,14 +10,21 @@ use crate::config::xkb_config_to_wl;
 use crate::input::InputBackendId;
 use crate::state::State;
 
+// Requested device types for an EI connection, mirroring the XDG RemoteDesktop portal `DeviceType` bitmask
+const DEVICE_TYPE_KEYBOARD: u32 = 1;
+const DEVICE_TYPE_POINTER: u32 = 2;
+const DEVICE_TYPE_TOUCHSCREEN: u32 = 4;
+
+pub type EiRequest = (UnixStream, u32);
+
 pub fn setup_ei(
     handle: &calloop::LoopHandle<'static, State>,
-) -> calloop::channel::Sender<UnixStream> {
-    let (sender, channel) = calloop::channel::channel::<UnixStream>();
+) -> calloop::channel::Sender<EiRequest> {
+    let (sender, channel) = calloop::channel::channel::<EiRequest>();
     let handle_clone = handle.clone();
     handle
         .insert_source(channel, move |event, _, _| {
-            let calloop::channel::Event::Msg(stream) = event else {
+            let calloop::channel::Event::Msg((stream, device_types)) = event else {
                 return;
             };
             let context = match eis::Context::new(stream) {
@@ -29,19 +36,28 @@ pub fn setup_ei(
             };
             let source = EiInput::new(context);
             if let Err(err) =
-                handle_clone.insert_source(source, |event, connection, data| match event {
+                handle_clone.insert_source(source, move |event, connection, data| match event {
                     EiInputEvent::Connected => {
                         let seat = connection.add_seat("default");
-                        let conf = data.common.config.xkb_config();
-                        let _ = seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&conf));
-                        seat.add_pointer("virtual pointer");
-                        seat.add_pointer_absolute("virtual absolute pointer");
-                        seat.add_touch("virtual touch");
+                        let wants_keyboard = device_types & DEVICE_TYPE_KEYBOARD != 0;
+                        if wants_keyboard {
+                            let conf = data.common.config.xkb_config();
+                            let _ = seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&conf));
+                        }
+                        if device_types & DEVICE_TYPE_POINTER != 0 {
+                            seat.add_pointer("virtual pointer");
+                            seat.add_pointer_absolute("virtual absolute pointer");
+                        }
+                        if device_types & DEVICE_TYPE_TOUCHSCREEN != 0 {
+                            seat.add_touch("virtual touch");
+                        }
                         // Track the seat so its virtual keyboard can be re-created when the
                         // keyboard configuration changes at runtime.
-                        data.common
-                            .ei_seats
-                            .insert(connection.eis_connection().clone(), seat);
+                        if wants_keyboard {
+                            data.common
+                                .ei_seats
+                                .insert(connection.eis_connection().clone(), seat);
+                        }
                     }
                     EiInputEvent::Disconnected => {
                         data.common.ei_seats.remove(connection.eis_connection());
