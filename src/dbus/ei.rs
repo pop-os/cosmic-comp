@@ -12,9 +12,9 @@ static ALLOWED_NAMES: &[WellKnownName] = &[WellKnownName::from_static_str_unchec
     "org.freedesktop.impl.portal.desktop.cosmic",
 )];
 
-/// Channel for handing the EI socketpair
+/// Channel for handing the EI socketpair (and requested device types)
 /// It's `None` until the EI sender side has been set up
-type EiSender = Arc<Mutex<Option<calloop::channel::Sender<UnixStream>>>>;
+type EiSender = Arc<Mutex<Option<calloop::channel::Sender<crate::libei::EiRequest>>>>;
 
 struct Ei {
     ei_sender: EiSender,
@@ -36,6 +36,7 @@ impl Ei {
     /// Create a new EI sender context
     async fn get_sender_socket(
         &self,
+        device_types: u32,
         #[zbus(header)] header: zbus::message::Header<'_>,
     ) -> zbus::fdo::Result<zbus::zvariant::OwnedFd> {
         if let Some(sender) = header.sender() {
@@ -51,7 +52,7 @@ impl Ei {
             let sender = guard
                 .as_ref()
                 .ok_or_else(|| zbus::fdo::Error::Failed("EI sender not available".to_string()))?;
-            sender.send(comp_stream).map_err(|err| {
+            sender.send((comp_stream, device_types)).map_err(|err| {
                 zbus::fdo::Error::Failed(format!("Failed to hand off EI socket: {err}"))
             })?;
         }

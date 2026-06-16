@@ -31,7 +31,7 @@ struct DBusStateInner {
     session_conn: zbus::Result<zbus::Connection>,
     system_conn: zbus::Result<zbus::Connection>,
     a11y_keyboard_monitor: RefCell<Option<a11y_keyboard_monitor::A11yKeyboardMonitorState>>,
-    ei_sender: Arc<Mutex<Option<calloop::channel::Sender<std::os::unix::net::UnixStream>>>>,
+    ei_sender: Arc<Mutex<Option<calloop::channel::Sender<crate::libei::EiRequest>>>>,
 }
 
 impl DBusState {
@@ -69,7 +69,7 @@ impl DBusState {
         RefMut::filter_map(self.0.a11y_keyboard_monitor.borrow_mut(), |x| x.as_mut()).ok()
     }
 
-    pub fn set_ei_sender(&self, sender: calloop::channel::Sender<std::os::unix::net::UnixStream>) {
+    pub fn set_ei_sender(&self, sender: calloop::channel::Sender<crate::libei::EiRequest>) {
         *self.0.ei_sender.lock().unwrap() = Some(sender);
     }
 
