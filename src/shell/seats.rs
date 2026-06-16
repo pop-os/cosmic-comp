@@ -5,7 +5,7 @@ use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex};
 use crate::{
     backend::render::cursor::CursorState,
     config::{Config, xkb_config_to_wl},
-    input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
+    input::{InputBackendId, ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
 };
 use smithay::{
@@ -82,11 +82,15 @@ impl Seats {
         self.last_active = Some(seat.clone());
     }
 
-    pub fn for_device<D: Device>(&self, device: &D) -> Option<&Seat<State>> {
+    pub fn for_device<D: Device>(
+        &self,
+        device: &D,
+        backend_id: &InputBackendId,
+    ) -> Option<&Seat<State>> {
         self.iter().find(|seat| {
             let userdata = seat.user_data();
             let devices = userdata.get::<Devices>().unwrap();
-            devices.has_device(device)
+            devices.has_device(device, backend_id)
         })
     }
 }
@@ -96,6 +100,7 @@ impl Devices {
         &self,
         device: &D,
         led_state: LedState,
+        backend_id: &InputBackendId,
     ) -> Vec<DeviceCapability> {
         let id = device.id();
         let mut map = self.capabilities.borrow_mut();
@@ -113,7 +118,7 @@ impl Devices {
             .cloned()
             .filter(|c| map.values().flatten().all(|has| *c != *has))
             .collect::<Vec<_>>();
-        map.insert(id, caps);
+        map.insert((backend_id.clone(), id), caps);
 
         if device.has_capability(DeviceCapability::Keyboard)
             && let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(device)
@@ -126,11 +131,18 @@ impl Devices {
         new_caps
     }
 
-    pub fn has_device<D: Device>(&self, device: &D) -> bool {
-        self.capabilities.borrow().contains_key(&device.id())
+    /// Whether the given backend's device with this id is registered on the seat.
+    pub fn has_device<D: Device>(&self, device: &D, backend_id: &InputBackendId) -> bool {
+        self.capabilities
+            .borrow()
+            .contains_key(&(backend_id.clone(), device.id()))
     }
 
-    pub fn remove_device<D: Device>(&self, device: &D) -> Vec<DeviceCapability> {
+    pub fn remove_device<D: Device>(
+        &self,
+        device: &D,
+        backend_id: &InputBackendId,
+    ) -> Vec<DeviceCapability> {
         let id = device.id();
 
         let mut keyboards = self.keyboards.borrow_mut();
@@ -139,7 +151,7 @@ impl Devices {
         }
 
         let mut map = self.capabilities.borrow_mut();
-        map.remove(&id)
+        map.remove(&(backend_id.clone(), id))
             .unwrap_or_default()
             .into_iter()
             .filter(|c| map.values().flatten().all(|has| *c != *has))
@@ -155,7 +167,8 @@ impl Devices {
 
 #[derive(Default)]
 pub struct Devices {
-    capabilities: RefCell<HashMap<String, Vec<DeviceCapability>>>,
+    // Keyed by `(backend, device_id)`
+    capabilities: RefCell<HashMap<(InputBackendId, String), Vec<DeviceCapability>>>,
     // Used for updating keyboard leds on kms backend
     keyboards: RefCell<Vec<InputDevice>>,
 }

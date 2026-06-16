@@ -89,6 +89,17 @@ use std::{
 pub mod actions;
 pub mod gestures;
 
+/// Identifies the input backend instance an event came from, used to disambiguate device ids
+/// (which are only unique within a single backend instance, see
+/// [`smithay::backend::input::Device::id`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum InputBackendId {
+    /// The session input backend (libinput / winit / x11) these are mutually exclusive
+    Normal,
+    /// A specific Ei client connection
+    Ei(smithay::reexports::reis::eis::Connection),
+}
+
 /// Used for debouncing focus updates due to pointer motion, if after the focus change is
 /// triggered the event will cancel if the pointer moves to the original target
 #[derive(Debug)]
@@ -166,8 +177,11 @@ impl ModifiersShortcutQueue {
 
 impl State {
     #[profiling::function]
-    pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
-    where
+    pub fn process_input_event<B: InputBackend>(
+        &mut self,
+        event: InputEvent<B>,
+        backend_id: InputBackendId,
+    ) where
         <B as InputBackend>::Device: 'static,
     {
         crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
@@ -178,7 +192,7 @@ impl State {
                 let shell = self.common.shell.read();
                 let seat = shell.seats.last_active();
                 let led_state = seat.get_keyboard().unwrap().led_state();
-                seat.devices().add_device(&device, led_state);
+                seat.devices().add_device(&device, led_state, &backend_id);
                 if device.has_capability(DeviceCapability::TabletTool) {
                     seat.tablet_seat().add_tablet::<Self>(
                         &self.common.display_handle,
@@ -189,8 +203,8 @@ impl State {
             InputEvent::DeviceRemoved { device } => {
                 for seat in &mut self.common.shell.read().seats.iter() {
                     let devices = seat.devices();
-                    if devices.has_device(&device) {
-                        devices.remove_device(&device);
+                    if devices.has_device(&device, &backend_id) {
+                        devices.remove_device(&device, &backend_id);
                         if device.has_capability(DeviceCapability::TabletTool) {
                             seat.tablet_seat()
                                 .remove_tablet(&TabletDescriptor::from(&device));
@@ -211,7 +225,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -312,7 +326,11 @@ impl State {
                 use smithay::backend::input::PointerMotionEvent;
 
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let current_output = seat.active_output();
@@ -677,7 +695,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -749,7 +767,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned()
                 else {
                     return;
@@ -963,7 +981,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1040,7 +1058,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1066,7 +1084,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1167,7 +1185,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1212,7 +1230,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1234,7 +1252,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1256,7 +1274,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1278,7 +1296,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1300,7 +1318,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1319,7 +1337,11 @@ impl State {
 
             InputEvent::TouchDown { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
@@ -1351,7 +1373,11 @@ impl State {
             }
             InputEvent::TouchMotion { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
@@ -1387,7 +1413,10 @@ impl State {
                     shell.set_overview_mode(None, self.common.event_loop_handle.clone());
                 }
 
-                let maybe_seat = shell.seats.for_device(&event.device()).cloned();
+                let maybe_seat = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     std::mem::drop(shell);
@@ -1409,7 +1438,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1423,7 +1452,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1434,7 +1463,11 @@ impl State {
 
             InputEvent::TabletToolAxis { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let Some(output) =
@@ -1500,7 +1533,11 @@ impl State {
             }
             InputEvent::TabletToolProximity { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let Some(output) =
@@ -1560,7 +1597,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1583,7 +1620,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);

@@ -309,7 +309,9 @@ impl State {
             WinitEvent::Focus(true) => {
                 for seat in self.common.shell.read().seats.iter() {
                     let devices = seat.user_data().get::<Devices>().unwrap();
-                    if devices.has_device(&WinitVirtualDevice) {
+                    if devices
+                        .has_device(&WinitVirtualDevice, &crate::input::InputBackendId::Normal)
+                    {
                         seat.set_active_output(&self.backend.winit().output);
                         break;
                     }
@@ -339,7 +341,9 @@ impl State {
                 render_ping.ping();
             }
             WinitEvent::Redraw => render_ping.ping(),
-            WinitEvent::Input(event) => self.process_input_event(event),
+            WinitEvent::Input(event) => {
+                self.process_input_event(event, crate::input::InputBackendId::Normal)
+            }
             WinitEvent::CloseRequested => {
                 self.common.should_stop = true;
             }
