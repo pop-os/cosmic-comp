@@ -1,4 +1,5 @@
-use reis::calloop::EisListenerSource;
+use std::os::unix::net::UnixStream;
+
 use reis::eis;
 use smithay::reexports::reis;
 
@@ -8,24 +9,26 @@ use smithay::reexports::calloop;
 use crate::config::xkb_config_to_wl;
 use crate::state::State;
 
-pub fn listen_eis(handle: &calloop::LoopHandle<'static, State>) -> Option<String> {
-    let listener = match eis::Listener::bind_auto() {
-        Ok(listener) => listener,
-        Err(err) => {
-            tracing::error!("Failed to bind EI listener socket: {}", err);
-            return None;
-        }
-    };
-
-    let socket_path = listener.path().to_string_lossy().into_owned();
-
-    let listener_source = EisListenerSource::new(listener);
+pub fn setup_ei(
+    handle: &calloop::LoopHandle<'static, State>,
+) -> calloop::channel::Sender<UnixStream> {
+    let (sender, channel) = calloop::channel::channel::<UnixStream>();
     let handle_clone = handle.clone();
     handle
-        .insert_source(listener_source, move |context, _, _| {
+        .insert_source(channel, move |event, _, _| {
+            let calloop::channel::Event::Msg(stream) = event else {
+                return;
+            };
+            let context = match eis::Context::new(stream) {
+                Ok(context) => context,
+                Err(err) => {
+                    tracing::error!("Failed to create EI context: {}", err);
+                    return;
+                }
+            };
             let source = EiInput::new(context);
-            handle_clone
-                .insert_source(source, |event, connection, data| match event {
+            if let Err(err) =
+                handle_clone.insert_source(source, |event, connection, data| match event {
                     EiInputEvent::Connected => {
                         let seat = connection.add_seat("default");
                         let conf = data.common.config.xkb_config();
@@ -39,10 +42,11 @@ pub fn listen_eis(handle: &calloop::LoopHandle<'static, State>) -> Option<String
                         data.process_input_event(event);
                     }
                 })
-                .unwrap();
-            Ok(calloop::PostAction::Continue)
+            {
+                tracing::error!("Failed to insert EI input source: {}", err);
+            }
         })
-        .unwrap();
+        .expect("Failed to insert EI channel source into the event loop");
 
-    Some(socket_path)
+    sender
 }
