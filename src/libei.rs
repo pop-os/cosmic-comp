@@ -7,6 +7,7 @@ use smithay::backend::libei::{EiInput, EiInputEvent};
 use smithay::reexports::calloop;
 
 use crate::config::xkb_config_to_wl;
+use crate::input::InputBackendId;
 use crate::state::State;
 
 pub fn setup_ei(
@@ -39,7 +40,8 @@ pub fn setup_ei(
                     }
                     EiInputEvent::Disconnected => {}
                     EiInputEvent::Event(event) => {
-                        data.process_input_event(event);
+                        let backend_id = InputBackendId::Ei(connection.eis_connection().clone());
+                        data.process_input_event(event, backend_id);
                     }
                 })
             {
