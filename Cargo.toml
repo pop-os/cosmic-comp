@@ -95,6 +95,7 @@ features = [
     "backend_drm",
     "backend_gbm",
     "backend_egl",
+    "backend_libei",
     "backend_libinput",
     "backend_session_libseat",
     "backend_udev",
@@ -143,4 +144,4 @@ cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch
 cosmic-client-toolkit = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "8eb4076" }
+smithay = { git = "https://github.com/hojjatabdollahi/smithay", branch= "hojjat/ei_text" }
