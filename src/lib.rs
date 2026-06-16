@@ -171,9 +171,9 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         event_loop.get_signal(),
         with_xwayland,
     );
-    // Start the libei EIS before the backend spawns Xwayland.
-    let eis_socket_path = libei::listen_eis(&event_loop.handle());
-    state.common.dbus_state.set_ei_socket_path(eis_socket_path);
+    // Set up the libei sender side before the backend spawns Xwayland.
+    let ei_sender = libei::setup_ei(&event_loop.handle());
+    state.common.dbus_state.set_ei_sender(ei_sender);
 
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;

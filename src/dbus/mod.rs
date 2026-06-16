@@ -31,10 +31,7 @@ struct DBusStateInner {
     session_conn: zbus::Result<zbus::Connection>,
     system_conn: zbus::Result<zbus::Connection>,
     a11y_keyboard_monitor: RefCell<Option<a11y_keyboard_monitor::A11yKeyboardMonitorState>>,
-    // Socket path advertised by the `com.system76.CosmicComp.Ei` interface. Shared with the
-    // registered `Ei` object so it can be set after the EIS listener is bound, independent of
-    // when the interface finishes registering on the shared session connection.
-    ei_socket_path: Arc<Mutex<Option<String>>>,
+    ei_sender: Arc<Mutex<Option<calloop::channel::Sender<std::os::unix::net::UnixStream>>>>,
 }
 
 impl DBusState {
@@ -48,7 +45,7 @@ impl DBusState {
             session_conn,
             system_conn,
             a11y_keyboard_monitor: RefCell::new(None),
-            ei_socket_path: Arc::new(Mutex::new(None)),
+            ei_sender: Arc::new(Mutex::new(None)),
         }));
         evlh.insert_source(source, |_, _, _| {}).unwrap();
         let state_clone = state.clone();
@@ -72,9 +69,8 @@ impl DBusState {
         RefMut::filter_map(self.0.a11y_keyboard_monitor.borrow_mut(), |x| x.as_mut()).ok()
     }
 
-    /// Set the EIS socket path advertised by the `com.system76.CosmicComp.Ei` interface.
-    pub fn set_ei_socket_path(&self, path: Option<String>) {
-        *self.0.ei_socket_path.lock().unwrap() = path;
+    pub fn set_ei_sender(&self, sender: calloop::channel::Sender<std::os::unix::net::UnixStream>) {
+        *self.0.ei_sender.lock().unwrap() = Some(sender);
     }
 
     // TODO Lazy async init when we don't have anything blocking main thread
@@ -97,7 +93,7 @@ async fn init_session(state: &DBusState) -> zbus::Result<()> {
     let a11y_keyboard_monitor_state =
         A11yKeyboardMonitorState::new(conn, &name_owners, &state.0.executor).await?;
     *state.0.a11y_keyboard_monitor.borrow_mut() = Some(a11y_keyboard_monitor_state);
-    ei::init(conn, &name_owners, state.0.ei_socket_path.clone()).await?;
+    ei::init(conn, &name_owners, state.0.ei_sender.clone()).await?;
     Ok(())
 }
 

@@ -1,4 +1,9 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    os::unix::net::UnixStream,
+    sync::{Arc, Mutex},
+};
+
+use smithay::reexports::calloop;
 use zbus::names::{UniqueName, WellKnownName};
 
 use super::name_owners::NameOwners;
@@ -7,8 +12,12 @@ static ALLOWED_NAMES: &[WellKnownName] = &[WellKnownName::from_static_str_unchec
     "org.freedesktop.impl.portal.desktop.cosmic",
 )];
 
+/// Channel for handing the EI socketpair
+/// It's `None` until the EI sender side has been set up
+type EiSender = Arc<Mutex<Option<calloop::channel::Sender<UnixStream>>>>;
+
 struct Ei {
-    socket_path: Arc<Mutex<Option<String>>>,
+    ei_sender: EiSender,
     name_owners: NameOwners,
 }
 
@@ -24,18 +33,30 @@ impl Ei {
 
 #[zbus::interface(name = "com.system76.CosmicComp.Ei")]
 impl Ei {
-    async fn get_socket_path(
+    /// Create a new EI sender context
+    async fn get_sender_socket(
         &self,
         #[zbus(header)] header: zbus::message::Header<'_>,
-    ) -> zbus::fdo::Result<String> {
+    ) -> zbus::fdo::Result<zbus::zvariant::OwnedFd> {
         if let Some(sender) = header.sender() {
             self.check_sender_allowed(sender).await?;
         }
-        self.socket_path
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| zbus::fdo::Error::Failed("EIS listener not available".to_string()))
+
+        let (comp_stream, client_stream) = UnixStream::pair().map_err(|err| {
+            zbus::fdo::Error::Failed(format!("Failed to create socket pair: {err}"))
+        })?;
+
+        {
+            let guard = self.ei_sender.lock().unwrap();
+            let sender = guard
+                .as_ref()
+                .ok_or_else(|| zbus::fdo::Error::Failed("EI sender not available".to_string()))?;
+            sender.send(comp_stream).map_err(|err| {
+                zbus::fdo::Error::Failed(format!("Failed to hand off EI socket: {err}"))
+            })?;
+        }
+
+        Ok(std::os::fd::OwnedFd::from(client_stream).into())
     }
 }
 
@@ -43,10 +64,10 @@ impl Ei {
 pub async fn init(
     conn: &zbus::Connection,
     name_owners: &NameOwners,
-    socket_path: Arc<Mutex<Option<String>>>,
+    ei_sender: EiSender,
 ) -> zbus::Result<()> {
     let ei = Ei {
-        socket_path,
+        ei_sender,
         name_owners: name_owners.clone(),
     };
     conn.object_server()
