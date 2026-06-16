@@ -820,6 +820,14 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         }
                     }
                 }
+                // Re-create the virtual keyboard on each libei sender seat with the new keymap.
+                for seat in state.common.ei_seats.values() {
+                    if let Err(err) =
+                        seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&value))
+                    {
+                        warn!(?err, "Failed to update libei virtual keyboard config");
+                    }
+                }
                 state.common.config.cosmic_conf.xkb_config = value;
             }
             "keyboard_config" => {
