@@ -37,8 +37,15 @@ pub fn setup_ei(
                         seat.add_pointer("virtual pointer");
                         seat.add_pointer_absolute("virtual absolute pointer");
                         seat.add_touch("virtual touch");
+                        // Track the seat so its virtual keyboard can be re-created when the
+                        // keyboard configuration changes at runtime.
+                        data.common
+                            .ei_seats
+                            .insert(connection.eis_connection().clone(), seat);
                     }
-                    EiInputEvent::Disconnected => {}
+                    EiInputEvent::Disconnected => {
+                        data.common.ei_seats.remove(connection.eis_connection());
+                    }
                     EiInputEvent::Event(event) => {
                         let backend_id = InputBackendId::Ei(connection.eis_connection().clone());
                         data.process_input_event(event, backend_id);
