@@ -249,6 +249,10 @@ impl CosmicStack {
             window.set_tiled(false);
 
             p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+            p.previous_index
+                .lock()
+                .unwrap()
+                .take_if(|(_, idx)| *idx >= windows.len());
         });
         self.0
             .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
@@ -276,6 +280,10 @@ impl CosmicStack {
             window.set_tiled(false);
 
             p.active.fetch_min(windows.len() - 1, Ordering::SeqCst);
+            p.previous_index
+                .lock()
+                .unwrap()
+                .take_if(|(_, idx)| *idx >= windows.len());
 
             Some(window)
         });
