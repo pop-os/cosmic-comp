@@ -374,6 +374,7 @@ impl State {
         for device in backend.drm_devices.values_mut() {
             if let Err(err) = device.drm.lock().activate(true) {
                 error!(?err, "Failed to resume drm device");
+                continue;
             }
             if let Some(lease_state) = device.inner.leasing_global.as_mut() {
                 lease_state.resume::<State>();
