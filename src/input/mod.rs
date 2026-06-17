@@ -63,7 +63,7 @@ use smithay::{
         input::Device as InputDevice,
         wayland_server::{Resource as _, protocol::wl_surface::WlSurface},
     },
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
         compositor::CompositorHandler,
         image_copy_capture::CursorSessionRef,
@@ -648,31 +648,13 @@ impl State {
                         seat.set_active_output(&output);
                     }
 
-                    for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some(cursor_geometry) = seat.cursor_geometry(
-                            (position - output_geometry.loc.to_f64())
-                                .as_logical()
-                                .to_buffer(
-                                    output.current_scale().fractional_scale(),
-                                    output.current_transform(),
-                                    &output_geometry.size.to_f64().as_logical(),
-                                ),
-                            self.common.clock.now(),
-                        ) {
-                            let constraints = cursor_capture_constraints(Some(cursor_geometry));
-                            if session
-                                .current_constraints()
-                                .map(|current_constraints| {
-                                    current_constraints.size != constraints.size
-                                })
-                                .unwrap_or(true)
-                            {
-                                session.update_constraints(constraints);
-                            }
-                            session.set_cursor_hotspot(cursor_geometry.hotspot);
-                            session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
-                        }
-                    }
+                    update_output_image_copy_cursor_position(
+                        &shell,
+                        &self.common.clock,
+                        &output,
+                        &seat,
+                        position,
+                    );
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -711,31 +693,13 @@ impl State {
                     ptr.frame(self);
 
                     let shell = self.common.shell.read();
-                    for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some(cursor_geometry) = seat.cursor_geometry(
-                            (position - output_geometry.loc.to_f64())
-                                .as_logical()
-                                .to_buffer(
-                                    output.current_scale().fractional_scale(),
-                                    output.current_transform(),
-                                    &output_geometry.size.to_f64().as_logical(),
-                                ),
-                            self.common.clock.now(),
-                        ) {
-                            let constraints = cursor_capture_constraints(Some(cursor_geometry));
-                            if session
-                                .current_constraints()
-                                .map(|current_constraints| {
-                                    current_constraints.size != constraints.size
-                                })
-                                .unwrap_or(true)
-                            {
-                                session.update_constraints(constraints);
-                            }
-                            session.set_cursor_hotspot(cursor_geometry.hotspot);
-                            session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
-                        }
-                    }
+                    update_output_image_copy_cursor_position(
+                        &shell,
+                        &self.common.clock,
+                        &output,
+                        &seat,
+                        position,
+                    );
                 }
             }
             InputEvent::PointerButton { event, .. } => {
@@ -2489,28 +2453,13 @@ impl State {
                     self.common.config.cosmic_conf.accessibility_zoom.view_moves,
                 );
 
-                let output_geometry = output.geometry();
-                for session in cursor_sessions_for_output(&shell, &output) {
-                    if let Some(cursor_geometry) = seat.cursor_geometry(
-                        point.as_logical().to_buffer(
-                            output.current_scale().fractional_scale(),
-                            output.current_transform(),
-                            &output_geometry.size.to_f64().as_logical(),
-                        ),
-                        self.common.clock.now(),
-                    ) {
-                        let constraints = cursor_capture_constraints(Some(cursor_geometry));
-                        if session
-                            .current_constraints()
-                            .map(|current_constraints| current_constraints.size != constraints.size)
-                            .unwrap_or(true)
-                        {
-                            session.update_constraints(constraints);
-                        }
-                        session.set_cursor_hotspot(cursor_geometry.hotspot);
-                        session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
-                    }
-                }
+                update_output_image_copy_cursor_position(
+                    &shell,
+                    &self.common.clock,
+                    &output,
+                    &seat,
+                    point,
+                );
             }
         }
     }
@@ -2570,4 +2519,37 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
         None
     };
     map_to_output.or_else(|| shell.builtin_output())
+}
+
+fn update_output_image_copy_cursor_position(
+    shell: &Shell,
+    clock: &Clock<Monotonic>,
+    output: &Output,
+    seat: &Seat<State>,
+    position: Point<f64, Global>,
+) {
+    let output_geometry = output.geometry();
+    for session in cursor_sessions_for_output(&shell, &output) {
+        if let Some(cursor_geometry) = seat.cursor_geometry(
+            (position - output_geometry.loc.to_f64())
+                .as_logical()
+                .to_buffer(
+                    output.current_scale().fractional_scale(),
+                    output.current_transform(),
+                    &output_geometry.size.to_f64().as_logical(),
+                ),
+            clock.now(),
+        ) {
+            let constraints = cursor_capture_constraints(Some(cursor_geometry));
+            if session
+                .current_constraints()
+                .map(|current_constraints| current_constraints.size != constraints.size)
+                .unwrap_or(true)
+            {
+                session.update_constraints(constraints);
+            }
+            session.set_cursor_hotspot(cursor_geometry.hotspot);
+            session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
+        }
+    }
 }
