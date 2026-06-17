@@ -39,10 +39,10 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, Device, DeviceCapability,
         GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
-        GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
-        PointerAxisEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
-        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-        TabletToolTipState, TouchEvent,
+        GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState, PointerAxisEvent,
+        ProximityState, Switch, SwitchState, SwitchToggleEvent, TabletToolButtonEvent,
+        TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState,
+        TouchEvent,
     },
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
@@ -246,51 +246,16 @@ impl State {
                             serial,
                             time,
                             |data, modifiers, handle| {
-                                if previous_modifiers != *modifiers {
-                                    *seat
-                                        .user_data()
-                                        .get::<LastModifierChange>()
-                                        .unwrap()
-                                        .0
-                                        .lock()
-                                        .unwrap() = Some(serial);
-                                }
-
-                                let current_focus = seat.get_keyboard().unwrap().current_focus();
-                                let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
-                                    f.wl_surface()
-                                        .map(|surface| {
-                                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                                                .map(|inhibitor| inhibitor.is_active())
-                                                .unwrap_or(false)
-                                                || seat.has_active_xwayland_grab(&surface)
-                                        })
-                                        .unwrap_or(false)
-                                });
-                                let sym = handle.modified_sym();
-
-                                let result = Self::filter_keyboard_input(
-                                    data, &event, &seat, modifiers, handle, serial,
-                                );
-
-                                if (matches!(result, FilterResult::Forward)
-                                    && !seat.get_keyboard().unwrap().is_grabbed()
-                                    && !shortcuts_inhibited
-                                    && !matches!(
-                                        current_focus,
-                                        Some(KeyboardFocusTarget::LockSurface(_))
-                                    ))
-                                // we don't want to accidentally leave any keys pressed
-                                // and do more filtering in `xwayland_notify_key_event`
-                                // for released keys
-                                    || state == KeyState::Released
-                                {
-                                    data.common.xwayland_notify_key_event(
-                                        sym, keycode, state, serial, time,
-                                    );
-                                }
-
-                                result
+                                data.process_keyboard_filter(
+                                    &seat,
+                                    modifiers,
+                                    handle,
+                                    serial,
+                                    time,
+                                    keycode,
+                                    state,
+                                    previous_modifiers,
+                                )
                             },
                         )
                         .flatten()
@@ -807,7 +772,7 @@ impl State {
                         };
                         if let Some(target) = under {
                             if let Some(surface) = target.toplevel().map(Cow::into_owned)
-                                && seat.get_keyboard().unwrap().modifier_state().logo
+                                && self.source_modifiers(&backend_id, &seat).logo
                                 && !shortcuts_inhibited
                             {
                                 let seat_clone = seat.clone();
@@ -987,7 +952,7 @@ impl State {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
 
-                    if seat.get_keyboard().unwrap().modifier_state().logo
+                    if self.source_modifiers(&backend_id, &seat).logo
                         && self
                             .common
                             .config
@@ -1676,15 +1641,194 @@ impl State {
         }
     }
 
+    /// The modifier state held by the source that produced an event.
+    ///
+    /// For a libei connection this is its own isolated keyboard state; for everything else
+    /// it is the seat's (physical) keyboard.
+    pub(crate) fn source_modifiers(
+        &self,
+        backend_id: &InputBackendId,
+        seat: &Seat<State>,
+    ) -> ModifiersState {
+        match backend_id {
+            InputBackendId::Ei(conn) => self
+                .common
+                .ei_isolated_kbd
+                .get(conn)
+                .map(|iso| iso.modifier_state())
+                .unwrap_or_default(),
+            _ => seat
+                .get_keyboard()
+                .map(|k| k.modifier_state())
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(crate) fn process_keyboard_filter(
+        &mut self,
+        seat: &Seat<State>,
+        modifiers: &ModifiersState,
+        handle: KeysymHandle<'_>,
+        serial: Serial,
+        time: u32,
+        keycode: Keycode,
+        key_state: KeyState,
+        previous_modifiers: ModifiersState,
+    ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
+        if previous_modifiers != *modifiers {
+            *seat
+                .user_data()
+                .get::<LastModifierChange>()
+                .unwrap()
+                .0
+                .lock()
+                .unwrap() = Some(serial);
+        }
+
+        let current_focus = seat.get_keyboard().unwrap().current_focus();
+        let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
+            f.wl_surface()
+                .map(|surface| {
+                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                        .map(|inhibitor| inhibitor.is_active())
+                        .unwrap_or(false)
+                        || seat.has_active_xwayland_grab(&surface)
+                })
+                .unwrap_or(false)
+        });
+        let sym = handle.modified_sym();
+
+        let result =
+            self.filter_keyboard_input(seat, modifiers, handle, serial, keycode, key_state, time);
+
+        if (matches!(result, FilterResult::Forward)
+            && !seat.get_keyboard().unwrap().is_grabbed()
+            && !shortcuts_inhibited
+            && !matches!(current_focus, Some(KeyboardFocusTarget::LockSurface(_))))
+        // we don't want to accidentally leave any keys pressed
+            || key_state == KeyState::Released
+        {
+            self.common
+                .xwayland_notify_key_event(sym, keycode, key_state, serial, time);
+        }
+
+        result
+    }
+
+    /// Inject a key from a libei connection through its isolated keyboard state.
+    pub(crate) fn inject_ei_key(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keycode: Keycode,
+        key_state: KeyState,
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+        let serial = SERIAL_COUNTER.next_serial();
+        let time = self.common.clock.now().as_millis();
+
+        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+            return;
+        };
+        let previous_modifiers = iso.modifier_state();
+        let result = keyboard
+            .input_isolated(
+                self,
+                &mut iso,
+                keycode,
+                key_state,
+                serial,
+                time,
+                |data, modifiers, handle| {
+                    data.process_keyboard_filter(
+                        &seat,
+                        modifiers,
+                        handle,
+                        serial,
+                        time,
+                        keycode,
+                        key_state,
+                        previous_modifiers,
+                    )
+                },
+            )
+            .flatten();
+        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
+
+        if let Some((action, pattern)) = result {
+            self.handle_action(action, &seat, serial, time, pattern, None);
+        }
+    }
+
+    /// Resolve a keysym from a libei `ei_text` device to a keycode
+    pub(crate) fn inject_ei_text_keysym(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keysym: u32,
+        key_state: KeyState,
+    ) {
+        use smithay::wayland::text_input::TextInputSeat;
+
+        let keysym = Keysym::new(keysym);
+
+        // if a printable, non-control keysym with no modifier held + text-input protocol when a text-input client is focused then commit the character directly
+        // (which also handles out-of-layout / Unicode that has no keycode)
+        // otherwise go through to keycode injection, which reaches every app.
+        let no_mods = self.common.ei_isolated_kbd.get(conn).is_some_and(|iso| {
+            let m = iso.modifier_state();
+            !(m.ctrl || m.alt || m.shift || m.logo)
+        });
+        if no_mods
+            && let Some(c) = keysym.key_char()
+            && !c.is_control()
+        {
+            let seat = self.common.shell.read().seats.last_active().clone();
+            let text_input = seat.text_input();
+            let mut handled = false;
+            text_input.with_active_text_input(|ti, _surface| {
+                // A text-input client is focused: commit on press, no-op on release.
+                if key_state == KeyState::Pressed {
+                    ti.commit_string(Some(c.to_string()));
+                }
+                handled = true;
+            });
+            if handled {
+                if key_state == KeyState::Pressed {
+                    text_input.done(false);
+                }
+                return;
+            }
+            // No active text-input: fall through to keycode injection (press and release).
+        }
+
+        let Some(keycode) = self
+            .common
+            .ei_isolated_kbd
+            .get(conn)
+            .and_then(|iso| iso.keycode_for_keysym(keysym))
+        else {
+            tracing::warn!(
+                "EI text keysym {:?} is not in the active layout; ignoring",
+                keysym
+            );
+            return;
+        };
+        self.inject_ei_key(conn, keycode, key_state);
+    }
+
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
     #[profiling::function]
-    pub fn filter_keyboard_input<B: InputBackend, E: KeyboardKeyEvent<B>>(
+    pub fn filter_keyboard_input(
         &mut self,
-        event: &E,
         seat: &Seat<Self>,
         modifiers: &ModifiersState,
         handle: KeysymHandle<'_>,
         serial: Serial,
+        keycode: Keycode,
+        key_state: KeyState,
+        time: u32,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
         // Pre-compute for layout-agnostic shortcut matching
         let raw_syms = handle.raw_syms();
@@ -1720,7 +1864,7 @@ impl State {
         });
 
         if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
-            a11y_keyboard_monitor.key_event(modifiers, &handle, event.state());
+            a11y_keyboard_monitor.key_event(modifiers, &handle, key_state);
         }
 
         // Leave move overview mode, if any modifier was released
@@ -1742,7 +1886,7 @@ impl State {
                 || (action_pattern.modifiers.shift && !modifiers.shift)
                 || (action_pattern.key.is_some()
                     && key_matches(action_pattern.key.unwrap())
-                    && event.state() == KeyState::Released))
+                    && key_state == KeyState::Released))
         {
             shell.set_overview_mode(None, self.common.event_loop_handle.clone());
 
@@ -1758,7 +1902,7 @@ impl State {
         // Leave or update resize mode, if modifiers changed or initial key was released
         if let Some(action_pattern) = shell.resize_mode().0.active_binding() {
             if action_pattern.key.is_some()
-                && event.state() == KeyState::Released
+                && key_state == KeyState::Released
                 && key_matches(action_pattern.key.unwrap())
             {
                 shell.set_resize_mode(
@@ -1811,7 +1955,7 @@ impl State {
                 let action = Action::Private(PrivateAction::Resizing(
                     direction,
                     edge.into(),
-                    cosmic_keystate_from_smithay(event.state()),
+                    cosmic_keystate_from_smithay(key_state),
                 ));
                 let key_pattern = shortcuts::Binding {
                     modifiers: cosmic_modifiers_from_smithay(*modifiers),
@@ -1820,7 +1964,7 @@ impl State {
                     description: None,
                 };
 
-                if event.state() == KeyState::Released {
+                if key_state == KeyState::Released {
                     if let Some(tokens) = seat.supressed_keys().filter(&handle) {
                         for token in tokens {
                             self.common.event_loop_handle.remove(token);
@@ -1831,7 +1975,6 @@ impl State {
                     let action_clone = action.clone();
                     let key_pattern_clone = key_pattern.clone();
                     let start = Instant::now();
-                    let time = event.time_msec();
                     let token = self
                         .common
                         .event_loop_handle
@@ -1863,7 +2006,7 @@ impl State {
         // cancel grabs
         if is_grabbed
             && handle.modified_sym() == Keysym::Escape
-            && event.state() == KeyState::Pressed
+            && key_state == KeyState::Pressed
             && !modifiers.alt
             && !modifiers.ctrl
             && !modifiers.logo
@@ -1882,7 +2025,7 @@ impl State {
         }
 
         if let Some(mut a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
-            if event.state() == KeyState::Released {
+            if key_state == KeyState::Released {
                 let removed =
                     a11y_keyboard_monitor.remove_active_virtual_mod(handle.modified_sym());
                 // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
@@ -1891,7 +2034,7 @@ impl State {
                     && (modifiers.serialized.locked & 2) != 0
                 {
                     let seat = seat.clone();
-                    let key_code = event.key_code();
+                    let key_code = keycode;
                     self.common.event_loop_handle.insert_idle(move |state| {
                         if let Some(keyboard) = seat.get_keyboard() {
                             let serial = SERIAL_COUNTER.next_serial();
@@ -1916,7 +2059,7 @@ impl State {
                         }
                     });
                 }
-            } else if event.state() == KeyState::Pressed
+            } else if key_state == KeyState::Pressed
                 && a11y_keyboard_monitor.has_virtual_mod(handle.modified_sym())
             {
                 a11y_keyboard_monitor.add_active_virtual_mod(handle.modified_sym());
@@ -1932,7 +2075,7 @@ impl State {
         }
 
         // Skip released events for initially surpressed keys
-        if event.state() == KeyState::Released
+        if key_state == KeyState::Released
             && let Some(tokens) = seat.supressed_keys().filter(&handle)
         {
             for token in tokens {
@@ -1942,7 +2085,7 @@ impl State {
         }
 
         // Handle VT switches
-        if event.state() == KeyState::Pressed
+        if key_state == KeyState::Pressed
             && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
                 .contains(&handle.modified_sym().raw())
         {
@@ -1956,7 +2099,7 @@ impl State {
         }
 
         if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor()
-            && event.state() == KeyState::Pressed
+            && key_state == KeyState::Pressed
             && (a11y_keyboard_monitor.has_keyboard_grab()
                 || a11y_keyboard_monitor.has_key_grab(modifiers, handle.modified_sym()))
         {
@@ -1978,7 +2121,7 @@ impl State {
 
                 // is this a released (triggered) modifier-only binding?
                 if binding.key.is_none()
-                    && event.state() == KeyState::Released
+                    && key_state == KeyState::Released
                     && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                     && modifiers_queue.take(binding)
                 {
@@ -1991,7 +2134,7 @@ impl State {
 
                 // could this potentially become a modifier-only binding?
                 if binding.key.is_none()
-                    && event.state() == KeyState::Pressed
+                    && key_state == KeyState::Pressed
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
                     modifiers_queue.set(binding.clone());
@@ -2000,7 +2143,7 @@ impl State {
 
                 // is this a normal binding?
                 if binding.key.is_some()
-                    && event.state() == KeyState::Pressed
+                    && key_state == KeyState::Pressed
                     && key_matches(binding.key.unwrap())
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
