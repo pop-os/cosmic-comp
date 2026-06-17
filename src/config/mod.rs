@@ -828,6 +828,18 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         warn!(?err, "Failed to update libei virtual keyboard config");
                     }
                 }
+                // Rebuild the per-connection isolated keyboard state with the new keymap
+                // Held modifiers reset
+                for iso in state.common.ei_isolated_kbd.values_mut() {
+                    match smithay::input::keyboard::IsolatedKeyboardState::new(xkb_config_to_wl(
+                        &value,
+                    )) {
+                        Ok(new_state) => *iso = new_state,
+                        Err(err) => {
+                            warn!(?err, "Failed to update libei isolated keyboard config")
+                        }
+                    }
+                }
                 state.common.config.cosmic_conf.xkb_config = value;
             }
             "keyboard_config" => {
