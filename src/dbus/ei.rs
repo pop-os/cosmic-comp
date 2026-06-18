@@ -8,9 +8,10 @@ use zbus::names::{UniqueName, WellKnownName};
 
 use super::name_owners::NameOwners;
 
-static ALLOWED_NAMES: &[WellKnownName] = &[WellKnownName::from_static_str_unchecked(
-    "org.freedesktop.impl.portal.desktop.cosmic",
-)];
+static ALLOWED_NAMES: &[WellKnownName] = &[
+    WellKnownName::from_static_str_unchecked("org.freedesktop.impl.portal.desktop.cosmic"),
+    WellKnownName::from_static_str_unchecked("com.system76.CosmicRemoteDesktop"),
+];
 
 /// Channel for handing the EI socketpair (and requested device types)
 /// It's `None` until the EI sender side has been set up
