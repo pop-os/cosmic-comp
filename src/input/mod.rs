@@ -11,7 +11,7 @@ use crate::{
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
-        LastModifierChange, SeatExt, Trigger,
+        SeatExt, Trigger,
         focus::{
             Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -81,7 +81,7 @@ use std::{
     any::Any,
     borrow::Cow,
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ops::ControlFlow,
     time::{Duration, Instant},
 };
@@ -98,6 +98,8 @@ pub enum InputBackendId {
     Normal,
     /// A specific Ei client connection
     Ei(smithay::reexports::reis::eis::Connection),
+    /// The `zwp_virtual_keyboard_v1` protocol (all virtual keyboards share this source)
+    VirtualKeyboard,
 }
 
 /// Used for debouncing focus updates due to pointer motion, if after the focus change is
@@ -112,19 +114,35 @@ pub struct PointerFocusState {
 }
 
 #[derive(Default)]
-pub struct SupressedKeys(RefCell<Vec<(Keycode, Option<RegistrationToken>)>>);
+pub struct SupressedKeys(
+    RefCell<HashMap<InputBackendId, Vec<(Keycode, Option<RegistrationToken>)>>>,
+);
 #[derive(Default)]
-pub struct SupressedButtons(RefCell<HashSet<u32>>);
+pub struct SupressedButtons(RefCell<HashMap<InputBackendId, HashSet<u32>>>);
 #[derive(Default, Debug)]
-pub struct ModifiersShortcutQueue(RefCell<Option<shortcuts::Binding>>);
+pub struct ModifiersShortcutQueue(RefCell<HashMap<InputBackendId, shortcuts::Binding>>);
 
 impl SupressedKeys {
-    fn add(&self, keysym: &KeysymHandle, token: impl Into<Option<RegistrationToken>>) {
-        self.0.borrow_mut().push((keysym.raw_code(), token.into()));
+    fn add(
+        &self,
+        backend_id: &InputBackendId,
+        keysym: &KeysymHandle,
+        token: impl Into<Option<RegistrationToken>>,
+    ) {
+        self.0
+            .borrow_mut()
+            .entry(backend_id.clone())
+            .or_default()
+            .push((keysym.raw_code(), token.into()));
     }
 
-    fn filter(&self, keysym: &KeysymHandle) -> Option<Vec<RegistrationToken>> {
-        let mut keys = self.0.borrow_mut();
+    fn filter(
+        &self,
+        backend_id: &InputBackendId,
+        keysym: &KeysymHandle,
+    ) -> Option<Vec<RegistrationToken>> {
+        let mut by_source = self.0.borrow_mut();
+        let keys = by_source.get_mut(backend_id)?;
         let (removed, remaining) = keys
             .drain(..)
             .partition(|(key, _)| *key == keysym.raw_code());
@@ -141,37 +159,50 @@ impl SupressedKeys {
                 .collect::<Vec<_>>(),
         )
     }
+
+    fn clear_source(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
+    }
 }
 
 impl SupressedButtons {
-    fn add(&self, button: u32) {
-        self.0.borrow_mut().insert(button);
+    fn add(&self, backend_id: &InputBackendId, button: u32) {
+        self.0
+            .borrow_mut()
+            .entry(backend_id.clone())
+            .or_default()
+            .insert(button);
     }
 
-    fn remove(&self, button: u32) -> bool {
-        self.0.borrow_mut().remove(&button)
+    fn remove(&self, backend_id: &InputBackendId, button: u32) -> bool {
+        self.0
+            .borrow_mut()
+            .get_mut(backend_id)
+            .is_some_and(|buttons| buttons.remove(&button))
+    }
+
+    fn clear_source(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
     }
 }
 
 impl ModifiersShortcutQueue {
-    pub fn set(&self, binding: shortcuts::Binding) {
-        let mut set = self.0.borrow_mut();
-        *set = Some(binding);
+    pub fn set(&self, backend_id: &InputBackendId, binding: shortcuts::Binding) {
+        self.0.borrow_mut().insert(backend_id.clone(), binding);
     }
 
-    pub fn take(&self, binding: &shortcuts::Binding) -> bool {
+    pub fn take(&self, backend_id: &InputBackendId, binding: &shortcuts::Binding) -> bool {
         let mut set = self.0.borrow_mut();
-        if set.is_some() && set.as_ref().unwrap() == binding {
-            *set = None;
+        if set.get(backend_id).is_some_and(|queued| queued == binding) {
+            set.remove(backend_id);
             true
         } else {
             false
         }
     }
 
-    pub fn clear(&self) {
-        let mut set = self.0.borrow_mut();
-        *set = None;
+    pub fn clear(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
     }
 }
 
@@ -247,6 +278,7 @@ impl State {
                             time,
                             |data, modifiers, handle| {
                                 data.process_keyboard_filter(
+                                    &backend_id,
                                     &seat,
                                     modifiers,
                                     handle,
@@ -266,7 +298,7 @@ impl State {
                                 FilterResult::<()>::Forward
                             });
                         }
-                        self.handle_action(action, &seat, serial, time, pattern, None)
+                        self.handle_action(action, &backend_id, &seat, serial, time, pattern, None)
                     }
 
                     // If we want to track numlock state so it can be reused on the next boot...
@@ -755,7 +787,7 @@ impl State {
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
 
-                let mut pass_event = !seat.supressed_buttons().remove(button);
+                let mut pass_event = !seat.supressed_buttons().remove(&backend_id, button);
                 if event.state() == ButtonState::Pressed {
                     // change the keyboard focus unless the pointer is grabbed
                     // We test for any matching surface type here but always use the root
@@ -783,17 +815,18 @@ impl State {
                                     // aimed at the compositor and shouldn't be passed
                                     // to the application.
                                     pass_event = false;
-                                    seat.supressed_buttons().add(button);
+                                    seat.supressed_buttons().add(&backend_id, button);
                                 };
 
                                 fn dispatch_grab<G: PointerGrab<State> + 'static>(
                                     grab: Option<(G, smithay::input::pointer::Focus)>,
                                     seat: Seat<State>,
+                                    backend_id: &InputBackendId,
                                     serial: Serial,
                                     state: &mut State,
                                 ) {
                                     if let Some((target, focus)) = grab {
-                                        seat.modifiers_shortcut_queue().clear();
+                                        seat.modifiers_shortcut_queue().clear(backend_id);
 
                                         seat.get_pointer()
                                             .unwrap()
@@ -805,6 +838,7 @@ impl State {
                                     match mouse_button {
                                         smithay::backend::input::MouseButton::Left => {
                                             supress_button();
+                                            let backend_id = backend_id.clone();
                                             self.common.event_loop_handle.insert_idle(
                                                 move |state| {
                                                     let mut shell = state.common.shell.write();
@@ -819,12 +853,19 @@ impl State {
                                                         false,
                                                     );
                                                     drop(shell);
-                                                    dispatch_grab(res, seat_clone, serial, state);
+                                                    dispatch_grab(
+                                                        res,
+                                                        seat_clone,
+                                                        &backend_id,
+                                                        serial,
+                                                        state,
+                                                    );
                                                 },
                                             );
                                         }
                                         smithay::backend::input::MouseButton::Right => {
                                             supress_button();
+                                            let backend_id = backend_id.clone();
                                             self.common.event_loop_handle.insert_idle(
                                                 move |state| {
                                                     let mut shell = state.common.shell.write();
@@ -882,7 +923,13 @@ impl State {
                                                         false,
                                                     );
                                                     drop(shell);
-                                                    dispatch_grab(res, seat_clone, serial, state);
+                                                    dispatch_grab(
+                                                        res,
+                                                        seat_clone,
+                                                        &backend_id,
+                                                        serial,
+                                                        state,
+                                                    );
                                                 },
                                             );
                                         }
@@ -960,7 +1007,7 @@ impl State {
                             .accessibility_zoom
                             .enable_mouse_zoom_shortcuts
                     {
-                        seat.modifiers_shortcut_queue().clear();
+                        seat.modifiers_shortcut_queue().clear(&backend_id);
                         if let Some(mut percentage) = event
                             .amount_v120(Axis::Vertical)
                             .map(|val| val / 120.)
@@ -1664,8 +1711,38 @@ impl State {
         }
     }
 
+    pub(crate) fn clear_input_source_state(&mut self, backend_id: &InputBackendId) {
+        let seats = self
+            .common
+            .shell
+            .read()
+            .seats
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for seat in seats {
+            seat.supressed_keys().clear_source(backend_id);
+            seat.supressed_buttons().clear_source(backend_id);
+            seat.modifiers_shortcut_queue().clear(backend_id);
+        }
+    }
+
+    pub(crate) fn release_ei_keyboard(&mut self, conn: &smithay::reexports::reis::eis::Connection) {
+        let pressed_keys = self
+            .common
+            .ei_isolated_kbd
+            .get(conn)
+            .map(|iso| iso.pressed_keys().collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        for keycode in pressed_keys.into_iter().rev() {
+            self.inject_ei_key_internal(conn, keycode, KeyState::Released, false);
+        }
+    }
+
     pub(crate) fn process_keyboard_filter(
         &mut self,
+        backend_id: &InputBackendId,
         seat: &Seat<State>,
         modifiers: &ModifiersState,
         handle: KeysymHandle<'_>,
@@ -1676,13 +1753,7 @@ impl State {
         previous_modifiers: ModifiersState,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
         if previous_modifiers != *modifiers {
-            *seat
-                .user_data()
-                .get::<LastModifierChange>()
-                .unwrap()
-                .0
-                .lock()
-                .unwrap() = Some(serial);
+            seat.set_last_modifier_change(backend_id, serial);
         }
 
         let current_focus = seat.get_keyboard().unwrap().current_focus();
@@ -1698,8 +1769,9 @@ impl State {
         });
         let sym = handle.modified_sym();
 
-        let result =
-            self.filter_keyboard_input(seat, modifiers, handle, serial, keycode, key_state, time);
+        let result = self.filter_keyboard_input(
+            backend_id, seat, modifiers, handle, serial, keycode, key_state, time,
+        );
 
         if (matches!(result, FilterResult::Forward)
             && !seat.get_keyboard().unwrap().is_grabbed()
@@ -1709,21 +1781,26 @@ impl State {
             || key_state == KeyState::Released
         {
             self.common
-                .xwayland_notify_key_event(sym, keycode, key_state, serial, time);
+                .xwayland_notify_key_event(sym, keycode, key_state, *modifiers, serial, time);
         }
 
         result
     }
 
-    /// Inject a key through an isolated keyboard state: run it through the shortcut filter
-    /// and deliver it to the focused client, keeping this source's modifier/key state fully
-    /// isolated from the physical keyboard. Shared by libei connections and virtual keyboards.
+    /// Inject a key through an isolated keyboard state: run it through the per-source shortcut
+    /// filter and deliver it to the focused client, keeping this source's modifier/key state
+    /// fully isolated from the physical keyboard. Shared by libei connections and virtual keyboards.
+    ///
+    /// `handle_shortcuts` is `false` when synthesizing releases during teardown, so still-held
+    /// keys are just forwarded without re-triggering bindings.
     pub(crate) fn inject_isolated_key(
         &mut self,
+        backend_id: &InputBackendId,
         seat: &Seat<State>,
         iso: &mut smithay::input::keyboard::IsolatedKeyboardState,
         keycode: Keycode,
         key_state: KeyState,
+        handle_shortcuts: bool,
     ) {
         let Some(keyboard) = seat.get_keyboard() else {
             return;
@@ -1740,22 +1817,27 @@ impl State {
                 serial,
                 time,
                 |data, modifiers, handle| {
-                    data.process_keyboard_filter(
-                        seat,
-                        modifiers,
-                        handle,
-                        serial,
-                        time,
-                        keycode,
-                        key_state,
-                        previous_modifiers,
-                    )
+                    if handle_shortcuts {
+                        data.process_keyboard_filter(
+                            backend_id,
+                            seat,
+                            modifiers,
+                            handle,
+                            serial,
+                            time,
+                            keycode,
+                            key_state,
+                            previous_modifiers,
+                        )
+                    } else {
+                        FilterResult::Forward
+                    }
                 },
             )
             .flatten();
 
         if let Some((action, pattern)) = result {
-            self.handle_action(action, seat, serial, time, pattern, None);
+            self.handle_action(action, backend_id, seat, serial, time, pattern, None);
         }
     }
 
@@ -1766,12 +1848,30 @@ impl State {
         keycode: Keycode,
         key_state: KeyState,
     ) {
+        self.inject_ei_key_internal(conn, keycode, key_state, true);
+    }
+
+    fn inject_ei_key_internal(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keycode: Keycode,
+        key_state: KeyState,
+        handle_shortcuts: bool,
+    ) {
         let seat = self.common.shell.read().seats.last_active().clone();
+        let backend_id = InputBackendId::Ei(conn.clone());
         // Temporarily take the isolated state out so we can borrow `self` mutably for delivery.
         let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
             return;
         };
-        self.inject_isolated_key(&seat, &mut iso, keycode, key_state);
+        self.inject_isolated_key(
+            &backend_id,
+            &seat,
+            &mut iso,
+            keycode,
+            key_state,
+            handle_shortcuts,
+        );
         self.common.ei_isolated_kbd.insert(conn.clone(), iso);
     }
 
@@ -1835,6 +1935,7 @@ impl State {
     #[profiling::function]
     pub fn filter_keyboard_input(
         &mut self,
+        backend_id: &InputBackendId,
         seat: &Seat<Self>,
         modifiers: &ModifiersState,
         handle: KeysymHandle<'_>,
@@ -1978,7 +2079,7 @@ impl State {
                 };
 
                 if key_state == KeyState::Released {
-                    if let Some(tokens) = seat.supressed_keys().filter(&handle) {
+                    if let Some(tokens) = seat.supressed_keys().filter(backend_id, &handle) {
                         for token in tokens {
                             self.common.event_loop_handle.remove(token);
                         }
@@ -1987,6 +2088,7 @@ impl State {
                     let seat_clone = seat.clone();
                     let action_clone = action.clone();
                     let key_pattern_clone = key_pattern.clone();
+                    let backend_id_clone = backend_id.clone();
                     let start = Instant::now();
                     let token = self
                         .common
@@ -1997,6 +2099,7 @@ impl State {
                                 let duration = current.duration_since(start).as_millis();
                                 state.handle_action(
                                     action_clone.clone(),
+                                    &backend_id_clone,
                                     &seat_clone,
                                     serial,
                                     time.overflowing_add(duration as u32).0,
@@ -2008,7 +2111,7 @@ impl State {
                         )
                         .ok();
 
-                    seat.supressed_keys().add(&handle, token);
+                    seat.supressed_keys().add(backend_id, &handle, token);
                 }
                 return FilterResult::Intercept(Some((action, key_pattern)));
             }
@@ -2025,7 +2128,7 @@ impl State {
             && !modifiers.logo
             && !modifiers.shift
         {
-            seat.supressed_keys().add(&handle, None);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(Some((
                 Action::Private(PrivateAction::Escape),
                 shortcuts::Binding {
@@ -2081,7 +2184,7 @@ impl State {
                     "active virtual mods: {:?}",
                     a11y_keyboard_monitor.active_virtual_mods()
                 );
-                seat.supressed_keys().add(&handle, None);
+                seat.supressed_keys().add(backend_id, &handle, None);
 
                 return FilterResult::Intercept(None);
             }
@@ -2089,7 +2192,7 @@ impl State {
 
         // Skip released events for initially surpressed keys
         if key_state == KeyState::Released
-            && let Some(tokens) = seat.supressed_keys().filter(&handle)
+            && let Some(tokens) = seat.supressed_keys().filter(backend_id, &handle)
         {
             for token in tokens {
                 self.common.event_loop_handle.remove(token);
@@ -2107,7 +2210,7 @@ impl State {
             ) {
                 error!(?err, "Failed switching virtual terminal.");
             }
-            seat.supressed_keys().add(&handle, None);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(None);
         }
 
@@ -2117,8 +2220,8 @@ impl State {
                 || a11y_keyboard_monitor.has_key_grab(modifiers, handle.modified_sym()))
         {
             let modifiers_queue = seat.modifiers_shortcut_queue();
-            modifiers_queue.clear();
-            seat.supressed_keys().add(&handle, None);
+            modifiers_queue.clear(backend_id);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(None);
         }
 
@@ -2136,9 +2239,9 @@ impl State {
                 if binding.key.is_none()
                     && key_state == KeyState::Released
                     && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                    && modifiers_queue.take(binding)
+                    && modifiers_queue.take(backend_id, binding)
                 {
-                    modifiers_queue.clear();
+                    modifiers_queue.clear(backend_id);
                     return FilterResult::Intercept(Some((
                         Action::Shortcut(action.clone()),
                         binding.clone(),
@@ -2150,7 +2253,7 @@ impl State {
                     && key_state == KeyState::Pressed
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
-                    modifiers_queue.set(binding.clone());
+                    modifiers_queue.set(backend_id, binding.clone());
                     clear_queue = false;
                 }
 
@@ -2160,8 +2263,8 @@ impl State {
                     && key_matches(binding.key.unwrap())
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
-                    modifiers_queue.clear();
-                    seat.supressed_keys().add(&handle, None);
+                    modifiers_queue.clear(backend_id);
+                    seat.supressed_keys().add(backend_id, &handle, None);
                     return FilterResult::Intercept(Some((
                         Action::Shortcut(action.clone()),
                         binding.clone(),
@@ -2172,7 +2275,7 @@ impl State {
 
         // no binding
         if clear_queue {
-            seat.modifiers_shortcut_queue().clear();
+            seat.modifiers_shortcut_queue().clear(backend_id);
         }
         // keys are passed through to apps
         FilterResult::Forward
