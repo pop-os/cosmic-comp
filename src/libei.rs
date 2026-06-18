@@ -108,7 +108,12 @@ pub fn setup_ei(
                         }
                     }
                     EiInputEvent::TextKeysym { keysym, state } => {
-                        data.inject_ei_text_keysym(connection.eis_connection(), keysym, state);
+                        data.inject_ei_text_keysym(
+                            connection.eis_connection(),
+                            keysym,
+                            state,
+                            true, // explicit keysym could cause shortcuts
+                        );
                     }
                     EiInputEvent::TextUtf8 { text } => {
                         data.inject_ei_text(connection.eis_connection(), &text);
@@ -141,8 +146,9 @@ impl State {
         for c in text.chars() {
             let keysym = Keysym::from_char(c);
             if keysym.raw() != 0 {
-                self.inject_ei_text_keysym(conn, keysym.raw(), KeyState::Pressed);
-                self.inject_ei_text_keysym(conn, keysym.raw(), KeyState::Released);
+                // Literal text: when  we fall back to keycodes must never trigger shortcuts
+                self.inject_ei_text_keysym(conn, keysym.raw(), KeyState::Pressed, false);
+                self.inject_ei_text_keysym(conn, keysym.raw(), KeyState::Released, false);
             }
         }
     }

@@ -1881,6 +1881,7 @@ impl State {
         conn: &smithay::reexports::reis::eis::Connection,
         keysym: u32,
         key_state: KeyState,
+        handle_shortcuts: bool,
     ) {
         use smithay::wayland::text_input::TextInputSeat;
 
@@ -1928,7 +1929,7 @@ impl State {
             );
             return;
         };
-        self.inject_ei_key(conn, keycode, key_state);
+        self.inject_ei_key_internal(conn, keycode, key_state, handle_shortcuts);
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
