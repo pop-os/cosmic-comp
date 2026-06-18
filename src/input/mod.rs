@@ -1715,35 +1715,33 @@ impl State {
         result
     }
 
-    /// Inject a key from a libei connection through its isolated keyboard state.
-    pub(crate) fn inject_ei_key(
+    /// Inject a key through an isolated keyboard state: run it through the shortcut filter
+    /// and deliver it to the focused client, keeping this source's modifier/key state fully
+    /// isolated from the physical keyboard. Shared by libei connections and virtual keyboards.
+    pub(crate) fn inject_isolated_key(
         &mut self,
-        conn: &smithay::reexports::reis::eis::Connection,
+        seat: &Seat<State>,
+        iso: &mut smithay::input::keyboard::IsolatedKeyboardState,
         keycode: Keycode,
         key_state: KeyState,
     ) {
-        let seat = self.common.shell.read().seats.last_active().clone();
         let Some(keyboard) = seat.get_keyboard() else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
         let time = self.common.clock.now().as_millis();
-
-        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
-            return;
-        };
         let previous_modifiers = iso.modifier_state();
         let result = keyboard
             .input_isolated(
                 self,
-                &mut iso,
+                iso,
                 keycode,
                 key_state,
                 serial,
                 time,
                 |data, modifiers, handle| {
                     data.process_keyboard_filter(
-                        &seat,
+                        seat,
                         modifiers,
                         handle,
                         serial,
@@ -1755,11 +1753,26 @@ impl State {
                 },
             )
             .flatten();
-        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
 
         if let Some((action, pattern)) = result {
-            self.handle_action(action, &seat, serial, time, pattern, None);
+            self.handle_action(action, seat, serial, time, pattern, None);
         }
+    }
+
+    /// Inject a key from a libei connection through its isolated keyboard state.
+    pub(crate) fn inject_ei_key(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keycode: Keycode,
+        key_state: KeyState,
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        // Temporarily take the isolated state out so we can borrow `self` mutably for delivery.
+        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+            return;
+        };
+        self.inject_isolated_key(&seat, &mut iso, keycode, key_state);
+        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
     }
 
     /// Resolve a keysym from a libei `ei_text` device to a keycode
