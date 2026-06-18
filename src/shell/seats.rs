@@ -198,7 +198,7 @@ struct FocusedOutput(pub Mutex<Option<Output>>);
 pub struct PointerConstraintHint(pub Mutex<Option<(WlSurface, Point<f64, Logical>)>>);
 
 #[derive(Default)]
-pub struct LastModifierChange(pub Mutex<Option<Serial>>);
+pub struct LastModifierChange(pub Mutex<(HashMap<InputBackendId, Serial>, Option<Serial>)>);
 
 pub fn create_seat(
     dh: &DisplayHandle,
@@ -278,6 +278,8 @@ pub trait SeatExt {
     fn supressed_buttons(&self) -> &SupressedButtons;
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue;
     fn last_modifier_change(&self) -> Option<Serial>;
+    fn last_modifier_change_for(&self, backend_id: &InputBackendId) -> Option<Serial>;
+    fn set_last_modifier_change(&self, backend_id: &InputBackendId, serial: Serial);
     fn pointer_constraint_hint(&self) -> Option<(WlSurface, Point<f64, Logical>)>;
     fn set_pointer_constraint_hint(&self, hint: Option<(WlSurface, Point<f64, Logical>)>);
 
@@ -356,13 +358,37 @@ impl SeatExt for Seat<State> {
     }
 
     fn last_modifier_change(&self) -> Option<Serial> {
-        *self
-            .user_data()
+        self.user_data()
             .get::<LastModifierChange>()
             .unwrap()
             .0
             .lock()
             .unwrap()
+            .1
+    }
+
+    fn last_modifier_change_for(&self, backend_id: &InputBackendId) -> Option<Serial> {
+        self.user_data()
+            .get::<LastModifierChange>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap()
+            .0
+            .get(backend_id)
+            .copied()
+    }
+
+    fn set_last_modifier_change(&self, backend_id: &InputBackendId, serial: Serial) {
+        let mut guard = self
+            .user_data()
+            .get::<LastModifierChange>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap();
+        guard.0.insert(backend_id.clone(), serial);
+        guard.1 = Some(serial);
     }
 
     fn pointer_constraint_hint(&self) -> Option<(WlSurface, Point<f64, Logical>)> {

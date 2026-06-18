@@ -82,10 +82,12 @@ pub fn setup_ei(
                         }
                     }
                     EiInputEvent::Disconnected => {
-                        data.common.ei_seats.remove(connection.eis_connection());
-                        data.common
-                            .ei_isolated_kbd
-                            .remove(connection.eis_connection());
+                        let conn = connection.eis_connection().clone();
+                        let backend_id = InputBackendId::Ei(conn.clone());
+                        data.release_ei_keyboard(&conn);
+                        data.clear_input_source_state(&backend_id);
+                        data.common.ei_seats.remove(&conn);
+                        data.common.ei_isolated_kbd.remove(&conn);
                     }
                     EiInputEvent::Event(event) => {
                         use smithay::backend::input::{InputEvent, KeyboardKeyEvent};

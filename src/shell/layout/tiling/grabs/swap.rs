@@ -13,6 +13,7 @@ use smithay::{
 
 use crate::{
     config::key_bindings::cosmic_modifiers_from_smithay,
+    input::InputBackendId,
     shell::{Trigger, layout::tiling::NodeDesc},
     state::State,
 };
@@ -73,6 +74,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
 
         data.handle_shortcut_action(
             shortcuts::Action::Focus(direction),
+            &InputBackendId::Normal,
             &self.seat,
             serial,
             time,
