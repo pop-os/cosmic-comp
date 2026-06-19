@@ -821,14 +821,10 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         }
                     }
                 }
-                // Re-create the virtual keyboard on each libei sender seat with the new keymap.
-                for seat in state.common.ei_seats.values() {
-                    if let Err(err) =
-                        seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&value))
-                    {
-                        warn!(?err, "Failed to update libei virtual keyboard config");
-                    }
-                }
+                // TODO: we deliberately do NOT recreate the EIS virtual keyboard device
+                // here. It was causing loss of focus when layout changes. I'll have to come back to
+                // this issue.
+
                 // Rebuild the per-connection isolated keyboard state with the new keymap
                 // after first releasing any keys that source still has held.
                 let ei_connections = state
