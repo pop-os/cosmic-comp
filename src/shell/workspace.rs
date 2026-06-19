@@ -61,7 +61,7 @@ use wayland_backend::server::ClientId;
 use super::{
     CosmicMappedRenderElement, CosmicSurface, ResizeDirection, ResizeMode,
     element::{
-        CosmicMapped, MaximizedState, resize_indicator::ResizeIndicator,
+        CosmicMapped, CosmicMappedKey, MaximizedState, resize_indicator::ResizeIndicator,
         stack::CosmicStackRenderElement, swap_indicator::SwapIndicator,
         window::CosmicWindowRenderElement,
     },
@@ -262,6 +262,9 @@ pub enum FullscreenRestoreState {
         output: WeakOutput,
         state: FloatingRestoreData,
     },
+    Stack {
+        state: StackRestoreData,
+    },
 }
 
 impl FullscreenRestoreState {
@@ -270,6 +273,7 @@ impl FullscreenRestoreState {
             FullscreenRestoreState::Floating { state, .. }
             | FullscreenRestoreState::Sticky { state, .. } => state.was_maximized,
             FullscreenRestoreState::Tiling { state, .. } => state.was_maximized,
+            FullscreenRestoreState::Stack { .. } => false,
         }
     }
 }
@@ -279,16 +283,7 @@ pub enum WorkspaceRestoreData {
     Fullscreen(Option<FullscreenRestoreData>),
     Tiling(Option<TilingRestoreData>),
     Floating(Option<FloatingRestoreData>),
-}
-
-impl From<ManagedLayer> for WorkspaceRestoreData {
-    fn from(value: ManagedLayer) -> Self {
-        match value {
-            ManagedLayer::Floating | ManagedLayer::Sticky => WorkspaceRestoreData::Floating(None),
-            ManagedLayer::Tiling => WorkspaceRestoreData::Tiling(None),
-            ManagedLayer::Fullscreen => WorkspaceRestoreData::Fullscreen(None),
-        }
-    }
+    Stack(StackRestoreData),
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +313,12 @@ impl FloatingRestoreData {
 pub struct TilingRestoreData {
     pub state: Option<RestoreTilingState>,
     pub was_maximized: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackRestoreData {
+    pub stack: CosmicMappedKey,
+    pub idx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -715,15 +716,14 @@ impl Workspace {
         if let Some(stack) = mapped.stack_ref()
             && stack.len() > 1
         {
-            let idx = stack.surfaces().position(|s| &s == surface);
-            let layer = if self.is_tiled(surface) {
-                ManagedLayer::Tiling
-            } else {
-                ManagedLayer::Floating
-            };
-            return idx
-                .and_then(|idx| stack.remove_idx(idx))
-                .map(|s| (s, layer.into()));
+            let idx = stack.surfaces().position(|s| &s == surface)?;
+            return Some((
+                stack.remove_idx(idx)?,
+                WorkspaceRestoreData::Stack(StackRestoreData {
+                    stack: mapped.key(),
+                    idx,
+                }),
+            ));
         }
 
         // we know mapped is no stack with more than one element now,
