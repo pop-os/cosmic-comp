@@ -2592,9 +2592,21 @@ impl Shell {
     pub fn remap_unfullscreened_window(
         &mut self,
         surface: CosmicSurface,
-        state: Option<FullscreenRestoreState>,
+        mut state: Option<FullscreenRestoreState>,
         loop_handle: &LoopHandle<'static, State>,
     ) -> CosmicMapped {
+        if let Some(FullscreenRestoreState::Stack { state: stack_state }) = &state {
+            if let Some(mapped) = self.mapped().find(|m| **m == stack_state.stack)
+                && let Some(stack) = mapped.stack_ref()
+            {
+                let idx = stack_state.idx.min(stack.len());
+                stack.add_window(surface, Some(idx), None);
+                return mapped.clone();
+            } else {
+                state = None;
+            }
+        }
+
         let window = CosmicMapped::from(CosmicWindow::new(
             surface,
             loop_handle.clone(),
@@ -2637,7 +2649,9 @@ impl Shell {
                 workspace
             }
             None => self.workspaces.active_mut(&seat.active_output()).unwrap(),
-            Some(FullscreenRestoreState::Sticky { .. }) => unreachable!(),
+            Some(FullscreenRestoreState::Sticky { .. } | FullscreenRestoreState::Stack { .. }) => {
+                unreachable!()
+            }
         };
         let fullscreen_geometry = workspace.output.geometry().to_local(&workspace.output);
 
@@ -2752,7 +2766,9 @@ impl Shell {
                     }
                 }
             }
-            Some(FullscreenRestoreState::Sticky { .. }) => unreachable!(),
+            Some(FullscreenRestoreState::Sticky { .. } | FullscreenRestoreState::Stack { .. }) => {
+                unreachable!()
+            }
         }
 
         window
@@ -4877,6 +4893,9 @@ impl Shell {
                             workspace: handle,
                             state,
                         })
+                    }
+                    WorkspaceRestoreData::Stack(stack_state) => {
+                        Some(FullscreenRestoreState::Stack { state: stack_state })
                     }
                     WorkspaceRestoreData::Fullscreen(_) => unreachable!(),
                 },
