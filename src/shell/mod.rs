@@ -2856,10 +2856,12 @@ impl Shell {
 
         let maybe_focused = workspace.focus_stack.get(&seat).iter().next().cloned();
         if let Some(FocusTarget::Window(focused)) = maybe_focused
-            && (focused.is_stack() && !is_dialog && !should_be_maximized)
+            && let Some(stack) = focused.stack_ref()
+            && !is_dialog
+            && !should_be_maximized
             && !(workspace.is_tiled(&focused.active_window()) && floating_exception)
         {
-            focused.stack_ref().unwrap().add_window(window, None, None);
+            stack.add_window(window, None, None);
             if was_activated {
                 workspace_state.add_workspace_state(&workspace_handle, WState::Urgent);
             }
@@ -2985,8 +2987,8 @@ impl Shell {
                     .map(|idx| (idx, m.clone()))
             });
             let surface = if let Some((idx, mapped)) = sticky_res {
-                if mapped.is_stack() {
-                    mapped.stack_ref().unwrap().remove_idx(idx)
+                if let Some(stack) = mapped.stack_ref() {
+                    stack.remove_idx(idx)
                 } else {
                     set.sticky_layer.unmap(&mapped, None);
                     Some(mapped.active_window())
@@ -2996,20 +2998,13 @@ impl Shell {
                 .iter()
                 .position(|w| w.windows().any(|s| &s == surface))
             {
-                if set
+                if let Some(stack) = set
                     .minimized_windows
-                    .get(idx)
+                    .get_mut(idx)
                     .unwrap()
-                    .mapped()
-                    .is_some_and(CosmicMapped::is_stack)
+                    .mapped_mut()
+                    .and_then(|m| m.stack_ref())
                 {
-                    let window = set
-                        .minimized_windows
-                        .get_mut(idx)
-                        .unwrap()
-                        .mapped_mut()
-                        .unwrap();
-                    let stack = window.stack_ref().unwrap();
                     let idx = stack.surfaces().position(|s| &s == surface);
                     idx.and_then(|idx| stack.remove_idx(idx))
                 } else {
@@ -4796,12 +4791,9 @@ impl Shell {
         {
             let mut from = set.sticky_layer.element_geometry(&mapped).unwrap();
             let mut was_maximized = false;
-            window = if mapped
-                .stack_ref()
-                .map(|stack| stack.len() > 1)
-                .unwrap_or(false)
+            window = if let Some(stack) = mapped.stack_ref()
+                && stack.len() > 1
             {
-                let stack = mapped.stack_ref().unwrap();
                 let surface = stack.surfaces().find(|s| s == surface).unwrap();
                 stack.remove_window(&surface);
                 surface
