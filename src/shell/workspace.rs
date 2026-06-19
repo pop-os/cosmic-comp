@@ -712,8 +712,7 @@ impl Workspace {
         }
 
         let mapped = self.element_for_surface(surface)?;
-        let maybe_stack = mapped.stack_ref().filter(|s| s.len() > 1);
-        if let Some(stack) = maybe_stack
+        if let Some(stack) = mapped.stack_ref()
             && stack.len() > 1
         {
             let idx = stack.surfaces().position(|s| &s == surface);
