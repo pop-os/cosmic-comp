@@ -1874,8 +1874,8 @@ impl TilingLayout {
                 if let Some(id) = id {
                     return match tree.get(&id).unwrap().data() {
                         Data::Mapped { mapped, .. } => {
-                            if mapped.is_stack() {
-                                mapped.stack_ref().unwrap().focus_stack();
+                            if let Some(stack) = mapped.stack_ref() {
+                                stack.focus_stack();
                             }
                             FocusResult::Some(mapped.clone().into())
                         }
@@ -1983,11 +1983,11 @@ impl TilingLayout {
                                 }))
                             }
                             Data::Mapped { mapped, .. } => {
-                                if mapped.is_stack()
+                                if let Some(stack) = mapped.stack_ref()
                                     && desc.stack_window.is_none()
                                     && replacement_id == &desc.node
                                 {
-                                    mapped.stack_ref().unwrap().focus_stack();
+                                    stack.focus_stack();
                                 }
                                 FocusResult::Some(KeyboardFocusTarget::Element(mapped.clone()))
                             }
@@ -2059,7 +2059,7 @@ impl TilingLayout {
                                 });
                         }
                         Data::Mapped { mapped, .. } => {
-                            if mapped.is_stack()
+                            if let Some(stack) = mapped.stack_ref()
                                 && swap_desc
                                     .as_ref()
                                     .map(|desc| {
@@ -2068,7 +2068,7 @@ impl TilingLayout {
                                     })
                                     .unwrap_or(false)
                             {
-                                mapped.stack_ref().unwrap().focus_stack();
+                                stack.focus_stack();
                             }
                             return FocusResult::Some(mapped.clone().into());
                         }
