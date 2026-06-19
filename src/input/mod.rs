@@ -1917,19 +1917,113 @@ impl State {
             // No active text-input: fall through to keycode injection (press and release).
         }
 
-        let Some(keycode) = self
+        // If the keysym exists in the active layout, inject its real keycode with the
+        // shift-level modifiers applied (no keymap change). Out-of-layout / Unicode keysyms
+        // have no keycode and can only be delivered via the text-input fast path above.
+        // TODO: update this doc when we have the final solution
+        let resolved = self
             .common
             .ei_isolated_kbd
             .get(conn)
-            .and_then(|iso| iso.keycode_for_keysym(keysym))
-        else {
-            tracing::warn!(
-                "EI text keysym {:?} is not in the active layout; ignoring",
-                keysym
-            );
+            .and_then(|iso| iso.keycode_for_keysym(keysym));
+
+        match resolved {
+            Some((keycode, mask)) => {
+                self.inject_ei_keysym_in_layout(conn, keycode, mask, key_state, handle_shortcuts)
+            }
+            // Out-of-layout / Unicode: bind a spare keycode to the keysym and inject it, on the
+            // press event only (KWin's fallback).
+            None if key_state == KeyState::Pressed => {
+                self.inject_ei_keysym_remapped(conn, keysym, handle_shortcuts)
+            }
+            None => {}
+        }
+    }
+
+    /// Inject an in-layout keysym by its real keycode, bracketing it with the shift-level
+    /// modifiers it needs (KWin's primary keysym-injection path).
+    fn inject_ei_keysym_in_layout(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keycode: Keycode,
+        mask: u32,
+        key_state: KeyState,
+        handle_shortcuts: bool,
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let Some(keyboard) = seat.get_keyboard() else {
             return;
         };
-        self.inject_ei_key_internal(conn, keycode, key_state, handle_shortcuts);
+        let backend_id = InputBackendId::Ei(conn.clone());
+        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+            return;
+        };
+
+        if mask == 0 {
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                key_state,
+                handle_shortcuts,
+            );
+        } else {
+            // Momentarily OR in the level's modifiers, deliver them, send the key, then restore
+            // the real modifier state (so e.g. injecting `!` doesn't leave Shift stuck).
+            let (depressed, latched, locked, layout) = iso.serialized_mods();
+            iso.update_modifiers(depressed | mask, latched, locked, layout);
+            keyboard.input_isolated_modifiers(self, &iso);
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                key_state,
+                handle_shortcuts,
+            );
+            iso.update_modifiers(depressed, latched, locked, layout);
+            keyboard.input_isolated_modifiers(self, &iso);
+        }
+
+        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
+    }
+
+    /// Inject an out-of-layout keysym via a temporary spare-keycode keymap (KWin's fallback),
+    /// as an atomic press+release so the keymap only changes while no key is held.
+    fn inject_ei_keysym_remapped(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keysym: Keysym,
+        handle_shortcuts: bool,
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let backend_id = InputBackendId::Ei(conn.clone());
+        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+            return;
+        };
+        if let Some(keycode) = iso.remap_keysym_to_spare_keycode(keysym) {
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                KeyState::Pressed,
+                handle_shortcuts,
+            );
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                KeyState::Released,
+                handle_shortcuts,
+            );
+            iso.restore_keymap();
+        } else {
+            tracing::warn!("EI text keysym {:?} could not be mapped; ignoring", keysym);
+        }
+        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
