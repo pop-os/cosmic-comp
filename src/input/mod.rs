@@ -998,7 +998,10 @@ impl State {
                         }
                     } else {
                         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
-                        if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
+                        let horizontal_amount = event
+                            .amount(Axis::Horizontal)
+                            .or_else(|| Some(event.amount_v120(Axis::Horizontal)? * 15.0 / 120.));
+                        if let Some(horizontal_amount) = horizontal_amount {
                             if horizontal_amount != 0.0 {
                                 frame = frame
                                     .relative_direction(
@@ -1016,7 +1019,10 @@ impl State {
                                 frame = frame.stop(Axis::Horizontal);
                             }
                         }
-                        if let Some(vertical_amount) = event.amount(Axis::Vertical) {
+                        let vertical_amount = event
+                            .amount(Axis::Vertical)
+                            .or_else(|| Some(event.amount_v120(Axis::Vertical)? * 15.0 / 120.));
+                        if let Some(vertical_amount) = vertical_amount {
                             if vertical_amount != 0.0 {
                                 frame = frame
                                     .relative_direction(
