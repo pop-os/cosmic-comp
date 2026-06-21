@@ -1350,7 +1350,7 @@ impl FloatingLayout {
             mapped.set_bounds(geometry.size.as_logical());
             let prev = self.space.element_geometry(&mapped).map(RectExt::as_local);
 
-            let window_geometry = if mapped.is_maximized(false) {
+            let window_geometry = if mapped.is_maximized(true) {
                 geometry
             } else {
                 prev.map(|mut rect| {
