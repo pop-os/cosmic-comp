@@ -180,6 +180,41 @@ impl State {
                     if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
                         xwayland_state.xwm = None;
                     }
+
+                    // Scan for X11 windows in the shell and remove them
+                    let mut shell = data.common.shell.write();
+                    let seat = shell.seats.last_active().clone();
+
+                    // 1. Remove mapped windows
+                    let to_remove: Vec<_> = shell
+                        .mapped()
+                        .filter_map(|w| {
+                            let surface = w.active_window();
+                            surface.x11_surface().map(|_| surface)
+                        })
+                        .collect();
+
+                    for window in to_remove {
+                        shell.unmap_surface(
+                            &window,
+                            &seat,
+                            &mut data.common.toplevel_info_state,
+                        );
+                    }
+
+                    // 2. Clear pending windows
+                    shell
+                        .pending_windows
+                        .retain(|p| p.surface.x11_surface().is_none());
+
+                    // 3. Clear override redirect windows
+                    shell.override_redirect_windows.clear();
+
+                    // 4. Clear pending activations
+                    shell
+                        .pending_activations
+                        .retain(|k, _| !matches!(k, crate::shell::ActivationKey::X11(_)));
+
                     data.notify_ready();
                 }
             }) {
