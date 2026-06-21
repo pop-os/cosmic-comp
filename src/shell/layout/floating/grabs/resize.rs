@@ -13,7 +13,7 @@ use crate::{
 };
 use smithay::{
     backend::input::ButtonState,
-    desktop::{WindowSurface, space::SpaceElement},
+    desktop::{WindowSurface, layer_map_for_output, space::SpaceElement},
     input::{
         Seat,
         pointer::{
@@ -100,21 +100,48 @@ impl ResizeSurfaceGrab {
 
             // If the resizing vertical edge is close to our output's edge in the same direction, snap to it.
             let output_geom = self.output.geometry().to_local(&self.output);
+            let layers = layer_map_for_output(&self.output);
+            let work_area = layers.non_exclusive_zone();
+
             if self.edges.intersects(ResizeEdge::LEFT) {
+                let initial_x = self.initial_window_location.x;
+                let final_x = initial_x - dx as i32;
+
+                // Clamp to work area
+                if final_x < work_area.loc.x {
+                    let diff = work_area.loc.x - final_x;
+                    new_window_width -= diff;
+                    location_diff.x += diff as f64;
+                    // Fix dx for future calculations if any (unlikely needed here but consistency)
+                    // dx = dx - diff as f64; 
+                }
+
                 if (self.initial_window_location.x - dx as i32 - output_geom.loc.x).unsigned_abs()
                     < self.edge_snap_threshold
                 {
                     new_window_width = self.initial_window_size.w - output_geom.loc.x
                         + self.initial_window_location.x;
                 }
-            } else if (self.initial_window_location.x + self.initial_window_size.w + dx as i32
+            } else {
+                let initial_x = self.initial_window_location.x;
+                let current_width = self.initial_window_size.w;
+                let final_right = initial_x + current_width + dx as i32;
+                
+                // Clamp right edge
+                if final_right > work_area.loc.x + work_area.size.w {
+                    let diff = final_right - (work_area.loc.x + work_area.size.w);
+                    new_window_width -= diff;
+                }
+
+                if (self.initial_window_location.x + self.initial_window_size.w + dx as i32
                 - output_geom.loc.x
                 - output_geom.size.w)
                 .unsigned_abs()
                 < self.edge_snap_threshold
-            {
-                new_window_width =
-                    output_geom.loc.x - self.initial_window_location.x + output_geom.size.w;
+                {
+                    new_window_width =
+                        output_geom.loc.x - self.initial_window_location.x + output_geom.size.w;
+                }
             }
         }
 
@@ -128,21 +155,46 @@ impl ResizeSurfaceGrab {
 
             // If the resizing horizontal edge is close to our output's edge in the same direction, snap to it.
             let output_geom = self.output.geometry().to_local(&self.output);
+            let layers = layer_map_for_output(&self.output);
+            let work_area = layers.non_exclusive_zone();
+
             if self.edges.intersects(ResizeEdge::TOP) {
+                let initial_y = self.initial_window_location.y;
+                let final_y = initial_y - dy as i32;
+
+                // Clamp to work area
+                if final_y < work_area.loc.y {
+                    let diff = work_area.loc.y - final_y;
+                    new_window_height -= diff;
+                    location_diff.y += diff as f64;
+                }
+
                 if (self.initial_window_location.y - dy as i32 - output_geom.loc.y).unsigned_abs()
                     < self.edge_snap_threshold
                 {
                     new_window_height = self.initial_window_size.h - output_geom.loc.y
                         + self.initial_window_location.y;
                 }
-            } else if (self.initial_window_location.y + self.initial_window_size.h + dy as i32
+            } else {
+                let initial_y = self.initial_window_location.y;
+                let current_height = self.initial_window_size.h;
+                let final_bottom = initial_y + current_height + dy as i32;
+
+                // Clamp bottom edge
+                if final_bottom > work_area.loc.y + work_area.size.h {
+                    let diff = final_bottom - (work_area.loc.y + work_area.size.h);
+                    new_window_height -= diff;
+                }
+
+                if (self.initial_window_location.y + self.initial_window_size.h + dy as i32
                 - output_geom.loc.y
                 - output_geom.size.h)
                 .unsigned_abs()
                 < self.edge_snap_threshold
-            {
-                new_window_height =
-                    output_geom.loc.y - self.initial_window_location.y + output_geom.size.h;
+                {
+                    new_window_height =
+                        output_geom.loc.y - self.initial_window_location.y + output_geom.size.h;
+                }
             }
         }
 
