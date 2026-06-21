@@ -16,7 +16,7 @@ use smithay::{
 
 use crate::shell::{CosmicSurface, Workspace};
 
-type ImageCopySessionsData = RefCell<ImageCopySessions>;
+pub type ImageCopySessionsData = RefCell<ImageCopySessions>;
 type PendingImageCopyBuffers = Mutex<Vec<(SessionRef, Frame)>>;
 
 pub type SessionData = Mutex<SessionUserData>;
