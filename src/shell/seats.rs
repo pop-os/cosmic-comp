@@ -280,6 +280,7 @@ pub trait SeatExt {
     fn last_modifier_change(&self) -> Option<Serial>;
     fn last_modifier_change_for(&self, backend_id: &InputBackendId) -> Option<Serial>;
     fn set_last_modifier_change(&self, backend_id: &InputBackendId, serial: Serial);
+    fn clear_last_modifier_change(&self, backend_id: &InputBackendId);
     fn pointer_constraint_hint(&self) -> Option<(WlSurface, Point<f64, Logical>)>;
     fn set_pointer_constraint_hint(&self, hint: Option<(WlSurface, Point<f64, Logical>)>);
 
@@ -389,6 +390,17 @@ impl SeatExt for Seat<State> {
             .unwrap();
         guard.0.insert(backend_id.clone(), serial);
         guard.1 = Some(serial);
+    }
+
+    fn clear_last_modifier_change(&self, backend_id: &InputBackendId) {
+        self.user_data()
+            .get::<LastModifierChange>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap()
+            .0
+            .remove(backend_id);
     }
 
     fn pointer_constraint_hint(&self) -> Option<(WlSurface, Point<f64, Logical>)> {

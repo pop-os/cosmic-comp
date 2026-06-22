@@ -1708,6 +1708,7 @@ impl State {
             seat.supressed_keys().clear_source(backend_id);
             seat.supressed_buttons().clear_source(backend_id);
             seat.modifiers_shortcut_queue().clear(backend_id);
+            seat.clear_last_modifier_change(backend_id);
         }
     }
 
