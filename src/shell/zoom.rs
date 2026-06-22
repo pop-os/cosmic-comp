@@ -9,7 +9,10 @@ use cosmic::{
 };
 use cosmic_comp_config::ZoomMovement;
 use cosmic_config::ConfigSet;
-use keyframe::{ease, functions::Linear};
+use keyframe::{
+    ease,
+    functions::{EaseInOutCubic, Linear},
+};
 use smithay::{
     backend::renderer::{ImportMem, Renderer, element::AsRenderElements},
     desktop::space::SpaceElement,
@@ -178,27 +181,19 @@ impl OutputZoomState {
     }
 
     pub fn is_animating(&self) -> bool {
-        self.animations_enabled && (self.previous_point.is_some() || self.previous_level.is_some())
+        self.previous_point.is_some() || self.previous_level.is_some()
     }
 
     pub fn refresh(&mut self) -> bool {
-        if !self.animations_enabled {
-            self.previous_level = None;
-            self.previous_point = None;
-        } else {
-            if self.previous_level.as_ref().is_some_and(|(_, start)| {
-                Instant::now().duration_since(*start) > ANIMATION_DURATION
-            }) {
-                self.previous_level.take();
-            }
-            if self.previous_point.as_ref().is_some_and(|(_, start)| {
-                Instant::now().duration_since(*start) > ANIMATION_DURATION
-            }) {
-                self.previous_point.take();
-            }
+        if self
+            .previous_level
+            .as_ref()
+            .is_some_and(|(_, start)| Instant::now().duration_since(*start) > ANIMATION_DURATION)
+        {
+            self.previous_level.take();
         }
         self.element.refresh();
-        self.level == 1. && self.previous_level.is_none() && self.previous_point.is_none()
+        self.level == 1. && self.previous_level.is_none()
     }
 
     pub fn update(&mut self, level: f64, animate: bool, movement: ZoomMovement, increment: u32) {

@@ -239,10 +239,6 @@ where
 impl State {
     fn set_animations_enabled(&mut self, enabled: bool) {
         self.animations_enabled = enabled;
-        if !enabled {
-            self.scroll_animation = None;
-            self.tab_animations.clear();
-        }
     }
 
     fn next_tab_animation(&self) -> Option<&TabAnimationState> {
@@ -287,12 +283,6 @@ impl State {
     }
 
     pub fn cleanup_old_animations(&mut self) {
-        if !self.animations_enabled {
-            self.scroll_animation = None;
-            self.tab_animations.clear();
-            return;
-        }
-
         let start_time = Instant::now();
 
         if let Some(animation) = self.scroll_animation.as_ref()

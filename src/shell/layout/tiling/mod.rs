@@ -4234,14 +4234,12 @@ impl TilingLayout {
             .is_some()
             .then(|| &self.queue.trees.front().unwrap().0);
 
-        let percentage = if let Some(animation_start) = self.queue.animation_start {
-            if duration.is_zero() {
-                1.0
-            } else {
-                let percentage = Instant::now().duration_since(animation_start).as_millis() as f32
-                    / duration.as_millis() as f32;
-                ease(EaseInOutCubic, 0.0, 1.0, percentage)
-            }
+        let percentage = if let Some(animation_start) =
+            self.queue.animation_start.filter(|_| !duration.is_zero())
+        {
+            let percentage = Instant::now().duration_since(animation_start).as_millis() as f32
+                / duration.as_millis() as f32;
+            ease(EaseInOutCubic, 0.0, 1.0, percentage)
         } else {
             1.0
         };

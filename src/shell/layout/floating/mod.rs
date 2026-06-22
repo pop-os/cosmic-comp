@@ -282,10 +282,6 @@ impl FloatingLayout {
 
     pub fn set_animations_enabled(&mut self, enabled: bool) {
         self.animations_enabled = enabled;
-        if !enabled && !self.animations.is_empty() {
-            self.animations.clear();
-            self.dirty.store(true, Ordering::SeqCst);
-        }
     }
 
     pub fn set_output(&mut self, output: &Output) {
