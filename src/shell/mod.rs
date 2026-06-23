@@ -12,7 +12,10 @@ use std::{
 use wayland_backend::server::ClientId;
 
 use crate::{
-    shell::{focus::FocusTarget, grabs::fullscreen_items, layout::tiling::PlaceholderType},
+    shell::{
+        element::CosmicStack, focus::FocusTarget, grabs::fullscreen_items,
+        layout::tiling::PlaceholderType,
+    },
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
         protocols::workspace::{State as WState, WorkspaceCapabilities},
@@ -2607,12 +2610,21 @@ impl Shell {
             }
         }
 
-        let window = CosmicMapped::from(CosmicWindow::new(
-            surface,
-            loop_handle.clone(),
-            self.theme.clone(),
-            self.appearance_conf,
-        ));
+        let window = if state.as_ref().is_some_and(|s| s.was_stack()) {
+            CosmicMapped::from(CosmicStack::new(
+                std::iter::once(surface),
+                loop_handle.clone(),
+                self.theme.clone(),
+                self.appearance_conf,
+            ))
+        } else {
+            CosmicMapped::from(CosmicWindow::new(
+                surface,
+                loop_handle.clone(),
+                self.theme.clone(),
+                self.appearance_conf,
+            ))
+        };
 
         if let Some(FullscreenRestoreState::Sticky { output, state, .. }) = &state {
             let output = output
@@ -3267,6 +3279,7 @@ impl Shell {
                         state: None,
                         was_maximized: previous.was_maximized(),
                     },
+                    was_stack: previous.was_stack(),
                 };
             } else if let FullscreenRestoreState::Tiling { workspace, .. }
             | FullscreenRestoreState::Floating { workspace, .. } = previous
@@ -4808,6 +4821,7 @@ impl Shell {
             let mut from = set.sticky_layer.element_geometry(&mapped).unwrap();
             let mut was_maximized = false;
             let mut restore_state = None;
+            let was_stack = mapped.is_stack();
             window = if let Some(stack) = mapped.stack_ref()
                 && stack.len() > 1
             {
@@ -4859,6 +4873,7 @@ impl Shell {
                         was_maximized,
                         was_snapped: None,
                     },
+                    was_stack,
                 })),
                 Some(from),
             );
@@ -4893,12 +4908,14 @@ impl Shell {
                         Some(FullscreenRestoreState::Floating {
                             workspace: handle,
                             state: floating_state,
+                            was_stack: mapped.is_stack(),
                         })
                     }
                     WorkspaceRestoreData::Tiling(tiling_state) => {
                         Some(FullscreenRestoreState::Tiling {
                             workspace: handle,
                             state: tiling_state,
+                            was_stack: mapped.is_stack(),
                         })
                     }
                     WorkspaceRestoreData::Stack(stack_state) => {
