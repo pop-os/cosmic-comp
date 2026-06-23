@@ -281,8 +281,8 @@ impl FullscreenRestoreState {
 #[derive(Debug, Clone)]
 pub enum WorkspaceRestoreData {
     Fullscreen(Option<FullscreenRestoreData>),
-    Tiling(Option<TilingRestoreData>),
-    Floating(Option<FloatingRestoreData>),
+    Tiling(TilingRestoreData),
+    Floating(FloatingRestoreData),
     Stack(StackRestoreData),
 }
 
@@ -642,32 +642,30 @@ impl Workspace {
             mapped.set_minimized(false);
             return Some(match state {
                 MinimizedWindow::Floating { previous, .. } => {
-                    WorkspaceRestoreData::Floating(Some(previous))
+                    WorkspaceRestoreData::Floating(previous)
                 }
-                MinimizedWindow::Tiling { previous, .. } => {
-                    WorkspaceRestoreData::Tiling(Some(previous))
-                }
+                MinimizedWindow::Tiling { previous, .. } => WorkspaceRestoreData::Tiling(previous),
                 MinimizedWindow::Fullscreen { .. } => unreachable!(),
             });
         }
 
         if let Ok(state) = self.tiling_layer.unmap(mapped, None) {
-            return Some(WorkspaceRestoreData::Tiling(Some(TilingRestoreData {
+            return Some(WorkspaceRestoreData::Tiling(TilingRestoreData {
                 state,
                 was_maximized: was_maximized.is_some(),
-            })));
+            }));
         }
 
         let was_snapped = *mapped.floating_tiled.lock().unwrap();
         // unmaximize_request might have triggered a `floating_layer.refresh()`,
         // which may have already removed a non-alive surface.
         if let Some(floating_geometry) = self.floating_layer.unmap(mapped, None).or(was_maximized) {
-            return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
+            return Some(WorkspaceRestoreData::Floating(FloatingRestoreData {
                 geometry: floating_geometry,
                 output_size: self.output.geometry().size.as_logical(),
                 was_maximized: was_maximized.is_some(),
                 was_snapped,
-            })));
+            }));
         };
 
         None
