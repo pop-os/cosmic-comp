@@ -4806,11 +4806,15 @@ impl Shell {
         {
             let mut from = set.sticky_layer.element_geometry(&mapped).unwrap();
             let mut was_maximized = false;
+            let mut restore_state = None;
             window = if let Some(stack) = mapped.stack_ref()
                 && stack.len() > 1
             {
-                let surface = stack.surfaces().find(|s| s == surface).unwrap();
-                stack.remove_window(&surface);
+                let idx = stack.surfaces().position(|s| &s == surface)?;
+                let surface = stack.remove_idx(idx)?;
+                restore_state = Some(FullscreenRestoreState::Stack {
+                    state: StackRestoreData { stack: mapped, idx },
+                });
                 surface
             } else {
                 // Must be set before `map_internal`/`unmap` below, as both may call
@@ -4843,7 +4847,7 @@ impl Shell {
             workspace.map_fullscreen(
                 &window,
                 &seat,
-                Some(FullscreenRestoreState::Sticky {
+                Some(restore_state.unwrap_or(FullscreenRestoreState::Sticky {
                     output: old_output,
                     state: FloatingRestoreData {
                         geometry: from,
@@ -4851,7 +4855,7 @@ impl Shell {
                         was_maximized,
                         was_snapped: None,
                     },
-                }),
+                })),
                 Some(from),
             );
         } else if let Some(workspace) = self.space_for_mut(&mapped) {
