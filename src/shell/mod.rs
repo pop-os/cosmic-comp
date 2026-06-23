@@ -3251,7 +3251,7 @@ impl Shell {
         toplevel_enter_workspace(window, to);
 
         // we can't restore to a given position
-        if let WorkspaceRestoreData::Tiling(Some(state)) = &mut window_state {
+        if let WorkspaceRestoreData::Tiling(state) = &mut window_state {
             state.state.take();
         }
         // update fullscreen state to restore to the new workspace
@@ -3278,7 +3278,7 @@ impl Shell {
         if is_minimized {
             let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
             let minimized_window = match window_state {
-                WorkspaceRestoreData::Floating(Some(previous)) => {
+                WorkspaceRestoreData::Floating(previous) => {
                     let window = CosmicMapped::from(CosmicWindow::new(
                         window.clone(),
                         evlh.clone(),
@@ -3288,7 +3288,7 @@ impl Shell {
                     window.set_minimized(true);
                     MinimizedWindow::Floating { window, previous }
                 }
-                WorkspaceRestoreData::Tiling(Some(previous)) => {
+                WorkspaceRestoreData::Tiling(previous) => {
                     let window = CosmicMapped::from(CosmicWindow::new(
                         window.clone(),
                         evlh.clone(),
@@ -3355,7 +3355,7 @@ impl Shell {
                     self.appearance_conf,
                 ));
                 let position = match window_state {
-                    WorkspaceRestoreData::Floating(Some(data)) => Some(
+                    WorkspaceRestoreData::Floating(data) => Some(
                         data.position_relative(to_workspace.output.geometry().size.as_logical()),
                     ),
                     _ => None,
@@ -3455,7 +3455,7 @@ impl Shell {
         let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
         if !to_workspace.tiling_enabled {
             let (position, was_maximized, was_snapped) = match &window_state {
-                WorkspaceRestoreData::Floating(Some(data)) => (
+                WorkspaceRestoreData::Floating(data) => (
                     Some(data.position_relative(to_workspace.output.geometry().size.as_logical())),
                     data.was_maximized,
                     data.was_snapped,
@@ -4883,15 +4883,15 @@ impl Shell {
                 &seat,
                 match state {
                     WorkspaceRestoreData::Floating(floating_state) => {
-                        floating_state.map(|state| FullscreenRestoreState::Floating {
+                        Some(FullscreenRestoreState::Floating {
                             workspace: handle,
-                            state,
+                            state: floating_state,
                         })
                     }
                     WorkspaceRestoreData::Tiling(tiling_state) => {
-                        tiling_state.map(|state| FullscreenRestoreState::Tiling {
+                        Some(FullscreenRestoreState::Tiling {
                             workspace: handle,
-                            state,
+                            state: tiling_state,
                         })
                     }
                     WorkspaceRestoreData::Stack(stack_state) => {
