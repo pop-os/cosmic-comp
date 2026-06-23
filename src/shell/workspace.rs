@@ -253,14 +253,17 @@ pub enum FullscreenRestoreState {
     Tiling {
         workspace: WorkspaceHandle,
         state: TilingRestoreData,
+        was_stack: bool,
     },
     Floating {
         workspace: WorkspaceHandle,
         state: FloatingRestoreData,
+        was_stack: bool,
     },
     Sticky {
         output: WeakOutput,
         state: FloatingRestoreData,
+        was_stack: bool,
     },
     Stack {
         state: StackRestoreData,
@@ -273,6 +276,17 @@ impl FullscreenRestoreState {
             FullscreenRestoreState::Floating { state, .. }
             | FullscreenRestoreState::Sticky { state, .. } => state.was_maximized,
             FullscreenRestoreState::Tiling { state, .. } => state.was_maximized,
+            FullscreenRestoreState::Stack { .. } => false,
+        }
+    }
+
+    // Surface was previously a single-window stack
+    pub fn was_stack(&self) -> bool {
+        match self {
+            FullscreenRestoreState::Floating { was_stack, .. }
+            | FullscreenRestoreState::Sticky { was_stack, .. } => *was_stack,
+            FullscreenRestoreState::Tiling { was_stack, .. } => *was_stack,
+            // Stack wasn't removed; surface was removed from the stack
             FullscreenRestoreState::Stack { .. } => false,
         }
     }
