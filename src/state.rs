@@ -567,7 +567,10 @@ impl LockedBackend<'_> {
                         shell.seats.iter(),
                         workspace_state,
                         xdg_activation_state,
-                    )
+                    );
+                    if let Some(session_lock) = &mut shell.session_lock {
+                        session_lock.surfaces.remove(output);
+                    }
                 }
             }
 
