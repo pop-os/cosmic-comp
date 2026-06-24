@@ -608,6 +608,7 @@ impl WorkspaceSet {
             self.workspaces[self.active].refresh();
         }
         self.sticky_layer.refresh();
+        self.minimized_windows.retain(|w| w.alive());
     }
 
     fn add_empty_workspace(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
