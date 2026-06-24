@@ -2600,7 +2600,10 @@ impl Shell {
                 use smithay::reexports::wayland_server::Resource;
                 surface.is_alive()
             }
-            ActivationKey::X11(_) => true,
+            ActivationKey::X11(_) => self
+                .pending_windows
+                .iter()
+                .any(|p| &ActivationKey::from(&p.surface) == key),
         });
     }
 
