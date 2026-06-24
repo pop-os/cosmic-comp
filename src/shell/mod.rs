@@ -2629,6 +2629,16 @@ impl Shell {
             .retain(|pending| pending.surface.alive());
         self.pending_windows
             .retain(|pending| pending.surface.alive());
+        self.pending_activations.retain(|key, _| match key {
+            ActivationKey::Wayland(surface) => {
+                use smithay::reexports::wayland_server::Resource;
+                surface.is_alive()
+            }
+            ActivationKey::X11(_) => self
+                .pending_windows
+                .iter()
+                .any(|p| &ActivationKey::from(&p.surface) == key),
+        });
     }
 
     pub fn update_pointer_position(&mut self, location: Point<f64, Local>, output: &Output) {
