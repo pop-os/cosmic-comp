@@ -4,7 +4,7 @@ use reis::eis;
 use smithay::reexports::reis;
 
 use smithay::backend::input::KeyState;
-use smithay::backend::libei::{EiInput, EiInputEvent};
+use smithay::backend::libei::{EiInput, EiInputEvent, EiRegion};
 use smithay::input::keyboard::Keysym;
 use smithay::reexports::calloop;
 use smithay::wayland::input_method::InputMethodSeat;
@@ -13,13 +13,52 @@ use smithay::wayland::text_input::TextInputSeat;
 use crate::config::xkb_config_to_wl;
 use crate::input::InputBackendId;
 use crate::state::{BackendData, State};
+use crate::utils::prelude::OutputExt;
 
 // Requested device types for an EI connection, mirroring the XDG RemoteDesktop portal `DeviceType` bitmask
 const DEVICE_TYPE_KEYBOARD: u32 = 1;
 const DEVICE_TYPE_POINTER: u32 = 2;
 const DEVICE_TYPE_TOUCHSCREEN: u32 = 4;
 
+// Name of the EI absolute-pointer device. Shared so the connect path and the
+// re-advertise-on-output-change path recreate the same device.
+const ABSOLUTE_POINTER_NAME: &str = "virtual absolute pointer";
+
 pub type EiRequest = (UnixStream, u32);
+
+/// Build the regions advertised on the EI absolute-pointer device for the current
+/// output layout: one region per output, each at its **global logical** offset with
+/// its logical size and scale.
+pub fn absolute_pointer_regions(state: &State) -> Vec<EiRegion> {
+    let shell = state.common.shell.read();
+    shell
+        .outputs()
+        .map(|output| {
+            let geo = output.geometry();
+            let scale = output.current_scale().fractional_scale();
+            EiRegion {
+                // EI region offsets are unsigned; cosmic-comp normalizes output
+                // layout to non-negative coordinates.
+                x: geo.loc.x.max(0) as u32,
+                y: geo.loc.y.max(0) as u32,
+                width: geo.size.w.max(0) as u32,
+                height: geo.size.h.max(0) as u32,
+                scale: scale as f32,
+            }
+        })
+        .collect()
+}
+
+/// Re-advertise the absolute-pointer region on every active EI seat.
+pub fn refresh_absolute_pointer_regions(state: &State) {
+    if state.common.ei_seats.is_empty() {
+        return;
+    }
+    let regions = absolute_pointer_regions(state);
+    for seat in state.common.ei_seats.values() {
+        seat.add_pointer_absolute(ABSOLUTE_POINTER_NAME, &regions);
+    }
+}
 
 pub fn setup_ei(
     handle: &calloop::LoopHandle<'static, State>,
@@ -68,7 +107,8 @@ pub fn setup_ei(
                         };
                         if device_types & DEVICE_TYPE_POINTER != 0 {
                             seat.add_pointer("virtual pointer");
-                            seat.add_pointer_absolute("virtual absolute pointer");
+                            let regions = absolute_pointer_regions(data);
+                            seat.add_pointer_absolute(ABSOLUTE_POINTER_NAME, &regions);
                         }
                         if device_types & DEVICE_TYPE_TOUCHSCREEN != 0 {
                             seat.add_touch("virtual touch");

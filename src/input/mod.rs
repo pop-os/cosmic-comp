@@ -697,14 +697,44 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
-                    let output = seat.active_output();
-                    let output_geometry = output.geometry();
-                    let position = output_geometry.loc.to_f64()
-                        + smithay::backend::input::AbsolutePositionEvent::position_transformed(
-                            &event,
-                            output_geometry.size.as_logical(),
-                        )
-                        .as_global();
+                    let (output, output_geometry, position) =
+                        if matches!(&backend_id, InputBackendId::Ei(_)) {
+                            // EI absolute coordinates are in the compositor's *global*
+                            // logical space: each advertised region carries its output's
+                            // global offset, so the client sends a global position. Use
+                            // the coordinate directly and find the output it lands in,
+                            // rather than mapping relative to the focused output (which
+                            // cannot address other monitors). This is the KWin/mutter
+                            // model.
+                            let position =
+                            smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                // smithay's EI impl ignores the size and returns the
+                                // raw coordinate.
+                                Size::from((0, 0)),
+                            )
+                            .as_global();
+                            let output = self
+                                .common
+                                .shell
+                                .read()
+                                .outputs()
+                                .find(|o| o.geometry().to_f64().contains(position))
+                                .cloned()
+                                .unwrap_or_else(|| seat.active_output());
+                            let output_geometry = output.geometry();
+                            (output, output_geometry, position)
+                        } else {
+                            let output = seat.active_output();
+                            let output_geometry = output.geometry();
+                            let position = output_geometry.loc.to_f64()
+                            + smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                output_geometry.size.as_logical(),
+                            )
+                            .as_global();
+                            (output, output_geometry, position)
+                        };
                     let serial = SERIAL_COUNTER.next_serial();
                     let under = State::surface_under(position, &output, &self.common.shell.write())
                         .map(|(target, pos)| (target, pos.as_logical()));
@@ -721,7 +751,20 @@ impl State {
                     );
                     ptr.frame(self);
 
+                    // Keep the seat's active output following the pointer. Click-to-
+                    // focus (PointerButton) resolves its target via
+                    // `seat.active_output()`
+                    let previous_output = seat.active_output();
+                    if previous_output != output {
+                        seat.set_active_output(&output);
+                    }
+
                     let shell = self.common.shell.read();
+                    if previous_output != output {
+                        for session in cursor_sessions_for_output(&shell, &previous_output) {
+                            session.set_cursor_pos(None);
+                        }
+                    }
                     for session in cursor_sessions_for_output(&shell, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
                             (position - output_geometry.loc.to_f64())

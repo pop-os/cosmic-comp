@@ -87,11 +87,20 @@ impl Seats {
         device: &D,
         backend_id: &InputBackendId,
     ) -> Option<&Seat<State>> {
-        self.iter().find(|seat| {
-            let userdata = seat.user_data();
-            let devices = userdata.get::<Devices>().unwrap();
-            devices.has_device(device, backend_id)
-        })
+        self.iter()
+            .find(|seat| {
+                let userdata = seat.user_data();
+                let devices = userdata.get::<Devices>().unwrap();
+                devices.has_device(device, backend_id)
+            })
+            .or_else(|| {
+                // EI devices can be transiently unregistered while the compositor recreates
+                // the absolute-pointer device (e.g. on a scale/geometry change), which would
+                // otherwise drop all pointer/touch input until the client re-binds it. EI is
+                // single-seat, so fall back to the active seat here, matching the EI keyboard
+                // path, which always targets the active seat.
+                matches!(backend_id, InputBackendId::Ei(_)).then(|| self.last_active())
+            })
     }
 }
 
