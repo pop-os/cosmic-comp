@@ -7,6 +7,7 @@ use smithay::backend::input::KeyState;
 use smithay::backend::libei::{EiInput, EiInputEvent};
 use smithay::input::keyboard::Keysym;
 use smithay::reexports::calloop;
+use smithay::wayland::input_method::InputMethodSeat;
 use smithay::wayland::text_input::TextInputSeat;
 
 use crate::config::xkb_config_to_wl;
@@ -79,6 +80,7 @@ pub fn setup_ei(
                                 data.common.ei_isolated_kbd.insert(conn.clone(), iso);
                             }
                             data.common.ei_seats.insert(conn, seat);
+                            data.update_ei_input_method();
                         }
                     }
                     EiInputEvent::Disconnected => {
@@ -88,6 +90,7 @@ pub fn setup_ei(
                         data.clear_input_source_state(&backend_id);
                         data.common.ei_seats.remove(&conn);
                         data.common.ei_isolated_kbd.remove(&conn);
+                        data.update_ei_input_method();
                     }
                     EiInputEvent::Event(event) => {
                         use smithay::backend::input::{InputEvent, KeyboardKeyEvent};
@@ -134,27 +137,96 @@ pub fn setup_ei(
 }
 
 impl State {
+    /// Act as the input method for text injection while any text-capable EI connection is
+    /// active, so `ei_text` UTF-8 can be committed into the focused app even without a real
+    /// IME, but only when none is bound (a real IME always wins)
+    pub(crate) fn update_ei_input_method(&mut self) {
+        let active = !self.common.ei_seats.is_empty();
+        let seats = self
+            .common
+            .shell
+            .read()
+            .seats
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for seat in seats {
+            let has_ime = seat.input_method().has_instance();
+            let text_input = seat.text_input();
+            if active {
+                if !has_ime {
+                    text_input.set_compositor_input_method(true);
+                }
+            } else {
+                text_input.set_compositor_input_method(false);
+            }
+        }
+    }
+
     /// Inject UTF-8 text (from an EI `ei_text` device) into the focused client.
     pub fn inject_ei_text(&mut self, conn: &smithay::reexports::reis::eis::Connection, text: &str) {
         let seat = self.common.shell.read().seats.last_active().clone();
-        let text_input = seat.text_input();
-        let mut injected = false;
-        text_input.with_active_text_input(|ti, _surface| {
-            ti.commit_string(Some(text.to_owned()));
-            injected = true;
-        });
-        if injected {
-            text_input.done(false);
-            return;
-        }
-
-        for c in text.chars() {
-            let keysym = Keysym::from_char(c);
-            if keysym.raw() != 0 {
-                // Literal text: when  we fall back to keycodes must never trigger shortcuts
-                self.inject_ei_text_keysym(conn, keysym.raw(), KeyState::Pressed, false);
-                self.inject_ei_text_keysym(conn, keysym.raw(), KeyState::Released, false);
+        // Only commit through text-input when we're the active input method (no real IME)
+        if !seat.input_method().has_instance() {
+            let text_input = seat.text_input();
+            let mut injected = false;
+            text_input.with_active_text_input(|ti, _surface| {
+                ti.commit_string(Some(text.to_owned()));
+                injected = true;
+            });
+            if injected {
+                text_input.done(false);
+                return;
             }
         }
+
+        // Bind the whole chunk to spare keycodes in one temporary keymap per batch, so we
+        // change (and broadcast) the keymap ~once per chunk instead of once per character
+        let keysyms: Vec<Keysym> = text
+            .chars()
+            .map(Keysym::from_char)
+            .filter(|keysym| keysym.raw() != 0)
+            .collect();
+        // At most ~247 keysyms fit one spare keymap (keycodes 9..=255); leave margin.
+        const BATCH: usize = 240;
+        for batch in keysyms.chunks(BATCH) {
+            self.inject_ei_text_batch(conn, batch);
+        }
+    }
+
+    /// Inject a batch of keysyms by binding them to consecutive spare keycodes in a single
+    /// temporary keymap (one keymap change for the whole batch), injecting each press+release,
+    /// then restoring the keymap. Never triggers shortcuts (literal text).
+    fn inject_ei_text_batch(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keysyms: &[Keysym],
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let backend_id = InputBackendId::Ei(conn.clone());
+        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+            return;
+        };
+        let keycodes = iso.remap_keysyms_to_spare_keycodes(keysyms);
+        for keycode in keycodes.into_iter().flatten() {
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                KeyState::Pressed,
+                false,
+            );
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                KeyState::Released,
+                false,
+            );
+        }
+        iso.restore_keymap();
+        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
     }
 }

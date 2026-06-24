@@ -1890,6 +1890,7 @@ impl State {
         key_state: KeyState,
         handle_shortcuts: bool,
     ) {
+        use smithay::wayland::input_method::InputMethodSeat;
         use smithay::wayland::text_input::TextInputSeat;
 
         let keysym = Keysym::new(keysym);
@@ -1906,22 +1907,25 @@ impl State {
             && !c.is_control()
         {
             let seat = self.common.shell.read().seats.last_active().clone();
-            let text_input = seat.text_input();
-            let mut handled = false;
-            text_input.with_active_text_input(|ti, _surface| {
-                // A text-input client is focused: commit on press, no-op on release.
-                if key_state == KeyState::Pressed {
-                    ti.commit_string(Some(c.to_string()));
+            // Only commit through text-input when we're the active input method (no real IME).
+            if !seat.input_method().has_instance() {
+                let text_input = seat.text_input();
+                let mut handled = false;
+                text_input.with_active_text_input(|ti, _surface| {
+                    // A text-input client is focused: commit on press, no-op on release.
+                    if key_state == KeyState::Pressed {
+                        ti.commit_string(Some(c.to_string()));
+                    }
+                    handled = true;
+                });
+                if handled {
+                    if key_state == KeyState::Pressed {
+                        text_input.done(false);
+                    }
+                    return;
                 }
-                handled = true;
-            });
-            if handled {
-                if key_state == KeyState::Pressed {
-                    text_input.done(false);
-                }
-                return;
+                // No active text-input: fall through to keycode injection (press and release).
             }
-            // No active text-input: fall through to keycode injection (press and release).
         }
 
         // If the keysym exists in the active layout, inject its real keycode with the
