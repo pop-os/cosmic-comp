@@ -110,6 +110,7 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_activation::XdgActivationState,
         xdg_foreign::XdgForeignState,
+        xdg_system_bell::XdgSystemBellState,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
         xwayland_shell::XWaylandShellState,
     },
@@ -730,6 +731,8 @@ impl State {
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
         let dbus_state = DBusState::init(&handle);
+
+        XdgSystemBellState::new::<State>(dh);
 
         State {
             common: Common {
