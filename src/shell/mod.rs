@@ -1564,10 +1564,8 @@ impl Common {
 
     pub fn remove_output(&mut self, output: &Output) {
         let mut shell = self.shell.write();
-        let shell_ref = &mut *shell;
-        shell_ref.workspaces.remove_output(
+        shell.remove_output(
             output,
-            shell_ref.seats.iter(),
             &mut self.workspace_state.update(),
             &self.xdg_activation_state,
         );
@@ -2557,6 +2555,23 @@ impl Shell {
 
     pub fn zoom_state(&self) -> Option<&ZoomState> {
         self.zoom_state.as_ref()
+    }
+
+    pub fn remove_output(
+        &mut self,
+        output: &Output,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        xdg_activation_state: &XdgActivationState,
+    ) {
+        self.workspaces.remove_output(
+            output,
+            self.seats.iter(),
+            workspace_state,
+            xdg_activation_state,
+        );
+        if let Some(session_lock) = &mut self.session_lock {
+            session_lock.surfaces.remove(output);
+        }
     }
 
     fn refresh(

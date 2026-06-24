@@ -584,12 +584,7 @@ impl LockedBackend<'_> {
                 OutputState::Enabled => shell_ref.workspaces.add_output(output, workspace_state),
                 _ => {
                     let shell = &mut *shell_ref;
-                    shell.workspaces.remove_output(
-                        output,
-                        shell.seats.iter(),
-                        workspace_state,
-                        xdg_activation_state,
-                    )
+                    shell.remove_output(output, workspace_state, xdg_activation_state);
                 }
             }
 
