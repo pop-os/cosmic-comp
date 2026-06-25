@@ -3,13 +3,13 @@
 use smithay::backend::{
     SwapBuffersError,
     allocator::{
-        Allocator,
+        Allocator, Format, Fourcc, Modifier,
         dmabuf::{AnyError, Dmabuf, DmabufAllocator},
         gbm::GbmAllocator,
     },
     drm::{CreateDrmNodeError, DrmNode},
     renderer::{
-        RendererSuper,
+        Bind, RendererSuper,
         gles::{GlesError, GlesRenderer},
         glow::GlowRenderer,
         multigpu::{ApiDevice, Error as MultiError, GraphicsApi},
@@ -23,7 +23,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use crate::backend::render::element::FromGlesError;
+use crate::backend::{kms::render::udmabuf::UdmabufAllocator, render::element::FromGlesError};
 
 /// Errors raised by the [`GbmGlesBackend`]
 #[derive(Debug, thiserror::Error)]
@@ -124,11 +124,26 @@ impl<A: AsFd + Clone + 'static> GraphicsApi for GbmGlowBackend<A> {
             })
             .flat_map(|(node, (allocator, renderer))| {
                 let renderer = renderer.replace(None)?;
+                let can_render_to_linear = Bind::<Dmabuf>::supported_formats(&renderer)
+                    .is_some_and(|formats| {
+                        formats.contains(&Format {
+                            code: Fourcc::Abgr8888,
+                            modifier: Modifier::Linear,
+                        })
+                    });
+
+                let allocator =
+                    if can_render_to_linear && let Ok(allocator) = UdmabufAllocator::new() {
+                        Box::new(DmabufAllocator(allocator))
+                            as Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>
+                    } else {
+                        Box::new(DmabufAllocator(allocator.clone()))
+                    };
 
                 Some(GbmGlowDevice {
                     node: *node,
                     renderer,
-                    allocator: Box::new(DmabufAllocator(allocator.clone())),
+                    allocator,
                 })
             })
             .collect::<Vec<GbmGlowDevice>>();
