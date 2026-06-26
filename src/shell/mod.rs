@@ -2809,22 +2809,22 @@ impl Shell {
             _ => None,
         };
 
-        let pinned_workspace_id =
+        let pinned_workspace_name =
             layout::get_workspace_assignment(&self.workspace_assignments, &window);
 
-        let pinned_workspace_handle = pinned_workspace_id //
+        let pinned_workspace_handle = pinned_workspace_name //
             .as_deref()
-            .and_then(|target_id| {
+            .and_then(|target_name| {
                 self.workspaces
                     .spaces()
-                    .find(|ws| ws.id.as_deref() == Some(target_id))
+                    .find(|ws| ws.name.as_deref() == Some(target_id))
                     .map(|ws| ws.handle)
             });
 
-        if let Some(id) = pinned_workspace_id
+        if let Some(name) = pinned_workspace_name
             && pinned_workspace_handle.is_none()
         {
-            warn!("Assigned workspace id not found: {}", id);
+            warn!("Assigned workspace name not found: {}", name);
         };
 
         // override the pending activation handle if we have a matching pinned workspace.

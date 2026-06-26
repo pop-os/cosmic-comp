@@ -106,7 +106,7 @@ pub fn has_floating_exception(exceptions: &TilingExceptions, window: &CosmicSurf
 pub struct WorkspaceAssignment {
     app_id: Regex,
     title: Regex,
-    workspace_id: String,
+    workspace_name: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -140,7 +140,7 @@ impl WorkspaceAssignments {
                 Some(WorkspaceAssignment {
                     app_id,
                     title,
-                    workspace_id: assignment.workspace_id.clone(),
+                    workspace_name: assignment.workspace_name.clone(),
                 })
             })
             .collect();
@@ -157,5 +157,5 @@ pub fn get_workspace_assignment(
         .assignments
         .iter()
         .find(|a| a.app_id.is_match(&window.app_id()) && a.title.is_match(&window.title()))
-        .map(|a| a.workspace_id.clone())
+        .map(|a| a.workspace_name.clone())
 }
