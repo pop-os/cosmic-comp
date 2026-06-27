@@ -1,7 +1,7 @@
 a11y-zoom-move-continuously = Ansicht bewegt sich kontinuierlich mit dem Cursor
 a11y-zoom-move-onedge = Ansicht bewegt sich, sobald der Cursor den Rand erreicht
 a11y-zoom-move-centered = Ansicht bewegt sich, um den Cursor zentiert zu halten
-a11y-zoom-settings = Vergrößerungsglas-Einstellungen…
+a11y-zoom-settings = Vergrößerungsglas-Einstellungen ...
 grow-window = Vergrößern
 shrink-window = Verkleinern
 swap-windows = Fenster tauschen
