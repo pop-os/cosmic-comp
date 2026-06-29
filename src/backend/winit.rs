@@ -26,7 +26,7 @@ use smithay::{
         calloop::{EventLoop, ping},
         wayland_protocols::wp::presentation_time::server::wp_presentation_feedback,
         wayland_server::DisplayHandle,
-        winit::platform::pump_events::PumpStatus,
+        winit::event_loop::pump_events::PumpStatus,
     },
     utils::Transform,
     wayland::{dmabuf::DmabufFeedbackBuilder, presentation::Refresh},
