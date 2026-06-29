@@ -8,7 +8,7 @@ use crate::{
         init_shaders, output_elements,
     },
     config::ScreenFilter,
-    shell::Shell,
+    shell::{Shell, element::surface::ScanoutTargetNodeGuard},
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
     wayland::handlers::{
@@ -1057,21 +1057,24 @@ impl SurfaceThreadState {
             vrr = has_active_fullscreen;
         }
 
-        let mut elements = output_elements(
-            Some(&render_node),
-            &mut renderer,
-            &self.shell,
-            self.clock.now(),
-            self.mirroring.as_ref().unwrap_or(&self.output),
-            CursorMode::All,
-            #[cfg(not(feature = "debug"))]
-            None,
-            #[cfg(feature = "debug")]
-            Some((&self.egui, &self.timings)),
-        )
-        .map_err(|err| {
-            anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
-        })?;
+        let mut elements = {
+            let _scanout_node = ScanoutTargetNodeGuard::new(Some(self.target_node));
+            output_elements(
+                Some(&render_node),
+                &mut renderer,
+                &self.shell,
+                self.clock.now(),
+                self.mirroring.as_ref().unwrap_or(&self.output),
+                CursorMode::All,
+                #[cfg(not(feature = "debug"))]
+                None,
+                #[cfg(feature = "debug")]
+                Some((&self.egui, &self.timings)),
+            )
+            .map_err(|err| {
+                anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
+            })?
+        };
 
         if vrr && fullscreen_drives_refresh_rate && !self.timings.past_min_render_time(&self.clock)
         {

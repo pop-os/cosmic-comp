@@ -6,6 +6,7 @@ use crate::{
 };
 use std::{
     borrow::Cow,
+    cell::Cell,
     sync::{
         Mutex,
         atomic::{AtomicBool, Ordering},
@@ -14,11 +15,17 @@ use std::{
 };
 
 use smithay::{
-    backend::renderer::{
-        ImportAll, Renderer,
-        element::{
-            AsRenderElements, Kind, RenderElementStates,
-            surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+    backend::{
+        drm::DrmNode,
+        renderer::{
+            ImportAll, Renderer,
+            element::{
+                AsRenderElements, Kind, RenderElementStates,
+                surface::{
+                    KindEvaluation, WaylandSurfaceRenderElement, render_elements_from_surface_tree,
+                },
+            },
+            utils::RendererSurfaceStateUserData,
         },
     },
     desktop::{
@@ -49,6 +56,7 @@ use smithay::{
             SubsurfaceCachedState, SurfaceData, TraversalAction, get_parent, with_states,
             with_surface_tree_downward,
         },
+        dmabuf::get_dmabuf,
         seat::WaylandFocus,
         shell::xdg::{
             SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
@@ -66,6 +74,66 @@ use crate::{
         decoration::{KdeDecorationData, PreferredDecorationMode},
     },
 };
+
+thread_local! {
+    /// The scan-out target [`DrmNode`] of the surface thread that is currently accumulating
+    /// render elements, if any.
+    static SCANOUT_TARGET_NODE: Cell<Option<DrmNode>> = const { Cell::new(None) };
+}
+
+/// RAII guard that sets the current thread's scan-out target node and restores the previous value
+/// on drop. Hold it only across render-element accumulation so the gate can't outlive a render pass.
+/// See [`SCANOUT_TARGET_NODE`].
+pub struct ScanoutTargetNodeGuard(Option<DrmNode>);
+
+impl ScanoutTargetNodeGuard {
+    pub fn new(node: Option<DrmNode>) -> Self {
+        ScanoutTargetNodeGuard(SCANOUT_TARGET_NODE.with(|n| n.replace(node)))
+    }
+}
+
+impl Drop for ScanoutTargetNodeGuard {
+    fn drop(&mut self) {
+        SCANOUT_TARGET_NODE.with(|n| n.set(self.0));
+    }
+}
+
+/// The [`DrmNode`] the surface's currently committed buffer was allocated on, if it is a dmabuf.
+fn buffer_node(data: &SurfaceData) -> Option<DrmNode> {
+    let surface_state = data.data_map.get::<RendererSurfaceStateUserData>()?;
+    let surface_state = surface_state.lock().unwrap();
+    surface_state
+        .buffer()
+        .and_then(|buffer| get_dmabuf(buffer).ok())
+        .and_then(|dmabuf| dmabuf.node())
+}
+
+/// Build the [`KindEvaluation`] for a window's surface tree.
+fn scanout_kind_eval(scanout_override: Option<bool>) -> KindEvaluation {
+    match (scanout_override, SCANOUT_TARGET_NODE.with(|n| n.get())) {
+        // Forced off.
+        (Some(false), _) => Kind::Unspecified.into(),
+        // No node restriction: preserve the previous behaviour exactly.
+        (Some(true), None) => Kind::ScanoutCandidate.into(),
+        (None, None) => FRAME_TIME_FILTER,
+        // Node restriction in effect: only buffers on the scan-out node may be candidates.
+        (Some(true), Some(node)) => KindEvaluation::Closure(Box::new(move |data| {
+            if buffer_node(data) == Some(node) {
+                Kind::ScanoutCandidate
+            } else {
+                Kind::Unspecified
+            }
+        })),
+        (None, Some(node)) => KindEvaluation::Closure(Box::new(move |data| {
+            if buffer_node(data) == Some(node)
+            {
+                frame_time_filter_fn(data)
+            } else {
+                Kind::Unspecified
+            }
+        })),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct CosmicSurface(pub Window);
@@ -836,7 +904,7 @@ impl CosmicSurface {
                             location + offset,
                             scale,
                             alpha,
-                            FRAME_TIME_FILTER,
+                            scanout_kind_eval(None),
                         )
                     })
                     .collect()
@@ -868,16 +936,7 @@ impl CosmicSurface {
                     location,
                     scale,
                     alpha,
-                    scanout_override
-                        .map(|val| {
-                            if val {
-                                Kind::ScanoutCandidate
-                            } else {
-                                Kind::Unspecified
-                            }
-                            .into()
-                        })
-                        .unwrap_or(FRAME_TIME_FILTER),
+                    scanout_kind_eval(scanout_override),
                 )
             }
             WindowSurface::X11(surface) => {
@@ -891,16 +950,7 @@ impl CosmicSurface {
                     location,
                     scale,
                     alpha,
-                    scanout_override
-                        .map(|val| {
-                            if val {
-                                Kind::ScanoutCandidate
-                            } else {
-                                Kind::Unspecified
-                            }
-                            .into()
-                        })
-                        .unwrap_or(FRAME_TIME_FILTER),
+                    scanout_kind_eval(scanout_override),
                 )
             }
         }
