@@ -40,7 +40,7 @@ use smithay::{
         touch::{self, GrabStartData as TouchGrabStartData, TouchGrab, TouchInnerHandle},
     },
     output::Output,
-    utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Scale, Serial},
+    utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Scale},
 };
 use std::{
     collections::HashSet,
@@ -652,9 +652,8 @@ impl TouchGrab<State> for MoveGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &touch::DownEvent,
-        seq: Serial,
     ) {
-        handle.down(data, None, event, seq)
+        handle.down(data, None, event)
     }
 
     fn up(
@@ -662,13 +661,12 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &touch::UpEvent,
-        seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
             handle.unset_grab(self, data);
         }
 
-        handle.up(data, event, seq);
+        handle.up(data, event);
     }
 
     fn motion(
@@ -677,20 +675,19 @@ impl TouchGrab<State> for MoveGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &touch::MotionEvent,
-        seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
             self.update_location(data, event.location);
         }
 
-        handle.motion(data, None, event, seq);
+        handle.motion(data, None, event);
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
-        handle.frame(data, seq)
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.frame(data)
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         handle.unset_grab(self, data);
     }
 
@@ -699,9 +696,8 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &touch::ShapeEvent,
-        seq: Serial,
     ) {
-        handle.shape(data, event, seq)
+        handle.shape(data, event)
     }
 
     fn orientation(
@@ -709,9 +705,8 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &touch::OrientationEvent,
-        seq: Serial,
     ) {
-        handle.orientation(data, event, seq)
+        handle.orientation(data, event)
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {
