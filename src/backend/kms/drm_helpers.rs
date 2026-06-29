@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, anyhow};
 use libdisplay_info::{edid::DisplayDescriptorTag, info::Info};
 use smithay::{
+    backend::drm::DrmDevice,
     reexports::drm::control::{
         AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType, ResourceHandle,
         atomic::AtomicModeReq,
@@ -16,8 +17,7 @@ use smithay::{
 use std::{collections::HashMap, ops::Range};
 
 pub fn display_configuration(
-    device: &mut impl ControlDevice,
-    supports_atomic: bool,
+    device: &mut DrmDevice,
 ) -> Result<HashMap<connector::Handle, Option<crtc::Handle>>> {
     let res_handles = device.resource_handles()?;
     let connectors = res_handles.connectors();
@@ -73,7 +73,7 @@ pub fn display_configuration(
     }
 
     // And then cleanup
-    if supports_atomic {
+    if device.is_atomic() {
         let mut req = AtomicModeReq::new();
         let plane_handles = device.plane_handles()?;
 
@@ -105,24 +105,20 @@ pub fn display_configuration(
             let _ = device.set_cursor(*crtc, Option::<&DumbBuffer>::None);
         }
     }
-    disable_crtcs(device, supports_atomic, &cleanup)?;
+    disable_crtcs(device, &cleanup)?;
 
     Ok(map)
 }
 
 /// Disables the given CRTCs and detaches their connectors/planes.
-pub fn disable_crtcs(
-    device: &mut impl ControlDevice,
-    supports_atomic: bool,
-    crtcs: &[crtc::Handle],
-) -> Result<()> {
+pub fn disable_crtcs(device: &mut DrmDevice, crtcs: &[crtc::Handle]) -> Result<()> {
     if crtcs.is_empty() {
         return Ok(());
     }
 
     let res_handles = device.resource_handles()?;
 
-    if supports_atomic {
+    if device.is_atomic() {
         let mut req = AtomicModeReq::new();
 
         for conn in res_handles

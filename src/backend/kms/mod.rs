@@ -865,12 +865,9 @@ impl KmsGuard<'_> {
                     }
                 });
 
-                let supports_atomic = device.drm.device().is_atomic();
-                if let Err(err) = drm_helpers::disable_crtcs(
-                    device.drm.device_mut(),
-                    supports_atomic,
-                    &disabled_crtcs,
-                ) {
+                if let Err(err) =
+                    drm_helpers::disable_crtcs(device.drm.device_mut(), &disabled_crtcs)
+                {
                     warn!("Failed to disable crtcs for disabled outputs: {err}");
                 }
             }
