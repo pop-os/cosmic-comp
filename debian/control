@@ -6,6 +6,7 @@ Build-Depends:
     cargo,
     cmake,
     debhelper-compat (=10),
+    just,
     libegl1-mesa-dev,
     libfontconfig-dev,
     libgbm-dev,
