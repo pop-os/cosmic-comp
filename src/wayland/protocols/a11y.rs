@@ -11,7 +11,8 @@ pub trait A11yHandler {
 
     fn request_screen_magnifier(&mut self, enabled: bool);
     fn request_screen_invert(&mut self, inverted: bool);
-    fn request_screen_filter(&mut self, filter: Option<ColorFilter>);
+    fn request_screen_filter_select(&mut self, filter: ColorFilter);
+    fn request_screen_filter_state(&mut self, enabled: bool);
 }
 
 #[derive(Debug)]
@@ -21,37 +22,36 @@ pub struct A11yState {
 
     magnifier_state: bool,
     screen_inverted: bool,
-    screen_filter: Option<ColorFilter>,
+    screen_filter: ColorFilter,
+    screen_filter_state: bool,
 }
 
 struct Unknown;
 
 fn protocol_to_color_filter(
     protocol: WEnum<cosmic_a11y_manager_v1::Filter>,
-) -> Result<Option<ColorFilter>, Unknown> {
+) -> Result<ColorFilter, Unknown> {
     match protocol {
-        WEnum::Value(cosmic_a11y_manager_v1::Filter::Disabled) => Ok(None),
-        WEnum::Value(cosmic_a11y_manager_v1::Filter::Greyscale) => Ok(Some(ColorFilter::Greyscale)),
+        WEnum::Value(cosmic_a11y_manager_v1::Filter::Greyscale) => Ok(ColorFilter::Greyscale),
         WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeProtanopia) => {
-            Ok(Some(ColorFilter::Protanopia))
+            Ok(ColorFilter::Protanopia)
         }
         WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeDeuteranopia) => {
-            Ok(Some(ColorFilter::Deuteranopia))
+            Ok(ColorFilter::Deuteranopia)
         }
         WEnum::Value(cosmic_a11y_manager_v1::Filter::DaltonizeTritanopia) => {
-            Ok(Some(ColorFilter::Tritanopia))
+            Ok(ColorFilter::Tritanopia)
         }
         WEnum::Unknown(_) | WEnum::Value(_) => Err(Unknown),
     }
 }
 
-fn color_filter_to_protocol(filter: Option<ColorFilter>) -> cosmic_a11y_manager_v1::Filter {
+fn color_filter_to_protocol(filter: ColorFilter) -> cosmic_a11y_manager_v1::Filter {
     match filter {
-        None => cosmic_a11y_manager_v1::Filter::Disabled,
-        Some(ColorFilter::Greyscale) => cosmic_a11y_manager_v1::Filter::Greyscale,
-        Some(ColorFilter::Protanopia) => cosmic_a11y_manager_v1::Filter::DaltonizeProtanopia,
-        Some(ColorFilter::Deuteranopia) => cosmic_a11y_manager_v1::Filter::DaltonizeDeuteranopia,
-        Some(ColorFilter::Tritanopia) => cosmic_a11y_manager_v1::Filter::DaltonizeTritanopia,
+        ColorFilter::Greyscale => cosmic_a11y_manager_v1::Filter::Greyscale,
+        ColorFilter::Protanopia => cosmic_a11y_manager_v1::Filter::DaltonizeProtanopia,
+        ColorFilter::Deuteranopia => cosmic_a11y_manager_v1::Filter::DaltonizeDeuteranopia,
+        ColorFilter::Tritanopia => cosmic_a11y_manager_v1::Filter::DaltonizeTritanopia,
     }
 }
 
@@ -62,7 +62,7 @@ impl A11yState {
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + 'static,
     {
         let global = dh.create_global::<D, cosmic_a11y_manager_v1::CosmicA11yManagerV1, _>(
-            2,
+            3,
             A11yGlobalData {
                 filter: Box::new(client_filter),
             },
@@ -73,7 +73,8 @@ impl A11yState {
 
             magnifier_state: false,
             screen_inverted: false,
-            screen_filter: None,
+            screen_filter: ColorFilter::Greyscale,
+            screen_filter_state: false,
         }
     }
 
@@ -102,23 +103,43 @@ impl A11yState {
         self.send_screen_filter();
     }
 
-    pub fn set_screen_filter(&mut self, state: Option<ColorFilter>) {
+    pub fn set_screen_filter(&mut self, state: ColorFilter) {
         self.screen_filter = state;
+        self.send_screen_filter();
+    }
+
+    pub fn set_screen_filter_state(&mut self, enabled: bool) {
+        self.screen_filter_state = enabled;
         self.send_screen_filter();
     }
 
     fn send_screen_filter(&self) {
         for instance in &self.instances {
-            if instance.version() >= cosmic_a11y_manager_v1::EVT_SCREEN_FILTER_SINCE {
-                instance.screen_filter(
+            if instance.version() >= cosmic_a11y_manager_v1::EVT_SCREEN_FILTER2_SINCE {
+                instance.screen_filter2(
                     if self.screen_inverted {
                         cosmic_a11y_manager_v1::ActiveState::Enabled
                     } else {
                         cosmic_a11y_manager_v1::ActiveState::Disabled
                     },
                     color_filter_to_protocol(self.screen_filter),
+                    if self.screen_filter_state {
+                        cosmic_a11y_manager_v1::ActiveState::Enabled
+                    } else {
+                        cosmic_a11y_manager_v1::ActiveState::Disabled
+                    },
                 );
             }
+        }
+    }
+
+    fn send_deprecated(&self, client_id: wayland_backend::server::ClientId, message: String) {
+        if let Some(instance) = &self
+            .instances
+            .iter()
+            .find(|i| i.client().map_or(false, |client| client.id() == client_id))
+        {
+            instance.post_error(cosmic_a11y_manager_v1::Error::Deprecated, message);
         }
     }
 }
@@ -151,14 +172,19 @@ where
             cosmic_a11y_manager_v1::ActiveState::Disabled
         });
 
-        if instance.version() >= cosmic_a11y_manager_v1::EVT_SCREEN_FILTER_SINCE {
-            instance.screen_filter(
+        if instance.version() >= cosmic_a11y_manager_v1::EVT_SCREEN_FILTER2_SINCE {
+            instance.screen_filter2(
                 if state.screen_inverted {
                     cosmic_a11y_manager_v1::ActiveState::Enabled
                 } else {
                     cosmic_a11y_manager_v1::ActiveState::Disabled
                 },
                 color_filter_to_protocol(state.screen_filter),
+                if state.screen_filter_state {
+                    cosmic_a11y_manager_v1::ActiveState::Enabled
+                } else {
+                    cosmic_a11y_manager_v1::ActiveState::Disabled
+                },
             );
         }
 
@@ -176,7 +202,7 @@ where
 {
     fn request(
         state: &mut D,
-        _client: &Client,
+        client: &Client,
         _resource: &cosmic_a11y_manager_v1::CosmicA11yManagerV1,
         request: <cosmic_a11y_manager_v1::CosmicA11yManagerV1 as smithay::reexports::wayland_server::Resource>::Request,
         _data: &(),
@@ -193,12 +219,27 @@ where
                     state.request_screen_magnifier(enabled);
                 }
             }
-            cosmic_a11y_manager_v1::Request::SetScreenFilter { inverted, filter } => {
+            cosmic_a11y_manager_v1::Request::SetScreenFilter { .. } => {
+                state.a11y_state().send_deprecated(
+                    client.id(),
+                    "Version 3 or higher was bound. Use `set_screen_filter2` instead.".to_string(),
+                );
+            }
+            cosmic_a11y_manager_v1::Request::SetScreenFilter2 {
+                inverted,
+                filter,
+                filter_state,
+            } => {
                 let inverted = inverted
                     .into_result()
                     .unwrap_or(cosmic_a11y_manager_v1::ActiveState::Disabled)
                     == cosmic_a11y_manager_v1::ActiveState::Enabled;
                 let filter = protocol_to_color_filter(filter);
+                let filter_state = filter_state
+                    .into_result()
+                    .unwrap_or(cosmic_a11y_manager_v1::ActiveState::Disabled)
+                    == cosmic_a11y_manager_v1::ActiveState::Enabled;
+                let mut filter_changed = false;
 
                 if inverted != state.a11y_state().screen_inverted {
                     state.request_screen_invert(inverted);
@@ -207,7 +248,14 @@ where
                 if let Ok(filter) = filter
                     && filter != state.a11y_state().screen_filter
                 {
-                    state.request_screen_filter(filter);
+                    filter_changed = true;
+                    state.request_screen_filter_select(filter);
+                }
+
+                if filter_state != state.a11y_state().screen_filter_state
+                    || (filter_state == true && filter_changed)
+                {
+                    state.request_screen_filter_state(filter_state);
                 }
             }
             _ => unreachable!(),
