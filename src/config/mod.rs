@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    config::ColorFilter::Greyscale,
     shell::Shell,
     state::{BackendData, State},
     utils::prelude::OutputExt,
