@@ -62,8 +62,8 @@ use smithay::{
             PointerTarget, RelativeMotionEvent,
         },
         touch::{
-            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
-            UpEvent,
+            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
+            TouchTarget, UpEvent,
         },
     },
     output::Output,
@@ -80,7 +80,7 @@ use std::{
     hash::Hash,
     sync::{
         Arc, LazyLock, Mutex,
-        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering},
     },
 };
 
@@ -115,6 +115,7 @@ pub struct CosmicStackInternal {
     scroll_to_focus: AtomicBool,
     previous_keyboard: AtomicUsize,
     pointer_entered: AtomicU8,
+    touch_serial: AtomicU32,
     reenter: AtomicBool,
     potential_drag: Mutex<Option<usize>>,
     override_alive: AtomicBool,
@@ -172,6 +173,7 @@ impl CosmicStack {
                 scroll_to_focus: AtomicBool::new(false),
                 previous_keyboard: AtomicUsize::new(0),
                 pointer_entered: AtomicU8::new(0),
+                touch_serial: AtomicU32::new(0),
                 reenter: AtomicBool::new(false),
                 potential_drag: Mutex::new(None),
                 override_alive: AtomicBool::new(true),
@@ -1823,55 +1825,62 @@ impl PointerTarget<State> for CosmicStack {
 }
 
 impl TouchTarget<State> for CosmicStack {
-    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
         let mut event = event.clone();
         let active_window_geo = self.0.with_program(|p| {
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         });
         event.location -= active_window_geo.loc.to_f64();
-        TouchTarget::down(&self.0, seat, data, &event, seq)
+        self.0
+            .with_program(|p| p.touch_serial.store(event.serial.into(), Ordering::Release));
+        TouchTarget::down(&self.0, seat, data, &event)
     }
 
-    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent, seq: Serial) {
-        TouchTarget::up(&self.0, seat, data, event, seq)
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent) {
+        TouchTarget::up(&self.0, seat, data, event)
     }
 
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent) {
         let mut event = event.clone();
         let active_window_geo = self.0.with_program(|p| {
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         });
         event.location -= active_window_geo.loc.to_f64();
-        TouchTarget::motion(&self.0, seat, data, &event, seq);
+        TouchTarget::motion(&self.0, seat, data, &event);
 
         if event.location.y < 0.0
             || event.location.y > TAB_HEIGHT as f64
             || event.location.x < 64.0
             || event.location.x > (active_window_geo.size.w as f64 - 64.0)
         {
-            self.start_drag(data, seat, seq);
+            self.start_drag(
+                data,
+                seat,
+                self.0
+                    .with_program(|p| p.touch_serial.load(Ordering::Acquire))
+                    .into(),
+            );
         }
     }
 
-    fn frame(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
-        TouchTarget::frame(&self.0, seat, data, seq)
+    fn frame(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
+        TouchTarget::frame(&self.0, seat, data, frame)
     }
 
-    fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
-        TouchTarget::cancel(&self.0, seat, data, seq)
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
+        TouchTarget::cancel(&self.0, seat, data, frame)
     }
 
-    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent, seq: Serial) {
-        TouchTarget::shape(&self.0, seat, data, event, seq)
+    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent) {
+        TouchTarget::shape(&self.0, seat, data, event)
     }
 
-    fn orientation(
-        &self,
-        _seat: &Seat<State>,
-        _data: &mut State,
-        _event: &OrientationEvent,
-        _seq: Serial,
-    ) {
+    fn orientation(&self, seat: &Seat<State>, data: &mut State, event: &OrientationEvent) {
+        TouchTarget::orientation(&self.0, seat, data, event)
+    }
+
+    fn last_frame(&self, seat: &Seat<State>, data: &mut State) -> Option<FrameMarker> {
+        TouchTarget::last_frame(&self.0, seat, data)
     }
 }
 
