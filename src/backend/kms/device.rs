@@ -947,6 +947,7 @@ impl LockedDevice<'_> {
                         output,
                         CursorMode::All,
                         None,
+                        None,
                     )
                     .with_context(|| "Failed to render outputs")?,
                     None => Vec::new(),

@@ -31,6 +31,7 @@ use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::Tiling
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smithay::backend::drm::DrmNode;
 use smithay::backend::renderer::element::Kind;
 use smithay::output::WeakOutput;
 use smithay::utils::user_data::UserDataMap;
@@ -1612,6 +1613,7 @@ impl Workspace {
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         theme: &CosmicTheme,
+        scanout_node: Option<DrmNode>,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: AsGlowRenderer,
@@ -1700,6 +1702,7 @@ impl Workspace {
                     output_scale.into(),
                     alpha,
                     Some(true),
+                    scanout_node,
                 )
                 .into_iter()
                 .map(animation_rescale)
@@ -1772,6 +1775,7 @@ impl Workspace {
                         indicator_thickness,
                         alpha,
                         theme,
+                        scanout_node,
                     )
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
@@ -1801,6 +1805,7 @@ impl Workspace {
                         resize_indicator,
                         indicator_thickness,
                         theme,
+                        scanout_node,
                     )?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
@@ -1836,6 +1841,7 @@ impl Workspace {
         render_focus: bool,
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         theme: &CosmicTheme,
+        scanout_node: Option<DrmNode>,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: AsGlowRenderer,
@@ -1909,6 +1915,7 @@ impl Workspace {
                         render_loc,
                         output_scale.into(),
                         alpha,
+                        scanout_node,
                     )
                     .into_iter()
                     .map(Into::into),
@@ -1947,7 +1954,7 @@ impl Workspace {
 
             elements.extend(
                 self.floating_layer
-                    .render_popups::<R>(renderer, alpha)
+                    .render_popups::<R>(renderer, alpha, scanout_node)
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
             );
@@ -1961,6 +1968,7 @@ impl Workspace {
                         zone,
                         overview,
                         theme,
+                        scanout_node,
                     )?
                     .into_iter()
                     .map(WorkspaceRenderElement::from),
