@@ -22,8 +22,8 @@ use smithay::{
             MotionEvent as PointerMotionEvent, PointerTarget, RelativeMotionEvent,
         },
         touch::{
-            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
-            UpEvent,
+            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
+            TouchTarget, UpEvent,
         },
     },
     output::Output,
@@ -1036,58 +1036,59 @@ impl PointerTarget<State> for ZoomFocusTarget {
 }
 
 impl TouchTarget<State> for ZoomFocusTarget {
-    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
         match self {
-            ZoomFocusTarget::Main(elem) => TouchTarget::down(elem, seat, data, event, seq),
-            ZoomFocusTarget::Menu(elem) => TouchTarget::down(elem, seat, data, event, seq),
+            ZoomFocusTarget::Main(elem) => TouchTarget::down(elem, seat, data, event),
+            ZoomFocusTarget::Menu(elem) => TouchTarget::down(elem, seat, data, event),
         }
     }
 
-    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent, seq: Serial) {
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent) {
         match self {
-            ZoomFocusTarget::Main(elem) => TouchTarget::up(elem, seat, data, event, seq),
-            ZoomFocusTarget::Menu(elem) => TouchTarget::up(elem, seat, data, event, seq),
+            ZoomFocusTarget::Main(elem) => TouchTarget::up(elem, seat, data, event),
+            ZoomFocusTarget::Menu(elem) => TouchTarget::up(elem, seat, data, event),
         }
     }
 
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent) {
         match self {
-            ZoomFocusTarget::Main(elem) => TouchTarget::motion(elem, seat, data, event, seq),
-            ZoomFocusTarget::Menu(elem) => TouchTarget::motion(elem, seat, data, event, seq),
+            ZoomFocusTarget::Main(elem) => TouchTarget::motion(elem, seat, data, event),
+            ZoomFocusTarget::Menu(elem) => TouchTarget::motion(elem, seat, data, event),
         }
     }
 
-    fn frame(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
+    fn frame(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
         match self {
-            ZoomFocusTarget::Main(elem) => TouchTarget::frame(elem, seat, data, seq),
-            ZoomFocusTarget::Menu(elem) => TouchTarget::frame(elem, seat, data, seq),
+            ZoomFocusTarget::Main(elem) => TouchTarget::frame(elem, seat, data, frame),
+            ZoomFocusTarget::Menu(elem) => TouchTarget::frame(elem, seat, data, frame),
         }
     }
 
-    fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
         match self {
-            ZoomFocusTarget::Main(elem) => TouchTarget::cancel(elem, seat, data, seq),
-            ZoomFocusTarget::Menu(elem) => TouchTarget::cancel(elem, seat, data, seq),
+            ZoomFocusTarget::Main(elem) => TouchTarget::cancel(elem, seat, data, frame),
+            ZoomFocusTarget::Menu(elem) => TouchTarget::cancel(elem, seat, data, frame),
         }
     }
 
-    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent, seq: Serial) {
+    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent) {
         match self {
-            ZoomFocusTarget::Main(elem) => TouchTarget::shape(elem, seat, data, event, seq),
-            ZoomFocusTarget::Menu(elem) => TouchTarget::shape(elem, seat, data, event, seq),
+            ZoomFocusTarget::Main(elem) => TouchTarget::shape(elem, seat, data, event),
+            ZoomFocusTarget::Menu(elem) => TouchTarget::shape(elem, seat, data, event),
         }
     }
 
-    fn orientation(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &OrientationEvent,
-        seq: Serial,
-    ) {
+    fn orientation(&self, seat: &Seat<State>, data: &mut State, event: &OrientationEvent) {
         match self {
-            ZoomFocusTarget::Main(elem) => TouchTarget::orientation(elem, seat, data, event, seq),
-            ZoomFocusTarget::Menu(elem) => TouchTarget::orientation(elem, seat, data, event, seq),
+            ZoomFocusTarget::Main(elem) => TouchTarget::orientation(elem, seat, data, event),
+            ZoomFocusTarget::Menu(elem) => TouchTarget::orientation(elem, seat, data, event),
+        }
+    }
+
+    fn last_frame(&self, seat: &Seat<State>, data: &mut State) -> Option<FrameMarker> {
+        match self {
+            ZoomFocusTarget::Main(elem) => TouchTarget::last_frame(elem, seat, data),
+            ZoomFocusTarget::Menu(elem) => TouchTarget::last_frame(elem, seat, data),
         }
     }
 }
