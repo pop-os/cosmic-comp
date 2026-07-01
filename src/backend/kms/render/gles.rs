@@ -144,7 +144,10 @@ impl<A: AsFd + Device + Clone + 'static> GraphicsApi for GbmGlowBackend<A> {
                         })
                         .is_ok_and(|name| {
                             name.as_str().is_ok_and(|name| {
-                                name.contains("MTL") || name.contains("ARL") || name.contains("LNL")
+                                name.contains("TGL")
+                                    || name.contains("MTL")
+                                    || name.contains("ARL")
+                                    || name.contains("LNL")
                             })
                         });
 
