@@ -21,6 +21,7 @@ use calloop::LoopHandle;
 use cosmic::theme::CosmicTheme;
 use smithay::{
     backend::{
+        drm::DrmNode,
         input::ButtonState,
         renderer::{
             ImportAll, ImportMem, Renderer,
@@ -68,7 +69,13 @@ pub struct MoveGrabState {
 
 impl MoveGrabState {
     #[profiling::function]
-    pub fn render<I, R>(&self, renderer: &mut R, output: &Output, theme: &CosmicTheme) -> Vec<I>
+    pub fn render<I, R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        theme: &CosmicTheme,
+        scanout_node: Option<DrmNode>,
+    ) -> Vec<I>
     where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
@@ -198,6 +205,7 @@ impl MoveGrabState {
                 output_scale,
                 alpha,
                 Some(false),
+                scanout_node,
             );
         let p_elements = self
             .window
@@ -207,6 +215,7 @@ impl MoveGrabState {
                     .to_physical_precise_round(output_scale),
                 output_scale,
                 alpha,
+                scanout_node,
             );
         let shadow_element = self.window.shadow_render_element(
             renderer,
