@@ -13,6 +13,7 @@ use wayland_backend::server::ClientId;
 
 use crate::{
     shell::{focus::FocusTarget, grabs::fullscreen_items, layout::tiling::PlaceholderType},
+    utils,
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
         protocols::workspace::{State as WState, WorkspaceCapabilities},
@@ -99,9 +100,8 @@ use self::zoom::{OutputZoomState, ZoomState};
 
 use self::{
     element::{
-        CosmicWindow, MaximizedState,
-        resize_indicator::{ResizeIndicator, resize_indicator},
-        swap_indicator::{SwapIndicator, swap_indicator},
+        CosmicWindow, MaximizedState, resize_indicator::ResizeIndicator,
+        swap_indicator::SwapIndicator,
     },
     focus::target::{KeyboardFocusTarget, PointerFocusTarget},
     grabs::{
@@ -1508,12 +1508,31 @@ impl Workspaces {
 #[derive(Debug)]
 pub struct InvalidWorkspaceIndex;
 
+utils::id_gen!(next_output_id, OUTPUT_ID, OUTPUT_IDS);
+pub struct OutputId(usize);
+
+impl OutputId {
+    pub fn namespace_for_workspace(&self, idx: usize) -> usize {
+        self.0 | (idx << 32)
+    }
+}
+
+impl Drop for OutputId {
+    fn drop(&mut self) {
+        OUTPUT_IDS.lock().unwrap().remove(&self.0);
+    }
+}
+
 impl Common {
     pub fn add_output(&mut self, output: &Output) {
         let mut shell = self.shell.write();
         shell
             .workspaces
             .add_output(output, &mut self.workspace_state.update());
+
+        output
+            .user_data()
+            .insert_if_missing_threadsafe(|| OutputId(next_output_id()));
 
         if let Some(state) = shell.zoom_state.as_ref() {
             output.user_data().insert_if_missing_threadsafe(|| {
@@ -2288,7 +2307,7 @@ impl Shell {
                 OverviewMode::Started(_, _) | OverviewMode::Active(_)
             ) {
                 if matches!(trigger, Trigger::KeyboardSwap(_, _)) {
-                    self.swap_indicator = Some(swap_indicator(evlh, self.theme.clone()));
+                    self.swap_indicator = Some(SwapIndicator::new(evlh, self.theme.clone()));
                 }
                 self.overview_mode = OverviewMode::Started(trigger, Instant::now());
             }
@@ -2341,7 +2360,7 @@ impl Shell {
             } else {
                 self.resize_mode = ResizeMode::Started(pattern, Instant::now(), direction);
             }
-            self.resize_indicator = Some(resize_indicator(
+            self.resize_indicator = Some(ResizeIndicator::new(
                 direction,
                 config,
                 evlh,
@@ -3644,6 +3663,8 @@ impl Shell {
             return None;
         };
 
+        let mut theme = self.theme.clone();
+        theme.transparent = theme.cosmic().frosted_windows;
         let grab = MenuGrab::new(
             GrabStartData::Pointer(start_data),
             seat,
@@ -3652,7 +3673,7 @@ impl Shell {
             MenuAlignment::CORNER,
             None,
             evlh.clone(),
-            self.theme.clone(),
+            theme,
         );
 
         Some((grab, Focus::Keep))
@@ -5003,13 +5024,14 @@ impl Shell {
 
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
+            let namespace = self.workspaces.active_num(output).1;
             layer_surface.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
                     surface_presentation_feedback_flags_from_states(
                         surface,
-                        None,
+                        Some(namespace),
                         render_element_states,
                     )
                 },
