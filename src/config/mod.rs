@@ -947,6 +947,11 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     }
                 }
             }
+            "default_h_split_ratio" | "default_v_split_ratio"
+            | "first_h_split_ratio" | "first_v_split_ratio" => {
+                state.common.config.cosmic_conf.update_keys(&config, &[key]);
+                state.common.update_config();
+            }
             "cursor_hide_timeout" => {
                 let new = get_config::<Option<u32>>(&config, "cursor_hide_timeout");
                 if new != state.common.config.cosmic_conf.cursor_hide_timeout {
