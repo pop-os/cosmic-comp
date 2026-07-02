@@ -11,7 +11,7 @@ use crate::{
     },
     input::gestures::{GestureState, SwipeAction},
     shell::{
-        LastModifierChange, SeatExt, Trigger,
+        SeatExt, Trigger,
         focus::{
             Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -39,10 +39,10 @@ use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, Device, DeviceCapability,
         GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
-        GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
-        PointerAxisEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
-        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-        TabletToolTipState, TouchEvent,
+        GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState, PointerAxisEvent,
+        ProximityState, Switch, SwitchState, SwitchToggleEvent, TabletToolButtonEvent,
+        TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState,
+        TouchEvent,
     },
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
@@ -81,13 +81,26 @@ use std::{
     any::Any,
     borrow::Cow,
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ops::ControlFlow,
     time::{Duration, Instant},
 };
 
 pub mod actions;
 pub mod gestures;
+
+/// Identifies the input backend instance an event came from, used to disambiguate device ids
+/// (which are only unique within a single backend instance, see
+/// [`smithay::backend::input::Device::id`]).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum InputBackendId {
+    /// The session input backend (libinput / winit / x11) these are mutually exclusive
+    Normal,
+    /// A specific Ei client connection
+    Ei(smithay::reexports::reis::eis::Connection),
+    /// The `zwp_virtual_keyboard_v1` protocol (all virtual keyboards share this source)
+    VirtualKeyboard,
+}
 
 /// Used for debouncing focus updates due to pointer motion, if after the focus change is
 /// triggered the event will cancel if the pointer moves to the original target
@@ -101,19 +114,35 @@ pub struct PointerFocusState {
 }
 
 #[derive(Default)]
-pub struct SupressedKeys(RefCell<Vec<(Keycode, Option<RegistrationToken>)>>);
+pub struct SupressedKeys(
+    RefCell<HashMap<InputBackendId, Vec<(Keycode, Option<RegistrationToken>)>>>,
+);
 #[derive(Default)]
-pub struct SupressedButtons(RefCell<HashSet<u32>>);
+pub struct SupressedButtons(RefCell<HashMap<InputBackendId, HashSet<u32>>>);
 #[derive(Default, Debug)]
-pub struct ModifiersShortcutQueue(RefCell<Option<shortcuts::Binding>>);
+pub struct ModifiersShortcutQueue(RefCell<HashMap<InputBackendId, shortcuts::Binding>>);
 
 impl SupressedKeys {
-    fn add(&self, keysym: &KeysymHandle, token: impl Into<Option<RegistrationToken>>) {
-        self.0.borrow_mut().push((keysym.raw_code(), token.into()));
+    fn add(
+        &self,
+        backend_id: &InputBackendId,
+        keysym: &KeysymHandle,
+        token: impl Into<Option<RegistrationToken>>,
+    ) {
+        self.0
+            .borrow_mut()
+            .entry(backend_id.clone())
+            .or_default()
+            .push((keysym.raw_code(), token.into()));
     }
 
-    fn filter(&self, keysym: &KeysymHandle) -> Option<Vec<RegistrationToken>> {
-        let mut keys = self.0.borrow_mut();
+    fn filter(
+        &self,
+        backend_id: &InputBackendId,
+        keysym: &KeysymHandle,
+    ) -> Option<Vec<RegistrationToken>> {
+        let mut by_source = self.0.borrow_mut();
+        let keys = by_source.get_mut(backend_id)?;
         let (removed, remaining) = keys
             .drain(..)
             .partition(|(key, _)| *key == keysym.raw_code());
@@ -130,44 +159,60 @@ impl SupressedKeys {
                 .collect::<Vec<_>>(),
         )
     }
+
+    fn clear_source(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
+    }
 }
 
 impl SupressedButtons {
-    fn add(&self, button: u32) {
-        self.0.borrow_mut().insert(button);
+    fn add(&self, backend_id: &InputBackendId, button: u32) {
+        self.0
+            .borrow_mut()
+            .entry(backend_id.clone())
+            .or_default()
+            .insert(button);
     }
 
-    fn remove(&self, button: u32) -> bool {
-        self.0.borrow_mut().remove(&button)
+    fn remove(&self, backend_id: &InputBackendId, button: u32) -> bool {
+        self.0
+            .borrow_mut()
+            .get_mut(backend_id)
+            .is_some_and(|buttons| buttons.remove(&button))
+    }
+
+    fn clear_source(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
     }
 }
 
 impl ModifiersShortcutQueue {
-    pub fn set(&self, binding: shortcuts::Binding) {
-        let mut set = self.0.borrow_mut();
-        *set = Some(binding);
+    pub fn set(&self, backend_id: &InputBackendId, binding: shortcuts::Binding) {
+        self.0.borrow_mut().insert(backend_id.clone(), binding);
     }
 
-    pub fn take(&self, binding: &shortcuts::Binding) -> bool {
+    pub fn take(&self, backend_id: &InputBackendId, binding: &shortcuts::Binding) -> bool {
         let mut set = self.0.borrow_mut();
-        if set.is_some() && set.as_ref().unwrap() == binding {
-            *set = None;
+        if set.get(backend_id).is_some_and(|queued| queued == binding) {
+            set.remove(backend_id);
             true
         } else {
             false
         }
     }
 
-    pub fn clear(&self) {
-        let mut set = self.0.borrow_mut();
-        *set = None;
+    pub fn clear(&self, backend_id: &InputBackendId) {
+        self.0.borrow_mut().remove(backend_id);
     }
 }
 
 impl State {
     #[profiling::function]
-    pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>)
-    where
+    pub fn process_input_event<B: InputBackend>(
+        &mut self,
+        event: InputEvent<B>,
+        backend_id: InputBackendId,
+    ) where
         <B as InputBackend>::Device: 'static,
     {
         crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
@@ -178,7 +223,7 @@ impl State {
                 let shell = self.common.shell.read();
                 let seat = shell.seats.last_active();
                 let led_state = seat.get_keyboard().unwrap().led_state();
-                seat.devices().add_device(&device, led_state);
+                seat.devices().add_device(&device, led_state, &backend_id);
                 if device.has_capability(DeviceCapability::TabletTool) {
                     seat.tablet_seat().add_tablet::<Self>(
                         &self.common.display_handle,
@@ -189,8 +234,8 @@ impl State {
             InputEvent::DeviceRemoved { device } => {
                 for seat in &mut self.common.shell.read().seats.iter() {
                     let devices = seat.devices();
-                    if devices.has_device(&device) {
-                        devices.remove_device(&device);
+                    if devices.has_device(&device, &backend_id) {
+                        devices.remove_device(&device, &backend_id);
                         if device.has_capability(DeviceCapability::TabletTool) {
                             seat.tablet_seat()
                                 .remove_tablet(&TabletDescriptor::from(&device));
@@ -211,7 +256,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -232,51 +277,17 @@ impl State {
                             serial,
                             time,
                             |data, modifiers, handle| {
-                                if previous_modifiers != *modifiers {
-                                    *seat
-                                        .user_data()
-                                        .get::<LastModifierChange>()
-                                        .unwrap()
-                                        .0
-                                        .lock()
-                                        .unwrap() = Some(serial);
-                                }
-
-                                let current_focus = seat.get_keyboard().unwrap().current_focus();
-                                let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
-                                    f.wl_surface()
-                                        .map(|surface| {
-                                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                                                .map(|inhibitor| inhibitor.is_active())
-                                                .unwrap_or(false)
-                                                || seat.has_active_xwayland_grab(&surface)
-                                        })
-                                        .unwrap_or(false)
-                                });
-                                let sym = handle.modified_sym();
-
-                                let result = Self::filter_keyboard_input(
-                                    data, &event, &seat, modifiers, handle, serial,
-                                );
-
-                                if (matches!(result, FilterResult::Forward)
-                                    && !seat.get_keyboard().unwrap().is_grabbed()
-                                    && !shortcuts_inhibited
-                                    && !matches!(
-                                        current_focus,
-                                        Some(KeyboardFocusTarget::LockSurface(_))
-                                    ))
-                                // we don't want to accidentally leave any keys pressed
-                                // and do more filtering in `xwayland_notify_key_event`
-                                // for released keys
-                                    || state == KeyState::Released
-                                {
-                                    data.common.xwayland_notify_key_event(
-                                        sym, keycode, state, serial, time,
-                                    );
-                                }
-
-                                result
+                                data.process_keyboard_filter(
+                                    &backend_id,
+                                    &seat,
+                                    modifiers,
+                                    handle,
+                                    serial,
+                                    time,
+                                    keycode,
+                                    state,
+                                    previous_modifiers,
+                                )
                             },
                         )
                         .flatten()
@@ -287,7 +298,7 @@ impl State {
                                 FilterResult::<()>::Forward
                             });
                         }
-                        self.handle_action(action, &seat, serial, time, pattern, None)
+                        self.handle_action(action, &backend_id, &seat, serial, time, pattern, None)
                     }
 
                     // If we want to track numlock state so it can be reused on the next boot...
@@ -312,7 +323,11 @@ impl State {
                 use smithay::backend::input::PointerMotionEvent;
 
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let current_output = seat.active_output();
@@ -677,19 +692,49 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
-                    let output = seat.active_output();
-                    let output_geometry = output.geometry();
-                    let position = output_geometry.loc.to_f64()
-                        + smithay::backend::input::AbsolutePositionEvent::position_transformed(
-                            &event,
-                            output_geometry.size.as_logical(),
-                        )
-                        .as_global();
+                    let (output, output_geometry, position) =
+                        if matches!(&backend_id, InputBackendId::Ei(_)) {
+                            // EI absolute coordinates are in the compositor's *global*
+                            // logical space: each advertised region carries its output's
+                            // global offset, so the client sends a global position. Use
+                            // the coordinate directly and find the output it lands in,
+                            // rather than mapping relative to the focused output (which
+                            // cannot address other monitors). This is the KWin/mutter
+                            // model.
+                            let position =
+                            smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                // smithay's EI impl ignores the size and returns the
+                                // raw coordinate.
+                                Size::from((0, 0)),
+                            )
+                            .as_global();
+                            let output = self
+                                .common
+                                .shell
+                                .read()
+                                .outputs()
+                                .find(|o| o.geometry().to_f64().contains(position))
+                                .cloned()
+                                .unwrap_or_else(|| seat.active_output());
+                            let output_geometry = output.geometry();
+                            (output, output_geometry, position)
+                        } else {
+                            let output = seat.active_output();
+                            let output_geometry = output.geometry();
+                            let position = output_geometry.loc.to_f64()
+                            + smithay::backend::input::AbsolutePositionEvent::position_transformed(
+                                &event,
+                                output_geometry.size.as_logical(),
+                            )
+                            .as_global();
+                            (output, output_geometry, position)
+                        };
                     let serial = SERIAL_COUNTER.next_serial();
                     let under = State::surface_under(position, &output, &self.common.shell.write())
                         .map(|(target, pos)| (target, pos.as_logical()));
@@ -706,7 +751,20 @@ impl State {
                     );
                     ptr.frame(self);
 
+                    // Keep the seat's active output following the pointer. Click-to-
+                    // focus (PointerButton) resolves its target via
+                    // `seat.active_output()`
+                    let previous_output = seat.active_output();
+                    if previous_output != output {
+                        seat.set_active_output(&output);
+                    }
+
                     let shell = self.common.shell.read();
+                    if previous_output != output {
+                        for session in cursor_sessions_for_output(&shell, &previous_output) {
+                            session.set_cursor_pos(None);
+                        }
+                    }
                     for session in cursor_sessions_for_output(&shell, &output) {
                         if let Some((geometry, offset)) = seat.cursor_geometry(
                             (position - output_geometry.loc.to_f64())
@@ -749,7 +807,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned()
                 else {
                     return;
@@ -772,7 +830,7 @@ impl State {
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
 
-                let mut pass_event = !seat.supressed_buttons().remove(button);
+                let mut pass_event = !seat.supressed_buttons().remove(&backend_id, button);
                 if event.state() == ButtonState::Pressed {
                     // change the keyboard focus unless the pointer is grabbed
                     // We test for any matching surface type here but always use the root
@@ -789,7 +847,7 @@ impl State {
                         };
                         if let Some(target) = under {
                             if let Some(surface) = target.toplevel().map(Cow::into_owned)
-                                && seat.get_keyboard().unwrap().modifier_state().logo
+                                && self.source_modifiers(&backend_id, &seat).logo
                                 && !shortcuts_inhibited
                             {
                                 let seat_clone = seat.clone();
@@ -800,17 +858,18 @@ impl State {
                                     // aimed at the compositor and shouldn't be passed
                                     // to the application.
                                     pass_event = false;
-                                    seat.supressed_buttons().add(button);
+                                    seat.supressed_buttons().add(&backend_id, button);
                                 };
 
                                 fn dispatch_grab<G: PointerGrab<State> + 'static>(
                                     grab: Option<(G, smithay::input::pointer::Focus)>,
                                     seat: Seat<State>,
+                                    backend_id: &InputBackendId,
                                     serial: Serial,
                                     state: &mut State,
                                 ) {
                                     if let Some((target, focus)) = grab {
-                                        seat.modifiers_shortcut_queue().clear();
+                                        seat.modifiers_shortcut_queue().clear(backend_id);
 
                                         seat.get_pointer()
                                             .unwrap()
@@ -822,6 +881,7 @@ impl State {
                                     match mouse_button {
                                         smithay::backend::input::MouseButton::Left => {
                                             supress_button();
+                                            let backend_id = backend_id.clone();
                                             self.common.event_loop_handle.insert_idle(
                                                 move |state| {
                                                     let mut shell = state.common.shell.write();
@@ -836,12 +896,19 @@ impl State {
                                                         false,
                                                     );
                                                     drop(shell);
-                                                    dispatch_grab(res, seat_clone, serial, state);
+                                                    dispatch_grab(
+                                                        res,
+                                                        seat_clone,
+                                                        &backend_id,
+                                                        serial,
+                                                        state,
+                                                    );
                                                 },
                                             );
                                         }
                                         smithay::backend::input::MouseButton::Right => {
                                             supress_button();
+                                            let backend_id = backend_id.clone();
                                             self.common.event_loop_handle.insert_idle(
                                                 move |state| {
                                                     let mut shell = state.common.shell.write();
@@ -899,7 +966,13 @@ impl State {
                                                         false,
                                                     );
                                                     drop(shell);
-                                                    dispatch_grab(res, seat_clone, serial, state);
+                                                    dispatch_grab(
+                                                        res,
+                                                        seat_clone,
+                                                        &backend_id,
+                                                        serial,
+                                                        state,
+                                                    );
                                                 },
                                             );
                                         }
@@ -963,13 +1036,13 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
 
-                    if seat.get_keyboard().unwrap().modifier_state().logo
+                    if self.source_modifiers(&backend_id, &seat).logo
                         && self
                             .common
                             .config
@@ -977,7 +1050,7 @@ impl State {
                             .accessibility_zoom
                             .enable_mouse_zoom_shortcuts
                     {
-                        seat.modifiers_shortcut_queue().clear();
+                        seat.modifiers_shortcut_queue().clear(&backend_id);
                         if let Some(mut percentage) = event
                             .amount_v120(Axis::Vertical)
                             .map(|val| val / 120.)
@@ -999,7 +1072,10 @@ impl State {
                         }
                     } else {
                         let mut frame = AxisFrame::new(event.time_msec()).source(event.source());
-                        if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
+                        let horizontal_amount = event
+                            .amount(Axis::Horizontal)
+                            .or_else(|| Some(event.amount_v120(Axis::Horizontal)? * 15.0 / 120.));
+                        if let Some(horizontal_amount) = horizontal_amount {
                             if horizontal_amount != 0.0 {
                                 frame = frame
                                     .value(Axis::Horizontal, scroll_factor * horizontal_amount);
@@ -1013,7 +1089,10 @@ impl State {
                                 frame = frame.stop(Axis::Horizontal);
                             }
                         }
-                        if let Some(vertical_amount) = event.amount(Axis::Vertical) {
+                        let vertical_amount = event
+                            .amount(Axis::Vertical)
+                            .or_else(|| Some(event.amount_v120(Axis::Vertical)? * 15.0 / 120.));
+                        if let Some(vertical_amount) = vertical_amount {
                             if vertical_amount != 0.0 {
                                 frame =
                                     frame.value(Axis::Vertical, scroll_factor * vertical_amount);
@@ -1040,7 +1119,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1066,7 +1145,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1167,7 +1246,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1212,7 +1291,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1234,7 +1313,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1256,7 +1335,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1278,7 +1357,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1300,7 +1379,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1319,7 +1398,11 @@ impl State {
 
             InputEvent::TouchDown { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
@@ -1351,7 +1434,11 @@ impl State {
             }
             InputEvent::TouchMotion { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
@@ -1387,7 +1474,10 @@ impl State {
                     shell.set_overview_mode(None, self.common.event_loop_handle.clone());
                 }
 
-                let maybe_seat = shell.seats.for_device(&event.device()).cloned();
+                let maybe_seat = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     std::mem::drop(shell);
@@ -1409,7 +1499,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1423,7 +1513,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1434,7 +1524,11 @@ impl State {
 
             InputEvent::TabletToolAxis { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let Some(output) =
@@ -1500,7 +1594,11 @@ impl State {
             }
             InputEvent::TabletToolProximity { event, .. } => {
                 let shell = self.common.shell.write();
-                if let Some(seat) = shell.seats.for_device(&event.device()).cloned() {
+                if let Some(seat) = shell
+                    .seats
+                    .for_device(&event.device(), &backend_id)
+                    .cloned()
+                {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let Some(output) =
@@ -1560,7 +1658,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1583,7 +1681,7 @@ impl State {
                     .shell
                     .read()
                     .seats
-                    .for_device(&event.device())
+                    .for_device(&event.device(), &backend_id)
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
@@ -1639,15 +1737,361 @@ impl State {
         }
     }
 
+    /// The modifier state held by the source that produced an event.
+    ///
+    /// For a libei connection this is its own isolated keyboard state; for everything else
+    /// it is the seat's (physical) keyboard.
+    pub(crate) fn source_modifiers(
+        &self,
+        backend_id: &InputBackendId,
+        seat: &Seat<State>,
+    ) -> ModifiersState {
+        match backend_id {
+            InputBackendId::Ei(conn) => self
+                .common
+                .ei_isolated_kbd
+                .get(conn)
+                .map(|iso| iso.modifier_state())
+                .unwrap_or_default(),
+            _ => seat
+                .get_keyboard()
+                .map(|k| k.modifier_state())
+                .unwrap_or_default(),
+        }
+    }
+
+    pub(crate) fn clear_input_source_state(&mut self, backend_id: &InputBackendId) {
+        let seats = self
+            .common
+            .shell
+            .read()
+            .seats
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for seat in seats {
+            seat.supressed_keys().clear_source(backend_id);
+            seat.supressed_buttons().clear_source(backend_id);
+            seat.modifiers_shortcut_queue().clear(backend_id);
+            seat.clear_last_modifier_change(backend_id);
+        }
+    }
+
+    pub(crate) fn release_ei_keyboard(&mut self, conn: &smithay::reexports::reis::eis::Connection) {
+        let pressed_keys = self
+            .common
+            .ei_isolated_kbd
+            .get(conn)
+            .map(|iso| iso.pressed_keys().collect::<Vec<_>>())
+            .unwrap_or_default();
+
+        for keycode in pressed_keys.into_iter().rev() {
+            self.inject_ei_key_internal(conn, keycode, KeyState::Released, false);
+        }
+    }
+
+    pub(crate) fn process_keyboard_filter(
+        &mut self,
+        backend_id: &InputBackendId,
+        seat: &Seat<State>,
+        modifiers: &ModifiersState,
+        handle: KeysymHandle<'_>,
+        serial: Serial,
+        time: u32,
+        keycode: Keycode,
+        key_state: KeyState,
+        previous_modifiers: ModifiersState,
+    ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
+        if previous_modifiers != *modifiers {
+            seat.set_last_modifier_change(backend_id, serial);
+        }
+
+        let current_focus = seat.get_keyboard().unwrap().current_focus();
+        let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
+            f.wl_surface()
+                .map(|surface| {
+                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                        .map(|inhibitor| inhibitor.is_active())
+                        .unwrap_or(false)
+                        || seat.has_active_xwayland_grab(&surface)
+                })
+                .unwrap_or(false)
+        });
+        let sym = handle.modified_sym();
+
+        let result = self.filter_keyboard_input(
+            backend_id, seat, modifiers, handle, serial, keycode, key_state, time,
+        );
+
+        if (matches!(result, FilterResult::Forward)
+            && !seat.get_keyboard().unwrap().is_grabbed()
+            && !shortcuts_inhibited
+            && !matches!(current_focus, Some(KeyboardFocusTarget::LockSurface(_))))
+        // we don't want to accidentally leave any keys pressed
+            || key_state == KeyState::Released
+        {
+            self.common
+                .xwayland_notify_key_event(sym, keycode, key_state, *modifiers, serial, time);
+        }
+
+        result
+    }
+
+    /// Inject a key through an isolated keyboard state: run it through the per-source shortcut
+    /// filter and deliver it to the focused client, keeping this source's modifier/key state
+    /// fully isolated from the physical keyboard. Shared by libei connections and virtual keyboards.
+    ///
+    /// `handle_shortcuts` is `false` when synthesizing releases during teardown, so still-held
+    /// keys are just forwarded without re-triggering bindings.
+    pub(crate) fn inject_isolated_key(
+        &mut self,
+        backend_id: &InputBackendId,
+        seat: &Seat<State>,
+        iso: &mut smithay::input::keyboard::IsolatedKeyboardState,
+        keycode: Keycode,
+        key_state: KeyState,
+        handle_shortcuts: bool,
+    ) {
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+        let serial = SERIAL_COUNTER.next_serial();
+        let time = self.common.clock.now().as_millis();
+        let previous_modifiers = iso.modifier_state();
+        let result = keyboard
+            .input_isolated(
+                self,
+                iso,
+                keycode,
+                key_state,
+                serial,
+                time,
+                |data, modifiers, handle| {
+                    if handle_shortcuts {
+                        data.process_keyboard_filter(
+                            backend_id,
+                            seat,
+                            modifiers,
+                            handle,
+                            serial,
+                            time,
+                            keycode,
+                            key_state,
+                            previous_modifiers,
+                        )
+                    } else {
+                        FilterResult::Forward
+                    }
+                },
+            )
+            .flatten();
+
+        if let Some((action, pattern)) = result {
+            self.handle_action(action, backend_id, seat, serial, time, pattern, None);
+        }
+    }
+
+    /// Inject a key from a libei connection through its isolated keyboard state.
+    pub(crate) fn inject_ei_key(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keycode: Keycode,
+        key_state: KeyState,
+    ) {
+        self.inject_ei_key_internal(conn, keycode, key_state, true);
+    }
+
+    fn inject_ei_key_internal(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keycode: Keycode,
+        key_state: KeyState,
+        handle_shortcuts: bool,
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let backend_id = InputBackendId::Ei(conn.clone());
+        // Temporarily take the isolated state out so we can borrow `self` mutably for delivery.
+        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+            return;
+        };
+        self.inject_isolated_key(
+            &backend_id,
+            &seat,
+            &mut iso,
+            keycode,
+            key_state,
+            handle_shortcuts,
+        );
+        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
+    }
+
+    /// Resolve a keysym from a libei `ei_text` device to a keycode
+    pub(crate) fn inject_ei_text_keysym(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keysym: u32,
+        key_state: KeyState,
+        handle_shortcuts: bool,
+    ) {
+        use smithay::wayland::input_method::InputMethodSeat;
+        use smithay::wayland::text_input::TextInputSeat;
+
+        let keysym = Keysym::new(keysym);
+
+        // if a printable, non-control keysym with no modifier held + text-input protocol when a text-input client is focused then commit the character directly
+        // (which also handles out-of-layout / Unicode that has no keycode)
+        // otherwise go through to keycode injection, which reaches every app.
+        let no_mods = self.common.ei_isolated_kbd.get(conn).is_some_and(|iso| {
+            let m = iso.modifier_state();
+            !(m.ctrl || m.alt || m.shift || m.logo)
+        });
+        if no_mods
+            && let Some(c) = keysym.key_char()
+            && !c.is_control()
+        {
+            let seat = self.common.shell.read().seats.last_active().clone();
+            // Only commit through text-input when we're the active input method (no real IME).
+            if !seat.input_method().has_instance() {
+                let text_input = seat.text_input();
+                let mut handled = false;
+                text_input.with_active_text_input(|ti, _surface| {
+                    // A text-input client is focused: commit on press, no-op on release.
+                    if key_state == KeyState::Pressed {
+                        ti.commit_string(Some(c.to_string()));
+                    }
+                    handled = true;
+                });
+                if handled {
+                    if key_state == KeyState::Pressed {
+                        text_input.done(false);
+                    }
+                    return;
+                }
+                // No active text-input: fall through to keycode injection (press and release).
+            }
+        }
+
+        // If the keysym exists in the active layout, inject its real keycode with the
+        // shift-level modifiers applied (no keymap change). Out-of-layout / Unicode keysyms
+        // have no keycode and can only be delivered via the text-input fast path above.
+        // TODO: update this doc when we have the final solution
+        let resolved = self
+            .common
+            .ei_isolated_kbd
+            .get(conn)
+            .and_then(|iso| iso.keycode_for_keysym(keysym));
+
+        match resolved {
+            Some((keycode, mask)) => {
+                self.inject_ei_keysym_in_layout(conn, keycode, mask, key_state, handle_shortcuts)
+            }
+            // Out-of-layout / Unicode: bind a spare keycode to the keysym and inject it, on the
+            // press event only (KWin's fallback).
+            None if key_state == KeyState::Pressed => {
+                self.inject_ei_keysym_remapped(conn, keysym, handle_shortcuts)
+            }
+            None => {}
+        }
+    }
+
+    /// Inject an in-layout keysym by its real keycode, bracketing it with the shift-level
+    /// modifiers it needs (KWin's primary keysym-injection path).
+    fn inject_ei_keysym_in_layout(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keycode: Keycode,
+        mask: u32,
+        key_state: KeyState,
+        handle_shortcuts: bool,
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+        let backend_id = InputBackendId::Ei(conn.clone());
+        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+            return;
+        };
+
+        if mask == 0 {
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                key_state,
+                handle_shortcuts,
+            );
+        } else {
+            // Momentarily OR in the level's modifiers, deliver them, send the key, then restore
+            // the real modifier state (so e.g. injecting `!` doesn't leave Shift stuck).
+            let (depressed, latched, locked, layout) = iso.serialized_mods();
+            iso.update_modifiers(depressed | mask, latched, locked, layout);
+            keyboard.input_isolated_modifiers(self, &iso);
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                key_state,
+                handle_shortcuts,
+            );
+            iso.update_modifiers(depressed, latched, locked, layout);
+            keyboard.input_isolated_modifiers(self, &iso);
+        }
+
+        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
+    }
+
+    /// Inject an out-of-layout keysym via a temporary spare-keycode keymap (KWin's fallback),
+    /// as an atomic press+release so the keymap only changes while no key is held.
+    fn inject_ei_keysym_remapped(
+        &mut self,
+        conn: &smithay::reexports::reis::eis::Connection,
+        keysym: Keysym,
+        handle_shortcuts: bool,
+    ) {
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let backend_id = InputBackendId::Ei(conn.clone());
+        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+            return;
+        };
+        if let Some(keycode) = iso.remap_keysym_to_spare_keycode(keysym) {
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                KeyState::Pressed,
+                handle_shortcuts,
+            );
+            self.inject_isolated_key(
+                &backend_id,
+                &seat,
+                &mut iso,
+                keycode,
+                KeyState::Released,
+                handle_shortcuts,
+            );
+            iso.restore_keymap();
+        } else {
+            tracing::warn!("EI text keysym {:?} could not be mapped; ignoring", keysym);
+        }
+        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
+    }
+
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
     #[profiling::function]
-    pub fn filter_keyboard_input<B: InputBackend, E: KeyboardKeyEvent<B>>(
+    pub fn filter_keyboard_input(
         &mut self,
-        event: &E,
+        backend_id: &InputBackendId,
         seat: &Seat<Self>,
         modifiers: &ModifiersState,
         handle: KeysymHandle<'_>,
         serial: Serial,
+        keycode: Keycode,
+        key_state: KeyState,
+        time: u32,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
         // Pre-compute for layout-agnostic shortcut matching
         let raw_syms = handle.raw_syms();
@@ -1683,7 +2127,7 @@ impl State {
         });
 
         if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
-            a11y_keyboard_monitor.key_event(modifiers, &handle, event.state());
+            a11y_keyboard_monitor.key_event(modifiers, &handle, key_state);
         }
 
         // Leave move overview mode, if any modifier was released
@@ -1705,7 +2149,7 @@ impl State {
                 || (action_pattern.modifiers.shift && !modifiers.shift)
                 || (action_pattern.key.is_some()
                     && key_matches(action_pattern.key.unwrap())
-                    && event.state() == KeyState::Released))
+                    && key_state == KeyState::Released))
         {
             shell.set_overview_mode(None, self.common.event_loop_handle.clone());
 
@@ -1721,7 +2165,7 @@ impl State {
         // Leave or update resize mode, if modifiers changed or initial key was released
         if let Some(action_pattern) = shell.resize_mode().0.active_binding() {
             if action_pattern.key.is_some()
-                && event.state() == KeyState::Released
+                && key_state == KeyState::Released
                 && key_matches(action_pattern.key.unwrap())
             {
                 shell.set_resize_mode(
@@ -1774,7 +2218,7 @@ impl State {
                 let action = Action::Private(PrivateAction::Resizing(
                     direction,
                     edge.into(),
-                    cosmic_keystate_from_smithay(event.state()),
+                    cosmic_keystate_from_smithay(key_state),
                 ));
                 let key_pattern = shortcuts::Binding {
                     modifiers: cosmic_modifiers_from_smithay(*modifiers),
@@ -1783,8 +2227,8 @@ impl State {
                     description: None,
                 };
 
-                if event.state() == KeyState::Released {
-                    if let Some(tokens) = seat.supressed_keys().filter(&handle) {
+                if key_state == KeyState::Released {
+                    if let Some(tokens) = seat.supressed_keys().filter(backend_id, &handle) {
                         for token in tokens {
                             self.common.event_loop_handle.remove(token);
                         }
@@ -1793,8 +2237,8 @@ impl State {
                     let seat_clone = seat.clone();
                     let action_clone = action.clone();
                     let key_pattern_clone = key_pattern.clone();
+                    let backend_id_clone = backend_id.clone();
                     let start = Instant::now();
-                    let time = event.time_msec();
                     let token = self
                         .common
                         .event_loop_handle
@@ -1804,6 +2248,7 @@ impl State {
                                 let duration = current.duration_since(start).as_millis();
                                 state.handle_action(
                                     action_clone.clone(),
+                                    &backend_id_clone,
                                     &seat_clone,
                                     serial,
                                     time.overflowing_add(duration as u32).0,
@@ -1815,7 +2260,7 @@ impl State {
                         )
                         .ok();
 
-                    seat.supressed_keys().add(&handle, token);
+                    seat.supressed_keys().add(backend_id, &handle, token);
                 }
                 return FilterResult::Intercept(Some((action, key_pattern)));
             }
@@ -1826,13 +2271,13 @@ impl State {
         // cancel grabs
         if is_grabbed
             && handle.modified_sym() == Keysym::Escape
-            && event.state() == KeyState::Pressed
+            && key_state == KeyState::Pressed
             && !modifiers.alt
             && !modifiers.ctrl
             && !modifiers.logo
             && !modifiers.shift
         {
-            seat.supressed_keys().add(&handle, None);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(Some((
                 Action::Private(PrivateAction::Escape),
                 shortcuts::Binding {
@@ -1845,7 +2290,7 @@ impl State {
         }
 
         if let Some(mut a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
-            if event.state() == KeyState::Released {
+            if key_state == KeyState::Released {
                 let removed =
                     a11y_keyboard_monitor.remove_active_virtual_mod(handle.modified_sym());
                 // If `Caps_Lock` is a virtual modifier, and is in locked state, clear it
@@ -1854,7 +2299,7 @@ impl State {
                     && (modifiers.serialized.locked & 2) != 0
                 {
                     let seat = seat.clone();
-                    let key_code = event.key_code();
+                    let key_code = keycode;
                     self.common.event_loop_handle.insert_idle(move |state| {
                         if let Some(keyboard) = seat.get_keyboard() {
                             let serial = SERIAL_COUNTER.next_serial();
@@ -1879,7 +2324,7 @@ impl State {
                         }
                     });
                 }
-            } else if event.state() == KeyState::Pressed
+            } else if key_state == KeyState::Pressed
                 && a11y_keyboard_monitor.has_virtual_mod(handle.modified_sym())
             {
                 a11y_keyboard_monitor.add_active_virtual_mod(handle.modified_sym());
@@ -1888,15 +2333,15 @@ impl State {
                     "active virtual mods: {:?}",
                     a11y_keyboard_monitor.active_virtual_mods()
                 );
-                seat.supressed_keys().add(&handle, None);
+                seat.supressed_keys().add(backend_id, &handle, None);
 
                 return FilterResult::Intercept(None);
             }
         }
 
         // Skip released events for initially surpressed keys
-        if event.state() == KeyState::Released
-            && let Some(tokens) = seat.supressed_keys().filter(&handle)
+        if key_state == KeyState::Released
+            && let Some(tokens) = seat.supressed_keys().filter(backend_id, &handle)
         {
             for token in tokens {
                 self.common.event_loop_handle.remove(token);
@@ -1905,7 +2350,7 @@ impl State {
         }
 
         // Handle VT switches
-        if event.state() == KeyState::Pressed
+        if key_state == KeyState::Pressed
             && (Keysym::XF86_Switch_VT_1.raw()..=Keysym::XF86_Switch_VT_12.raw())
                 .contains(&handle.modified_sym().raw())
         {
@@ -1914,18 +2359,18 @@ impl State {
             ) {
                 error!(?err, "Failed switching virtual terminal.");
             }
-            seat.supressed_keys().add(&handle, None);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(None);
         }
 
         if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor()
-            && event.state() == KeyState::Pressed
+            && key_state == KeyState::Pressed
             && (a11y_keyboard_monitor.has_keyboard_grab()
                 || a11y_keyboard_monitor.has_key_grab(modifiers, handle.modified_sym()))
         {
             let modifiers_queue = seat.modifiers_shortcut_queue();
-            modifiers_queue.clear();
-            seat.supressed_keys().add(&handle, None);
+            modifiers_queue.clear(backend_id);
+            seat.supressed_keys().add(backend_id, &handle, None);
             return FilterResult::Intercept(None);
         }
 
@@ -1941,11 +2386,11 @@ impl State {
 
                 // is this a released (triggered) modifier-only binding?
                 if binding.key.is_none()
-                    && event.state() == KeyState::Released
+                    && key_state == KeyState::Released
                     && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
-                    && modifiers_queue.take(binding)
+                    && modifiers_queue.take(backend_id, binding)
                 {
-                    modifiers_queue.clear();
+                    modifiers_queue.clear(backend_id);
                     return FilterResult::Intercept(Some((
                         Action::Shortcut(action.clone()),
                         binding.clone(),
@@ -1954,21 +2399,21 @@ impl State {
 
                 // could this potentially become a modifier-only binding?
                 if binding.key.is_none()
-                    && event.state() == KeyState::Pressed
+                    && key_state == KeyState::Pressed
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
-                    modifiers_queue.set(binding.clone());
+                    modifiers_queue.set(backend_id, binding.clone());
                     clear_queue = false;
                 }
 
                 // is this a normal binding?
                 if binding.key.is_some()
-                    && event.state() == KeyState::Pressed
+                    && key_state == KeyState::Pressed
                     && key_matches(binding.key.unwrap())
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
-                    modifiers_queue.clear();
-                    seat.supressed_keys().add(&handle, None);
+                    modifiers_queue.clear(backend_id);
+                    seat.supressed_keys().add(backend_id, &handle, None);
                     return FilterResult::Intercept(Some((
                         Action::Shortcut(action.clone()),
                         binding.clone(),
@@ -1979,7 +2424,7 @@ impl State {
 
         // no binding
         if clear_queue {
-            seat.modifiers_shortcut_queue().clear();
+            seat.modifiers_shortcut_queue().clear(backend_id);
         }
         // keys are passed through to apps
         FilterResult::Forward

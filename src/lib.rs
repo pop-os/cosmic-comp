@@ -41,6 +41,7 @@ pub mod dbus;
 pub mod debug;
 pub mod hooks;
 pub mod input;
+pub mod libei;
 mod logger;
 pub mod session;
 pub mod shell;
@@ -170,6 +171,10 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         event_loop.get_signal(),
         with_xwayland,
     );
+    // Set up the libei sender side before the backend spawns Xwayland.
+    let ei_sender = libei::setup_ei(&event_loop.handle());
+    state.common.dbus_state.set_ei_sender(ei_sender);
+
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;
 

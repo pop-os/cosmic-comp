@@ -533,14 +533,14 @@ impl State {
             let device = event.device();
             for seat in self.common.shell.read().seats.iter() {
                 let devices = seat.user_data().get::<Devices>().unwrap();
-                if devices.has_device(&device) {
+                if devices.has_device(&device, &crate::input::InputBackendId::Normal) {
                     seat.set_active_output(&output);
                     break;
                 }
             }
         };
 
-        self.process_input_event(event);
+        self.process_input_event(event, crate::input::InputBackendId::Normal);
         // TODO actually figure out the output
         for output in self.common.shell.read().outputs() {
             self.backend.x11().schedule_render(output);

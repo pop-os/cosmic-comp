@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    input::InputBackendId,
     shell::Shell,
     state::{BackendData, State},
     utils::prelude::OutputExt,
@@ -817,6 +818,32 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         if old_modifier_state.caps_lock != keyboard.modifier_state().caps_lock {
                             const CAPSLOCK_SCANCODE: u32 = 58;
                             change_modifier_state(&keyboard, CAPSLOCK_SCANCODE, state);
+                        }
+                    }
+                }
+                // TODO: we deliberately do NOT recreate the EIS virtual keyboard device
+                // here. It was causing loss of focus when layout changes. I'll have to come back to
+                // this issue.
+
+                // Rebuild the per-connection isolated keyboard state with the new keymap
+                // after first releasing any keys that source still has held.
+                let ei_connections = state
+                    .common
+                    .ei_isolated_kbd
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for conn in &ei_connections {
+                    state.release_ei_keyboard(conn);
+                    state.clear_input_source_state(&InputBackendId::Ei(conn.clone()));
+                }
+                for source in state.common.ei_isolated_kbd.values_mut() {
+                    match smithay::input::keyboard::IsolatedKeyboardState::new(xkb_config_to_wl(
+                        &value,
+                    )) {
+                        Ok(new_state) => *source = new_state,
+                        Err(err) => {
+                            warn!(?err, "Failed to update libei isolated keyboard config")
                         }
                     }
                 }
