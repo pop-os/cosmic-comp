@@ -20,7 +20,11 @@ use smithay::{
         egl::{EGLContext, EGLDevice, EGLDisplay},
         input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
-        renderer::{glow::GlowRenderer, multigpu::GpuManager},
+        renderer::{
+            Renderer,
+            glow::GlowRenderer,
+            multigpu::{ApiDevice, GpuManager},
+        },
         session::{Event as SessionEvent, Session, libseat::LibSeatSession},
         udev::{UdevBackend, UdevEvent, primary_gpu},
     },
@@ -48,6 +52,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, RwLock, atomic::AtomicBool},
+    time::{Duration, Instant},
 };
 
 mod device;
@@ -74,6 +79,7 @@ pub struct KmsState {
     libinput: Libinput,
 
     pub syncobj_state: Option<DrmSyncobjState>,
+    last_renderer_cleanup: Instant,
 }
 
 pub struct KmsGuard<'a> {
@@ -131,6 +137,7 @@ pub fn init_backend(
         libinput: libinput_context,
 
         syncobj_state: None,
+        last_renderer_cleanup: Instant::now(),
     });
 
     // manually add already present gpus
@@ -586,6 +593,31 @@ impl KmsState {
         }
 
         Ok(node)
+    }
+
+    /// Drain the GL destruction queues of the main-thread renderers
+    ///
+    /// The main-thread renderers only draw during output (re-)configuration, so
+    /// they never drain on their own. Textures and EGLImages of surfaces imported
+    /// there sit on the cleanup queue once dropped, pinning the underlying client
+    /// buffers in VRAM until this runs.
+    pub fn cleanup_renderer_caches(&mut self) {
+        const CLEANUP_INTERVAL: Duration = Duration::from_secs(2);
+
+        if !self.session.is_active() || self.last_renderer_cleanup.elapsed() < CLEANUP_INTERVAL {
+            return;
+        }
+        match self.api.devices_mut() {
+            Ok(devices) => {
+                for device in devices {
+                    if let Err(err) = device.renderer_mut().cleanup_texture_cache() {
+                        debug!(?err, "Failed to drain main-thread renderer cleanup queue");
+                    }
+                }
+            }
+            Err(err) => debug!(?err, "Failed to enumerate render devices for cleanup"),
+        }
+        self.last_renderer_cleanup = Instant::now();
     }
 
     pub fn schedule_render(&mut self, output: &Output) {

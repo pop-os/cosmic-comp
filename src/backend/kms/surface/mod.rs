@@ -739,6 +739,7 @@ impl SurfaceThreadState {
 
     fn node_removed(&mut self, node: DrmNode) {
         self.api.as_mut().remove_node(&node);
+        self.postprocess_textures.remove(&node);
         // force enumeration
         let _ = self.api.devices();
     }

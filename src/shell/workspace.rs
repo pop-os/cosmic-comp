@@ -209,6 +209,16 @@ impl MinimizedWindow {
     }
 }
 
+impl IsAlive for MinimizedWindow {
+    fn alive(&self) -> bool {
+        match self {
+            MinimizedWindow::Fullscreen { surface, .. } => surface.alive(),
+            MinimizedWindow::Floating { window, .. }
+            | MinimizedWindow::Tiling { window, .. } => window.alive(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FullscreenSurface {
     pub surface: CosmicSurface,
@@ -458,10 +468,8 @@ impl Workspace {
 
     #[profiling::function]
     pub fn refresh(&mut self) {
-        // seems it removes dead windows
-        // self.fullscreen.take_if(|w| !w.alive());
         self.fullscreen_surfaces.retain(|w| w.alive());
-
+        self.minimized_windows.retain(|w| w.alive());
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
     }
