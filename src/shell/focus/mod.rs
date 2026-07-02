@@ -195,6 +195,21 @@ impl Shell {
         serial: Option<Serial>,
         update_cursor: bool,
     ) {
+        // Modal dialogs take focus over their (blocked) parents
+        let redirect =
+            target.and_then(|target| state.common.shell.read().resolve_modal_redirect(target));
+        if let Some(KeyboardFocusTarget::Element(dialog)) = redirect.as_ref()
+            && dialog.is_minimized()
+        {
+            let loop_handle = state.common.event_loop_handle.clone();
+            state.common.shell.write().unminimize_request(
+                &dialog.active_window(),
+                seat,
+                &loop_handle,
+            );
+        }
+        let target = redirect.as_ref().or(target);
+
         let focus_target = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(FocusTarget::Window(mapped.clone())),
             Some(KeyboardFocusTarget::Fullscreen(surface)) => {
@@ -210,6 +225,28 @@ impl Shell {
         update_focus_state(seat, target, state, serial, update_cursor);
 
         state.common.shell.write().update_active();
+    }
+
+    /// Redirects keyboard focus to a modal dialog for any seat whose focused
+    /// window just became blocked.
+    pub fn redirect_blocked_focus(state: &mut State) {
+        let seats = state
+            .common
+            .shell
+            .read()
+            .seats
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for seat in seats {
+            let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
+                continue;
+            };
+            let dialog = state.common.shell.read().resolve_modal_redirect(&target);
+            if let Some(dialog) = dialog {
+                Shell::set_focus(state, Some(&dialog), &seat, None, false);
+            }
+        }
     }
 
     pub fn append_focus_stack(&mut self, target: impl Into<FocusTarget>, seat: &Seat<State>) {
@@ -272,7 +309,7 @@ impl Shell {
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
             let set = self.workspaces.sets.get_mut(&output).unwrap();
             for focused in focused_windows.iter() {
-                raise_with_children(&mut set.sticky_layer, focused);
+                raise_modal_with_ancestors(&mut set.sticky_layer, focused);
             }
             for window in set.sticky_layer.mapped() {
                 window.set_activated(focused_windows.contains(window));
@@ -302,7 +339,7 @@ impl Shell {
                 fs.surface.send_configure();
             }
             for focused in focused_windows.iter() {
-                raise_with_children(&mut workspace.floating_layer, focused);
+                raise_modal_with_ancestors(&mut workspace.floating_layer, focused);
             }
             for window in workspace.mapped() {
                 window.set_activated(focused_windows.contains(window));
@@ -429,6 +466,24 @@ fn update_focus_state(
     }
 }
 
+fn raise_modal_with_ancestors(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
+    let mut root = focused.clone();
+    while root.active_window().is_modal_dialog() {
+        let Some(parent) = floating_layer
+            .mapped()
+            .find(|m| m.active_window().is_parent_of(&root.active_window()))
+            .cloned()
+        else {
+            break;
+        };
+        root = parent;
+    }
+    raise_with_children(floating_layer, &root);
+    if &root != focused {
+        floating_layer.space.raise_element(focused, true);
+    }
+}
+
 fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
     if floating_layer.mapped().any(|m| m == focused) {
         floating_layer.space.raise_element(focused, true);
@@ -436,21 +491,7 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
             .space
             .elements()
             .filter(|elem| elem != &focused)
-            .filter(|elem| {
-                let parent = elem
-                    .active_window()
-                    .0
-                    .toplevel()
-                    .and_then(|toplevel| toplevel.parent());
-                parent.is_some_and(|parent| {
-                    focused
-                        .active_window()
-                        .wl_surface()
-                        .map(Cow::into_owned)
-                        .map(|focused| parent == focused)
-                        .unwrap_or(false)
-                })
-            })
+            .filter(|elem| focused.active_window().is_parent_of(&elem.active_window()))
             .cloned()
             .collect::<Vec<_>>()
             .into_iter()
@@ -463,6 +504,27 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
 impl Common {
     #[profiling::function]
     pub fn refresh_focus(state: &mut State) {
+        // Switch focus back to the parents of modal dialogs that just closed.
+        let focus_overrides =
+            std::mem::take(&mut state.common.shell.write().pending_focus_overrides);
+        for focus_override in focus_overrides {
+            let mapped = state
+                .common
+                .shell
+                .read()
+                .element_for_surface(&focus_override.surface)
+                .cloned();
+            if let Some(mapped) = mapped {
+                Shell::set_focus(
+                    state,
+                    Some(&KeyboardFocusTarget::Element(mapped)),
+                    &focus_override.seat,
+                    None,
+                    false,
+                );
+            }
+        }
+
         let seats = state
             .common
             .shell

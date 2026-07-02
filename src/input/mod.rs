@@ -908,7 +908,13 @@ impl State {
                                 }
                             }
 
-                            Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
+                            // a click on a parent blocked by a modal dialog nudges it
+                            let redirect = self.common.shell.read().resolve_modal_redirect(&target);
+                            if let Some(KeyboardFocusTarget::Element(dialog)) = &redirect {
+                                self.common.shell.write().shake_modal_dialog(dialog);
+                            }
+                            let target = redirect.as_ref().unwrap_or(&target);
+                            Shell::set_focus(self, Some(target), &seat, Some(serial), false);
                         }
                     }
                 } else {

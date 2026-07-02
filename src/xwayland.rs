@@ -1173,6 +1173,16 @@ impl XwmHandler for State {
         }
     }
 
+    fn modal_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let _ = window.set_modal(true);
+        Shell::redirect_blocked_focus(self);
+    }
+
+    fn unmodal_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let _ = window.set_modal(false);
+        Shell::redirect_blocked_focus(self);
+    }
+
     fn stick_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
         if let Some(pending) = shell
