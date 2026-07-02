@@ -115,6 +115,7 @@ features = ["svg"]
 optional = true
 
 [features]
+custom-accel = ["cosmic-comp-config/custom-accel"]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
 logind = ["logind-zbus"]
