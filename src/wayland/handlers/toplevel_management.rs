@@ -110,11 +110,14 @@ impl ToplevelManagementHandler for State {
 
             std::mem::drop(shell);
 
-            // move pointer to window if it’s on a different monitor/output
+            // move pointer to window if it’s on a different monitor/output,
+            // but only when the user opted into cursor_follows_focus.
             let switching_output = seat.active_output() != *output;
             if switching_output && let Some(new_pos) = new_pos {
                 seat.set_active_output(output);
-                if let Some(ptr) = seat.get_pointer() {
+                if self.common.config.cosmic_conf.cursor_follows_focus
+                    && let Some(ptr) = seat.get_pointer()
+                {
                     let serial = SERIAL_COUNTER.next_serial();
                     ptr.motion(
                         self,
