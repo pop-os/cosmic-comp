@@ -37,6 +37,7 @@ use cosmic_settings_config::shortcuts;
 use shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     backend::{
+        drm::DrmNode,
         input::KeyState,
         renderer::{
             ImportAll, ImportMem, Renderer,
@@ -654,6 +655,7 @@ impl CosmicStack {
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
+        scanout_node: Option<DrmNode>,
     ) -> Vec<C>
     where
         R: AsGlowRenderer,
@@ -667,7 +669,11 @@ impl CosmicStack {
 
             windows[active]
                 .popup_render_elements::<R, CosmicStackRenderElement<R>>(
-                    renderer, window_loc, scale, alpha,
+                    renderer,
+                    window_loc,
+                    scale,
+                    alpha,
+                    scanout_node,
                 )
                 .into_iter()
                 .map(C::from)
@@ -750,6 +756,7 @@ impl CosmicStack {
         scale: Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
+        scanout_node: Option<DrmNode>,
     ) -> Vec<C>
     where
         R: AsGlowRenderer,
@@ -823,6 +830,7 @@ impl CosmicStack {
                         scale,
                         alpha,
                         scanout_override,
+                        scanout_node,
                     )
                     .into_iter()
                     .map(move |elem| {

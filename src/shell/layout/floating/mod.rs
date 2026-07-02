@@ -10,9 +10,12 @@ use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::renderer::element::{
-        AsRenderElements, RenderElement,
-        utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+    backend::{
+        drm::DrmNode,
+        renderer::element::{
+            AsRenderElements, RenderElement,
+            utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
+        },
     },
     desktop::{PopupKind, Space, WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
@@ -1439,6 +1442,7 @@ impl FloatingLayout {
         &self,
         renderer: &mut R,
         alpha: f32,
+        scanout_node: Option<DrmNode>,
     ) -> Vec<CosmicMappedRenderElement<R>>
     where
         R: AsGlowRenderer,
@@ -1474,6 +1478,7 @@ impl FloatingLayout {
                         .to_physical_precise_round(output_scale),
                     output_scale.into(),
                     alpha,
+                    scanout_node,
                 ),
             );
         }
@@ -1490,6 +1495,7 @@ impl FloatingLayout {
         indicator_thickness: u8,
         alpha: f32,
         theme: &cosmic::theme::CosmicTheme,
+        scanout_node: Option<DrmNode>,
     ) -> Vec<CosmicMappedRenderElement<R>>
     where
         R: AsGlowRenderer,
@@ -1530,6 +1536,7 @@ impl FloatingLayout {
                 output_scale.into(),
                 alpha,
                 None,
+                scanout_node,
             );
             window_elements.extend(
                 elem.shadow_render_element(

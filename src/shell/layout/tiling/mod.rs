@@ -46,15 +46,18 @@ use keyframe::{
     functions::{EaseInOutCubic, Linear},
 };
 use smithay::{
-    backend::renderer::{
-        element::{
-            AsRenderElements, Id, RenderElement,
-            utils::{
-                ConstrainAlign, ConstrainScaleBehavior, RescaleRenderElement,
-                constrain_render_elements,
+    backend::{
+        drm::DrmNode,
+        renderer::{
+            element::{
+                AsRenderElements, Id, RenderElement,
+                utils::{
+                    ConstrainAlign, ConstrainScaleBehavior, RescaleRenderElement,
+                    constrain_render_elements,
+                },
             },
+            glow::GlowRenderer,
         },
-        glow::GlowRenderer,
     },
     desktop::{PopupKind, WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
@@ -4007,6 +4010,7 @@ impl TilingLayout {
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         theme: &cosmic::theme::CosmicTheme,
+        scanout_node: Option<DrmNode>,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: AsGlowRenderer,
@@ -4093,6 +4097,7 @@ impl TilingLayout {
                 indicator_thickness,
                 swap_desc.is_some(),
                 theme,
+                scanout_node,
             ));
 
             geometries
@@ -4149,6 +4154,7 @@ impl TilingLayout {
             &self.swapping_stack_surface_id,
             &self.backdrop_id,
             theme,
+            scanout_node,
         ));
 
         // tiling hints
@@ -4167,6 +4173,7 @@ impl TilingLayout {
         non_exclusive_zone: Rectangle<i32, Local>,
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         theme: &cosmic::theme::CosmicTheme,
+        scanout_node: Option<DrmNode>,
     ) -> Result<Vec<CosmicMappedRenderElement<R>>, OutputNotMapped>
     where
         R: AsGlowRenderer,
@@ -4242,6 +4249,7 @@ impl TilingLayout {
                 output_scale,
                 percentage,
                 swap_desc.is_some(),
+                scanout_node,
             ));
 
             geometries
@@ -4281,6 +4289,7 @@ impl TilingLayout {
             percentage,
             overview,
             swap_desc.clone(),
+            scanout_node,
         ));
 
         Ok(elements)
@@ -4973,6 +4982,7 @@ fn render_old_tree_popups<R>(
     output_scale: f64,
     percentage: f32,
     is_swap_mode: bool,
+    scanout_node: Option<DrmNode>,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: AsGlowRenderer,
@@ -4998,6 +5008,7 @@ where
                         - elem_geometry.loc,
                     Scale::from(output_scale),
                     alpha,
+                    scanout_node,
                 ),
             );
         },
@@ -5016,6 +5027,7 @@ fn render_old_tree_windows<R>(
     indicator_thickness: u8,
     is_swap_mode: bool,
     theme: &cosmic::theme::CosmicTheme,
+    scanout_node: Option<DrmNode>,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: AsGlowRenderer,
@@ -5052,6 +5064,7 @@ where
                 Scale::from(output_scale),
                 alpha,
                 None,
+                scanout_node,
             );
 
             elements.extend(window_elements.into_iter().flat_map(|element| {
@@ -5196,6 +5209,7 @@ fn render_new_tree_popups<R>(
     percentage: f32,
     overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
     swap_desc: Option<NodeDesc>,
+    scanout_node: Option<DrmNode>,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: AsGlowRenderer,
@@ -5234,6 +5248,7 @@ where
                             - elem_geometry.loc,
                         Scale::from(output_scale),
                         alpha,
+                        scanout_node,
                     ),
                 );
             }
@@ -5262,6 +5277,7 @@ fn render_new_tree_windows<R>(
     swapping_stack_surface_id: &Id,
     backdrop_id: &Id,
     theme: &cosmic::theme::CosmicTheme,
+    scanout_node: Option<DrmNode>,
 ) -> Vec<CosmicMappedRenderElement<R>>
 where
     R: AsGlowRenderer,
@@ -5597,6 +5613,7 @@ where
                     Scale::from(output_scale),
                     alpha,
                     None,
+                    scanout_node,
                 );
 
                 if swap_desc
