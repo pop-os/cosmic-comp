@@ -1907,10 +1907,11 @@ fn postprocess_elements<'a>(
                 Uniform::new("invert", if screen_filter.inverted { 1. } else { 0. }),
                 Uniform::new(
                     "color_mode",
-                    screen_filter
-                        .color_filter
-                        .map(|val| val as u8 as f32)
-                        .unwrap_or(0.),
+                    if screen_filter.color_filter_enabled {
+                        screen_filter.color_filter as u8 as f32
+                    } else {
+                        0.
+                    },
                 ),
             ],
         ));
@@ -1941,10 +1942,11 @@ fn postprocess_elements<'a>(
             Uniform::new("invert", if screen_filter.inverted { 1. } else { 0. }),
             Uniform::new(
                 "color_mode",
-                screen_filter
-                    .color_filter
-                    .map(|val| val as u8 as f32)
-                    .unwrap_or(0.),
+                if screen_filter.color_filter_enabled {
+                    screen_filter.color_filter as u8 as f32
+                } else {
+                    0.
+                },
             ),
         ],
     ));
