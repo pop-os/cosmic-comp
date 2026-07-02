@@ -19,6 +19,7 @@ use crate::{
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
             image_capture_source::CosmicImageCaptureSourceState,
+            keyboard_layout::KeyboardLayoutState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
@@ -279,6 +280,7 @@ pub struct Common {
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
     pub dbus_state: DBusState,
+    pub keyboard_layout_state: KeyboardLayoutState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -682,6 +684,7 @@ impl State {
         AlphaModifierState::new::<Self>(dh);
         SinglePixelBufferState::new::<Self>(dh);
         FixesState::new::<Self>(dh);
+        let keyboard_layout_state = KeyboardLayoutState::new::<State, _>(&dh, client_not_sandboxed);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
@@ -792,6 +795,7 @@ impl State {
                 xwayland_shell_state,
                 pointer_focus_state: None,
                 dbus_state,
+                keyboard_layout_state,
 
                 #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
