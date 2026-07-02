@@ -253,14 +253,20 @@ pub enum FullscreenRestoreState {
     Tiling {
         workspace: WorkspaceHandle,
         state: TilingRestoreData,
+        was_stack: bool,
     },
     Floating {
         workspace: WorkspaceHandle,
         state: FloatingRestoreData,
+        was_stack: bool,
     },
     Sticky {
         output: WeakOutput,
         state: FloatingRestoreData,
+        was_stack: bool,
+    },
+    Stack {
+        state: StackRestoreData,
     },
 }
 
@@ -270,6 +276,18 @@ impl FullscreenRestoreState {
             FullscreenRestoreState::Floating { state, .. }
             | FullscreenRestoreState::Sticky { state, .. } => state.was_maximized,
             FullscreenRestoreState::Tiling { state, .. } => state.was_maximized,
+            FullscreenRestoreState::Stack { .. } => false,
+        }
+    }
+
+    // Surface was previously a single-window stack
+    pub fn was_stack(&self) -> bool {
+        match self {
+            FullscreenRestoreState::Floating { was_stack, .. }
+            | FullscreenRestoreState::Sticky { was_stack, .. } => *was_stack,
+            FullscreenRestoreState::Tiling { was_stack, .. } => *was_stack,
+            // Stack wasn't removed; surface was removed from the stack
+            FullscreenRestoreState::Stack { .. } => false,
         }
     }
 }
@@ -277,18 +295,9 @@ impl FullscreenRestoreState {
 #[derive(Debug, Clone)]
 pub enum WorkspaceRestoreData {
     Fullscreen(Option<FullscreenRestoreData>),
-    Tiling(Option<TilingRestoreData>),
-    Floating(Option<FloatingRestoreData>),
-}
-
-impl From<ManagedLayer> for WorkspaceRestoreData {
-    fn from(value: ManagedLayer) -> Self {
-        match value {
-            ManagedLayer::Floating | ManagedLayer::Sticky => WorkspaceRestoreData::Floating(None),
-            ManagedLayer::Tiling => WorkspaceRestoreData::Tiling(None),
-            ManagedLayer::Fullscreen => WorkspaceRestoreData::Fullscreen(None),
-        }
-    }
+    Tiling(TilingRestoreData),
+    Floating(FloatingRestoreData),
+    Stack(StackRestoreData),
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +327,12 @@ impl FloatingRestoreData {
 pub struct TilingRestoreData {
     pub state: Option<RestoreTilingState>,
     pub was_maximized: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackRestoreData {
+    pub stack: CosmicMapped,
+    pub idx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -641,32 +656,30 @@ impl Workspace {
             mapped.set_minimized(false);
             return Some(match state {
                 MinimizedWindow::Floating { previous, .. } => {
-                    WorkspaceRestoreData::Floating(Some(previous))
+                    WorkspaceRestoreData::Floating(previous)
                 }
-                MinimizedWindow::Tiling { previous, .. } => {
-                    WorkspaceRestoreData::Tiling(Some(previous))
-                }
+                MinimizedWindow::Tiling { previous, .. } => WorkspaceRestoreData::Tiling(previous),
                 MinimizedWindow::Fullscreen { .. } => unreachable!(),
             });
         }
 
         if let Ok(state) = self.tiling_layer.unmap(mapped, None) {
-            return Some(WorkspaceRestoreData::Tiling(Some(TilingRestoreData {
+            return Some(WorkspaceRestoreData::Tiling(TilingRestoreData {
                 state,
                 was_maximized: was_maximized.is_some(),
-            })));
+            }));
         }
 
         let was_snapped = *mapped.floating_tiled.lock().unwrap();
         // unmaximize_request might have triggered a `floating_layer.refresh()`,
         // which may have already removed a non-alive surface.
         if let Some(floating_geometry) = self.floating_layer.unmap(mapped, None).or(was_maximized) {
-            return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
+            return Some(WorkspaceRestoreData::Floating(FloatingRestoreData {
                 geometry: floating_geometry,
                 output_size: self.output.geometry().size.as_logical(),
                 was_maximized: was_maximized.is_some(),
                 was_snapped,
-            })));
+            }));
         };
 
         None
@@ -712,19 +725,17 @@ impl Workspace {
         }
 
         let mapped = self.element_for_surface(surface)?;
-        let maybe_stack = mapped.stack_ref().filter(|s| s.len() > 1);
-        if let Some(stack) = maybe_stack
+        if let Some(stack) = mapped.stack_ref()
             && stack.len() > 1
         {
-            let idx = stack.surfaces().position(|s| &s == surface);
-            let layer = if self.is_tiled(surface) {
-                ManagedLayer::Tiling
-            } else {
-                ManagedLayer::Floating
-            };
-            return idx
-                .and_then(|idx| stack.remove_idx(idx))
-                .map(|s| (s, layer.into()));
+            let idx = stack.surfaces().position(|s| &s == surface)?;
+            return Some((
+                stack.remove_idx(idx)?,
+                WorkspaceRestoreData::Stack(StackRestoreData {
+                    stack: mapped.clone(),
+                    idx,
+                }),
+            ));
         }
 
         // we know mapped is no stack with more than one element now,

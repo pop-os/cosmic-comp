@@ -12,7 +12,10 @@ use std::{
 use wayland_backend::server::ClientId;
 
 use crate::{
-    shell::{focus::FocusTarget, grabs::fullscreen_items, layout::tiling::PlaceholderType},
+    shell::{
+        element::CosmicStack, focus::FocusTarget, grabs::fullscreen_items,
+        layout::tiling::PlaceholderType,
+    },
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
         protocols::workspace::{State as WState, WorkspaceCapabilities},
@@ -2592,15 +2595,35 @@ impl Shell {
     pub fn remap_unfullscreened_window(
         &mut self,
         surface: CosmicSurface,
-        state: Option<FullscreenRestoreState>,
+        mut state: Option<FullscreenRestoreState>,
         loop_handle: &LoopHandle<'static, State>,
     ) -> CosmicMapped {
-        let window = CosmicMapped::from(CosmicWindow::new(
-            surface,
-            loop_handle.clone(),
-            self.theme.clone(),
-            self.appearance_conf,
-        ));
+        if let Some(FullscreenRestoreState::Stack { state: stack_state }) = &state {
+            let stack = stack_state.stack.stack_ref().unwrap();
+            if stack.alive() {
+                let idx = stack_state.idx.min(stack.len());
+                stack.add_window(surface, Some(idx), None);
+                return stack_state.stack.clone();
+            } else {
+                state = None;
+            }
+        }
+
+        let window = if state.as_ref().is_some_and(|s| s.was_stack()) {
+            CosmicMapped::from(CosmicStack::new(
+                std::iter::once(surface),
+                loop_handle.clone(),
+                self.theme.clone(),
+                self.appearance_conf,
+            ))
+        } else {
+            CosmicMapped::from(CosmicWindow::new(
+                surface,
+                loop_handle.clone(),
+                self.theme.clone(),
+                self.appearance_conf,
+            ))
+        };
 
         if let Some(FullscreenRestoreState::Sticky { output, state, .. }) = &state {
             let output = output
@@ -2637,7 +2660,9 @@ impl Shell {
                 workspace
             }
             None => self.workspaces.active_mut(&seat.active_output()).unwrap(),
-            Some(FullscreenRestoreState::Sticky { .. }) => unreachable!(),
+            Some(FullscreenRestoreState::Sticky { .. } | FullscreenRestoreState::Stack { .. }) => {
+                unreachable!()
+            }
         };
         let fullscreen_geometry = workspace.output.geometry().to_local(&workspace.output);
 
@@ -2752,7 +2777,9 @@ impl Shell {
                     }
                 }
             }
-            Some(FullscreenRestoreState::Sticky { .. }) => unreachable!(),
+            Some(FullscreenRestoreState::Sticky { .. } | FullscreenRestoreState::Stack { .. }) => {
+                unreachable!()
+            }
         }
 
         window
@@ -2856,10 +2883,12 @@ impl Shell {
 
         let maybe_focused = workspace.focus_stack.get(&seat).iter().next().cloned();
         if let Some(FocusTarget::Window(focused)) = maybe_focused
-            && (focused.is_stack() && !is_dialog && !should_be_maximized)
+            && let Some(stack) = focused.stack_ref()
+            && !is_dialog
+            && !should_be_maximized
             && !(workspace.is_tiled(&focused.active_window()) && floating_exception)
         {
-            focused.stack_ref().unwrap().add_window(window, None, None);
+            stack.add_window(window, None, None);
             if was_activated {
                 workspace_state.add_workspace_state(&workspace_handle, WState::Urgent);
             }
@@ -2985,8 +3014,8 @@ impl Shell {
                     .map(|idx| (idx, m.clone()))
             });
             let surface = if let Some((idx, mapped)) = sticky_res {
-                if mapped.is_stack() {
-                    mapped.stack_ref().unwrap().remove_idx(idx)
+                if let Some(stack) = mapped.stack_ref() {
+                    stack.remove_idx(idx)
                 } else {
                     set.sticky_layer.unmap(&mapped, None);
                     Some(mapped.active_window())
@@ -2996,20 +3025,13 @@ impl Shell {
                 .iter()
                 .position(|w| w.windows().any(|s| &s == surface))
             {
-                if set
+                if let Some(stack) = set
                     .minimized_windows
-                    .get(idx)
+                    .get_mut(idx)
                     .unwrap()
-                    .mapped()
-                    .is_some_and(CosmicMapped::is_stack)
+                    .mapped_mut()
+                    .and_then(|m| m.stack_ref())
                 {
-                    let window = set
-                        .minimized_windows
-                        .get_mut(idx)
-                        .unwrap()
-                        .mapped_mut()
-                        .unwrap();
-                    let stack = window.stack_ref().unwrap();
                     let idx = stack.surfaces().position(|s| &s == surface);
                     idx.and_then(|idx| stack.remove_idx(idx))
                 } else {
@@ -3240,7 +3262,7 @@ impl Shell {
         toplevel_enter_workspace(window, to);
 
         // we can't restore to a given position
-        if let WorkspaceRestoreData::Tiling(Some(state)) = &mut window_state {
+        if let WorkspaceRestoreData::Tiling(state) = &mut window_state {
             state.state.take();
         }
         // update fullscreen state to restore to the new workspace
@@ -3256,6 +3278,7 @@ impl Shell {
                         state: None,
                         was_maximized: previous.was_maximized(),
                     },
+                    was_stack: previous.was_stack(),
                 };
             } else if let FullscreenRestoreState::Tiling { workspace, .. }
             | FullscreenRestoreState::Floating { workspace, .. } = previous
@@ -3267,7 +3290,7 @@ impl Shell {
         if is_minimized {
             let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
             let minimized_window = match window_state {
-                WorkspaceRestoreData::Floating(Some(previous)) => {
+                WorkspaceRestoreData::Floating(previous) => {
                     let window = CosmicMapped::from(CosmicWindow::new(
                         window.clone(),
                         evlh.clone(),
@@ -3277,7 +3300,7 @@ impl Shell {
                     window.set_minimized(true);
                     MinimizedWindow::Floating { window, previous }
                 }
-                WorkspaceRestoreData::Tiling(Some(previous)) => {
+                WorkspaceRestoreData::Tiling(previous) => {
                     let window = CosmicMapped::from(CosmicWindow::new(
                         window.clone(),
                         evlh.clone(),
@@ -3344,7 +3367,7 @@ impl Shell {
                     self.appearance_conf,
                 ));
                 let position = match window_state {
-                    WorkspaceRestoreData::Floating(Some(data)) => Some(
+                    WorkspaceRestoreData::Floating(data) => Some(
                         data.position_relative(to_workspace.output.geometry().size.as_logical()),
                     ),
                     _ => None,
@@ -3444,7 +3467,7 @@ impl Shell {
         let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
         if !to_workspace.tiling_enabled {
             let (position, was_maximized, was_snapped) = match &window_state {
-                WorkspaceRestoreData::Floating(Some(data)) => (
+                WorkspaceRestoreData::Floating(data) => (
                     Some(data.position_relative(to_workspace.output.geometry().size.as_logical())),
                     data.was_maximized,
                     data.was_snapped,
@@ -4796,14 +4819,16 @@ impl Shell {
         {
             let mut from = set.sticky_layer.element_geometry(&mapped).unwrap();
             let mut was_maximized = false;
-            window = if mapped
-                .stack_ref()
-                .map(|stack| stack.len() > 1)
-                .unwrap_or(false)
+            let mut restore_state = None;
+            let was_stack = mapped.is_stack();
+            window = if let Some(stack) = mapped.stack_ref()
+                && stack.len() > 1
             {
-                let stack = mapped.stack_ref().unwrap();
-                let surface = stack.surfaces().find(|s| s == surface).unwrap();
-                stack.remove_window(&surface);
+                let idx = stack.surfaces().position(|s| &s == surface)?;
+                let surface = stack.remove_idx(idx)?;
+                restore_state = Some(FullscreenRestoreState::Stack {
+                    state: StackRestoreData { stack: mapped, idx },
+                });
                 surface
             } else {
                 // Must be set before `map_internal`/`unmap` below, as both may call
@@ -4836,7 +4861,7 @@ impl Shell {
             workspace.map_fullscreen(
                 &window,
                 &seat,
-                Some(FullscreenRestoreState::Sticky {
+                Some(restore_state.unwrap_or(FullscreenRestoreState::Sticky {
                     output: old_output,
                     state: FloatingRestoreData {
                         geometry: from,
@@ -4844,7 +4869,8 @@ impl Shell {
                         was_maximized,
                         was_snapped: None,
                     },
-                }),
+                    was_stack,
+                })),
                 Some(from),
             );
         } else if let Some(workspace) = self.space_for_mut(&mapped) {
@@ -4875,16 +4901,21 @@ impl Shell {
                 &seat,
                 match state {
                     WorkspaceRestoreData::Floating(floating_state) => {
-                        floating_state.map(|state| FullscreenRestoreState::Floating {
+                        Some(FullscreenRestoreState::Floating {
                             workspace: handle,
-                            state,
+                            state: floating_state,
+                            was_stack: mapped.is_stack(),
                         })
                     }
                     WorkspaceRestoreData::Tiling(tiling_state) => {
-                        tiling_state.map(|state| FullscreenRestoreState::Tiling {
+                        Some(FullscreenRestoreState::Tiling {
                             workspace: handle,
-                            state,
+                            state: tiling_state,
+                            was_stack: mapped.is_stack(),
                         })
+                    }
+                    WorkspaceRestoreData::Stack(stack_state) => {
+                        Some(FullscreenRestoreState::Stack { state: stack_state })
                     }
                     WorkspaceRestoreData::Fullscreen(_) => unreachable!(),
                 },
