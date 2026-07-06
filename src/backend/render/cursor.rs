@@ -114,18 +114,57 @@ enum Error {
     NoDefaultCursor,
     #[error("Error opening xcursor file: {0}")]
     File(#[from] std::io::Error),
-    #[error("Failed to parse XCursor file")]
-    Parse,
+}
+
+fn cursor_aliases(name: &str) -> &[&str] {
+    match name {
+        "default" => &["default", "left_ptr", "arrow"],
+        "pointer" => &["pointer", "hand2", "hand"],
+        "text" => &["text", "xterm"],
+        "wait" => &["wait", "watch"],
+        "progress" => &["progress", "left_ptr_watch"],
+
+        "ew-resize" => &["ew-resize", "h_double_arrow", "sb_h_double_arrow"],
+        "ns-resize" => &["ns-resize", "v_double_arrow", "sb_v_double_arrow"],
+        "nw-resize" => &["nw-resize", "top_left_corner"],
+        "ne-resize" => &["ne-resize", "top_right_corner"],
+        "sw-resize" => &["sw-resize", "bottom_left_corner"],
+        "se-resize" => &["se-resize", "bottom_right_corner"],
+
+        "w-resize" => &["w-resize", "left_side"],
+        "e-resize" => &["e-resize", "right_side"],
+        "n-resize" => &["n-resize", "top_side"],
+        "s-resize" => &["s-resize", "bottom_side"],
+
+        "move" => &["move", "fleur"],
+        "not-allowed" => &["not-allowed", "crossed_circle"],
+        "crosshair" => &["crosshair", "cross"],
+        "help" => &["help", "question_arrow", "left_ptr_help"],
+
+        _ => &[],
+    }
 }
 
 fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error> {
-    let icon_path = theme
-        .load_icon(&shape.to_string())
-        .ok_or(Error::NoDefaultCursor)?;
-    let mut cursor_file = std::fs::File::open(&icon_path)?;
-    let mut cursor_data = Vec::new();
-    cursor_file.read_to_end(&mut cursor_data)?;
-    parse_xcursor(&cursor_data).ok_or(Error::Parse)
+    let shape_name = shape.to_string();
+
+    for name in cursor_aliases(&shape_name)
+        .iter()
+        .copied()
+        .chain(std::iter::once(shape_name.as_str()))
+    {
+        if let Some(icon_path) = theme.load_icon(name) {
+            let mut cursor_file = std::fs::File::open(&icon_path)?;
+            let mut cursor_data = Vec::new();
+            cursor_file.read_to_end(&mut cursor_data)?;
+
+            if let Some(images) = parse_xcursor(&cursor_data) {
+                return Ok(images);
+            }
+        }
+    }
+
+    Err(Error::NoDefaultCursor)
 }
 
 render_elements! {
