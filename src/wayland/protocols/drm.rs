@@ -180,7 +180,7 @@ where
                     Modifier::Invalid,
                     DmabufFlags::empty(),
                 );
-                dma.add_plane(name, 0, offset0 as u32, stride0 as u32);
+                dma.add_plane(name, offset0 as u32, stride0 as u32);
                 match dma.build() {
                     Some(dmabuf) => {
                         match state.dmabuf_imported(&data.dmabuf_global, dmabuf.clone()) {
