@@ -124,9 +124,9 @@ impl fmt::Debug for CosmicMapped {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CosmicMappedKey(CosmicMappedKeyInner);
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum CosmicMappedKeyInner {
     Window(Weak<Mutex<IcedElementInternal<CosmicWindowInternal>>>),
     Stack(Weak<Mutex<IcedElementInternal<CosmicStackInternal>>>),
@@ -164,6 +164,20 @@ impl PartialEq for CosmicMappedKey {
     }
 }
 impl Eq for CosmicMappedKey {}
+
+impl PartialEq<CosmicMappedKey> for CosmicMapped {
+    fn eq(&self, other: &CosmicMappedKey) -> bool {
+        match (&self.element, &other.0) {
+            (CosmicMappedInternal::Window(window), CosmicMappedKeyInner::Window(weak)) => {
+                Arc::as_ptr(&window.0.0) == weak.as_ptr()
+            }
+            (CosmicMappedInternal::Stack(stack), CosmicMappedKeyInner::Stack(weak)) => {
+                Arc::as_ptr(&stack.0.0) == weak.as_ptr()
+            }
+            _ => false,
+        }
+    }
+}
 
 impl PartialEq for CosmicMapped {
     fn eq(&self, other: &Self) -> bool {
