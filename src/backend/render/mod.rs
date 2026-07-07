@@ -41,7 +41,9 @@ use crate::{
             compositor::FRAME_TIME_FILTER,
             corner_radius::{pad_rect, surface_corners, surface_padding},
             data_device::get_dnd_icon,
-            image_copy_capture::{FrameHolder, SessionData, render_session},
+            image_copy_capture::{
+                FrameHolder, SessionData, render_element_buffers, render_session,
+            },
         },
         protocols::workspace::WorkspaceHandle,
     },
@@ -1505,11 +1507,16 @@ where
                             }
                         }
 
-                        Ok(RenderOutputResult {
-                            damage: res.0,
-                            sync,
-                            states: res.1,
-                        })
+                        let buffers = render_element_buffers(renderer, &elements);
+
+                        Ok((
+                            RenderOutputResult {
+                                damage: res.0,
+                                sync,
+                                states: res.1,
+                            },
+                            buffers,
+                        ))
                     },
                 )? {
                     pending_image_copy_data.send_success_when_ready(

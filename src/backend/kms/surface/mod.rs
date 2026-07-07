@@ -1674,7 +1674,7 @@ fn send_screencopy_result<'a>(
     pre_postprocess_data: &mut PrePostprocessData,
     tx: &std::sync::mpsc::Sender<PendingImageCopyData>,
     frame_result: &RenderFrameResult<GbmBuffer, GbmFramebuffer, CosmicElement<GlMultiRenderer<'a>>>,
-    elements: &[CosmicElement<GlMultiRenderer>],
+    elements: &[CosmicElement<GlMultiRenderer<'a>>],
     (session, frame, res): (
         &ScreencopySessionRef,
         ScreencopyFrame,
@@ -1855,6 +1855,8 @@ fn send_screencopy_result<'a>(
         transform,
         damage.as_deref(),
         sync,
+        // Don't reference `Buffer`s since we blit from framebuffer/postprocess buffer
+        vec![],
     )? {
         if frame_result.is_empty {
             data.frame
