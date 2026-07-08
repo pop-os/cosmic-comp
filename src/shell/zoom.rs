@@ -319,7 +319,7 @@ impl ZoomState {
             ZoomMovement::Centered => {
                 let center = (output_geometry.size / 2.).to_point();
 
-                if level <= 1.0 + f64::EPSILON {
+                if level == 1.0 {
                     // Prevent focal point jumping to top-left corner (0, 0) on zoom out
                     output_state_ref.focal_point = center;
                     return;
