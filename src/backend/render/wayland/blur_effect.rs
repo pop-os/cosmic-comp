@@ -489,10 +489,8 @@ fn blit_from_active_fb(
     transform: Transform,
     to_texture: &mut GlesTexture,
 ) -> Result<SyncPoint, GlesError> {
-    let tex_size = to_texture
-        .size()
-        .to_logical(1, Transform::Normal)
-        .to_physical(1);
+    let tex_size = to_texture.size();
+    let tex_size_phys = tex_size.to_logical(1, Transform::Normal).to_physical(1);
     let fb_size = frame.output_size();
 
     let mut renderer = frame.renderer();
@@ -500,27 +498,31 @@ fn blit_from_active_fb(
     let sync = {
         let mut subframe = renderer
             .as_mut()
-            .render(&mut fb, tex_size, Transform::Normal)?;
-        subframe.clear(Color32F::TRANSPARENT, &[Rectangle::from_size(tex_size)])?;
+            .render(&mut fb, tex_size_phys, Transform::Normal)?;
+        subframe.clear(
+            Color32F::TRANSPARENT,
+            &[Rectangle::from_size(tex_size_phys)],
+        )?;
         subframe.finish()?
     };
 
     if transform != Transform::Normal {
-        let dst = dst
+        // We need to copy to a temporary texture to do an actual
+        // render pass with `render_texture_from_to` to do the rotation.
+        // dst is in screen space, but we just want to do a 1:1 copy in
+        // buffer space from dst of the current fb, so we need to undo any
+        // transforms for the blit.
+        let dst_phys = transform.transform_rect_in(dst, &fb_size);
+        let dst_buffer = dst_phys
             .to_logical(1)
-            .to_buffer(1, transform, &fb_size.to_logical(1));
+            .to_buffer(1, Transform::Normal, &Size::default());
         let mut tmp_texture = renderer
             .as_mut()
-            .create_buffer(Fourcc::Abgr8888, dst.size)?;
+            .create_buffer(Fourcc::Abgr8888, dst_buffer.size)?;
         let mut fb_tmp = renderer.as_mut().bind(&mut tmp_texture)?;
         std::mem::drop(renderer);
         frame.wait(&sync)?;
 
-        // TODO: Why does blit not take buffer coordinates?
-        let dst_phys = Rectangle::<_, Physical>::new(
-            Point::new(dst.loc.x, dst.loc.y),
-            dst.size.to_logical(1, Transform::Normal).to_physical(1),
-        );
         let sync = frame.blit_to(
             &mut fb_tmp,
             dst_phys,
@@ -530,20 +532,23 @@ fn blit_from_active_fb(
         frame.wait(&sync)?;
         std::mem::drop(fb_tmp);
 
+        // now we bind the target texture with `Transform::Normal`
+        // and render the temporary texture with inverse transform
+        // into src.
         let mut renderer = frame.renderer();
         let mut frame = renderer
             .as_mut()
-            .render(&mut fb, tex_size, Transform::Normal)?;
+            .render(&mut fb, tex_size_phys, Transform::Normal)?;
         frame.wait(&sync)?;
         Frame::render_texture_from_to(
             &mut frame,
             &tmp_texture,
-            Rectangle::from_size(dst.size.to_f64()),
-            src.to_logical(1., Transform::Normal, &src.size)
+            Rectangle::from_size(dst_buffer.size.to_f64()),
+            src.to_logical(1., Transform::Normal, &Size::default())
                 .to_physical(1.)
                 .to_i32_round(),
-            &[Rectangle::from_size(dst_phys.size)],
-            &[Rectangle::from_size(dst_phys.size)],
+            &[Rectangle::from_size(dst.size)],
+            &[Rectangle::from_size(dst.size)],
             transform.invert(),
             1.0,
         )?;
@@ -555,7 +560,7 @@ fn blit_from_active_fb(
         frame.blit_to(
             &mut fb,
             dst,
-            src.to_logical(1., Transform::Normal, &src.size)
+            src.to_logical(1., Transform::Normal, &Size::default())
                 .to_physical(1.)
                 .to_i32_round(),
             TextureFilter::Linear,
