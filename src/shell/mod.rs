@@ -2471,6 +2471,14 @@ impl Shell {
             increment: zoom_config.increment,
             movement: zoom_config.view_moves,
         });
+
+        if level > 1.0 {
+            self.update_focal_point(
+                seat,
+                seat.get_pointer().unwrap().current_location().as_global(),
+                zoom_config.view_moves,
+            );
+        }
     }
 
     pub fn update_focal_point(
