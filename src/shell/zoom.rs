@@ -257,11 +257,13 @@ impl ZoomState {
             }
             ZoomMovement::OnEdge => {
                 if is_level_change {
+                    // Ensure the cursor doesn't disappear off screen
                     output_state_ref.focal_point = cursor_position;
                     return;
                 }
 
                 // Compute small margin relative to zoomed output to keep cursor within
+                // (can be user-configurable in the future)
                 let margin_size = zoomed_output_geometry.size.h * 0.02;
                 let margins = FrameExtents::new(margin_size, margin_size, margin_size, margin_size);
                 let inner_rect = zoomed_output_geometry - margins;
@@ -305,7 +307,7 @@ impl ZoomState {
                 let center = (output_geometry.size / 2.).to_point();
 
                 if level <= 1.0 + f64::EPSILON {
-                    // Without this break, focal point will jump to (0, 0) on zoom out
+                    // Prevent focal point jumping to top-left corner (0, 0) on zoom out
                     output_state_ref.focal_point = center;
                     return;
                 }
