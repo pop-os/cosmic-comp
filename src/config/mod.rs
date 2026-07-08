@@ -924,6 +924,17 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.config.cosmic_conf.focus_follows_cursor_delay = new;
                 }
             }
+            // Live-reload the "raise on focus-follows-cursor" toggle. Reading the
+            // key and comparing before assigning matches the surrounding arms and
+            // avoids a needless write when the value is unchanged. No further work
+            // is required on change: the flag is consulted the next time focus
+            // follows the pointer, so the new setting takes effect immediately.
+            "focus_follows_cursor_raise" => {
+                let new = get_config::<bool>(&config, "focus_follows_cursor_raise");
+                if new != state.common.config.cosmic_conf.focus_follows_cursor_raise {
+                    state.common.config.cosmic_conf.focus_follows_cursor_raise = new;
+                }
+            }
             "edge_snap_threshold" => {
                 let new = get_config::<u32>(&config, "edge_snap_threshold");
                 if new != state.common.config.cosmic_conf.edge_snap_threshold {
