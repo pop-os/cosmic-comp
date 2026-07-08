@@ -549,6 +549,7 @@ impl CosmicWindow {
         }
 
         self.0.with_program(|p| {
+            let mut radii = radii;
             if has_ssd {
                 radii[1] = 0;
                 radii[3] = 0;
@@ -575,6 +576,8 @@ impl CosmicWindow {
         });
 
         if has_ssd {
+            radii[0] = 0;
+            radii[2] = 0;
             let ssd_loc = location
                 + self
                     .0
