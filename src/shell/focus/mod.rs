@@ -36,6 +36,27 @@ pub enum FocusTarget {
     Fullscreen(CosmicSurface),
 }
 
+/// Whether a focus change should also raise the focused window to the top of
+/// its layer's stacking order.
+///
+/// This exists to keep raising separate from focusing. Historically every
+/// focus change raised the window; with focus-follows-cursor that means a
+/// window jumps to the front merely because the pointer crossed it. Passing
+/// `Raise::No` lets focus move without disturbing stacking order (sloppy
+/// focus). A named enum is used instead of a bare `bool` because `set_focus`
+/// already takes another boolean (`update_cursor`); two adjacent bools at a
+/// call site are easy to transpose, whereas `Raise::Yes`/`Raise::No` is
+/// self-documenting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Raise {
+    /// Raise the window. Used for explicit focus intent: a click, a keyboard
+    /// action, or an application activating itself.
+    Yes,
+    /// Do not raise. Used when focus arrived passively (the pointer moved onto
+    /// the window) and the user has opted out of raise-on-hover.
+    No,
+}
+
 impl PartialEq<CosmicMapped> for FocusTarget {
     fn eq(&self, other: &CosmicMapped) -> bool {
         matches!(self, FocusTarget::Window(mapped) if mapped == other)
@@ -194,6 +215,10 @@ impl Shell {
         seat: &Seat<State>,
         serial: Option<Serial>,
         update_cursor: bool,
+        // Whether this focus change should also raise the window. Explicit
+        // focus passes Raise::Yes; passive focus-follows-cursor passes the
+        // user's configured choice.
+        raise: Raise,
     ) {
         let focus_target = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(FocusTarget::Window(mapped.clone())),
@@ -209,7 +234,24 @@ impl Shell {
 
         update_focus_state(seat, target, state, serial, update_cursor);
 
-        state.common.shell.write().update_active();
+        // Record or clear the "focused but do not auto-raise" mark under the
+        // same write lock we use to run update_active(), so the two stay
+        // consistent. On explicit focus (Raise::Yes) we clear any prior mark
+        // so the window raises normally. On passive focus with raising off
+        // (Raise::No) we mark the focused window — but only if it is an actual
+        // toplevel element; fullscreen and layer-surface targets are never in
+        // the floating stack, so there is nothing to suppress for them.
+        {
+            let mut shell = state.common.shell.write();
+            shell.no_raise_window = match raise {
+                Raise::No => match target {
+                    Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
+                    _ => None,
+                },
+                Raise::Yes => None,
+            };
+            shell.update_active();
+        }
     }
 
     pub fn append_focus_stack(&mut self, target: impl Into<FocusTarget>, seat: &Seat<State>) {
@@ -269,9 +311,22 @@ impl Shell {
             })
             .collect::<Vec<_>>();
 
+        // Snapshot the no-raise mark before the loops below borrow `self`
+        // mutably (they call `self.workspaces...get_mut`). Cloning a
+        // CosmicMapped is cheap (it is reference-counted) and releasing the
+        // borrow here keeps the borrow checker happy.
+        let no_raise = self.no_raise_window.clone();
+
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
             let set = self.workspaces.sets.get_mut(&output).unwrap();
             for focused in focused_windows.iter() {
+                // Skip raising a window the user is only hovering over (sloppy
+                // focus): raising it would defeat focus-follows-cursor-without-
+                // raise. All other (explicit) focus changes cleared the mark,
+                // so they fall through and raise as before.
+                if no_raise.as_ref() == Some(focused) {
+                    continue;
+                }
                 raise_with_children(&mut set.sticky_layer, focused);
             }
             for window in set.sticky_layer.mapped() {
@@ -302,6 +357,10 @@ impl Shell {
                 fs.surface.send_configure();
             }
             for focused in focused_windows.iter() {
+                // Same sloppy-focus guard as the sticky layer above.
+                if no_raise.as_ref() == Some(focused) {
+                    continue;
+                }
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
             for window in workspace.mapped() {

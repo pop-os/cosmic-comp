@@ -9,7 +9,8 @@ use std::{
 use crate::{
     backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
     shell::{
-        CosmicSurface, PendingWindow, Shell, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
+        CosmicSurface, PendingWindow, Raise, Shell, focus::target::KeyboardFocusTarget,
+        grabs::ReleaseMode,
     },
     state::State,
     utils::prelude::*,
@@ -850,7 +851,7 @@ impl XwmHandler for State {
             if let Some(target) = res {
                 let seat = shell.seats.last_active().clone();
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, false);
+                Shell::set_focus(self, Some(&target), &seat, None, false, Raise::Yes);
             }
         }
     }
@@ -1130,7 +1131,7 @@ impl XwmHandler for State {
         match shell.fullscreen_request(&window, output.clone(), &self.common.event_loop_handle) {
             Some(target) => {
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, true);
+                Shell::set_focus(self, Some(&target), &seat, None, true, Raise::Yes);
             }
             None => {
                 if let Some(pending) = shell
@@ -1162,7 +1163,7 @@ impl XwmHandler for State {
         if let Some(target) = shell.unfullscreen_request(&window, &self.common.event_loop_handle) {
             std::mem::drop(shell);
             if should_focus {
-                Shell::set_focus(self, Some(&target), &seat, None, true);
+                Shell::set_focus(self, Some(&target), &seat, None, true, Raise::Yes);
             }
         } else if let Some(pending) = shell
             .pending_windows
