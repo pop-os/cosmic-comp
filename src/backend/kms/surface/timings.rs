@@ -316,9 +316,10 @@ impl Timings {
             since_last.as_secs() * 1_000_000_000 + u64::from(since_last.subsec_nanos());
         let to_next_ns = (since_last_ns / refresh_interval_ns + 1) * refresh_interval_ns;
 
-        // If VRR is enabled and more than one frame passed since last presentation, assume that we
-        // can present immediately.
-        if self.vrr && to_next_ns > refresh_interval_ns {
+        // If VRR is enabled and we are already a full frame or more behind schedule (i.e. this is
+        // a genuine missed-vblank recovery, not just the normal one-interval-ahead computation),
+        // assume that we can present immediately.
+        if self.vrr && to_next_ns > 2 * refresh_interval_ns {
             Duration::ZERO
         } else {
             last_presentation_time + Duration::from_nanos(to_next_ns) - now
@@ -381,11 +382,27 @@ impl Timings {
             return Duration::ZERO;
         }
 
+        // When the deadline (estimated_presentation_time - margin) has already passed, don't
+        // collapse to Duration::ZERO: that causes an immediate re-render right after the previous
+        // vblank instead of one scheduled just before the next vblank, keeping the GPU busy for
+        // (almost) the whole refresh interval instead of letting it idle. Floor to a small delay
+        // so rendering still happens close to, but not exactly at, the previous presentation.
+        const MIN_RENDER_TIME: Duration = Duration::from_millis(1);
+
         let Some(avg_submittime) = self.avg_submittime(SAMPLE_TIME_WINDOW) else {
-            return estimated_presentation_time.saturating_sub(baseline + BASE_SAFETY_MARGIN);
+            let margin = baseline + BASE_SAFETY_MARGIN;
+            return if estimated_presentation_time > margin {
+                estimated_presentation_time - margin
+            } else {
+                MIN_RENDER_TIME
+            };
         };
 
         let margin = avg_submittime + BASE_SAFETY_MARGIN;
-        estimated_presentation_time.saturating_sub(margin)
+        if estimated_presentation_time > margin {
+            estimated_presentation_time - margin
+        } else {
+            MIN_RENDER_TIME
+        }
     }
 }
