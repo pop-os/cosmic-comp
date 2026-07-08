@@ -91,6 +91,15 @@ pub struct CosmicCompConfig {
     pub cursor_follows_focus: bool,
     /// The delay in milliseconds before focus follows mouse (if enabled)
     pub focus_follows_cursor_delay: u64,
+    /// When `focus_follows_cursor` is enabled, controls whether the window
+    /// that gains keyboard focus from the pointer passing over it is also
+    /// raised to the front of the stack.
+    ///
+    /// `true`  = historical behaviour: hovering focuses AND raises.
+    /// `false` = "sloppy focus": hovering focuses but leaves stacking order
+    ///           alone; a window only rises when explicitly acted upon
+    ///           (clicked, keyboard-focused, or activated by an app).
+    pub focus_follows_cursor_raise: bool,
     /// Let X11 applications scale themselves
     pub descale_xwayland: XwaylandDescaling,
     /// Let X11 applications snoop on certain key-presses to allow for global shortcuts
@@ -133,6 +142,9 @@ impl Default for CosmicCompConfig {
             focus_follows_cursor: false,
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
+            // Default true preserves the historical focus-follows-cursor
+            // behaviour (raise on hover) for everyone who has not opted out.
+            focus_follows_cursor_raise: true,
             descale_xwayland: XwaylandDescaling::Fractional,
             xwayland_eavesdropping: XwaylandEavesdropping::default(),
             edge_snap_threshold: 0,
@@ -246,4 +258,20 @@ pub enum XwaylandDescaling {
     Disabled,
     #[default]
     Fractional,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CosmicCompConfig;
+
+    /// The new "raise on focus-follows-cursor" option must default to `true`
+    /// so that upgrading users keep the historical behaviour (focus follows
+    /// the pointer AND raises). Only users who explicitly opt out get the
+    /// new "sloppy focus" behaviour.
+    #[test]
+    fn focus_follows_cursor_raise_defaults_to_true() {
+        // Build the whole config with its Default impl and check just the one field.
+        let config = CosmicCompConfig::default();
+        assert!(config.focus_follows_cursor_raise);
+    }
 }
