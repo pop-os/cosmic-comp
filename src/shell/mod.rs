@@ -4883,10 +4883,19 @@ impl Shell {
                 return None;
             }
 
-            // Must be set before `unmap_surface()`.
-            // `Workspace::unmap_surface` may call intermediate `configure()` internally, which would send
-            // a configure event without the fullscreen state, causing clients like Chromium to cancel the transition.
-            mapped.set_fullscreen(true);
+            // A multi-tab stack extracts via `remove_idx`, which only stages
+            // pending state - the extracted surface's first configure is the
+            // one `map_fullscreen` sends, already carrying `Fullscreen`.
+            // Everything else unmaps through `unmap_element`, which flushes a
+            // configure mid-unmap; pre-set `Fullscreen` on the requesting
+            // surface (never the whole mapped element - that leaks pending
+            // `Fullscreen` onto sibling tabs) so that configure doesn't read
+            // as a denial to clients like Chromium.
+            if !mapped.stack_ref().is_some_and(|s| s.len() > 1)
+                && let Some((target, _)) = mapped.windows().find(|(w, _)| w == surface)
+            {
+                target.set_fullscreen(true);
+            }
 
             let from = workspace.element_geometry(&mapped).unwrap();
             let (surface, state) = workspace.unmap_surface(surface).unwrap();
