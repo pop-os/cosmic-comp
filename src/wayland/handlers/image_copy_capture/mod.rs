@@ -42,7 +42,9 @@ mod render;
 mod user_data;
 pub use self::render::*;
 use self::user_data::*;
-pub use self::user_data::{FrameHolder, ImageCopySessions, SessionData, SessionHolder};
+pub use self::user_data::{
+    FrameHolder, ImageCopySessions, ImageCopySessionsData, SessionData, SessionHolder,
+};
 
 impl ImageCopyCaptureHandler for State {
     fn image_copy_capture_state(&mut self) -> &mut ImageCopyCaptureState {
