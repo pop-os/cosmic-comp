@@ -378,8 +378,16 @@ impl CosmicSurface {
                     });
                     with_states(toplevel.wl_surface(), |data| {
                         if let Some(kde_data) = data.data_map.get::<KdeDecorationData>() {
-                            for obj in kde_data.lock().unwrap().objs.iter() {
-                                obj.mode(KdeMode::Server);
+                            let kde_data = kde_data.lock().unwrap();
+                            // Prefer the recorded xdg preference; fall back to
+                            // the client's kde-decoration request.
+                            let mode = match previous_mode {
+                                Some(DecorationMode::ServerSide) => KdeMode::Server,
+                                Some(_) => KdeMode::Client,
+                                None => kde_data.mode.unwrap_or(KdeMode::Client),
+                            };
+                            for obj in kde_data.objs.iter() {
+                                obj.mode(mode);
                             }
                         }
                     })
