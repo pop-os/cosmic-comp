@@ -136,6 +136,7 @@ pub enum Usage {
     PotentialGroupIndicator,
     SnappingIndicator,
     Border,
+    ModalDim,
 }
 
 #[derive(Clone)]

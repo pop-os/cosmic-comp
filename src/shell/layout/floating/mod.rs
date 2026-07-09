@@ -8,7 +8,10 @@ use std::{
 
 use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
-use keyframe::{ease, functions::EaseInOutCubic};
+use keyframe::{
+    ease,
+    functions::{EaseInOutCubic, EaseOutCubic},
+};
 use smithay::{
     backend::{
         drm::DrmNode,
@@ -50,6 +53,8 @@ pub use self::grabs::*;
 
 pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+const SHAKE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+const SHAKE_AMPLITUDE: f32 = 10.0;
 
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
@@ -79,6 +84,10 @@ enum Animation {
         previous_geometry: Rectangle<i32, Local>,
         target_geometry: Rectangle<i32, Local>,
     },
+    Shake {
+        start: Instant,
+        geometry: Rectangle<i32, Local>,
+    },
 }
 
 impl Animation {
@@ -87,12 +96,13 @@ impl Animation {
             Animation::Tiled { start, .. } => start,
             Animation::Minimize { start, .. } => start,
             Animation::Unminimize { start, .. } => start,
+            Animation::Shake { start, .. } => start,
         }
     }
 
     fn alpha(&self) -> f32 {
         match self {
-            Animation::Tiled { .. } => 1.0,
+            Animation::Tiled { .. } | Animation::Shake { .. } => 1.0,
             Animation::Minimize { start, .. } => {
                 let percentage = Instant::now()
                     .duration_since(*start)
@@ -123,6 +133,7 @@ impl Animation {
             Animation::Unminimize {
                 previous_geometry, ..
             } => previous_geometry,
+            Animation::Shake { geometry, .. } => geometry,
         }
     }
 
@@ -134,6 +145,21 @@ impl Animation {
         gaps: (i32, i32),
     ) -> Rectangle<i32, Local> {
         let (duration, target_rect) = match self {
+            Animation::Shake { start, geometry } => {
+                let progress = Instant::now()
+                    .duration_since(*start)
+                    .min(SHAKE_ANIMATION_DURATION)
+                    .as_secs_f32()
+                    / SHAKE_ANIMATION_DURATION.as_secs_f32();
+                let envelope: f32 = ease(EaseOutCubic, 1.0, 0.0, progress);
+                let offset =
+                    (SHAKE_AMPLITUDE * envelope * (progress * 3.0 * std::f32::consts::TAU).sin())
+                        .round() as i32;
+
+                let mut geometry = *geometry;
+                geometry.loc.x += offset;
+                return geometry;
+            }
             Animation::Minimize {
                 target_geometry, ..
             }
@@ -378,7 +404,9 @@ impl FloatingLayout {
                     } => {
                         *target_geometry = geometry;
                     }
-                    Animation::Minimize { .. } | Animation::Tiled { .. } => {}
+                    Animation::Minimize { .. }
+                    | Animation::Tiled { .. }
+                    | Animation::Shake { .. } => {}
                 }
             } else {
                 self.animations.insert(
@@ -1416,6 +1444,7 @@ impl FloatingLayout {
         self.animations.retain(|_, anim| {
             let duration = match anim {
                 Animation::Tiled { .. } => ANIMATION_DURATION,
+                Animation::Shake { .. } => SHAKE_ANIMATION_DURATION,
                 _ => MINIMIZE_ANIMATION_DURATION,
             };
             Instant::now().duration_since(*anim.start()) < duration
@@ -1423,6 +1452,25 @@ impl FloatingLayout {
         if self.animations.is_empty() != was_empty {
             self.dirty.store(true, Ordering::SeqCst);
         }
+    }
+
+    /// Plays a nudge animation on `mapped` if it lives in this layer; returns
+    /// whether it does, so callers can stop searching other layers.
+    pub fn shake(&mut self, mapped: &CosmicMapped) -> bool {
+        let Some(geometry) = self.space.element_geometry(mapped) else {
+            return false;
+        };
+        if !self.animations.contains_key(mapped) {
+            self.animations.insert(
+                mapped.clone(),
+                Animation::Shake {
+                    start: Instant::now(),
+                    geometry: geometry.as_local(),
+                },
+            );
+            self.dirty.store(true, Ordering::SeqCst);
+        }
+        true
     }
 
     pub fn merge(&mut self, other: FloatingLayout) {
@@ -1660,6 +1708,16 @@ impl FloatingLayout {
                     );
                     window_elements.insert(0, element.into());
                 }
+            }
+
+            let shade = theme.shade;
+            if let Some(dim) = elem.modal_dim_element(
+                renderer,
+                geometry,
+                alpha,
+                [shade.red, shade.green, shade.blue],
+            ) {
+                window_elements.insert(0, dim);
             }
 
             elements.extend(window_elements);

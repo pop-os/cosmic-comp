@@ -1,5 +1,8 @@
 use crate::{
-    backend::render::element::{AsGlowRenderer, FromGlesError},
+    backend::render::{
+        BackdropShader, Key, Usage,
+        element::{AsGlowRenderer, FromGlesError},
+    },
     state::State,
     utils::{iced::IcedElementInternal, prelude::*},
 };
@@ -39,11 +42,13 @@ use smithay::{
 use stack::CosmicStackInternal;
 use window::CosmicWindowInternal;
 
+use keyframe::{ease, functions::EaseInOutCubic};
 use std::{
     borrow::Cow,
     fmt,
     hash::Hash,
     sync::{Arc, Mutex, Weak, atomic::AtomicBool},
+    time::Instant,
 };
 
 pub mod surface;
@@ -90,6 +95,51 @@ pub struct MaximizedState {
     pub original_snapped: Option<TiledCorners>,
 }
 
+pub const MODAL_DIM_FADE_SECS: f32 = 0.125;
+
+/// Dim fade of a toplevel blocked by a modal dialog, see `Shell::refresh_modal_dim`.
+#[derive(Debug, Clone, Copy)]
+pub struct ModalDimState {
+    start: Instant,
+    from: f32,
+    dimmed: bool,
+    dim_alpha: f32,
+}
+
+impl ModalDimState {
+    pub fn new(dim_alpha: f32, now: Instant) -> Self {
+        ModalDimState {
+            start: now,
+            from: 0.0,
+            dimmed: true,
+            dim_alpha,
+        }
+    }
+
+    pub fn is_dimmed(&self) -> bool {
+        self.dimmed
+    }
+
+    pub fn set_dimmed(&mut self, dimmed: bool, dim_alpha: f32, now: Instant) {
+        self.from = self.alpha(now);
+        self.dimmed = dimmed;
+        self.dim_alpha = dim_alpha;
+        self.start = now;
+    }
+
+    pub fn alpha(&self, now: Instant) -> f32 {
+        let to = if self.dimmed { self.dim_alpha } else { 0.0 };
+        let progress = (now.saturating_duration_since(self.start).as_secs_f32()
+            / MODAL_DIM_FADE_SECS)
+            .min(1.0);
+        ease(EaseInOutCubic, self.from, to, progress)
+    }
+
+    pub fn is_faded_out(&self, now: Instant) -> bool {
+        !self.dimmed && self.alpha(now) <= 0.0
+    }
+}
+
 #[derive(Clone)]
 pub struct CosmicMapped {
     element: CosmicMappedInternal,
@@ -106,6 +156,8 @@ pub struct CosmicMapped {
     pub floating_tiled: Arc<Mutex<Option<TiledCorners>>>,
     //sticky
     pub previous_layer: Arc<Mutex<Option<ManagedLayer>>>,
+    //modal dialogs
+    pub modal_dim: Arc<Mutex<Option<ModalDimState>>>,
 
     #[cfg(feature = "debug")]
     debug: Arc<Mutex<Option<smithay_egui::EguiState>>>,
@@ -921,6 +973,57 @@ impl CosmicMapped {
         }
     }
 
+    pub fn modal_dim_alpha(&self) -> Option<f32> {
+        let alpha = self
+            .modal_dim
+            .lock()
+            .unwrap()
+            .as_ref()?
+            .alpha(Instant::now());
+        (alpha > 0.0).then_some(alpha)
+    }
+
+    /// Backdrop overlay dimming this window while it is blocked by a modal dialog.
+    pub fn modal_dim_element<R>(
+        &self,
+        renderer: &mut R,
+        geo: Rectangle<i32, Local>,
+        alpha: f32,
+        color: [f32; 3],
+    ) -> Option<CosmicMappedRenderElement<R>>
+    where
+        R: AsGlowRenderer,
+        R::TextureId: 'static,
+    {
+        let dim_alpha = self.modal_dim_alpha()?;
+        // Dim the window content only, not the SSD header or stack tabs.
+        // active_window_geometry().loc is correct, but for a non-stacked X11 window its
+        // size is too tall: the Window branch adds SSD_HEIGHT while loc already skips the
+        // header, so the dim ends up SSD_HEIGHT below the window. Use the active surface
+        // size instead.
+        // TODO: fix when Window branch in active_window_geometry matches Stack.
+        let offset = self.active_window_geometry().loc;
+        let size = self.active_window().geometry().size;
+        let active_geo = Rectangle::new(geo.loc + offset.as_local(), size.as_local());
+        let radius = self
+            .corner_radius(active_geo.size.as_logical(), 0)
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        // BackdropShader takes one radius, not per-corner. X11 don't have rounded corners on top
+        // because the header is a decoration on top of X11 window content, so dim there require
+        // per-corner radius.
+        // TODO: proper per-corner dim needs a vec4 radius in the backdrop shader.
+        Some(CosmicMappedRenderElement::Overlay(BackdropShader::element(
+            renderer,
+            Key::Window(Usage::ModalDim, self.key()),
+            active_geo,
+            radius as f32,
+            alpha * dim_alpha,
+            color,
+        )))
+    }
+
     pub fn key(&self) -> CosmicMappedKey {
         CosmicMappedKey(match &self.element {
             CosmicMappedInternal::Stack(stack) => {
@@ -1083,6 +1186,7 @@ impl From<CosmicWindow> for CosmicMapped {
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
             floating_tiled: Arc::new(Mutex::new(None)),
             previous_layer: Arc::new(Mutex::new(None)),
+            modal_dim: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }
@@ -1100,6 +1204,7 @@ impl From<CosmicStack> for CosmicMapped {
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
             floating_tiled: Arc::new(Mutex::new(None)),
             previous_layer: Arc::new(Mutex::new(None)),
+            modal_dim: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }

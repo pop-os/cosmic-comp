@@ -95,7 +95,9 @@ pub mod layout;
 mod seats;
 mod workspace;
 pub mod zoom;
-pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
+pub use self::element::{
+    CosmicMapped, CosmicMappedRenderElement, CosmicSurface, MODAL_DIM_FADE_SECS, ModalDimState,
+};
 pub use self::seats::*;
 pub use self::workspace::*;
 use self::zoom::{OutputZoomState, ZoomState};
@@ -259,6 +261,12 @@ pub struct PendingWindow {
 }
 
 #[derive(Debug)]
+pub struct PendingFocusOverride {
+    pub surface: WlSurface,
+    pub seat: Seat<State>,
+}
+
+#[derive(Debug)]
 pub struct PendingLayer {
     pub surface: LayerSurface,
     pub seat: Seat<State>,
@@ -296,6 +304,9 @@ pub struct Shell {
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
+    // Latest dim fade refresh deadline
+    dim_fade_until: Instant,
+    pending_focus_overrides: Vec<PendingFocusOverride>,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -1694,6 +1705,8 @@ impl Shell {
             appearance_conf: config.cosmic_conf.appearance_settings,
             zoom_state: None,
             tiling_exceptions,
+            dim_fade_until: Instant::now(),
+            pending_focus_overrides: Vec::new(),
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -2146,6 +2159,141 @@ impl Shell {
         })
     }
 
+    /// Returns the topmost visible modal dialog of `parent`, if any
+    pub fn modal_child_for(&self, parent: &CosmicSurface) -> Option<CosmicMapped> {
+        // bottom-to-top iteration, so the last match is the topmost
+        self.mapped()
+            .filter(|mapped| {
+                let window = mapped.active_window();
+                window.is_modal_dialog() && parent.is_parent_of(&window)
+            })
+            .last()
+            .cloned()
+    }
+
+    /// If `surface`'s toplevel is blocked by a modal dialog, shakes the blocking dialog
+    /// and returns `true` so the caller can refuse the action.
+    fn block_by_modal_child<S>(&mut self, surface: &S) -> bool
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        let dialog = self
+            .element_for_surface(surface)
+            .and_then(|mapped| self.modal_child_for(&mapped.active_window()));
+        dialog
+            .map(|dialog| self.shake_modal_dialog(&dialog))
+            .is_some()
+    }
+
+    /// When a focused modal dialog about to be unmapped, returns the
+    /// surface of its parent so focus can be switched back to it explicitly (the
+    /// focus stack may have promoted an unrelated window above the parent).
+    fn modal_parent_to_refocus<S>(&self, surface: &S, seat: &Seat<State>) -> Option<WlSurface>
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        let dialog = self.element_for_surface(surface)?.active_window();
+        if !dialog.is_modal_dialog() {
+            return None;
+        }
+
+        // Redirect only when a focused modal dialog is closing.
+        let focused_on_dialog = matches!(
+            seat.get_keyboard().and_then(|k| k.current_focus()),
+            Some(KeyboardFocusTarget::Element(m)) if &m.active_window() == surface
+        );
+        if !focused_on_dialog {
+            return None;
+        }
+
+        self.mapped()
+            .find(|m| m.active_window().is_parent_of(&dialog))
+            .and_then(|p| p.active_window().wl_surface().map(|s| s.into_owned()))
+    }
+
+    pub fn shake_modal_dialog(&mut self, mapped: &CosmicMapped) {
+        for set in self.workspaces.sets.values_mut() {
+            if set.sticky_layer.shake(mapped) {
+                return;
+            }
+            for workspace in set.workspaces.iter_mut() {
+                if workspace.floating_layer.shake(mapped) {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Tracks which toplevels are blocked by visible modal dialogs and
+    /// drives the dim fade transitions of their backdrops
+    fn refresh_modal_dim(&mut self) {
+        let now = Instant::now();
+        let mut dialogs = self
+            .mapped()
+            .map(|mapped| mapped.active_window())
+            .filter(|window| window.is_modal_dialog())
+            .collect::<Vec<_>>();
+
+        for seat in self.seats.iter() {
+            if let Some(grab) = seat.user_data().get::<SeatMoveGrabState>()
+                && let Some(state) = grab.lock().unwrap().as_ref()
+            {
+                let window = state.window();
+                if window.is_modal_dialog() {
+                    dialogs.push(window);
+                }
+            }
+        }
+
+        let shade_alpha = self.theme.cosmic().shade.alpha;
+
+        let mut fade_started = false;
+        for mapped in self.mapped() {
+            let window = mapped.active_window();
+            let blocked = dialogs
+                .iter()
+                .any(|dialog| dialog != &window && window.is_parent_of(dialog));
+
+            let mut guard = mapped.modal_dim.lock().unwrap();
+            match guard.as_mut() {
+                Some(state) if state.is_dimmed() != blocked => {
+                    state.set_dimmed(blocked, shade_alpha, now);
+                    fade_started = true;
+                }
+                Some(state) if state.is_faded_out(now) => *guard = None,
+                None if blocked => {
+                    *guard = Some(ModalDimState::new(shade_alpha, now));
+                    fade_started = true;
+                }
+                _ => {}
+            }
+        }
+
+        if fade_started {
+            self.dim_fade_until = now + Duration::from_secs_f32(MODAL_DIM_FADE_SECS);
+        }
+    }
+
+    /// Resolves the keyboard focus target a chain of modal dialogs redirects to, if any
+    pub fn resolve_modal_redirect(
+        &self,
+        target: &KeyboardFocusTarget,
+    ) -> Option<KeyboardFocusTarget> {
+        let mut current = match target {
+            KeyboardFocusTarget::Element(mapped) => mapped.active_window(),
+            KeyboardFocusTarget::Fullscreen(surface) => surface.clone(),
+            _ => return None,
+        };
+
+        let mut redirect = None;
+        while let Some(dialog) = self.modal_child_for(&current) {
+            current = dialog.active_window();
+            redirect = Some(dialog);
+        }
+
+        redirect.map(KeyboardFocusTarget::Element)
+    }
+
     pub fn is_surface_mapped<S>(&self, surface: &S) -> bool
     where
         CosmicSurface: PartialEq<S>,
@@ -2267,6 +2415,7 @@ impl Shell {
                         .is_some_and(|state| state.lock().unwrap().is_animating())
                 })
             })
+            || Instant::now() < self.dim_fade_until
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
@@ -2554,6 +2703,8 @@ impl Shell {
 
         self.workspaces
             .refresh(workspace_state, xdg_activation_state);
+
+        self.refresh_modal_dim();
 
         for output in self.outputs() {
             let mut map = layer_map_for_output(output);
@@ -3008,6 +3159,18 @@ impl Shell {
     where
         CosmicSurface: PartialEq<S>,
     {
+        // When modal dialog is closed, we need to return focus to its parent
+        // instead of unrelated window from focus_stack
+        let seats = self.seats.iter().cloned().collect::<Vec<_>>();
+        for seat in seats {
+            if let Some(parent) = self.modal_parent_to_refocus(surface, &seat) {
+                self.pending_focus_overrides.push(PendingFocusOverride {
+                    seat,
+                    surface: parent,
+                });
+            }
+        }
+
         for set in self.workspaces.sets.values_mut() {
             let sticky_res = set.sticky_layer.mapped().find_map(|m| {
                 m.windows()
@@ -3697,6 +3860,10 @@ impl Shell {
             return None;
         }
 
+        if self.block_by_modal_child(surface) {
+            return None;
+        }
+
         let serial = serial.into();
         let mut element_geo = None;
 
@@ -4279,6 +4446,9 @@ impl Shell {
     where
         CosmicSurface: PartialEq<S>,
     {
+        if self.block_by_modal_child(surface) {
+            return;
+        }
         if let Some((set, mapped)) = self.workspaces.sets.values_mut().find_map(|set| {
             let mapped = set
                 .sticky_layer
@@ -4374,6 +4544,9 @@ impl Shell {
         animate: bool,
         loop_handle: &LoopHandle<'static, State>,
     ) {
+        if self.block_by_modal_child(&mapped.active_window()) {
+            return;
+        }
         self.unminimize_request(&mapped.active_window(), seat, loop_handle);
 
         let (original_layer, floating_layer, original_geometry) = if let Some(set) = self
@@ -4461,6 +4634,10 @@ impl Shell {
         edge_snap_threshold: u32,
         client_initiated: bool,
     ) -> Option<(ResizeGrab, Focus)> {
+        if self.block_by_modal_child(surface) {
+            return None;
+        }
+
         let serial = serial.into();
         let start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
@@ -4808,6 +4985,9 @@ impl Shell {
     where
         CosmicSurface: PartialEq<S>,
     {
+        if self.block_by_modal_child(surface) {
+            return None;
+        }
         let mapped = self.element_for_surface(surface).cloned()?;
         let seat = self.seats.last_active().clone();
         let window;

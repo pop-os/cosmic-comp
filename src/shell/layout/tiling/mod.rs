@@ -5067,6 +5067,13 @@ where
                 scanout_node,
             );
 
+            let shade = theme.shade;
+            if let Some(dim) =
+                mapped.modal_dim_element(renderer, geo, alpha, [shade.red, shade.green, shade.blue])
+            {
+                elements.push(dim);
+            }
+
             elements.extend(window_elements.into_iter().flat_map(|element| {
                 match element {
                     CosmicMappedRenderElement::Stack(elem) => constrain_render_elements(
@@ -5649,6 +5656,16 @@ where
                             group_color,
                         )),
                     )
+                }
+
+                let shade = theme.shade;
+                if let Some(dim) = mapped.modal_dim_element(
+                    renderer,
+                    geo,
+                    alpha,
+                    [shade.red, shade.green, shade.blue],
+                ) {
+                    elements.insert(0, dim);
                 }
 
                 let (behavior, align) = if is_overview {

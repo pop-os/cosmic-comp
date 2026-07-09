@@ -59,6 +59,7 @@ use smithay::{
         seat::WaylandFocus,
         shell::xdg::{
             SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
+            dialog::ToplevelDialogHint,
         },
     },
     xwayland::{X11Surface, xwm::X11Relatable},
@@ -946,6 +947,38 @@ impl CosmicSurface {
 
     pub fn downgrade(&self) -> WeakCosmicSurface {
         WeakCosmicSurface(self.0.downgrade())
+    }
+}
+
+/// Modal dialog semantics, unified over xdg-dialog-v1 and `_NET_WM_STATE_MODAL`
+impl CosmicSurface {
+    pub fn is_modal_dialog(&self) -> bool {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
+                states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .dialog_hint
+                    == ToplevelDialogHint::Modal
+            }),
+            WindowSurface::X11(surface) => surface.is_modal(),
+        }
+    }
+
+    pub fn is_parent_of(&self, child: &CosmicSurface) -> bool {
+        match child.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => toplevel
+                .parent()
+                .zip(self.wl_surface())
+                .is_some_and(|(parent, surface)| parent == *surface),
+            WindowSurface::X11(surface) => surface
+                .is_transient_for()
+                .zip(self.x11_surface())
+                .is_some_and(|(parent_id, parent)| parent_id == parent.window_id()),
+        }
     }
 }
 
