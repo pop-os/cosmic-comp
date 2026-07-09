@@ -1,11 +1,9 @@
+use crate::backend::render::wayland::SurfaceRenderElement;
 use crate::shell::focus::FocusTarget;
 use crate::shell::layout::tiling::RestoreTilingState;
 use crate::wayland::handlers::xdg_activation::ActivationContext;
 use crate::{
-    backend::render::{
-        BackdropShader,
-        element::{AsGlowRenderer, FromGlesError},
-    },
+    backend::render::{BackdropShader, element::AsGlowRenderer},
     shell::{
         ANIMATION_DURATION, OverviewMode, SeatMoveGrabState,
         layout::{
@@ -31,15 +29,15 @@ use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::Tiling
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smallvec::SmallVec;
 use smithay::backend::drm::DrmNode;
-use smithay::backend::renderer::element::Kind;
+use smithay::backend::renderer::element::{Kind, NamespacedElement};
 use smithay::output::WeakOutput;
 use smithay::utils::user_data::UserDataMap;
 use smithay::{
     backend::renderer::{
         element::{
-            Element, Id, RenderElement, surface::WaylandSurfaceRenderElement,
-            texture::TextureRenderElement, utils::RescaleRenderElement,
+            Element, Id, RenderElement, texture::TextureRenderElement, utils::RescaleRenderElement,
         },
         gles::GlesTexture,
         glow::GlowRenderer,
@@ -1625,8 +1623,8 @@ impl Workspace {
         indicator_thickness: u8,
         theme: &CosmicTheme,
         scanout_node: Option<DrmNode>,
-    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
-    where
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -1634,107 +1632,107 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = Vec::default();
-
         let output_scale = self.output.current_scale().fractional_scale();
         let zone = {
             let layer_map = layer_map_for_output(&self.output);
             layer_map.non_exclusive_zone().as_local()
         };
         let focused = self.focus_stack.get(last_active_seat).last().cloned();
+        let fullscreen_focused = matches!(focused, Some(FocusTarget::Fullscreen(_)));
 
-        let render_fullscreen = |fullscreen: &FullscreenSurface,
-                                 renderer: &mut R,
-                                 output_scale: f64|
-         -> Vec<WorkspaceRenderElement<R>> {
-            let fullscreen_geo = self.fullscreen_geometry_for(fullscreen);
-            let previous_geo = fullscreen
-                .previous_geometry
-                .as_ref()
-                .unwrap_or(&fullscreen_geo);
+        let mut fullscreen_elements = SmallVec::<[WorkspaceRenderElement<R>; 2]>::new_const();
+        let mut render_fullscreen =
+            |fullscreen: &FullscreenSurface, renderer: &mut R, output_scale: f64| {
+                let fullscreen_geo = self.fullscreen_geometry_for(fullscreen);
+                let previous_geo = fullscreen
+                    .previous_geometry
+                    .as_ref()
+                    .unwrap_or(&fullscreen_geo);
 
-            let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
-                (Some(started), _) => {
-                    let duration = Instant::now().duration_since(started).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(*previous_geo),
-                            EaseRectangle(fullscreen_geo),
-                            duration,
+                let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
+                    (Some(started), _) => {
+                        let duration = Instant::now().duration_since(started).as_secs_f64()
+                            / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                        (
+                            ease(
+                                EaseInOutCubic,
+                                EaseRectangle(*previous_geo),
+                                EaseRectangle(fullscreen_geo),
+                                duration,
+                            )
+                            .0,
+                            ease(EaseInOutCubic, 0.0, 1.0, duration),
                         )
-                        .0,
-                        ease(EaseInOutCubic, 0.0, 1.0, duration),
-                    )
-                }
-                (_, Some(ended)) => {
-                    let duration = Instant::now().duration_since(ended).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(fullscreen_geo),
-                            EaseRectangle(*previous_geo),
-                            duration,
+                    }
+                    (_, Some(ended)) => {
+                        let duration = Instant::now().duration_since(ended).as_secs_f64()
+                            / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                        (
+                            ease(
+                                EaseInOutCubic,
+                                EaseRectangle(fullscreen_geo),
+                                EaseRectangle(*previous_geo),
+                                duration,
+                            )
+                            .0,
+                            ease(EaseInOutCubic, 1.0, 0.0, duration),
                         )
-                        .0,
-                        ease(EaseInOutCubic, 1.0, 0.0, duration),
-                    )
-                }
-                (None, None) => (fullscreen_geo, 1.0),
-            };
+                    }
+                    (None, None) => (fullscreen_geo, 1.0),
+                };
 
-            let render_loc = target_geo
-                .loc
-                .as_logical()
-                .to_physical_precise_round(output_scale);
+                let render_loc = target_geo
+                    .loc
+                    .as_logical()
+                    .to_physical_precise_round(output_scale);
 
-            // Only rescale geometry when animating
-            let animation_rescale = |elem| {
-                if fullscreen.is_animating() {
-                    let fullscreen_geo = fullscreen.surface.0.geometry();
-                    let scale = Scale {
-                        x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
-                        y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
-                    };
+                let fullscreen_geo = fullscreen.surface.0.geometry();
+                let scale = Scale {
+                    x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
+                    y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
+                };
 
-                    RescaleRenderElement::from_element(elem, render_loc, scale).into()
-                } else {
-                    Into::<WorkspaceRenderElement<_>>::into(elem)
-                }
-            };
+                // Only rescale geometry when animating
+                let animation_rescale = |elem| {
+                    if fullscreen.is_animating() {
+                        RescaleRenderElement::from_element(elem, render_loc, scale).into()
+                    } else {
+                        Into::<WorkspaceRenderElement<_>>::into(elem)
+                    }
+                };
 
-            fullscreen
-                .surface
-                .render_elements::<R, CosmicWindowRenderElement<R>>(
+                let mut fullscreen_push = |elem: SurfaceRenderElement<R>| {
+                    if fullscreen_focused {
+                        push(animation_rescale(elem.into()))
+                    } else {
+                        fullscreen_elements.push(animation_rescale(elem.into()))
+                    }
+                };
+                fullscreen.surface.push_render_elements(
                     renderer,
                     render_loc,
                     output_scale.into(),
                     alpha,
                     Some(true),
                     scanout_node,
-                )
-                .into_iter()
-                .map(animation_rescale)
-                .collect::<Vec<_>>()
-        };
+                    false,
+                    [0, 0, 0, 0],
+                    0,
+                    &mut fullscreen_push,
+                    None,
+                );
+            };
 
         let top_fullscreen = self.get_fullscreen(last_active_seat);
 
-        let mut fullscreen_elements: Vec<WorkspaceRenderElement<R>> = Vec::new();
         if let Some(fs) = top_fullscreen {
-            fullscreen_elements.extend(render_fullscreen(fs, renderer, output_scale));
+            render_fullscreen(fs, renderer, output_scale)
         }
         // Also render any animating (entering/exiting) fullscreens
         for fs in self.fullscreen_surfaces.iter().filter(|f| f.is_animating()) {
             if top_fullscreen.is_none_or(|top| top.surface != fs.surface) {
-                fullscreen_elements.extend(render_fullscreen(fs, renderer, output_scale));
+                render_fullscreen(fs, renderer, output_scale);
             };
-        }
-
-        if matches!(focused, Some(FocusTarget::Fullscreen(_))) {
-            elements.append(&mut fullscreen_elements);
         }
 
         let any_fullscreen_animating = self
@@ -1767,29 +1765,21 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            elements.extend(
-                self.floating_layer
-                    .render::<R>(
-                        renderer,
-                        render_focus
-                            .then(|| {
-                                focused.as_ref().and_then(|target| {
-                                    if let FocusTarget::Window(mapped) = target {
-                                        Some(mapped)
-                                    } else {
-                                        None
-                                    }
-                                })
-                            })
-                            .flatten(),
-                        resize_indicator.clone(),
-                        indicator_thickness,
-                        alpha,
-                        theme,
-                        scanout_node,
-                    )
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+            self.floating_layer.render(
+                renderer,
+                focused.as_ref().and_then(|target| {
+                    if let FocusTarget::Window(mapped) = target {
+                        Some(mapped)
+                    } else {
+                        None
+                    }
+                }),
+                resize_indicator.clone(),
+                indicator_thickness,
+                alpha,
+                theme,
+                scanout_node,
+                &mut |elem| push(elem.into()),
             );
 
             let alpha = match &overview.0 {
@@ -1806,24 +1796,20 @@ impl Workspace {
             };
 
             //tiling surfaces
-            elements.extend(
-                self.tiling_layer
-                    .render::<R>(
-                        renderer,
-                        render_focus.then_some(last_active_seat),
-                        zone,
-                        overview,
-                        resize_indicator,
-                        indicator_thickness,
-                        theme,
-                        scanout_node,
-                    )?
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+            self.tiling_layer.render(
+                renderer,
+                render_focus.then_some(last_active_seat),
+                zone,
+                overview,
+                resize_indicator,
+                indicator_thickness,
+                theme,
+                scanout_node,
+                &mut |elem| push(elem.into()),
             );
 
             if let Some(alpha) = alpha {
-                elements.push(
+                push(
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
                         renderer,
                         self.backdrop_id.clone(),
@@ -1837,11 +1823,9 @@ impl Workspace {
             }
         }
 
-        if !matches!(focused, Some(FocusTarget::Fullscreen(_))) {
-            elements.extend(fullscreen_elements.into_iter());
+        for elem in fullscreen_elements {
+            push(elem);
         }
-
-        Ok(elements)
     }
 
     #[profiling::function]
@@ -1853,8 +1837,8 @@ impl Workspace {
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         theme: &CosmicTheme,
         scanout_node: Option<DrmNode>,
-    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
-    where
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -1862,8 +1846,6 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = Vec::default();
-
         let output_scale = self.output.current_scale().fractional_scale();
         let zone = {
             let layer_map = layer_map_for_output(&self.output);
@@ -1918,18 +1900,14 @@ impl Workspace {
                 .as_logical()
                 .to_physical_precise_round(output_scale);
 
-            elements.extend(
-                fullscreen
-                    .surface
-                    .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
-                        renderer,
-                        render_loc,
-                        output_scale.into(),
-                        alpha,
-                        scanout_node,
-                    )
-                    .into_iter()
-                    .map(Into::into),
+            fullscreen.surface.push_popup_render_elements(
+                renderer,
+                render_loc,
+                output_scale.into(),
+                alpha,
+                scanout_node,
+                0,
+                &mut |elem| push(WorkspaceRenderElement::FullscreenPopup(elem.into())),
             );
         }
 
@@ -1963,30 +1941,20 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            elements.extend(
-                self.floating_layer
-                    .render_popups::<R>(renderer, alpha, scanout_node)
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
-            );
+            self.floating_layer
+                .render_popups(renderer, alpha, scanout_node, &mut |elem| push(elem.into()));
 
             //tiling surfaces
-            elements.extend(
-                self.tiling_layer
-                    .render_popups::<R>(
-                        renderer,
-                        render_focus.then_some(last_active_seat),
-                        zone,
-                        overview,
-                        theme,
-                        scanout_node,
-                    )?
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+            self.tiling_layer.render_popups(
+                renderer,
+                render_focus.then_some(last_active_seat),
+                zone,
+                overview,
+                theme,
+                scanout_node,
+                &mut |elem| push(elem.into()),
             );
         }
-
-        Ok(elements)
     }
 }
 
@@ -2005,9 +1973,10 @@ pub struct OutputNotMapped;
 pub enum WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
-    OverrideRedirect(WaylandSurfaceRenderElement<R>),
+    OverrideRedirect(SurfaceRenderElement<R>),
+    LowerLayerShell(NamespacedElement<SurfaceRenderElement<R>>),
     Fullscreen(RescaleRenderElement<CosmicWindowRenderElement<R>>),
     FullscreenPopup(CosmicWindowRenderElement<R>),
     Window(CosmicMappedRenderElement<R>),
@@ -2017,11 +1986,12 @@ where
 impl<R> Element for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.id(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.id(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.id(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.id(),
             WorkspaceRenderElement::Window(elem) => elem.id(),
@@ -2032,6 +2002,7 @@ where
     fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.current_commit(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.current_commit(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.current_commit(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.current_commit(),
             WorkspaceRenderElement::Window(elem) => elem.current_commit(),
@@ -2042,6 +2013,7 @@ where
     fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.src(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.src(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.src(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.src(),
             WorkspaceRenderElement::Window(elem) => elem.src(),
@@ -2052,6 +2024,7 @@ where
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.geometry(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.geometry(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Window(elem) => elem.geometry(scale),
@@ -2062,6 +2035,7 @@ where
     fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.location(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.location(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.location(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.location(scale),
             WorkspaceRenderElement::Window(elem) => elem.location(scale),
@@ -2072,6 +2046,7 @@ where
     fn transform(&self) -> smithay::utils::Transform {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.transform(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.transform(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.transform(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.transform(),
             WorkspaceRenderElement::Window(elem) => elem.transform(),
@@ -2086,6 +2061,7 @@ where
     ) -> DamageSet<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.damage_since(scale, commit),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Fullscreen(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Window(elem) => elem.damage_since(scale, commit),
@@ -2096,6 +2072,7 @@ where
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.opaque_regions(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Window(elem) => elem.opaque_regions(scale),
@@ -2106,6 +2083,7 @@ where
     fn alpha(&self) -> f32 {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.alpha(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.alpha(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.alpha(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.alpha(),
             WorkspaceRenderElement::Window(elem) => elem.alpha(),
@@ -2116,6 +2094,7 @@ where
     fn kind(&self) -> Kind {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.kind(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.kind(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.kind(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.kind(),
             WorkspaceRenderElement::Window(elem) => elem.kind(),
@@ -2126,6 +2105,7 @@ where
     fn is_framebuffer_effect(&self) -> bool {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::Window(elem) => elem.is_framebuffer_effect(),
@@ -2137,8 +2117,7 @@ where
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
-    R::Error: FromGlesError,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,
@@ -2151,6 +2130,9 @@ where
     ) -> Result<(), R::Error> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
+            }
+            WorkspaceRenderElement::LowerLayerShell(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Fullscreen(elem) => {
@@ -2171,7 +2153,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
         }
     }
 
@@ -2181,6 +2163,7 @@ where
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage<'_>> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.underlying_storage(renderer),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Fullscreen(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
@@ -2201,6 +2184,9 @@ where
             WorkspaceRenderElement::OverrideRedirect(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
+            WorkspaceRenderElement::LowerLayerShell(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
             WorkspaceRenderElement::Fullscreen(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
@@ -2218,7 +2204,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
@@ -2227,7 +2213,7 @@ where
 impl<R> From<RescaleRenderElement<CosmicWindowRenderElement<R>>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: RescaleRenderElement<CosmicWindowRenderElement<R>>) -> Self {
@@ -2238,7 +2224,7 @@ where
 impl<R> From<CosmicWindowRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicWindowRenderElement<R>) -> Self {
@@ -2246,21 +2232,32 @@ where
     }
 }
 
-impl<R> From<WaylandSurfaceRenderElement<R>> for WorkspaceRenderElement<R>
+impl<R> From<SurfaceRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: WaylandSurfaceRenderElement<R>) -> Self {
+    fn from(elem: SurfaceRenderElement<R>) -> Self {
         WorkspaceRenderElement::OverrideRedirect(elem)
+    }
+}
+
+impl<R> From<NamespacedElement<SurfaceRenderElement<R>>> for WorkspaceRenderElement<R>
+where
+    R: AsGlowRenderer,
+    R::TextureId: Send + 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: NamespacedElement<SurfaceRenderElement<R>>) -> Self {
+        WorkspaceRenderElement::LowerLayerShell(elem)
     }
 }
 
 impl<R> From<CosmicMappedRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicMappedRenderElement<R>) -> Self {
@@ -2271,7 +2268,7 @@ where
 impl<R> From<TextureRenderElement<GlesTexture>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
