@@ -2598,6 +2598,7 @@ impl Shell {
         mut state: Option<FullscreenRestoreState>,
         loop_handle: &LoopHandle<'static, State>,
     ) -> CosmicMapped {
+        let mut stack_died = false;
         if let Some(FullscreenRestoreState::Stack { state: stack_state }) = &state {
             if let Some(mapped) = self.mapped().find(|m| **m == stack_state.stack)
                 && let Some(stack) = mapped.stack_ref()
@@ -2606,11 +2607,14 @@ impl Shell {
                 stack.add_window(surface, Some(idx), None);
                 return mapped.clone();
             } else {
+                // The original stack is gone - restore as a fresh single-window
+                // stack so the surface keeps stack decorations.
+                stack_died = true;
                 state = None;
             }
         }
 
-        let window = if state.as_ref().is_some_and(|s| s.was_stack()) {
+        let window = if stack_died || state.as_ref().is_some_and(|s| s.was_stack()) {
             CosmicMapped::from(CosmicStack::new(
                 std::iter::once(surface),
                 loop_handle.clone(),
@@ -2618,6 +2622,10 @@ impl Shell {
                 self.appearance_conf,
             ))
         } else {
+            // Reset forced-SSD/tiled state possibly left over from a stack the
+            // surface was extracted out of mid-transition.
+            surface.try_force_undecorated(false);
+            surface.set_tiled(false);
             CosmicMapped::from(CosmicWindow::new(
                 surface,
                 loop_handle.clone(),
