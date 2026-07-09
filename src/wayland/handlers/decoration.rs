@@ -121,6 +121,17 @@ impl FromDecorationPreference for KdeMode {
     }
 }
 
+/// The KDE mode to restore when forced server-side decorations are released:
+/// the xdg preference recorded when they were forced wins, then the client's
+/// own kde request.
+pub fn released_kde_mode(previous_mode: Option<XdgMode>, requested: Option<KdeMode>) -> KdeMode {
+    match previous_mode {
+        Some(XdgMode::ServerSide) => KdeMode::Server,
+        Some(_) => KdeMode::Client,
+        None => requested.unwrap_or(KdeMode::Client),
+    }
+}
+
 pub type KdeDecorationData = Mutex<KdeDecorationSurfaceState>;
 #[derive(Debug, Default)]
 pub struct KdeDecorationSurfaceState {
@@ -279,5 +290,38 @@ impl KdeDecorationHandler for State {
                 state.mode.take();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KdeMode, XdgMode, released_kde_mode};
+
+    #[test]
+    fn releasing_forced_ssd_restores_the_clients_kde_request() {
+        // Regression: the release path re-sent `Server` (the mode the enable
+        // path sends), so CSD clients protested with request_mode(Client) on
+        // every stack extraction.
+        assert_eq!(
+            released_kde_mode(None, Some(KdeMode::Client)),
+            KdeMode::Client
+        );
+        assert_eq!(
+            released_kde_mode(None, Some(KdeMode::Server)),
+            KdeMode::Server
+        );
+        assert_eq!(released_kde_mode(None, None), KdeMode::Client);
+    }
+
+    #[test]
+    fn the_recorded_xdg_preference_wins_over_the_kde_request() {
+        assert_eq!(
+            released_kde_mode(Some(XdgMode::ClientSide), Some(KdeMode::Server)),
+            KdeMode::Client
+        );
+        assert_eq!(
+            released_kde_mode(Some(XdgMode::ServerSide), Some(KdeMode::Client)),
+            KdeMode::Server
+        );
     }
 }

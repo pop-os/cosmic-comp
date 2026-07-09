@@ -72,7 +72,7 @@ use crate::{
     utils::prelude::*,
     wayland::handlers::{
         compositor::FRAME_TIME_FILTER,
-        decoration::{KdeDecorationData, PreferredDecorationMode},
+        decoration::{KdeDecorationData, PreferredDecorationMode, released_kde_mode},
     },
 };
 
@@ -399,8 +399,10 @@ impl CosmicSurface {
                     });
                     with_states(toplevel.wl_surface(), |data| {
                         if let Some(kde_data) = data.data_map.get::<KdeDecorationData>() {
-                            for obj in kde_data.lock().unwrap().objs.iter() {
-                                obj.mode(KdeMode::Server);
+                            let kde_data = kde_data.lock().unwrap();
+                            let mode = released_kde_mode(previous_mode, kde_data.mode);
+                            for obj in kde_data.objs.iter() {
+                                obj.mode(mode);
                             }
                         }
                     })
