@@ -87,7 +87,7 @@
 
           cosmic-comp = rustPlatform.buildRustPackage {
             pname = "cosmic-comp";
-            version = "1.0.0-dev";
+            version = "1.m.M-dev";
 
             src = common.pkgs.lib.fileset.toSource {
               root = ./.;
