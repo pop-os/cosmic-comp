@@ -1,5 +1,6 @@
 use super::{
     CosmicSurface,
+    surface::KeyboardEnteredSurface,
     window::{Focus, RESIZE_BORDER},
 };
 use crate::{
@@ -113,10 +114,8 @@ pub struct CosmicStackInternal {
     group_focused: AtomicBool,
     previous_index: Mutex<Option<(Serial, usize)>>,
     scroll_to_focus: AtomicBool,
-    previous_keyboard: AtomicUsize,
     pointer_entered: AtomicU8,
     touch_serial: AtomicU32,
-    reenter: AtomicBool,
     potential_drag: Mutex<Option<usize>>,
     override_alive: AtomicBool,
     geometry: Mutex<Option<Rectangle<i32, Global>>>,
@@ -171,10 +170,8 @@ impl CosmicStack {
                 group_focused: AtomicBool::new(false),
                 previous_index: Mutex::new(None),
                 scroll_to_focus: AtomicBool::new(false),
-                previous_keyboard: AtomicUsize::new(0),
                 pointer_entered: AtomicU8::new(0),
                 touch_serial: AtomicU32::new(0),
-                reenter: AtomicBool::new(false),
                 potential_drag: Mutex::new(None),
                 override_alive: AtomicBool::new(true),
                 geometry: Mutex::new(None),
@@ -213,11 +210,7 @@ impl CosmicStack {
             window.send_configure();
             if let Some(idx) = idx {
                 p.windows.lock().unwrap().insert(idx, window);
-                let old_idx = p.active.swap(idx, Ordering::SeqCst);
-                if old_idx == idx {
-                    p.reenter.store(true, Ordering::SeqCst);
-                    p.previous_keyboard.store(old_idx, Ordering::SeqCst);
-                }
+                p.active.store(idx, Ordering::SeqCst);
             } else {
                 let mut windows = p.windows.lock().unwrap();
                 windows.push(window);
@@ -244,9 +237,6 @@ impl CosmicStack {
             let Some(idx) = windows.iter().position(|w| w == window) else {
                 return;
             };
-            if idx == p.active.load(Ordering::SeqCst) {
-                p.reenter.store(true, Ordering::SeqCst);
-            }
             let window = windows.remove(idx);
             window.try_force_undecorated(false);
             window.set_tiled(false);
@@ -274,9 +264,6 @@ impl CosmicStack {
             }
             if windows.len() <= idx {
                 return None;
-            }
-            if idx == p.active.load(Ordering::SeqCst) {
-                p.reenter.store(true, Ordering::SeqCst);
             }
             let window = windows.remove(idx);
             window.try_force_undecorated(false);
@@ -316,20 +303,18 @@ impl CosmicStack {
             match direction {
                 FocusDirection::Left => {
                     if !p.group_focused.load(Ordering::SeqCst) {
-                        if let Ok(old) =
-                            p.active
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                    val.checked_sub(1)
-                                })
+                        if p.active
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                val.checked_sub(1)
+                            })
+                            .is_ok()
                         {
-                            p.previous_keyboard.store(old, Ordering::SeqCst);
                             p.scroll_to_focus.store(true, Ordering::SeqCst);
                             (true, true)
                         } else {
                             let new = prev_idx.unwrap().1;
                             let old = p.active.swap(new, Ordering::SeqCst);
                             if old != new {
-                                p.previous_keyboard.store(old, Ordering::SeqCst);
                                 p.scroll_to_focus.store(true, Ordering::SeqCst);
                                 (false, true)
                             } else {
@@ -343,20 +328,19 @@ impl CosmicStack {
                 FocusDirection::Right => {
                     if !p.group_focused.load(Ordering::SeqCst) {
                         let max = p.windows.lock().unwrap().len();
-                        if let Ok(old) =
-                            p.active
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
-                                    if val < max - 1 { Some(val + 1) } else { None }
-                                })
+                        if p
+                            .active
+                            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                if val < max - 1 { Some(val + 1) } else { None }
+                            })
+                            .is_ok()
                         {
-                            p.previous_keyboard.store(old, Ordering::SeqCst);
                             p.scroll_to_focus.store(true, Ordering::SeqCst);
                             (true, true)
                         } else {
                             let new = prev_idx.unwrap().1;
                             let old = p.active.swap(new, Ordering::SeqCst);
                             if old != new {
-                                p.previous_keyboard.store(old, Ordering::SeqCst);
                                 p.scroll_to_focus.store(true, Ordering::SeqCst);
                                 (false, true)
                             } else {
@@ -400,7 +384,6 @@ impl CosmicStack {
                         let new = prev_idx.unwrap().1;
                         let old = p.active.swap(new, Ordering::SeqCst);
                         if old != new {
-                            p.previous_keyboard.store(old, Ordering::SeqCst);
                             p.scroll_to_focus.store(true, Ordering::SeqCst);
                         }
                         (false, true)
@@ -441,7 +424,6 @@ impl CosmicStack {
             if let Some(val) = next {
                 let old = p.active.swap(val, Ordering::SeqCst);
                 windows.swap(old, val);
-                p.previous_keyboard.store(old, Ordering::SeqCst);
                 p.scroll_to_focus.store(true, Ordering::SeqCst);
                 MoveResult::Handled
             } else {
@@ -495,10 +477,7 @@ impl CosmicStack {
     {
         self.0.with_program(|p| {
             if let Some(val) = p.windows.lock().unwrap().iter().position(|w| w == window) {
-                let old = p.active.swap(val, Ordering::SeqCst);
-                if old != val {
-                    p.previous_keyboard.store(old, Ordering::SeqCst);
-                }
+                p.active.store(val, Ordering::SeqCst);
             }
         });
         self.0
@@ -612,29 +591,21 @@ impl CosmicStack {
         }
     }
 
-    fn keyboard_leave_if_previous(
+    /// Enters the active tab iff it does not already hold the wire keyboard
+    /// focus, per the seat's [`KeyboardEnteredSurface`] record; returns the
+    /// active index.
+    fn keyboard_enter_active(
         &self,
         seat: &Seat<State>,
         data: &mut State,
+        keys: Vec<KeysymHandle<'_>>,
         serial: Serial,
     ) -> usize {
         self.0.with_program(|p| {
             let active = p.active.load(Ordering::SeqCst);
-            let previous = p.previous_keyboard.swap(active, Ordering::SeqCst);
-            if previous != active || p.reenter.swap(false, Ordering::SeqCst) {
-                let windows = p.windows.lock().unwrap();
-                if let Some(previous_surface) = windows.get(previous)
-                    && previous != active
-                {
-                    KeyboardTarget::leave(previous_surface, seat, data, serial);
-                }
-                KeyboardTarget::enter(
-                    &windows[active],
-                    seat,
-                    data,
-                    Vec::new(), /* TODO */
-                    serial,
-                )
+            let active_surface = p.windows.lock().unwrap()[active].clone();
+            if KeyboardEnteredSurface::get(seat).as_ref() != Some(&active_surface) {
+                KeyboardTarget::enter(&active_surface, seat, data, keys, serial);
             }
             active
         })
@@ -1513,24 +1484,22 @@ impl KeyboardTarget<State> for CosmicStack {
         keys: Vec<KeysymHandle<'_>>,
         serial: Serial,
     ) {
-        self.0.with_program(|p| {
-            let active = p.active.load(Ordering::SeqCst);
-            p.previous_keyboard.store(active, Ordering::SeqCst);
-            KeyboardTarget::enter(
-                &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)],
-                seat,
-                data,
-                keys,
-                serial,
-            )
-        })
+        self.keyboard_enter_active(seat, data, keys, serial);
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial) {
-        let active = self.keyboard_leave_if_previous(seat, data, serial);
         self.0.force_redraw();
         self.0.with_program(|p| {
             p.group_focused.store(false, Ordering::SeqCst);
-            KeyboardTarget::leave(&p.windows.lock().unwrap()[active], seat, data, serial)
+
+            // Release the focus from whichever of our surfaces actually holds
+            // it; if the entered surface was just extracted, it took the wire
+            // focus with it - nothing to release.
+            let windows = p.windows.lock().unwrap();
+            if let Some(entered) =
+                KeyboardEnteredSurface::get(seat).filter(|s| windows.contains(s))
+            {
+                KeyboardTarget::leave(&entered, seat, data, serial);
+            }
         })
     }
     fn key(
@@ -1542,7 +1511,7 @@ impl KeyboardTarget<State> for CosmicStack {
         serial: Serial,
         time: u32,
     ) {
-        let active = self.keyboard_leave_if_previous(seat, data, serial);
+        let active = self.keyboard_enter_active(seat, data, Vec::new(), serial);
         self.0.with_program(|p| {
             if !p.group_focused.load(Ordering::SeqCst) {
                 KeyboardTarget::key(
@@ -1564,7 +1533,7 @@ impl KeyboardTarget<State> for CosmicStack {
         modifiers: ModifiersState,
         serial: Serial,
     ) {
-        let active = self.keyboard_leave_if_previous(seat, data, serial);
+        let active = self.keyboard_enter_active(seat, data, Vec::new(), serial);
         self.0.with_program(|p| {
             if !p.group_focused.load(Ordering::SeqCst) {
                 KeyboardTarget::modifiers(

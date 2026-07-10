@@ -1000,6 +1000,46 @@ impl SpaceElement for CosmicSurface {
     }
 }
 
+/// Tracks, per seat, which [`CosmicSurface`] holds the keyboard focus on the
+/// wire (received an `enter` not yet paired with a `leave`). All toplevel
+/// enters/leaves funnel through [`CosmicSurface`]'s [`KeyboardTarget`] impl,
+/// making this the ground truth for focus bookkeeping.
+#[derive(Debug, Default)]
+pub struct KeyboardEnteredSurface(Mutex<Option<CosmicSurface>>);
+
+impl KeyboardEnteredSurface {
+    pub fn get(seat: &Seat<State>) -> Option<CosmicSurface> {
+        seat.user_data()
+            .get_or_insert::<Self, _>(Self::default)
+            .0
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(IsAlive::alive)
+    }
+
+    fn replace(seat: &Seat<State>, surface: &CosmicSurface) -> Option<CosmicSurface> {
+        seat.user_data()
+            .get_or_insert::<Self, _>(Self::default)
+            .0
+            .lock()
+            .unwrap()
+            .replace(surface.clone())
+    }
+
+    fn clear_if(seat: &Seat<State>, surface: &CosmicSurface) {
+        let mut guard = seat
+            .user_data()
+            .get_or_insert::<Self, _>(Self::default)
+            .0
+            .lock()
+            .unwrap();
+        if guard.as_ref() == Some(surface) {
+            *guard = None;
+        }
+    }
+}
+
 impl KeyboardTarget<State> for CosmicSurface {
     fn enter(
         &self,
@@ -1012,6 +1052,14 @@ impl KeyboardTarget<State> for CosmicSurface {
             keys = vec![];
         }
 
+        // Release a stale unpaired `enter` left on another surface, or the
+        // client ends up believing two of its windows are focused at once.
+        if let Some(previous) = KeyboardEnteredSurface::replace(seat, self)
+            .filter(|prev| prev != self && prev.alive())
+        {
+            KeyboardTarget::leave(&previous, seat, data, serial);
+        }
+
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 KeyboardTarget::enter(toplevel.wl_surface(), seat, data, keys, serial)
@@ -1021,6 +1069,8 @@ impl KeyboardTarget<State> for CosmicSurface {
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: smithay::utils::Serial) {
+        KeyboardEnteredSurface::clear_if(seat, self);
+
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 KeyboardTarget::leave(toplevel.wl_surface(), seat, data, serial)
