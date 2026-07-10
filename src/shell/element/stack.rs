@@ -603,7 +603,11 @@ impl CosmicStack {
     ) -> usize {
         self.0.with_program(|p| {
             let active = p.active.load(Ordering::SeqCst);
-            let active_surface = p.windows.lock().unwrap()[active].clone();
+            // The active index and the window list update separately - the
+            // index may be stale here.
+            let Some(active_surface) = p.windows.lock().unwrap().get(active).cloned() else {
+                return active;
+            };
             if KeyboardEnteredSurface::get(seat).as_ref() != Some(&active_surface) {
                 KeyboardTarget::enter(&active_surface, seat, data, keys, serial);
             }
@@ -1513,16 +1517,10 @@ impl KeyboardTarget<State> for CosmicStack {
     ) {
         let active = self.keyboard_enter_active(seat, data, Vec::new(), serial);
         self.0.with_program(|p| {
-            if !p.group_focused.load(Ordering::SeqCst) {
-                KeyboardTarget::key(
-                    &p.windows.lock().unwrap()[active],
-                    seat,
-                    data,
-                    key,
-                    state,
-                    serial,
-                    time,
-                )
+            if !p.group_focused.load(Ordering::SeqCst)
+                && let Some(window) = p.windows.lock().unwrap().get(active)
+            {
+                KeyboardTarget::key(window, seat, data, key, state, serial, time)
             }
         })
     }
@@ -1535,14 +1533,10 @@ impl KeyboardTarget<State> for CosmicStack {
     ) {
         let active = self.keyboard_enter_active(seat, data, Vec::new(), serial);
         self.0.with_program(|p| {
-            if !p.group_focused.load(Ordering::SeqCst) {
-                KeyboardTarget::modifiers(
-                    &p.windows.lock().unwrap()[active],
-                    seat,
-                    data,
-                    modifiers,
-                    serial,
-                )
+            if !p.group_focused.load(Ordering::SeqCst)
+                && let Some(window) = p.windows.lock().unwrap().get(active)
+            {
+                KeyboardTarget::modifiers(window, seat, data, modifiers, serial)
             }
         })
     }
