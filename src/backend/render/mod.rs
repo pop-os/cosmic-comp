@@ -81,7 +81,10 @@ use smithay::{
     utils::{
         IsAlive, Logical, Monotonic, Physical, Point, Rectangle, Scale, Size, Time, Transform,
     },
-    wayland::{compositor::with_states, dmabuf::get_dmabuf, session_lock::LockSurface},
+    wayland::{
+        compositor::with_states, dmabuf::get_dmabuf, session_lock::LockSurface,
+        shell::wlr_layer::Layer as WlrLayer,
+    },
 };
 
 #[cfg(feature = "debug")]
@@ -95,6 +98,9 @@ pub mod wayland;
 use self::element::{AsGlowRenderer, CosmicElement};
 
 use super::kms::Timings;
+
+/// Alpha applied to panel / layer-shell surfaces on outputs without keyboard focus when `dim_inactive_panels` is enabled.
+const INACTIVE_PANEL_DIM: f32 = 0.6;
 
 pub type GlMultiRenderer<'a> =
     MultiRenderer<'a, 'a, GbmGlowBackend<DrmDeviceFd>, GbmGlowBackend<DrmDeviceFd>>;
@@ -791,6 +797,12 @@ where
         0
     };
 
+    // Dim panel / layer-shell surfaces on outputs that don't have keyboard focus, as a hint
+    // for which output keyboard-driven shortcuts act on. Only meaningful with multiple outputs
+    let dim_inactive_panels = shell.dim_inactive_panels
+        && shell.outputs().count() > 1
+        && last_active_seat.keyboard_or_active_output() != *output;
+
     let output_size = output
         .geometry()
         .size
@@ -852,6 +864,13 @@ where
                     .map(|id| id.namespace_for_workspace(workspace_idx))
                     .unwrap_or(workspace_idx);
 
+                // Match the dimming of the parent layer surface (panel menus, etc.).
+                let popup_alpha = if dim_inactive_panels {
+                    INACTIVE_PANEL_DIM
+                } else {
+                    1.0
+                };
+
                 push_render_elements_from_surface_tree(
                     renderer,
                     popup.wl_surface(),
@@ -861,7 +880,7 @@ where
                         .to_physical_precise_round(scale),
                     geometry.to_local(output).as_logical().to_f64(),
                     Scale::from(scale),
-                    1.0,
+                    popup_alpha,
                     false,
                     radii,
                     None,
@@ -901,6 +920,13 @@ where
                     .map(|id| id.namespace_for_workspace(workspace_idx))
                     .unwrap_or(workspace_idx);
 
+                // Keep the wallpaper (background layer) at full brightness and only dim panels, docks, notifications, etc.
+                let layer_alpha = if dim_inactive_panels && layer.layer() != WlrLayer::Background {
+                    INACTIVE_PANEL_DIM
+                } else {
+                    1.0
+                };
+
                 push_render_elements_from_surface_tree(
                     renderer,
                     layer.wl_surface(),
@@ -910,7 +936,7 @@ where
                         .to_physical_precise_round(scale),
                     geometry.to_f64(),
                     Scale::from(scale),
-                    1.0,
+                    layer_alpha,
                     false,
                     radii,
                     padded.to_f64(),
