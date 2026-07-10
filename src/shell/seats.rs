@@ -181,6 +181,15 @@ struct ActiveOutput(pub Mutex<Output>);
 /// The output which currently has keyboard focus
 struct FocusedOutput(pub Mutex<Option<Output>>);
 
+/// The output that keyboard-driven actions (e.g. workspace switching) should target.
+///
+/// Unlike [`FocusedOutput`], this is "sticky": it tracks the output that last held keyboard
+/// focus and is updated on keyboard-driven output/workspace switches, but it is *not* cleared
+/// when the currently focused workspace has no focusable window. This keeps keyboard shortcuts
+/// acting on the same output even after switching to an empty workspace, and it is never moved
+/// by pointer motion.
+struct KeyboardOutput(pub Mutex<Option<Output>>);
+
 #[derive(Default)]
 pub struct PointerConstraintHint(pub Mutex<Option<(WlSurface, Point<f64, Logical>)>>);
 
@@ -207,6 +216,7 @@ pub fn create_seat(
     userdata.insert_if_missing_threadsafe(CursorState::default);
     userdata.insert_if_missing_threadsafe(|| ActiveOutput(Mutex::new(output.clone())));
     userdata.insert_if_missing_threadsafe(|| FocusedOutput(Mutex::new(None)));
+    userdata.insert_if_missing_threadsafe(|| KeyboardOutput(Mutex::new(None)));
     userdata.insert_if_missing_threadsafe(PointerConstraintHint::default);
     userdata.insert_if_missing_threadsafe(|| Mutex::new(CursorImageStatus::default_named()));
 
@@ -252,8 +262,17 @@ pub trait SeatExt {
         self.focused_output()
             .unwrap_or_else(|| self.active_output())
     }
+    /// The output keyboard-driven actions should target (sticky keyboard focus), see
+    /// [`KeyboardOutput`]. Returns `None` if no output has held keyboard focus yet.
+    fn keyboard_output(&self) -> Option<Output>;
+    /// The output keyboard-driven actions should target, falling back to the cursor's output.
+    fn keyboard_or_active_output(&self) -> Output {
+        self.keyboard_output()
+            .unwrap_or_else(|| self.active_output())
+    }
     fn set_active_output(&self, output: &Output);
     fn set_focused_output(&self, output: Option<&Output>);
+    fn set_keyboard_output(&self, output: Option<&Output>);
     fn devices(&self) -> &Devices;
     fn supressed_keys(&self) -> &SupressedKeys;
     fn supressed_buttons(&self) -> &SupressedButtons;
@@ -300,6 +319,12 @@ impl SeatExt for Seat<State> {
         }
     }
 
+    fn keyboard_output(&self) -> Option<Output> {
+        self.user_data()
+            .get::<KeyboardOutput>()
+            .and_then(|x| x.0.lock().unwrap().clone())
+    }
+
     fn set_active_output(&self, output: &Output) {
         *self
             .user_data()
@@ -314,6 +339,16 @@ impl SeatExt for Seat<State> {
         *self
             .user_data()
             .get::<FocusedOutput>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap() = output.cloned();
+    }
+
+    fn set_keyboard_output(&self, output: Option<&Output>) {
+        *self
+            .user_data()
+            .get::<KeyboardOutput>()
             .unwrap()
             .0
             .lock()

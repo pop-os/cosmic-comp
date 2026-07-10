@@ -27,10 +27,12 @@ impl WlrLayerShellHandler for State {
     ) {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
+        // When a layer-shell client (e.g. the launcher / window switcher) doesn't pin an
+        // output, place it on the keyboard-focused output rather than the cursor's
         let output = wl_output
             .as_ref()
             .and_then(Output::from_resource)
-            .unwrap_or_else(|| seat.active_output());
+            .unwrap_or_else(|| seat.keyboard_or_active_output());
         shell.pending_layers.push(PendingLayer {
             surface: LayerSurface::new(surface, namespace),
             output,

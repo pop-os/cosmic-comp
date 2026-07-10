@@ -415,14 +415,14 @@ fn update_focus_state(
             // Get focused output calls visible_output_for_surface internally
             // what should happen if the target is some, but it's not visible?
             // should this be an error?
-            seat.set_focused_output(
-                state
-                    .common
-                    .shell
-                    .read()
-                    .get_output_for_focus(seat)
-                    .as_ref(),
-            )
+            let focused_output = state.common.shell.read().get_output_for_focus(seat);
+            seat.set_focused_output(focused_output.as_ref());
+            // Keep the sticky keyboard output in sync whenever we actually gain focus.
+            // It is intentionally *not* cleared in the `else` branch below, so keyboard
+            // actions keep targeting this output even after switching to an empty workspace.
+            if focused_output.is_some() {
+                seat.set_keyboard_output(focused_output.as_ref());
+            }
         } else {
             seat.set_focused_output(None);
         };
@@ -489,6 +489,14 @@ impl Common {
                 if focused_output.is_some_and(|f| !shell.outputs().any(|o| &f == o)) {
                     seat.set_focused_output(None);
                 }
+                // Drop the sticky keyboard output too if its output was removed, otherwise
+                // keyboard actions would keep targeting a gone output.
+                if seat
+                    .keyboard_output()
+                    .is_some_and(|k| !shell.outputs().any(|o| &k == o))
+                {
+                    seat.set_keyboard_output(None);
+                }
                 if !shell.outputs().any(|o| o == &active_output) {
                     if let Some(other) = shell.outputs().next() {
                         seat.set_active_output(other);
@@ -499,7 +507,9 @@ impl Common {
 
             update_pointer_focus(state, seat);
 
-            let output = seat.focused_or_active_output();
+            // Prefer the sticky keyboard output so keyboard focus doesn't get pulled back to
+            // the cursor's output when the keyboard-focused output has no focusable window
+            let output = seat.keyboard_or_active_output();
             let mut shell = state.common.shell.write();
             let last_known_focus = ActiveFocus::get(seat);
 

@@ -890,6 +890,23 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.update_config();
                 }
             }
+            "dim_inactive_panels" => {
+                let new = get_config::<bool>(&config, "dim_inactive_panels");
+                if new != state.common.config.cosmic_conf.dim_inactive_panels {
+                    state.common.config.cosmic_conf.dim_inactive_panels = new;
+                    state.common.update_config();
+                    let outputs = state
+                        .common
+                        .shell
+                        .read()
+                        .outputs()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    for output in &outputs {
+                        state.backend.schedule_render(output);
+                    }
+                }
+            }
             "descale_xwayland" => {
                 let new = get_config::<XwaylandDescaling>(&config, "descale_xwayland");
                 if new != state.common.config.cosmic_conf.descale_xwayland {
