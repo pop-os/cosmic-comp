@@ -1101,11 +1101,15 @@ impl KeyboardTarget<State> for CosmicSurface {
             keys = vec![];
         }
 
+        let previous = KeyboardEnteredSurface::replace(seat, self);
+        if previous.as_ref() == Some(self) {
+            // An `enter` without an intervening `leave` is a protocol violation.
+            return;
+        }
+
         // Release a stale unpaired `enter` left on another surface, or the
         // client ends up believing two of its windows are focused at once.
-        if let Some(previous) = KeyboardEnteredSurface::replace(seat, self)
-            .filter(|prev| prev != self && prev.alive())
-        {
+        if let Some(previous) = previous.filter(|prev| prev.alive()) {
             KeyboardTarget::leave(&previous, seat, data, serial);
         }
 
