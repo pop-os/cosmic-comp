@@ -127,7 +127,7 @@ use std::{
     cmp::min,
     collections::HashSet,
     ffi::OsString,
-    process::Child,
+    process::{Child, Command},
     sync::{Arc, LazyLock, Once, atomic::AtomicBool},
     time::{Duration, Instant},
 };
@@ -225,6 +225,7 @@ pub struct State {
     pub common: Common,
     pub ready: Once,
     pub last_refresh: LastRefresh,
+    pub kiosk_command: Option<Command>,
 }
 smithay::delegate_dispatch2!(State);
 
@@ -633,6 +634,7 @@ impl State {
         handle: LoopHandle<'static, State>,
         signal: LoopSignal,
         with_xwayland: bool,
+        kiosk_command: Option<Command>,
     ) -> State {
         let requested_languages = DesktopLanguageRequester::requested_languages();
         i18n_embed::select(&*LANG_LOADER, &Localizations, &requested_languages)
@@ -810,6 +812,7 @@ impl State {
             backend: BackendData::Unset,
             ready: Once::new(),
             last_refresh: LastRefresh::None,
+            kiosk_command,
         }
     }
 
