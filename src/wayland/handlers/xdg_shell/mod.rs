@@ -8,7 +8,7 @@ use smithay::desktop::layer_map_for_output;
 use smithay::{
     desktop::{
         PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
-        WindowSurfaceType, find_popup_root_surface,
+        WindowSurfaceType, find_popup_root_surface, space::SpaceElement,
     },
     input::{Seat, pointer::Focus},
     output::Output,
@@ -348,6 +348,23 @@ impl XdgShellHandler for State {
                 client_compositor_state(client).blocker_cleared(self, &dh);
             }
         }
+
+        if let Some(output) = output.as_ref() {
+            self.backend.schedule_render(output);
+        }
+    }
+
+    fn title_changed(&mut self, surface: ToplevelSurface) {
+        let output = {
+            let shell = self.common.shell.read();
+            let mapped = shell.element_for_surface(surface.wl_surface());
+            mapped.map(SpaceElement::refresh);
+            mapped.and_then(|_| {
+                shell
+                    .visible_output_for_surface(surface.wl_surface())
+                    .cloned()
+            })
+        };
 
         if let Some(output) = output.as_ref() {
             self.backend.schedule_render(output);

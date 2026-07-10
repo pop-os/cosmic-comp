@@ -216,6 +216,7 @@ pub enum ThreadCommand {
     UpdateScreenFilter(ScreenFilter),
     VBlank(Option<DrmEventMetadata>),
     ScheduleRender,
+    ScheduleFrameCallbacks,
     AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
     UseAdaptiveSync(AdaptiveSync),
     AllowFrameFlags(bool, FrameFlags),
@@ -389,6 +390,14 @@ impl Surface {
     pub fn schedule_render(&self) {
         if self.dpms {
             let _ = self.thread_command.send(ThreadCommand::ScheduleRender);
+        }
+    }
+
+    pub fn schedule_frame_callbacks(&self) {
+        if self.dpms {
+            let _ = self
+                .thread_command
+                .send(ThreadCommand::ScheduleFrameCallbacks);
         }
     }
 
@@ -593,6 +602,13 @@ fn surface_thread(
                 }
 
                 state.queue_redraw(false);
+            }
+            Event::Msg(ThreadCommand::ScheduleFrameCallbacks) => {
+                if !startup_done.load(Ordering::SeqCst) {
+                    return;
+                }
+
+                state.queue_frame_callbacks();
             }
             Event::Msg(ThreadCommand::UpdateMirroring(mirroring_output)) => {
                 state.update_mirroring(mirroring_output);
@@ -1410,8 +1426,7 @@ impl SurfaceThreadState {
 
     fn queue_estimated_vblank(&mut self, target_presentation_time: Duration, force: bool) {
         match mem::take(&mut self.state) {
-            QueueState::Idle => unreachable!(),
-            QueueState::Queued(_) => (),
+            QueueState::Idle | QueueState::Queued(_) => (),
             QueueState::WaitingForVBlank { .. } => unreachable!(),
             QueueState::WaitingForEstimatedVBlank(token)
             | QueueState::WaitingForEstimatedVBlankAndQueued {
@@ -1443,6 +1458,13 @@ impl SurfaceThreadState {
             })
             .unwrap();
         self.state = QueueState::WaitingForEstimatedVBlank(token);
+    }
+
+    fn queue_frame_callbacks(&mut self) {
+        if self.compositor.is_some() && matches!(self.state, QueueState::Idle) {
+            let estimated_presentation = self.timings.next_presentation_time(&self.clock);
+            self.queue_estimated_vblank(estimated_presentation, false);
+        }
     }
 
     fn update_mirroring(&mut self, mirroring_output: Option<Output>) {
