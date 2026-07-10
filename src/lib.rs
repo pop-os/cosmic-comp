@@ -81,11 +81,8 @@ impl State {
                 warn!(?err, "Failed to setup cosmic-session communication");
             }
 
-            let mut args = env::args().skip(1);
-            self.common.kiosk_child = if let Some(exec) = args.next() {
+            self.common.kiosk_child = if let Some(mut command) = self.kiosk_command.take() {
                 // Run command in kiosk mode
-                let mut command = process::Command::new(&exec);
-                command.args(args);
                 command.envs(
                     session::get_env(&self.common).expect("WAYLAND_DISPLAY should be valid UTF-8"),
                 );
@@ -96,7 +93,7 @@ impl State {
                     })
                 };
 
-                info!("Running {:?}", exec);
+                info!("Running {:?}", command.get_program());
                 command
                     .spawn()
                     .map_err(|err| {
@@ -115,8 +112,10 @@ impl State {
 pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     let raw_args = RawArgs::from_args();
     let mut cursor = raw_args.cursor();
+    raw_args.next_os(&mut cursor);
     let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
 
+    let mut kiosk_command = None;
     let mut with_xwayland = true;
     // Parse the arguments
     while let Some(arg) = raw_args.next_os(&mut cursor) {
@@ -137,7 +136,11 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                 );
                 return Ok(());
             }
-            _ => {}
+            _ => {
+                let mut cmd = process::Command::new(arg);
+                cmd.args(raw_args.remaining(&mut cursor));
+                kiosk_command = Some(cmd);
+            }
         }
     }
 
@@ -171,6 +174,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         event_loop.handle(),
         event_loop.get_signal(),
         with_xwayland,
+        kiosk_command,
     );
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;
