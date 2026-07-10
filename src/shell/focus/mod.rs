@@ -546,7 +546,25 @@ impl Common {
 
             if let Some(target) = last_known_focus {
                 if target.alive() {
-                    if focus_target_is_valid(&mut shell, seat, &output, target) {
+                    if focus_target_is_valid(&mut shell, seat, &output, target.clone()) {
+                        // The active tab can change without a set_focus call
+                        // (deferred activation, tab death) - re-enter it here.
+                        if let KeyboardFocusTarget::Element(mapped) = &target
+                            && let Some(keyboard) = seat.get_keyboard()
+                            && keyboard.current_focus().as_ref() == Some(&target)
+                            && mapped.needs_reenter(seat)
+                        {
+                            std::mem::drop(shell);
+                            let serial = SERIAL_COUNTER.next_serial();
+                            KeyboardTarget::enter(mapped, seat, state, Vec::new(), serial);
+                            KeyboardTarget::modifiers(
+                                mapped,
+                                seat,
+                                state,
+                                keyboard.modifier_state(),
+                                serial,
+                            );
+                        }
                         continue; // Focus is valid
                     } else {
                         trace!("Wrong Window, focus fixup");
