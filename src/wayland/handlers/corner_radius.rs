@@ -13,59 +13,13 @@ impl CornerRadiusHandler for State {
         &mut self.common.corner_radius_state
     }
 
-    fn set_corner_radius(&mut self, data: &CornerRadiusData) {
-        if force_redraw(self, data).is_none() {
-            tracing::warn!("Failed to force redraw for corner radius change.");
-        }
-    }
+    fn set_corner_radius(&mut self, _data: &CornerRadiusData) {}
 
-    fn unset_corner_radius(&mut self, data: &CornerRadiusData) {
-        if force_redraw(self, data).is_none() {
-            tracing::warn!("Failed to force redraw for corner radius reset.");
-        }
-    }
+    fn unset_corner_radius(&mut self, _data: &CornerRadiusData) {}
 
-    fn set_padding(&mut self, data: &CornerRadiusData) {
-        if force_redraw(self, data).is_none() {
-            tracing::warn!("Failed to force redraw for corner radius change.");
-        }
-    }
+    fn set_padding(&mut self, _data: &CornerRadiusData) {}
 
-    fn unset_padding(&mut self, data: &CornerRadiusData) {
-        if force_redraw(self, data).is_none() {
-            tracing::warn!("Failed to force redraw for corner radius reset.");
-        }
-    }
-}
-
-fn force_redraw(state: &mut State, data: &CornerRadiusData) -> Option<()> {
-    let guard = data.lock().unwrap();
-    let shell = state.common.shell.read();
-
-    let output = match &guard.surface {
-        CornerRadiusSurface::Toplevel(toplevel) => {
-            let toplevel = toplevel.upgrade().ok()?;
-            let surface = state.common.xdg_shell_state.get_toplevel(&toplevel)?;
-            shell.visible_output_for_surface(surface.wl_surface())?
-        }
-        CornerRadiusSurface::Popup(popup) => {
-            let popup = popup.upgrade().ok()?;
-            let surface = state.common.xdg_shell_state.get_popup(&popup)?;
-            shell.visible_output_for_surface(surface.wl_surface())?
-        }
-        CornerRadiusSurface::Layer(layer) => {
-            let layer = layer.upgrade().ok()?;
-            let surface = state
-                .common
-                .layer_shell_state
-                .layer_surfaces()
-                .find(|l| l.shell_surface() == &layer)?;
-            shell.visible_output_for_surface(surface.wl_surface())?
-        }
-    };
-
-    state.backend.schedule_render(output);
-    Some(())
+    fn unset_padding(&mut self, _data: &CornerRadiusData) {}
 }
 
 pub fn surface_corners(states: &SurfaceData, size: Size<i32, Logical>) -> Option<[u8; 4]> {
