@@ -50,6 +50,7 @@
             systemd
             udev
             wayland
+            xrdb
           ];
 
           nativeBuildInputs = with pkgs; [
