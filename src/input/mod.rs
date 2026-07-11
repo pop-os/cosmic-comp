@@ -788,7 +788,12 @@ impl State {
                             let shell = self.common.shell.read();
                             State::element_under(global_position, &output, &shell, &seat)
                         };
-                        if let Some(target) = under {
+                        // Grabbing a tiling resize handle (the gap between tiles) must not change keyboard focus
+                        let on_resize_fork = matches!(
+                            seat.get_pointer().unwrap().current_focus(),
+                            Some(PointerFocusTarget::ResizeFork(_))
+                        );
+                        if let Some(target) = under.filter(|_| !on_resize_fork) {
                             if let Some(surface) = target.toplevel().map(Cow::into_owned)
                                 && seat.get_keyboard().unwrap().modifier_state().logo
                                 && !shortcuts_inhibited
