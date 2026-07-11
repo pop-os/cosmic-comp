@@ -45,8 +45,8 @@ mod types;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    ActivationPolicy, AppearanceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig,
-    XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
+    ActivationPolicy, AppearanceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior,
+    WorkspaceAssignment, XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
     output::comp::{
         OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef, load_outputs,
@@ -854,6 +854,16 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 state.common.config.cosmic_conf.workspaces =
                     get_config::<WorkspaceConfig>(&config, "workspaces");
                 state.common.update_config();
+            }
+            "workspace_assignments" => {
+                let assignments =
+                    get_config::<Vec<WorkspaceAssignment>>(&config, "workspace_assignments");
+                state.common.config.cosmic_conf.workspace_assignments = assignments.clone();
+                state
+                    .common
+                    .shell
+                    .write()
+                    .update_workspace_assignments(assignments);
             }
             "autotile" => {
                 let new = get_config::<bool>(&config, "autotile");
