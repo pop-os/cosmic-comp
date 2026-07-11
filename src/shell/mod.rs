@@ -369,6 +369,9 @@ pub struct WorkspaceSet {
     pub sticky_layer: FloatingLayout,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub workspaces: Vec<Workspace>,
+    /// Some(columns) while the Grid layout is active; workspace protocol
+    /// coordinates are then published as 2D [column, row] instead of [idx].
+    grid_coords_columns: Option<u32>,
 }
 
 fn create_workspace(
@@ -504,6 +507,7 @@ impl WorkspaceSet {
             workspaces: Vec::new(),
             output: output.clone(),
             appearance,
+            grid_coords_columns: None,
         }
     }
 
@@ -628,7 +632,7 @@ impl WorkspaceSet {
             self.workspaces.len() as u8 + 1,
             &workspace.handle,
             workspace.name.as_deref(),
-            // this method is only used by code paths related to dynamic workspaces, so this should be fine
+            self.grid_coords_columns,
         );
         self.workspaces.push(workspace);
     }
@@ -704,6 +708,7 @@ impl WorkspaceSet {
                 i as u8 + 1,
                 &workspace.handle,
                 workspace.name.as_deref(),
+                self.grid_coords_columns,
             );
         }
     }
@@ -921,6 +926,8 @@ impl Workspaces {
         if set.workspaces.is_empty() {
             set.add_empty_workspace(workspace_state);
         }
+        set.grid_coords_columns =
+            (self.layout == WorkspaceLayout::Grid).then_some(self.grid_columns);
         if self.layout == WorkspaceLayout::Grid {
             set.ensure_grid_size(workspace_state, self.grid_columns, self.grid_rows);
         }
@@ -1183,6 +1190,16 @@ impl Workspaces {
         self.grid_rows = config.cosmic_conf.workspaces.workspace_grid_rows.max(1);
         self.appearance = config.cosmic_conf.appearance_settings;
 
+        // Keep protocol coordinates in sync with the layout (2D in Grid mode).
+        let grid_coords =
+            (self.layout == WorkspaceLayout::Grid).then_some(self.grid_columns);
+        for set in self.sets.values_mut() {
+            if set.grid_coords_columns != grid_coords {
+                set.grid_coords_columns = grid_coords;
+                set.update_workspace_idxs(workspace_state);
+            }
+        }
+
         for set in self.sets.values_mut() {
             set.appearance = self.appearance;
             set.sticky_layer.appearance = self.appearance;
@@ -1268,6 +1285,26 @@ impl Workspaces {
                 let Some(max) = self.sets.values().map(|set| set.workspaces.len()).max() else {
                     return;
                 };
+
+                // Grid: fixed count. Keep all sets in sync at
+                // max(current max, columns * rows), skipping the dynamic
+                // trailing-empty/auto-remove behavior below. Never shrinks,
+                // so switching layouts never destroys occupied workspaces.
+                if self.layout == WorkspaceLayout::Grid {
+                    let target = (self.grid_columns as usize)
+                        .saturating_mul(self.grid_rows as usize)
+                        .max(1)
+                        .max(max);
+                    for set in self.sets.values_mut() {
+                        while set.workspaces.len() < target {
+                            set.add_empty_workspace(workspace_state);
+                        }
+                    }
+                    for set in self.sets.values_mut() {
+                        set.refresh()
+                    }
+                    return;
+                }
 
                 for set in self
                     .sets
@@ -5117,9 +5154,18 @@ fn workspace_set_idx(
     idx: u8,
     handle: &WorkspaceHandle,
     name: Option<&str>,
+    grid_columns: Option<u32>,
 ) {
     state.set_workspace_name(handle, name.unwrap_or(&format!("{}", idx)));
-    state.set_workspace_coordinates(handle, &[idx as u32]);
+    match grid_columns.filter(|columns| *columns > 0) {
+        // Grid layout: publish 2D coordinates ([x, y], per the workspace
+        // protocol's convention for the first two dimensions).
+        Some(columns) => {
+            let flat = (idx as u32).saturating_sub(1);
+            state.set_workspace_coordinates(handle, &[flat % columns, flat / columns]);
+        }
+        None => state.set_workspace_coordinates(handle, &[idx as u32]),
+    }
 }
 
 pub fn check_grab_preconditions(

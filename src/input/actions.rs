@@ -136,6 +136,26 @@ impl State {
                     &mut self.common.workspace_state.update(),
                 );
             }
+            SwipeAction::GridMove(direction) => {
+                let columns = self.common.shell.read().workspaces.grid_columns as usize;
+                let current_output = seat.active_output();
+                let mut shell = self.common.shell.write();
+                let active = shell.workspaces.active_num(&current_output).1;
+                let total = shell.workspaces.len(&current_output);
+                if let Some(target) =
+                    grid_target_index(active, direction, columns, total, wraparound)
+                {
+                    let _ = shell.activate(
+                        &current_output,
+                        target,
+                        WorkspaceDelta::new_gesture(matches!(
+                            direction,
+                            Direction::Right | Direction::Down
+                        )),
+                        &mut self.common.workspace_state.update(),
+                    );
+                }
+            }
         }
     }
 
@@ -925,12 +945,15 @@ impl State {
                                 | (Direction::Down, WorkspaceLayout::Vertical) => {
                                     Action::NextWorkspace
                                 }
-                                // Grid mode: all 4 directions stay in the workspace grid;
-                                // the actual direction is re-resolved via
-                                // pattern.inferred_direction() inside NextWorkspace's
-                                // Grid branch, so dispatching through NextWorkspace here
-                                // (regardless of which physical arrow was pressed) is correct.
-                                (_, WorkspaceLayout::Grid) => Action::NextWorkspace,
+                                // Grid: all 4 directions stay in the workspace grid.
+                                // The Grid branches of Next/PreviousWorkspace resolve
+                                // the actual move from the binding's inferred direction.
+                                (Direction::Left | Direction::Up, WorkspaceLayout::Grid) => {
+                                    Action::PreviousWorkspace
+                                }
+                                (Direction::Right | Direction::Down, WorkspaceLayout::Grid) => {
+                                    Action::NextWorkspace
+                                }
                                 _ => Action::SwitchOutput(direction),
                             };
 
@@ -989,8 +1012,13 @@ impl State {
                             | (Direction::Down, WorkspaceLayout::Vertical) => {
                                 Action::MoveToNextWorkspace
                             }
-                            // Grid mode: see the matching comment in the Focus arm above.
-                            (_, WorkspaceLayout::Grid) => Action::MoveToNextWorkspace,
+                            // Grid: see the matching comment in the Focus arm above.
+                            (Direction::Left | Direction::Up, WorkspaceLayout::Grid) => {
+                                Action::MoveToPreviousWorkspace
+                            }
+                            (Direction::Right | Direction::Down, WorkspaceLayout::Grid) => {
+                                Action::MoveToNextWorkspace
+                            }
                             _ => Action::MoveToOutput(direction),
                         };
 
