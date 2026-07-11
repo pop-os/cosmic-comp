@@ -3180,6 +3180,10 @@ impl TilingLayout {
         let location = location_f64.to_i32_round();
 
         for (mapped, geo) in self.mapped() {
+            // Tiled windows are rendered cropped to their tile (`geo`), so input must be bound to the tile as well
+            if !geo.contains(location) {
+                continue;
+            }
             if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                 continue;
             }
@@ -3244,6 +3248,10 @@ impl TilingLayout {
 
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
+                // Tiled windows are rendered cropped to their tile (`geo`), so input must be bound to the tile as well
+                if !geo.contains(location) {
+                    continue;
+                }
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                     continue;
                 }
