@@ -687,6 +687,16 @@ impl WorkspaceSet {
         }
     }
 
+    // Grid mode: maintain a fixed `columns * rows` workspace count instead of the
+    // dynamic "always one trailing empty" behavior. Only pads up, never truncates,
+    // so toggling Grid on/off at runtime never destroys a workspace with windows on it.
+    fn ensure_grid_size(&mut self, state: &mut WorkspaceUpdateGuard<State>, columns: u32, rows: u32) {
+        let target = (columns as usize).saturating_mul(rows as usize).max(1);
+        while self.workspaces.len() < target {
+            self.add_empty_workspace(state);
+        }
+    }
+
     fn update_workspace_idxs(&self, state: &mut WorkspaceUpdateGuard<'_, State>) {
         for (i, workspace) in self.workspaces.iter().enumerate() {
             workspace_set_idx(
@@ -824,6 +834,8 @@ pub struct Workspaces {
     pub sets: IndexMap<Output, WorkspaceSet>,
     backup_set: Option<WorkspaceSet>,
     pub layout: WorkspaceLayout,
+    pub grid_columns: u32,
+    pub grid_rows: u32,
     mode: WorkspaceMode,
     autotile: bool,
     autotile_behavior: TileBehavior,
@@ -839,6 +851,8 @@ impl Workspaces {
             sets: IndexMap::new(),
             backup_set: None,
             layout: config.cosmic_conf.workspaces.workspace_layout,
+            grid_columns: config.cosmic_conf.workspaces.workspace_grid_columns.max(1),
+            grid_rows: config.cosmic_conf.workspaces.workspace_grid_rows.max(1),
             mode: config.cosmic_conf.workspaces.workspace_mode,
             autotile: config.cosmic_conf.autotile,
             autotile_behavior: config.cosmic_conf.autotile_behavior,
@@ -906,6 +920,9 @@ impl Workspaces {
         set.workspaces.extend(moved_workspaces);
         if set.workspaces.is_empty() {
             set.add_empty_workspace(workspace_state);
+        }
+        if self.layout == WorkspaceLayout::Grid {
+            set.ensure_grid_size(workspace_state, self.grid_columns, self.grid_rows);
         }
         set.update_workspace_idxs(workspace_state);
         for (i, workspace) in set.workspaces.iter_mut().enumerate() {
@@ -1162,6 +1179,8 @@ impl Workspaces {
         let old_mode = self.mode;
         self.mode = config.cosmic_conf.workspaces.workspace_mode;
         self.layout = config.cosmic_conf.workspaces.workspace_layout;
+        self.grid_columns = config.cosmic_conf.workspaces.workspace_grid_columns.max(1);
+        self.grid_rows = config.cosmic_conf.workspaces.workspace_grid_rows.max(1);
         self.appearance = config.cosmic_conf.appearance_settings;
 
         for set in self.sets.values_mut() {
@@ -1309,7 +1328,11 @@ impl Workspaces {
             }
             WorkspaceMode::OutputBound => {
                 for set in self.sets.values_mut() {
-                    set.ensure_last_empty(workspace_state, xdg_activation_state);
+                    if self.layout == WorkspaceLayout::Grid {
+                        set.ensure_grid_size(workspace_state, self.grid_columns, self.grid_rows);
+                    } else {
+                        set.ensure_last_empty(workspace_state, xdg_activation_state);
+                    }
                 }
             }
         }
