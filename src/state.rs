@@ -272,6 +272,7 @@ pub struct Common {
     pub idle_notifier_state: IdleNotifierState<State>,
     pub idle_inhibit_manager_state: IdleInhibitManagerState,
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
+    pub idle_inhibitors_export: crate::dbus::idle_inhibit_export::IdleInhibitors,
     pub shm_state: ShmState,
     pub cursor_shape_manager_state: CursorShapeManagerState,
     pub wl_drm_state: WlDrmState<Option<DrmNode>>,
@@ -693,6 +694,10 @@ impl State {
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
         let idle_inhibiting_surfaces = HashSet::new();
+        // Export Wayland idle-inhibitors over the session bus (own thread; a
+        // failure here only logs and never affects the compositor).
+        let idle_inhibitors_export = crate::dbus::idle_inhibit_export::new();
+        crate::dbus::idle_inhibit_export::spawn(idle_inhibitors_export.clone());
 
         let ext_data_control_state = ExtDataControlState::new::<Self, _>(
             dh,
@@ -765,6 +770,7 @@ impl State {
                 idle_notifier_state,
                 idle_inhibit_manager_state,
                 idle_inhibiting_surfaces,
+                idle_inhibitors_export,
                 cosmic_image_capture_source_state,
                 output_capture_source_state,
                 toplevel_capture_source_state,

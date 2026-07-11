@@ -18,6 +18,7 @@ use a11y_keyboard_monitor::A11yKeyboardMonitorState;
 pub mod logind;
 mod name_owners;
 mod power;
+pub mod idle_inhibit_export;
 
 #[derive(Clone, Debug)]
 pub struct DBusState(Rc<DBusStateInner>);
