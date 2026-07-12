@@ -401,7 +401,8 @@ fn create_workspace(
         WorkspaceCapabilities::Activate
             | WorkspaceCapabilities::SetTilingState
             | WorkspaceCapabilities::Pin
-            | WorkspaceCapabilities::Move,
+            | WorkspaceCapabilities::Move
+            | WorkspaceCapabilities::Rename,
     );
     Workspace::new(
         workspace_handle,
@@ -441,7 +442,8 @@ fn create_workspace_from_pinned(
         WorkspaceCapabilities::Activate
             | WorkspaceCapabilities::SetTilingState
             | WorkspaceCapabilities::Pin
-            | WorkspaceCapabilities::Move,
+            | WorkspaceCapabilities::Move
+            | WorkspaceCapabilities::Rename,
     );
 
     if let Some(ref name) = pinned.name {
