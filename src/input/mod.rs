@@ -1846,6 +1846,32 @@ impl State {
             )));
         }
 
+        // Open the focused window's context menu (Super+M). Hardcoded rather
+        // than going through the configurable shortcuts system - see the
+        // PrivateAction::OpenWindowMenu doc comment for why.
+        if !shortcuts_inhibited
+            && event.state() == KeyState::Pressed
+            && modifiers.logo
+            && !modifiers.alt
+            && !modifiers.ctrl
+            && !modifiers.shift
+            && key_matches(Keysym::m)
+        {
+            seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(Some((
+                Action::Private(PrivateAction::OpenWindowMenu),
+                shortcuts::Binding {
+                    modifiers: shortcuts::Modifiers {
+                        logo: true,
+                        ..Default::default()
+                    },
+                    keycode: None,
+                    key: Some(Keysym::m),
+                    description: None,
+                },
+            )));
+        }
+
         if let Some(mut a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
             if event.state() == KeyState::Released {
                 let removed =
