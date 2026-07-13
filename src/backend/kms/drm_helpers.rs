@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, anyhow};
 use libdisplay_info::{edid::DisplayDescriptorTag, info::Info};
 use smithay::{
+    backend::drm::DrmDevice,
     reexports::drm::control::{
         AtomicCommitFlags, Device as ControlDevice, Mode, ModeFlags, PlaneType, ResourceHandle,
         atomic::AtomicModeReq,
@@ -16,8 +17,7 @@ use smithay::{
 use std::{collections::HashMap, ops::Range};
 
 pub fn display_configuration(
-    device: &mut impl ControlDevice,
-    supports_atomic: bool,
+    device: &mut DrmDevice,
 ) -> Result<HashMap<connector::Handle, Option<crtc::Handle>>> {
     let res_handles = device.resource_handles()?;
     let connectors = res_handles.connectors();
@@ -73,27 +73,9 @@ pub fn display_configuration(
     }
 
     // And then cleanup
-    if supports_atomic {
+    if device.is_atomic() {
         let mut req = AtomicModeReq::new();
         let plane_handles = device.plane_handles()?;
-
-        for conn in connectors
-            .iter()
-            .flat_map(|conn| device.get_connector(*conn, false).ok())
-            .filter(|conn| {
-                if let Some(enc) = conn.current_encoder()
-                    && let Ok(enc) = device.get_encoder(enc)
-                    && let Some(crtc) = enc.crtc()
-                {
-                    return cleanup.contains(&crtc);
-                }
-                false
-            })
-            .map(|info| info.handle())
-        {
-            let crtc_id = get_prop(device, conn, "CRTC_ID")?;
-            req.add_property(conn, crtc_id, property::Value::CRTC(None));
-        }
 
         // We cannot just shortcut and use the legacy api for all cleanups because of this.
         // (Technically a device does not need to be atomic for planes to be used, but nobody does this otherwise.)
@@ -108,7 +90,7 @@ pub fn display_configuration(
                         _ => false,
                     },
                 )?;
-                if cleanup.contains(&crtc) || !is_primary {
+                if !is_primary && !cleanup.contains(&crtc) {
                     let crtc_id = get_prop(device, plane, "CRTC_ID")?;
                     let fb_id = get_prop(device, plane, "FB_ID")?;
                     req.add_property(plane, crtc_id, property::Value::CRTC(None));
@@ -116,27 +98,76 @@ pub fn display_configuration(
                 }
             }
         }
-
-        for crtc in cleanup {
-            let mode_id = get_prop(device, crtc, "MODE_ID")?;
-            let active = get_prop(device, crtc, "ACTIVE")?;
-            req.add_property(crtc, active, property::Value::Boolean(false));
-            req.add_property(crtc, mode_id, property::Value::Unknown(0));
-        }
-
         device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)?;
     } else {
         for crtc in res_handles.crtcs() {
             #[allow(deprecated)]
             let _ = device.set_cursor(*crtc, Option::<&DumbBuffer>::None);
         }
-        for crtc in cleanup {
+    }
+    disable_crtcs(device, &cleanup)?;
+
+    Ok(map)
+}
+
+/// Disables the given CRTCs and detaches their connectors/planes.
+pub fn disable_crtcs(device: &mut DrmDevice, crtcs: &[crtc::Handle]) -> Result<()> {
+    if crtcs.is_empty() {
+        return Ok(());
+    }
+
+    let res_handles = device.resource_handles()?;
+
+    if device.is_atomic() {
+        let mut req = AtomicModeReq::new();
+
+        for conn in res_handles
+            .connectors()
+            .iter()
+            .flat_map(|conn| device.get_connector(*conn, false).ok())
+            .filter(|conn| {
+                if let Some(enc) = conn.current_encoder()
+                    && let Ok(enc) = device.get_encoder(enc)
+                    && let Some(crtc) = enc.crtc()
+                {
+                    return crtcs.contains(&crtc);
+                }
+                false
+            })
+            .map(|info| info.handle())
+        {
+            let crtc_id = get_prop(device, conn, "CRTC_ID")?;
+            req.add_property(conn, crtc_id, property::Value::CRTC(None));
+        }
+
+        for plane in device.plane_handles()? {
+            let info = device.get_plane(plane)?;
+            if let Some(crtc) = info.crtc()
+                && crtcs.contains(&crtc)
+            {
+                let crtc_id = get_prop(device, plane, "CRTC_ID")?;
+                let fb_id = get_prop(device, plane, "FB_ID")?;
+                req.add_property(plane, crtc_id, property::Value::CRTC(None));
+                req.add_property(plane, fb_id, property::Value::Framebuffer(None));
+            }
+        }
+
+        for crtc in crtcs {
+            let mode_id = get_prop(device, *crtc, "MODE_ID")?;
+            let active = get_prop(device, *crtc, "ACTIVE")?;
+            req.add_property(*crtc, active, property::Value::Boolean(false));
+            req.add_property(*crtc, mode_id, property::Value::Unknown(0));
+        }
+
+        device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)?;
+    } else {
+        for crtc in crtcs {
             // null commit (necessary to trigger removal on the kernel side with the legacy api.)
-            let _ = device.set_crtc(crtc, None, (0, 0), &[], None);
+            let _ = device.set_crtc(*crtc, None, (0, 0), &[], None);
         }
     }
 
-    Ok(map)
+    Ok(())
 }
 
 pub fn interface_name(device: &impl ControlDevice, connector: connector::Handle) -> Result<String> {
