@@ -13,7 +13,7 @@ use smithay::wayland::text_input::TextInputSeat;
 use crate::config::xkb_config_to_wl;
 use crate::input::InputBackendId;
 use crate::state::{BackendData, State};
-use crate::utils::prelude::OutputExt;
+use crate::utils::prelude::{OutputExt, RectGlobalExt};
 
 // Requested device types for an EI connection, mirroring the XDG RemoteDesktop portal `DeviceType` bitmask
 const DEVICE_TYPE_KEYBOARD: u32 = 1;
@@ -34,15 +34,11 @@ pub fn absolute_pointer_regions(state: &State) -> Vec<EiRegion> {
     shell
         .outputs()
         .map(|output| {
-            let geo = output.geometry();
             let scale = output.current_scale().fractional_scale();
             EiRegion {
-                // EI region offsets are unsigned; cosmic-comp normalizes output
-                // layout to non-negative coordinates.
-                x: geo.loc.x.max(0) as u32,
-                y: geo.loc.y.max(0) as u32,
-                width: geo.size.w.max(0) as u32,
-                height: geo.size.h.max(0) as u32,
+                // Keep the signed logical rect
+                // the u32 clamp happens at the `ei_device.region` in smithay.
+                rect: output.geometry().as_logical(),
                 scale: scale as f32,
             }
         })
