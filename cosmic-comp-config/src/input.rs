@@ -38,6 +38,24 @@ pub struct AccelConfig {
     #[serde(with = "AccelProfileDef")]
     pub profile: Option<AccelProfile>,
     pub speed: f64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub custom_points: Option<CustomAccelPoints>,
+}
+
+// Custom acceleration curve points for the `Custom` libinput accel profile.
+// `step` is the input-velocity step in device units / ms.
+// `motion` (and optional `scroll`) are the multipliers at i*step.
+// `anchors` is editor-only state (cosmic-settings curve handles, expressed as
+// (mm/s, multiplier) pairs). cosmic-comp ignores it; only `motion` is fed to
+// libinput. cosmic-settings owns and round-trips it.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct CustomAccelPoints {
+    pub step: f64,
+    pub motion: Vec<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub scroll: Option<Vec<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub anchors: Option<Vec<(f64, f64)>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -115,17 +133,24 @@ mod AccelProfileDef {
     enum AccelProfile {
         Flat,
         Adaptive,
+        Custom,
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<AccelProfileOrig>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let o = Option::deserialize(deserializer)?;
-        Ok(o.map(|x| match x {
-            AccelProfile::Flat => AccelProfileOrig::Flat,
-            AccelProfile::Adaptive => AccelProfileOrig::Adaptive,
-        }))
+        let Some(x) = Option::deserialize(deserializer)? else {
+            return Ok(None);
+        };
+        Ok(match x {
+            AccelProfile::Flat => Some(AccelProfileOrig::Flat),
+            AccelProfile::Adaptive => Some(AccelProfileOrig::Adaptive),
+            #[cfg(feature = "custom-accel")]
+            AccelProfile::Custom => Some(AccelProfileOrig::Custom),
+            #[cfg(not(feature = "custom-accel"))]
+            AccelProfile::Custom => None,
+        })
     }
 
     pub fn serialize<S>(arg: &Option<AccelProfileOrig>, ser: S) -> Result<S::Ok, S::Error>
@@ -135,6 +160,8 @@ mod AccelProfileDef {
         let arg = match arg {
             Some(AccelProfileOrig::Flat) => Some(AccelProfile::Flat),
             Some(AccelProfileOrig::Adaptive) => Some(AccelProfile::Adaptive),
+            #[cfg(feature = "custom-accel")]
+            Some(AccelProfileOrig::Custom) => Some(AccelProfile::Custom),
             Some(_) | None => None,
         };
         Option::serialize(&arg, ser)
