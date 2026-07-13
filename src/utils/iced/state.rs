@@ -1,12 +1,16 @@
 use super::IcedProgram as Program;
-use cosmic::iced::core::event::{self, Event};
-use cosmic::iced::core::mouse;
-use cosmic::iced::core::renderer;
-use cosmic::iced::core::widget::operation::{self, Operation};
-use cosmic::iced::core::{Clipboard, Size};
-use cosmic::iced_core;
-use cosmic::iced_runtime::Task;
-use cosmic::iced_runtime::user_interface::{self, UserInterface};
+use cosmic::iced::{
+    core::{
+        self as iced_core, Clipboard, Size,
+        event::{self, Event},
+        mouse, renderer,
+        widget::operation::{self, Operation},
+    },
+    runtime::{
+        Task,
+        user_interface::{self, UserInterface},
+    },
+};
 
 /// The execution state of a [`Program`]. It leverages caching, event
 /// processing, and rendering primitive storage.
@@ -128,7 +132,7 @@ where
         messages.append(&mut self.queued_messages);
 
         let task = if messages.is_empty() {
-            if let cosmic::iced_runtime::user_interface::State::Updated {
+            if let cosmic::iced::runtime::user_interface::State::Updated {
                 mouse_interaction, ..
             } = state
             {
@@ -154,7 +158,7 @@ where
             let mut user_interface =
                 build_user_interface(id, &mut self.program, temp_cache, renderer, bounds);
 
-            if let cosmic::iced_runtime::user_interface::State::Updated {
+            if let cosmic::iced::runtime::user_interface::State::Updated {
                 mouse_interaction, ..
             } = state
             {

@@ -14,7 +14,7 @@ use tracing::{error, warn};
 
 pub mod a11y_keyboard_monitor;
 use a11y_keyboard_monitor::A11yKeyboardMonitorState;
-#[cfg(feature = "systemd")]
+#[cfg(feature = "logind")]
 pub mod logind;
 mod name_owners;
 mod power;

@@ -22,12 +22,13 @@ use smithay::{
             PointerTarget, RelativeMotionEvent,
         },
         touch::{
-            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
-            OrientationEvent, ShapeEvent, TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
+            DownEvent, FrameMarker, GrabStartData as TouchGrabStartData,
+            MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchGrab,
+            TouchInnerHandle, TouchTarget, UpEvent,
         },
     },
     output::WeakOutput,
-    utils::{IsAlive, Logical, Point, Serial},
+    utils::{IsAlive, Logical, Point},
 };
 
 use super::super::{Data, TilingLayout};
@@ -126,7 +127,7 @@ impl PointerTarget<State> for ResizeForkTarget {
 }
 
 impl TouchTarget<State> for ResizeForkTarget {
-    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, _seq: Serial) {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
         let seat = seat.clone();
         let node = self.node.clone();
         let output = self.output.clone();
@@ -157,25 +158,14 @@ impl TouchTarget<State> for ResizeForkTarget {
         });
     }
 
-    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent, _seq: Serial) {}
-    fn motion(
-        &self,
-        _seat: &Seat<State>,
-        _data: &mut State,
-        _event: &TouchMotionEvent,
-        _seq: Serial,
-    ) {
-    }
-    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {}
-    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _seq: Serial) {}
-    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent, _seq: Serial) {}
-    fn orientation(
-        &self,
-        _seat: &Seat<State>,
-        _data: &mut State,
-        _event: &OrientationEvent,
-        _seq: Serial,
-    ) {
+    fn up(&self, _seat: &Seat<State>, _data: &mut State, _event: &UpEvent) {}
+    fn motion(&self, _seat: &Seat<State>, _data: &mut State, _event: &TouchMotionEvent) {}
+    fn frame(&self, _seat: &Seat<State>, _data: &mut State, _frame: FrameMarker) {}
+    fn cancel(&self, _seat: &Seat<State>, _data: &mut State, _frame: FrameMarker) {}
+    fn shape(&self, _seat: &Seat<State>, _data: &mut State, _event: &ShapeEvent) {}
+    fn orientation(&self, _seat: &Seat<State>, _data: &mut State, _event: &OrientationEvent) {}
+    fn last_frame(&self, _seat: &Seat<State>, _data: &mut State) -> Option<FrameMarker> {
+        None
     }
 }
 
@@ -508,23 +498,16 @@ impl TouchGrab<State> for ResizeForkGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &DownEvent,
-        seq: Serial,
     ) {
-        handle.down(data, None, event, seq)
+        handle.down(data, None, event)
     }
 
-    fn up(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        event: &UpEvent,
-        seq: Serial,
-    ) {
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
             handle.unset_grab(self, data);
         }
 
-        handle.up(data, event, seq);
+        handle.up(data, event);
     }
 
     fn motion(
@@ -533,7 +516,6 @@ impl TouchGrab<State> for ResizeForkGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
-        seq: Serial,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot
             && self.update_location(data, event.location, false)
@@ -541,14 +523,14 @@ impl TouchGrab<State> for ResizeForkGrab {
             handle.unset_grab(self, data);
         }
 
-        handle.motion(data, None, event, seq);
+        handle.motion(data, None, event);
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
-        handle.frame(data, seq)
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.frame(data)
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, _seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         handle.unset_grab(self, data);
     }
 
@@ -557,9 +539,8 @@ impl TouchGrab<State> for ResizeForkGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &ShapeEvent,
-        seq: Serial,
     ) {
-        handle.shape(data, event, seq)
+        handle.shape(data, event)
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {
@@ -574,9 +555,8 @@ impl TouchGrab<State> for ResizeForkGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &OrientationEvent,
-        seq: Serial,
     ) {
-        handle.orientation(data, event, seq)
+        handle.orientation(data, event)
     }
 
     fn unset(&mut self, data: &mut State) {

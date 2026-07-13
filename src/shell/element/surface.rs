@@ -1,8 +1,10 @@
 use crate::{
-    shell::focus::target::PointerFocusTarget,
-    wayland::{
-        handlers::compositor::frame_time_filter_fn, protocols::corner_radius::CacheableCorners,
+    backend::render::{
+        element::AsGlowRenderer,
+        wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
     },
+    shell::focus::target::PointerFocusTarget,
+    wayland::handlers::{compositor::frame_time_filter_fn, corner_radius::surface_corners},
 };
 use std::{
     borrow::Cow,
@@ -14,11 +16,12 @@ use std::{
 };
 
 use smithay::{
-    backend::renderer::{
-        ImportAll, Renderer,
-        element::{
-            AsRenderElements, Kind, RenderElementStates,
-            surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+    backend::{
+        drm::DrmNode,
+        renderer::{
+            ImportAll, Renderer,
+            element::{Kind, RenderElementStates, surface::KindEvaluation},
+            utils::RendererSurfaceStateUserData,
         },
     },
     desktop::{
@@ -49,6 +52,7 @@ use smithay::{
             SubsurfaceCachedState, SurfaceData, TraversalAction, get_parent, with_states,
             with_surface_tree_downward,
         },
+        dmabuf::get_dmabuf,
         seat::WaylandFocus,
         shell::xdg::{
             SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
@@ -66,6 +70,49 @@ use crate::{
         decoration::{KdeDecorationData, PreferredDecorationMode},
     },
 };
+
+/// The [`DrmNode`] the surface's currently committed buffer was allocated on, if it is a dmabuf.
+fn buffer_node(data: &SurfaceData) -> Option<DrmNode> {
+    let surface_state = data.data_map.get::<RendererSurfaceStateUserData>()?;
+    let surface_state = surface_state.lock().unwrap();
+    surface_state
+        .buffer()
+        .and_then(|buffer| get_dmabuf(buffer).ok())
+        .and_then(|dmabuf| dmabuf.node())
+}
+
+/// Build the [`KindEvaluation`] for a window's surface tree.
+///
+/// `scanout_node`, when set, is the scan-out target [`DrmNode`] of the output currently being
+/// rendered: only buffers allocated on that node may be promoted to overlay scan-out candidates.
+/// It is `None` for render passes that never scan out to a plane (e.g. screen-copy).
+fn scanout_kind_eval(
+    scanout_override: Option<bool>,
+    scanout_node: Option<DrmNode>,
+) -> KindEvaluation {
+    match (scanout_override, scanout_node) {
+        // Forced off.
+        (Some(false), _) => Kind::Unspecified.into(),
+        // No node restriction: preserve the previous behaviour exactly.
+        (Some(true), None) => Kind::ScanoutCandidate.into(),
+        (None, None) => FRAME_TIME_FILTER,
+        // Node restriction in effect: only buffers on the scan-out node may be candidates.
+        (Some(true), Some(node)) => KindEvaluation::Closure(Box::new(move |data| {
+            if buffer_node(data) == Some(node) {
+                Kind::ScanoutCandidate
+            } else {
+                Kind::Unspecified
+            }
+        })),
+        (None, Some(node)) => KindEvaluation::Closure(Box::new(move |data| {
+            if buffer_node(data) == Some(node) {
+                frame_time_filter_fn(data)
+            } else {
+                Kind::Unspecified
+            }
+        })),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct CosmicSurface(pub Window);
@@ -144,22 +191,7 @@ impl CosmicSurface {
 
     pub fn corner_radius(&self, geometry_size: Size<i32, Logical>) -> Option<[u8; 4]> {
         self.wl_surface().and_then(|surface| {
-            with_states(&surface, |states| {
-                let mut guard = states.cached_state.get::<CacheableCorners>();
-
-                // guard against corner radius being too large, potentially disconnecting the outline
-                let half_min_dim =
-                    u8::try_from(geometry_size.w.min(geometry_size.h) / 2).unwrap_or(u8::MAX);
-
-                let corners = guard.current().0?;
-
-                Some([
-                    corners.bottom_right.min(half_min_dim),
-                    corners.top_right.min(half_min_dim),
-                    corners.bottom_left.min(half_min_dim),
-                    corners.top_left.min(half_min_dim),
-                ])
-            })
+            with_states(&surface, |states| surface_corners(states, geometry_size))
         })
     }
 
@@ -810,97 +842,112 @@ impl CosmicSurface {
         self.0.user_data()
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<C>
-    where
-        R: Renderer + ImportAll,
+        scanout_node: Option<DrmNode>,
+        blur_strength: usize,
+        push: &mut dyn FnMut(SurfaceRenderElement<R>),
+    ) where
+        R: Renderer + ImportAll + AsGlowRenderer,
         R::TextureId: Clone + 'static,
-        C: From<WaylandSurfaceRenderElement<R>>,
     {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 let surface = toplevel.wl_surface();
-                PopupManager::popups_for_surface(surface)
-                    .flat_map(move |(popup, popup_offset)| {
-                        let offset = (self.0.geometry().loc + popup_offset - popup.geometry().loc)
-                            .to_physical_precise_round(scale);
-
-                        render_elements_from_surface_tree(
-                            renderer,
-                            popup.wl_surface(),
-                            location + offset,
-                            scale,
-                            alpha,
-                            FRAME_TIME_FILTER,
-                        )
+                for (popup, popup_offset) in PopupManager::popups_for_surface(surface) {
+                    let offset = (self.0.geometry().loc + popup_offset - popup.geometry().loc)
+                        .to_physical_precise_round(scale);
+                    let mut geometry = popup.geometry().to_f64();
+                    geometry.loc += location.to_f64().to_logical(scale) + popup_offset.to_f64();
+                    let radii = with_states(popup.wl_surface(), |states| {
+                        surface_corners(states, geometry.size.to_i32_round())
                     })
-                    .collect()
+                    .unwrap_or([0; 4]);
+
+                    push_render_elements_from_surface_tree(
+                        renderer,
+                        popup.wl_surface(),
+                        location + offset,
+                        geometry,
+                        scale,
+                        alpha,
+                        false,
+                        radii,
+                        None,
+                        blur_strength,
+                        scanout_kind_eval(None, scanout_node),
+                        push,
+                        None,
+                    )
+                }
             }
-            WindowSurface::X11(_) => Vec::new(),
+            WindowSurface::X11(_) => {}
         }
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
-    ) -> Vec<C>
-    where
-        R: Renderer + ImportAll,
+        scanout_node: Option<DrmNode>,
+        should_clip: bool,
+        radii: [u8; 4],
+        blur_strength: usize,
+        push_above: &mut dyn FnMut(SurfaceRenderElement<R>),
+        push_below: Option<&mut dyn FnMut(SurfaceRenderElement<R>)>,
+    ) where
+        R: Renderer + ImportAll + AsGlowRenderer,
         R::TextureId: Clone + 'static,
-        C: From<WaylandSurfaceRenderElement<R>>,
     {
+        let mut geometry = self.0.geometry().to_f64();
+        geometry.loc += location.to_f64().to_logical(scale);
+
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 let surface = toplevel.wl_surface();
 
-                render_elements_from_surface_tree(
+                push_render_elements_from_surface_tree(
                     renderer,
                     surface,
                     location,
+                    geometry,
                     scale,
                     alpha,
-                    scanout_override
-                        .map(|val| {
-                            if val {
-                                Kind::ScanoutCandidate
-                            } else {
-                                Kind::Unspecified
-                            }
-                            .into()
-                        })
-                        .unwrap_or(FRAME_TIME_FILTER),
+                    should_clip,
+                    radii,
+                    None,
+                    blur_strength,
+                    scanout_kind_eval(scanout_override, scanout_node),
+                    push_above,
+                    push_below,
                 )
             }
             WindowSurface::X11(surface) => {
                 let Some(surface) = surface.wl_surface() else {
-                    return Vec::new();
+                    return;
                 };
 
-                render_elements_from_surface_tree(
+                push_render_elements_from_surface_tree(
                     renderer,
                     &surface,
                     location,
+                    geometry,
                     scale,
                     alpha,
-                    scanout_override
-                        .map(|val| {
-                            if val {
-                                Kind::ScanoutCandidate
-                            } else {
-                                Kind::Unspecified
-                            }
-                            .into()
-                        })
-                        .unwrap_or(FRAME_TIME_FILTER),
+                    should_clip,
+                    radii,
+                    None,
+                    blur_strength,
+                    scanout_kind_eval(scanout_override, scanout_node),
+                    push_above,
+                    push_below,
                 )
             }
         }
@@ -1041,24 +1088,6 @@ impl WaylandFocus for CosmicSurface {
 impl X11Relatable for CosmicSurface {
     fn is_window(&self, window: &X11Surface) -> bool {
         self.x11_surface() == Some(window)
-    }
-}
-
-impl<R> AsRenderElements<R> for CosmicSurface
-where
-    R: Renderer + ImportAll,
-    R::TextureId: Clone + 'static,
-{
-    type RenderElement = WaylandSurfaceRenderElement<R>;
-
-    fn render_elements<C: From<Self::RenderElement>>(
-        &self,
-        renderer: &mut R,
-        location: Point<i32, Physical>,
-        scale: Scale<f64>,
-        alpha: f32,
-    ) -> Vec<C> {
-        self.0.render_elements(renderer, location, scale, alpha)
     }
 }
 

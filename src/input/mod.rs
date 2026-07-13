@@ -35,14 +35,15 @@ use calloop::{
 use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
+#[cfg(feature = "systemd")]
+use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, Device, DeviceCapability,
         GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
         GestureSwipeUpdateEvent as _, InputBackend, InputEvent, KeyState, KeyboardKeyEvent,
-        PointerAxisEvent, ProximityState, Switch, SwitchState, SwitchToggleEvent,
-        TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
-        TabletToolTipState, TouchEvent,
+        PointerAxisEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
+        TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
     },
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
@@ -74,7 +75,7 @@ use smithay::{
         tablet_manager::{TabletDescriptor, TabletSeatTrait},
     },
 };
-use tracing::{error, trace, warn};
+use tracing::{error, trace};
 use xkbcommon::xkb::{Keycode, Keysym};
 
 use std::{
@@ -1002,6 +1003,10 @@ impl State {
                         if let Some(horizontal_amount) = event.amount(Axis::Horizontal) {
                             if horizontal_amount != 0.0 {
                                 frame = frame
+                                    .relative_direction(
+                                        Axis::Horizontal,
+                                        event.relative_direction(Axis::Horizontal),
+                                    )
                                     .value(Axis::Horizontal, scroll_factor * horizontal_amount);
                                 if let Some(discrete) = event.amount_v120(Axis::Horizontal) {
                                     frame = frame.v120(
@@ -1015,8 +1020,12 @@ impl State {
                         }
                         if let Some(vertical_amount) = event.amount(Axis::Vertical) {
                             if vertical_amount != 0.0 {
-                                frame =
-                                    frame.value(Axis::Vertical, scroll_factor * vertical_amount);
+                                frame = frame
+                                    .relative_direction(
+                                        Axis::Vertical,
+                                        event.relative_direction(Axis::Vertical),
+                                    )
+                                    .value(Axis::Vertical, scroll_factor * vertical_amount);
                                 if let Some(discrete) = event.amount_v120(Axis::Vertical) {
                                     frame = frame.v120(
                                         Axis::Vertical,
@@ -1599,8 +1608,9 @@ impl State {
                 }
             }
             InputEvent::Special(_) => {}
+            #[allow(unused_variables)]
             InputEvent::SwitchToggle { event } => {
-                #[cfg(feature = "systemd")]
+                #[cfg(feature = "logind")]
                 if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
                     let backend = self.backend.lock();
                     let output = backend
@@ -1620,7 +1630,7 @@ impl State {
 
                     if let Err(err) = self.refresh_output_config() {
                         if !closed {
-                            warn!(?err, "Failed to re-enable internal connector");
+                            tracing::warn!(?err, "Failed to re-enable internal connector");
                             if let Some(output) = output {
                                 use cosmic_comp_config::output::comp::OutputState;
 
@@ -2132,6 +2142,7 @@ impl State {
                         layer,
                         popup,
                         location,
+                        ..
                     } => {
                         if layer.can_receive_keyboard_focus() {
                             let surface = popup.wl_surface();
@@ -2149,7 +2160,9 @@ impl State {
                             }
                         }
                     }
-                    Stage::LayerSurface { layer, location } => {
+                    Stage::LayerSurface {
+                        layer, location, ..
+                    } => {
                         if under_from_surface_tree(
                             layer.wl_surface(),
                             global_pos.as_logical(),
@@ -2301,7 +2314,9 @@ impl State {
                             ))));
                         }
                     }
-                    Stage::LayerSurface { layer, location } => {
+                    Stage::LayerSurface {
+                        layer, location, ..
+                    } => {
                         let surface = layer.wl_surface();
                         if let Some((surface, surface_loc)) = under_from_surface_tree(
                             surface,
@@ -2393,7 +2408,7 @@ impl State {
             });
 
             if let Some((output, geometry, surface_offset)) = found {
-                let mut pos_in_element = location + surface_offset.to_f64();
+                let pos_in_element = location + surface_offset.to_f64();
                 let window_size = geometry.size.to_f64();
 
                 let is_legal = |p: Point<f64, Logical>| {
@@ -2417,29 +2432,13 @@ impl State {
                 let workspace_origin = output.geometry().loc.to_f64();
                 let origin = geometry.loc.to_f64();
 
-                if !is_legal(pos_in_element) {
-                    let original_global = pointer.current_location();
-
-                    let original_pos_in_element = Point::new(
-                        original_global.x - workspace_origin.x - origin.x,
-                        original_global.y - workspace_origin.y - origin.y,
-                    );
-
-                    let y_only_pos = Point::new(original_pos_in_element.x, pos_in_element.y);
-                    let x_only_pos = Point::new(pos_in_element.x, original_pos_in_element.y);
-
-                    if is_legal(y_only_pos) {
-                        pos_in_element = y_only_pos;
-                    } else if is_legal(x_only_pos) {
-                        pos_in_element = x_only_pos;
-                    } else {
-                        pos_in_element = original_pos_in_element;
-                    }
+                if is_legal(pos_in_element) {
+                    let x = workspace_origin.x + origin.x + pos_in_element.x;
+                    let y = workspace_origin.y + origin.y + pos_in_element.y;
+                    Some((Point::new(x, y), output.clone()))
+                } else {
+                    None
                 }
-
-                let x = workspace_origin.x + origin.x + pos_in_element.x;
-                let y = workspace_origin.y + origin.y + pos_in_element.y;
-                Some((Point::new(x, y), output.clone()))
             } else {
                 None
             }
