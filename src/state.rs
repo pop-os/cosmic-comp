@@ -260,6 +260,14 @@ pub struct Common {
         smithay::input::keyboard::IsolatedKeyboardState,
     >,
 
+    /// Keysyms from an `ei_text` device that were injected via the keycode path on press,
+    /// so their release is routed the same way even if the modifier state changed in
+    /// between (e.g. a client releasing the modifier before the key). Keyed by connection.
+    pub ei_text_keycode_held: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        std::collections::HashSet<smithay::input::keyboard::Keysym>,
+    >,
+
     pub kiosk_child: Option<Child>,
     pub theme: cosmic::Theme,
 
@@ -770,6 +778,7 @@ impl State {
                 gesture_state: None,
                 ei_seats: std::collections::HashMap::new(),
                 ei_isolated_kbd: std::collections::HashMap::new(),
+                ei_text_keycode_held: std::collections::HashMap::new(),
 
                 kiosk_child: None,
                 theme: cosmic::theme::system_preference(),

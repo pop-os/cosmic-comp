@@ -126,6 +126,7 @@ pub fn setup_ei(
                         data.clear_input_source_state(&backend_id);
                         data.common.ei_seats.remove(&conn);
                         data.common.ei_isolated_kbd.remove(&conn);
+                        data.common.ei_text_keycode_held.remove(&conn);
                         data.update_ei_input_method();
                     }
                     EiInputEvent::Event(event) => {

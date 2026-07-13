@@ -1909,6 +1909,16 @@ impl State {
 
         let keysym = Keysym::new(keysym);
 
+        // If this keysym was injected via the keycode path on press, its release must go the
+        // same way regardless of the current modifier state.
+        // e.g. Rustdesk may release the modifier *before* the key
+        let forced_keycode_release = key_state == KeyState::Released
+            && self
+                .common
+                .ei_text_keycode_held
+                .get(conn)
+                .is_some_and(|held| held.contains(&keysym));
+
         // if a printable, non-control keysym with no modifier held + text-input protocol when a text-input client is focused then commit the character directly
         // (which also handles out-of-layout / Unicode that has no keycode)
         // otherwise go through to keycode injection, which reaches every app.
@@ -1916,7 +1926,8 @@ impl State {
             let m = iso.modifier_state();
             !(m.ctrl || m.alt || m.shift || m.logo)
         });
-        if no_mods
+        if !forced_keycode_release
+            && no_mods
             && let Some(c) = keysym.key_char()
             && !c.is_control()
         {
@@ -1954,6 +1965,21 @@ impl State {
 
         match resolved {
             Some((keycode, mask)) => {
+                // Remember (press) / forget (release) that this keysym is held via keycode
+                match key_state {
+                    KeyState::Pressed => {
+                        self.common
+                            .ei_text_keycode_held
+                            .entry(conn.clone())
+                            .or_default()
+                            .insert(keysym);
+                    }
+                    KeyState::Released => {
+                        if let Some(held) = self.common.ei_text_keycode_held.get_mut(conn) {
+                            held.remove(&keysym);
+                        }
+                    }
+                }
                 self.inject_ei_keysym_in_layout(conn, keycode, mask, key_state, handle_shortcuts)
             }
             // Out-of-layout / Unicode: bind a spare keycode to the keysym and inject it, on the
