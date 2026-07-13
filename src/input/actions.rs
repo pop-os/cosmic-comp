@@ -9,7 +9,8 @@ use crate::{
     },
     utils::prelude::*,
     wayland::{
-        handlers::xdg_activation::ActivationContext, protocols::workspace::WorkspaceUpdateGuard,
+        handlers::xdg_activation::ActivationContext,
+        protocols::{keyboard_layout::KeyboardLayoutState, workspace::WorkspaceUpdateGuard},
     },
 };
 use cosmic_comp_config::{TileBehavior, workspace::WorkspaceLayout};
@@ -23,6 +24,7 @@ use smithay::{
 #[cfg(not(feature = "debug"))]
 use tracing::info;
 use tracing::{error, warn};
+use xkbcommon::xkb::Keysym;
 
 use std::{os::unix::process::CommandExt, thread};
 
@@ -35,6 +37,24 @@ fn propagate_by_default(action: &shortcuts::Action) -> bool {
     )
 }
 
+fn rotate_layouts(layouts: &mut String, variants: &mut String, active_layout: usize) {
+    let mut layout_entries = layouts.split(',').collect::<Vec<_>>();
+    let mut variant_entries = variants
+        .split(',')
+        .chain(std::iter::repeat(""))
+        .take(layout_entries.len())
+        .collect::<Vec<_>>();
+    if !layout_entries.is_empty() {
+        let offset = active_layout % layout_entries.len();
+        layout_entries.rotate_left(offset);
+        variant_entries.rotate_left(offset);
+    }
+    let new_layouts = layout_entries.join(",");
+    let new_variants = variant_entries.join(",");
+    *layouts = new_layouts;
+    *variants = new_variants;
+}
+
 impl State {
     pub fn handle_action(
         &mut self,
@@ -45,6 +65,30 @@ impl State {
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
     ) {
+        if let Some(keyboard) = seat.get_keyboard() {
+            let mut modifiers = keyboard.modifier_state();
+            let clear_lock = match pattern.key {
+                Some(Keysym::Caps_Lock) if modifiers.caps_lock => {
+                    modifiers.caps_lock = false;
+                    true
+                }
+                Some(Keysym::Num_Lock) if modifiers.num_lock => {
+                    modifiers.num_lock = false;
+                    true
+                }
+                _ => false,
+            };
+
+            if clear_lock && keyboard.set_modifier_state(modifiers) != 0 {
+                keyboard.advertise_modifier_state(self);
+                <State as smithay::input::SeatHandler>::led_state_changed(
+                    self,
+                    seat,
+                    keyboard.led_state(),
+                );
+            }
+        }
+
         // TODO: Detect if started from login manager or tty, and only allow
         // `Terminate` if it will return to login manager.
         if self.common.shell.read().session_lock.is_some()
@@ -1013,6 +1057,31 @@ impl State {
                 self.common.shell.write().toggle_sticky_current(seat);
             }
 
+            Action::System(shortcuts::action::System::InputSourceSwitch) => {
+                if let Some(keyboard) = seat.get_keyboard() {
+                    let active_layout = keyboard.with_xkb_state(self, |mut context| {
+                        context.cycle_next_layout();
+                        context.xkb().lock().unwrap().active_layout().0 as usize
+                    });
+                    KeyboardLayoutState::refresh(self);
+
+                    let mut xkb_config = self.common.config.cosmic_conf.xkb_config.clone();
+                    rotate_layouts(
+                        &mut xkb_config.layout,
+                        &mut xkb_config.variant,
+                        active_layout,
+                    );
+                    if let Err(err) = self
+                        .common
+                        .config
+                        .cosmic_helper
+                        .set("xkb_config", &xkb_config)
+                    {
+                        error!(?err, "Failed to persist active input source");
+                    }
+                }
+            }
+
             // Gets the configured command for a given system action.
             Action::System(system) => {
                 if let Some(command) = self.common.config.system_actions.get(&system) {
@@ -1177,4 +1246,20 @@ fn to_previous_workspace(
         },
         workspace_state,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rotate_layouts;
+
+    #[test]
+    fn rotating_layouts_keeps_variants_aligned() {
+        let mut layouts = "us,ru,de".to_string();
+        let mut variants = ",phonetic".to_string();
+
+        rotate_layouts(&mut layouts, &mut variants, 1);
+
+        assert_eq!(layouts, "ru,de,us");
+        assert_eq!(variants, "phonetic,,");
+    }
 }
