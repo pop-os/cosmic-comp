@@ -4,9 +4,9 @@ use std::str::FromStr;
 
 use anyhow::Result;
 
-use tracing::{debug, info};
 #[cfg(feature = "systemd")]
 use tracing::warn;
+use tracing::{debug, info};
 #[cfg(feature = "systemd")]
 use tracing_journald as journald;
 use tracing_subscriber::{EnvFilter, filter::Directive, fmt, prelude::*};
