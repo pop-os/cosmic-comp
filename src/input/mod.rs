@@ -2510,7 +2510,7 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
     map_to_output.or_else(|| shell.builtin_output())
 }
 
-fn update_output_image_copy_cursor_position(
+pub fn update_output_image_copy_cursor_position(
     shell: &Shell,
     clock: &Clock<Monotonic>,
     output: &Output,

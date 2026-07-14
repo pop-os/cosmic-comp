@@ -378,6 +378,14 @@ fn update_focus_state(
                     .cloned()
                     .unwrap_or(seat.active_output());
 
+                crate::input::update_output_image_copy_cursor_position(
+                    &shell,
+                    &state.common.clock,
+                    &output,
+                    seat,
+                    new_pos,
+                );
+
                 let focus = State::surface_under(new_pos, &output, &shell)
                     .map(|(focus, loc)| (focus, loc.as_logical()));
                 //drop here to avoid multiple borrows
