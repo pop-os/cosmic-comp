@@ -269,7 +269,7 @@ impl IndicatorShader {
             .filter(|(old_settings, _)| &settings == old_settings)
             .is_none()
         {
-            let thickness: f32 = ((thickness as f64 * scale).ceil() / scale) as f32;
+            let thickness: f32 = ((thickness as f64 * scale) / scale) as f32;
             let shader = Self::get(renderer);
 
             let elem = PixelShaderElement::new(
