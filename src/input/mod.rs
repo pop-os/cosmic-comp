@@ -49,7 +49,7 @@ use smithay::{
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
         Seat,
-        keyboard::{FilterResult, KeysymHandle, ModifiersState, SerializedMods},
+        keyboard::{FilterResult, KeysymHandle, Layout, ModifiersState, SerializedMods},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -1862,6 +1862,14 @@ impl State {
         }
     }
 
+    /// The seat's currently active keyboard layout group.
+    fn seat_active_layout(&mut self, seat: &Seat<State>) -> Option<Layout> {
+        let keyboard = seat.get_keyboard()?;
+        Some(keyboard.with_xkb_state(self, |context| {
+            context.xkb().lock().unwrap().active_layout()
+        }))
+    }
+
     /// Inject a key from a libei connection through its isolated keyboard state.
     pub(crate) fn inject_ei_key(
         &mut self,
@@ -1885,6 +1893,10 @@ impl State {
         let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
             return;
         };
+        // Mirror the seat's active layout group so injection matches the user's layout.
+        if let Some(layout) = self.seat_active_layout(&seat) {
+            iso.set_layout(layout);
+        }
         self.inject_isolated_key(
             &backend_id,
             &seat,
@@ -1908,6 +1920,17 @@ impl State {
         use smithay::wayland::text_input::TextInputSeat;
 
         let keysym = Keysym::new(keysym);
+
+        // Mirror the seat's active layout group onto this source, so the keysym resolves in
+        let active_layout = {
+            let seat = self.common.shell.read().seats.last_active().clone();
+            self.seat_active_layout(&seat)
+        };
+        if let Some(layout) = active_layout
+            && let Some(iso) = self.common.ei_isolated_kbd.get_mut(conn)
+        {
+            iso.set_layout(layout);
+        }
 
         // If this keysym was injected via the keycode path on press, its release must go the
         // same way regardless of the current modifier state.
