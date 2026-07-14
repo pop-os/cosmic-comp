@@ -2447,8 +2447,31 @@ impl State {
         };
 
         if let Some((point, output)) = point_and_output {
+            // TODO: Replace with `wl_pointer.warp`
             let original_position = pointer.current_location();
-            pointer.set_location(point.as_logical());
+            let serial = SERIAL_COUNTER.next_serial();
+            let under = State::surface_under(point, &output, &self.common.shell.write())
+                .map(|(target, pos)| (target, pos.as_logical()));
+            let time = self.common.clock.now();
+            pointer.relative_motion(
+                self,
+                under.clone(),
+                &RelativeMotionEvent {
+                    delta: (0., 0.).into(),
+                    delta_unaccel: (0., 0.).into(),
+                    utime: time.as_micros(),
+                },
+            );
+            pointer.motion(
+                self,
+                under,
+                &MotionEvent {
+                    location: point.as_logical(),
+                    serial,
+                    time: time.as_millis(),
+                },
+            );
+            pointer.frame(self);
 
             let mut shell = self.common.shell.write();
             shell.update_pointer_position(point.to_local(&output), &output);
