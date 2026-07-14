@@ -49,7 +49,7 @@ use smithay::{
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
         Seat,
-        keyboard::{FilterResult, KeysymHandle, ModifiersState},
+        keyboard::{FilterResult, KeysymHandle, ModifiersState, SerializedMods},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -2022,8 +2022,11 @@ impl State {
         } else {
             // Momentarily OR in the level's modifiers, deliver them, send the key, then restore
             // the real modifier state (so e.g. injecting `!` doesn't leave Shift stuck).
-            let (depressed, latched, locked, layout) = iso.serialized_mods();
-            iso.update_modifiers(depressed | mask, latched, locked, layout);
+            let mods = iso.serialized_mods();
+            iso.update_modifiers(SerializedMods {
+                depressed: mods.depressed | mask,
+                ..mods
+            });
             keyboard.input_isolated_modifiers(self, &iso);
             self.inject_isolated_key(
                 &backend_id,
@@ -2033,7 +2036,7 @@ impl State {
                 key_state,
                 handle_shortcuts,
             );
-            iso.update_modifiers(depressed, latched, locked, layout);
+            iso.update_modifiers(mods);
             keyboard.input_isolated_modifiers(self, &iso);
         }
 
