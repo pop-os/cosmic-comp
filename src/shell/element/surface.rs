@@ -115,7 +115,7 @@ fn is_likely_translucent(alpha: f32, data: &SurfaceData) -> bool {
         .current()
         .blur_region
         .as_ref()
-        .is_none_or(|region| region.is_empty())
+        .is_some_and(|region| !region.is_empty())
 }
 
 /// Build the [`KindEvaluation`] for a window's surface tree.
