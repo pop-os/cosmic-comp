@@ -614,6 +614,11 @@ pub fn render_window_to_buffer(
         let pointer_loc = pointer.current_location().to_i32_round().as_global();
         let mut location = None;
         if let Some(element) = shell.element_for_surface(toplevel)
+            && pointer
+                .current_focus()
+                .and_then(|f| f.toplevel(&shell))
+                .as_ref()
+                == Some(toplevel)
             && element.has_active_window(toplevel)
             && let Some(workspace) = shell.space_for(element)
             && let Some(geometry) = workspace.element_geometry(element)
