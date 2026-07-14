@@ -2426,7 +2426,7 @@ impl State {
                 if is_legal(pos_in_element) {
                     let x = workspace_origin.x + origin.x + pos_in_element.x;
                     let y = workspace_origin.y + origin.y + pos_in_element.y;
-                    Some((Point::new(x, y), output.clone()))
+                    Some((Point::<_, Global>::new(x, y), output.clone()))
                 } else {
                     None
                 }
@@ -2437,10 +2437,10 @@ impl State {
 
         if let Some((point, output)) = point_and_output {
             let original_position = pointer.current_location();
-            pointer.set_location(point);
+            pointer.set_location(point.as_logical());
 
             let mut shell = self.common.shell.write();
-            shell.update_pointer_position(point.as_global().to_local(&output), &output);
+            shell.update_pointer_position(point.to_local(&output), &output);
 
             let seat = shell
                 .seats
@@ -2458,7 +2458,7 @@ impl State {
                 let output_geometry = output.geometry();
                 for session in cursor_sessions_for_output(&shell, &output) {
                     if let Some(cursor_geometry) = seat.cursor_geometry(
-                        point.to_buffer(
+                        point.as_logical().to_buffer(
                             output.current_scale().fractional_scale(),
                             output.current_transform(),
                             &output_geometry.size.to_f64().as_logical(),
