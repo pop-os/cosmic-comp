@@ -40,6 +40,9 @@ pub fn absolute_pointer_regions(state: &State) -> Vec<EiRegion> {
                 // the u32 clamp happens at the `ei_device.region` in smithay.
                 rect: output.geometry().as_logical(),
                 scale: scale as f32,
+                // Tie the region to its output so a client can correlate it with the
+                // matching screencast stream (the portal advertises the same name).
+                mapping_id: Some(output.name()),
             }
         })
         .collect()
