@@ -3880,11 +3880,11 @@ impl Shell {
                 (initial_window_location, layer, workspace.handle)
             } else {
                 let sticky_layer = self
-                .workspaces
-                .sets
-                .get_mut(&cursor_output)
-                .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
-                .map(|set| &mut set.sticky_layer)?;
+                    .workspaces
+                    .sets
+                    .get_mut(&cursor_output)
+                    .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
+                    .map(|set| &mut set.sticky_layer)?;
                 let elem_geo = sticky_layer.element_geometry(&old_mapped).unwrap();
                 let mut initial_window_location = elem_geo.loc.to_global(&cursor_output);
 
