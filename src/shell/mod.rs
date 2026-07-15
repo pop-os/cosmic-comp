@@ -3878,13 +3878,13 @@ impl Shell {
                 }
 
                 (initial_window_location, layer, workspace.handle)
-            } else if let Some(sticky_layer) = self
+            } else {
+                let sticky_layer = self
                 .workspaces
                 .sets
                 .get_mut(&cursor_output)
                 .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
-                .map(|set| &mut set.sticky_layer)
-            {
+                .map(|set| &mut set.sticky_layer)?;
                 let elem_geo = sticky_layer.element_geometry(&old_mapped).unwrap();
                 let mut initial_window_location = elem_geo.loc.to_global(&cursor_output);
 
@@ -3927,8 +3927,6 @@ impl Shell {
                     ManagedLayer::Sticky,
                     self.active_space(&cursor_output).unwrap().handle,
                 )
-            } else {
-                return None;
             };
 
         toplevel_leave_workspace(&window, &workspace_handle);
@@ -4222,14 +4220,13 @@ impl Shell {
                 .unwrap()
                 .to_global(&set.output);
             (&mut set.sticky_layer, geometry)
-        } else if let Some(workspace) = self.space_for_mut(mapped) {
+        } else {
+            let workspace = self.space_for_mut(mapped)?;
             let geometry = workspace
                 .element_geometry(mapped)
                 .unwrap()
                 .to_global(workspace.output());
             (&mut workspace.floating_layer, geometry)
-        } else {
-            return None;
         };
 
         let new_loc = if edge.contains(ResizeEdge::LEFT) {
@@ -4266,7 +4263,8 @@ impl Shell {
             ReleaseMode::Click,
         ) {
             grab.into()
-        } else if let Some(ws) = self.space_for_mut(mapped) {
+        } else {
+            let ws = self.space_for_mut(mapped)?;
             let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
             let (node, left_up_idx, orientation) = ws.tiling_layer.resize_request(node_id, edge)?;
             ResizeForkGrab::new(
@@ -4279,8 +4277,6 @@ impl Shell {
                 ReleaseMode::Click,
             )
             .into()
-        } else {
-            return None;
         };
 
         Some(((focus, new_loc), (grab, Focus::Keep)))
@@ -4517,10 +4513,9 @@ impl Shell {
             .find(|set| set.sticky_layer.mapped().any(|m| m == &mapped))
         {
             &mut set.sticky_layer
-        } else if let Some(workspace) = self.space_for_mut(&mapped) {
-            &mut workspace.floating_layer
         } else {
-            return None;
+            let workspace = self.space_for_mut(&mapped)?;
+            &mut workspace.floating_layer
         };
 
         let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
@@ -4532,7 +4527,8 @@ impl Shell {
             ReleaseMode::NoMouseButtons,
         ) {
             grab.into()
-        } else if let Some(ws) = self.space_for_mut(&mapped) {
+        } else {
+            let ws = self.space_for_mut(&mapped)?;
             let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
             let (node, left_up_idx, orientation) =
                 ws.tiling_layer.resize_request(node_id, edges)?;
@@ -4546,8 +4542,6 @@ impl Shell {
                 ReleaseMode::NoMouseButtons,
             )
             .into()
-        } else {
-            return None;
         };
 
         Some((grab, Focus::Clear))
@@ -4904,7 +4898,8 @@ impl Shell {
                 })),
                 Some(from),
             );
-        } else if let Some(workspace) = self.space_for_mut(&mapped) {
+        } else {
+            let workspace = self.space_for_mut(&mapped)?;
             if mapped.is_minimized() {
                 // TODO: Rewrite the `MinimizedWindow` to restore to fullscreen
                 return None;
@@ -4952,8 +4947,6 @@ impl Shell {
                 },
                 Some(from),
             );
-        } else {
-            return None;
         };
 
         Some(KeyboardFocusTarget::Fullscreen(window))

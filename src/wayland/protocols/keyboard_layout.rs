@@ -51,8 +51,8 @@ impl KeyboardLayoutState {
     {
         let mut keyboard_layouts = mem::take(&mut state.keyboard_layout_state().keyboard_layouts);
         for (keyboard_layout, last_layout) in &mut keyboard_layouts {
-            if let Some(data) = keyboard_layout.data::<LayoutUserData<D>>() {
-                if let Some(handle) = &data.handle {
+            if let Some(data) = keyboard_layout.data::<LayoutUserData<D>>()
+                && let Some(handle) = &data.handle {
                     let active_layout = handle.with_xkb_state(state, |context| {
                         context.xkb().lock().unwrap().active_layout()
                     });
@@ -61,7 +61,6 @@ impl KeyboardLayoutState {
                         *last_layout = Some(active_layout);
                     }
                 }
-            }
         }
         state.keyboard_layout_state().keyboard_layouts = keyboard_layouts;
     }
