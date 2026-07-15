@@ -688,7 +688,7 @@ impl State {
         AlphaModifierState::new::<Self>(dh);
         SinglePixelBufferState::new::<Self>(dh);
         FixesState::new::<Self>(dh);
-        let keyboard_layout_state = KeyboardLayoutState::new::<State, _>(&dh, client_not_sandboxed);
+        let keyboard_layout_state = KeyboardLayoutState::new::<State, _>(dh, client_not_sandboxed);
 
         let background_effect_state = BackgroundEffectState::new::<Self>(dh);
 

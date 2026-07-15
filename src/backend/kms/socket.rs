@@ -36,7 +36,7 @@ impl Common {
     ) -> Result<Socket> {
         let socket_name = format!(
             "{}-{}",
-            &self.socket.to_string_lossy(),
+            self.socket.to_string_lossy(),
             render_node
                 .dev_path()
                 .unwrap()
