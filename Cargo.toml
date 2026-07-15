@@ -9,6 +9,10 @@ rust-version = "1.93"
 [workspace]
 members = ["cosmic-comp-config"]
 
+[patch.'https://github.com/pop-os/cosmic-settings-daemon']
+cosmic-settings-config = { path = "../cosmic-settings-daemon/config" }
+cosmic-settings-daemon-config = { path = "../cosmic-settings-daemon/cosmic-settings-daemon-config" }
+
 [dependencies]
 anyhow = { version = "1.0.102", features = ["backtrace"] }
 bitflags = "2.11.0"
