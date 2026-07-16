@@ -9,19 +9,18 @@ use std::{
 use calloop::LoopHandle;
 use cosmic::{
     Apply as _, Task,
-    iced::{Alignment, Background},
-    iced_core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
-    iced_widget::{self, Column, Row, text::Style as TextStyle},
+    iced::{
+        Alignment, Background,
+        core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
+        widget::{self as iced_widget, Row, text::Style as TextStyle},
+    },
     theme,
-    widget::{button, divider, icon::from_name, space, text},
+    widget::{button, divider, icon::from_name, menu::menu_column::MenuColumn, space, text},
 };
 use smithay::{
     backend::{
         input::{ButtonState, TouchSlot},
-        renderer::{
-            ImportMem, Renderer,
-            element::{AsRenderElements, memory::MemoryRenderBufferRenderElement},
-        },
+        renderer::ImportMem,
     },
     desktop::space::SpaceElement,
     input::{
@@ -43,10 +42,11 @@ use smithay::{
 };
 
 use crate::{
+    backend::render::element::AsGlowRenderer,
     shell::{SeatExt, focus::target::PointerFocusTarget},
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
     },
 };
@@ -65,29 +65,32 @@ pub struct MenuGrabState {
 pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
 impl MenuGrabState {
-    pub fn render<I, R>(&self, renderer: &mut R, output: &Output) -> Vec<I>
-    where
-        R: Renderer + ImportMem,
+    pub fn render<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        push: &mut dyn FnMut(IcedRenderElement<R>),
+    ) where
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
-        I: From<MemoryRenderBufferRenderElement<R>>,
     {
         let scale = output.current_scale().fractional_scale();
-        self.elements
-            .lock()
-            .unwrap()
-            .iter()
-            .flat_map(|elem| {
-                elem.iced.render_elements(
-                    renderer,
-                    elem.position
-                        .to_local(output)
-                        .as_logical()
-                        .to_physical_precise_round(scale),
-                    scale.into(),
-                    1.0,
-                )
-            })
-            .collect()
+        for elem in self.elements.lock().unwrap().iter() {
+            elem.iced.push_render_elements(
+                renderer,
+                elem.position
+                    .to_local(output)
+                    .as_logical()
+                    .to_physical_precise_round(scale),
+                scale.into(),
+                1.0,
+                elem.iced
+                    .with_theme(|theme| theme.cosmic().radius_s())
+                    .map(|x| x.round() as u8),
+                push,
+                None,
+            )
+        }
     }
 
     pub fn is_in_screen_space(&self) -> bool {
@@ -276,11 +279,13 @@ impl Program for ContextMenu {
                             let mut elements = grab_state.elements.lock().unwrap();
 
                             let position = elements.last().unwrap().position;
+                            let mut theme = state.common.theme.clone();
+                            theme.transparent = theme.cosmic().frosted_system_interface;
                             let element = IcedElement::new(
                                 ContextMenu::new(items),
                                 Size::default(),
                                 state.common.event_loop_handle.clone(),
-                                state.common.theme.clone(),
+                                theme,
                             );
 
                             let min_size = element.minimum_size();
@@ -295,7 +300,7 @@ impl Program for ContextMenu {
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            bounds.width.ceil() as i32,
+                                            bounds.width.floor() as i32,
                                             bounds.y.ceil() as i32,
                                         )),
                                     min_size.as_global(),
@@ -304,7 +309,7 @@ impl Program for ContextMenu {
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            bounds.width.ceil() as i32,
+                                            bounds.width.floor() as i32,
                                             bounds.y.ceil() as i32 + bounds.height.ceil() as i32
                                                 - min_size.h,
                                         )),
@@ -312,14 +317,15 @@ impl Program for ContextMenu {
                                 ),
                                 // to the left -> down
                                 Rectangle::new(
-                                    position + Point::from((-min_size.w, bounds.y.ceil() as i32)),
+                                    position
+                                        + Point::from((-min_size.w + 1, bounds.y.ceil() as i32)),
                                     min_size.as_global(),
                                 ),
                                 // to the left -> up
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            -min_size.w,
+                                            -min_size.w + 1,
                                             bounds.y.ceil() as i32 + bounds.height.ceil() as i32
                                                 - min_size.h,
                                         )),
@@ -385,9 +391,11 @@ impl Program for ContextMenu {
             _ => Length::Fill,
         };
 
-        Column::with_children(self.items.iter().enumerate().map(|(idx, item)| {
+        MenuColumn::with_children(self.items.iter().enumerate().map(|(idx, item)| {
             match item {
-                Item::Separator => divider::horizontal::light().into(),
+                Item::Separator => divider::horizontal::light()
+                    .class(theme::Rule::Default)
+                    .into(),
                 Item::Submenu { title, .. } => Row::with_children(vec![
                     space::horizontal().width(16).into(),
                     text::body(title).width(mode).into(),
@@ -428,10 +436,11 @@ impl Program for ContextMenu {
                             .width(mode)
                             .class(if *disabled {
                                 theme::Text::Custom(|theme| {
-                                    let mut color = theme.cosmic().background.component.on;
+                                    let mut color = theme.cosmic().background(false).component.on;
                                     color.alpha *= 0.5;
                                     TextStyle {
                                         color: Some(color.into()),
+                                        ..Default::default()
                                     }
                                 })
                             } else {
@@ -446,10 +455,11 @@ impl Program for ContextMenu {
                                 .align_x(Horizontal::Right)
                                 .width(Length::Shrink)
                                 .class(theme::Text::Custom(|theme| {
-                                    let mut color = theme.cosmic().background.component.on;
+                                    let mut color = theme.cosmic().background(false).component.on;
                                     color.alpha *= 0.75;
                                     TextStyle {
                                         color: Some(color.into()),
+                                        ..Default::default()
                                     }
                                 }))
                                 .into(),
@@ -474,7 +484,7 @@ impl Program for ContextMenu {
         .padding(1)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
-            let component = &cosmic.background.component;
+            let component = &cosmic.background(theme.cosmic().frosted_windows).component;
             iced_widget::container::Style {
                 snap: true,
                 icon_color: Some(cosmic.accent.base.into()),
@@ -554,8 +564,11 @@ impl PointerGrab<State> for MenuGrab {
                     PointerTarget::motion(&element.iced, &self.seat, state, &new_event);
                 }
             } else {
-                elements.iter_mut().for_each(|element| {
-                    if element.pointer_entered {
+                elements
+                    .iter_mut()
+                    .filter(|element| element.pointer_entered)
+                    .skip(1)
+                    .for_each(|element| {
                         PointerTarget::leave(
                             &element.iced,
                             &self.seat,
@@ -564,8 +577,7 @@ impl PointerGrab<State> for MenuGrab {
                             event.time,
                         );
                         element.pointer_entered = false;
-                    }
-                })
+                    })
             }
         }
         handle.motion(state, None, event);
@@ -718,7 +730,6 @@ impl TouchGrab<State> for MenuGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &DownEvent,
-        seq: Serial,
     ) {
         {
             let mut guard = self.elements.lock().unwrap();
@@ -753,21 +764,15 @@ impl TouchGrab<State> for MenuGrab {
                     time: event.time,
                 };
                 if element.touch_entered.is_none() {
-                    TouchTarget::down(&element.iced, &self.seat, data, &new_event, seq);
+                    TouchTarget::down(&element.iced, &self.seat, data, &new_event);
                     element.touch_entered = Some(event.slot);
                 }
             }
         }
-        handle.down(data, None, event, seq);
+        handle.down(data, None, event);
     }
 
-    fn up(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        event: &UpEvent,
-        seq: Serial,
-    ) {
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
         {
             let elements = self.elements.lock().unwrap();
             for element in elements.iter().filter(|elem| {
@@ -775,7 +780,7 @@ impl TouchGrab<State> for MenuGrab {
                     .as_ref()
                     .is_some_and(|slot| *slot == event.slot)
             }) {
-                TouchTarget::up(&element.iced, &self.seat, data, event, seq);
+                TouchTarget::up(&element.iced, &self.seat, data, event);
             }
         }
         handle.unset_grab(self, data);
@@ -787,7 +792,6 @@ impl TouchGrab<State> for MenuGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
-        seq: Serial,
     ) {
         {
             let elements = self.elements.lock().unwrap();
@@ -796,24 +800,24 @@ impl TouchGrab<State> for MenuGrab {
                     .as_ref()
                     .is_some_and(|slot| *slot == event.slot)
             }) {
-                TouchTarget::motion(&element.iced, &self.seat, data, event, seq);
+                TouchTarget::motion(&element.iced, &self.seat, data, event);
             }
         }
-        handle.motion(data, None, event, seq);
+        handle.motion(data, None, event);
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
-        handle.frame(data, seq);
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.frame(data);
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         {
             let mut elements = self.elements.lock().unwrap();
             for element in elements.iter_mut() {
                 let _ = element.touch_entered.take();
             }
         }
-        handle.cancel(data, seq);
+        handle.cancel(data);
     }
 
     fn shape(
@@ -821,9 +825,8 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &smithay::input::touch::ShapeEvent,
-        seq: Serial,
     ) {
-        handle.shape(data, event, seq);
+        handle.shape(data, event);
     }
 
     fn orientation(
@@ -831,9 +834,8 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &smithay::input::touch::OrientationEvent,
-        seq: Serial,
     ) {
-        handle.orientation(data, event, seq);
+        handle.orientation(data, event);
     }
 
     fn start_data(&self) -> &TouchGrabStartData<State> {

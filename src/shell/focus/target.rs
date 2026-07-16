@@ -29,8 +29,8 @@ use smithay::{
             MotionEvent as PointerMotionEvent, PointerTarget, RelativeMotionEvent,
         },
         touch::{
-            DownEvent, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchTarget,
-            UpEvent,
+            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
+            TouchTarget, UpEvent,
         },
     },
     reexports::wayland_server::{
@@ -498,39 +498,36 @@ impl PointerTarget<State> for PointerFocusTarget {
 }
 
 impl TouchTarget<State> for PointerFocusTarget {
-    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent, seq: Serial) {
-        self.inner_touch_target().down(seat, data, event, seq);
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
+        self.inner_touch_target().down(seat, data, event);
     }
 
-    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent, seq: Serial) {
-        self.inner_touch_target().up(seat, data, event, seq);
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent) {
+        self.inner_touch_target().up(seat, data, event);
     }
 
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent, seq: Serial) {
-        self.inner_touch_target().motion(seat, data, event, seq);
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &TouchMotionEvent) {
+        self.inner_touch_target().motion(seat, data, event);
     }
 
-    fn frame(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
-        self.inner_touch_target().frame(seat, data, seq);
+    fn frame(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
+        self.inner_touch_target().frame(seat, data, frame);
     }
 
-    fn cancel(&self, seat: &Seat<State>, data: &mut State, seq: Serial) {
-        self.inner_touch_target().cancel(seat, data, seq);
+    fn cancel(&self, seat: &Seat<State>, data: &mut State, frame: FrameMarker) {
+        self.inner_touch_target().cancel(seat, data, frame);
     }
 
-    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent, seq: Serial) {
-        self.inner_touch_target().shape(seat, data, event, seq);
+    fn shape(&self, seat: &Seat<State>, data: &mut State, event: &ShapeEvent) {
+        self.inner_touch_target().shape(seat, data, event);
     }
 
-    fn orientation(
-        &self,
-        seat: &Seat<State>,
-        data: &mut State,
-        event: &OrientationEvent,
-        seq: Serial,
-    ) {
-        self.inner_touch_target()
-            .orientation(seat, data, event, seq);
+    fn orientation(&self, seat: &Seat<State>, data: &mut State, event: &OrientationEvent) {
+        self.inner_touch_target().orientation(seat, data, event);
+    }
+
+    fn last_frame(&self, seat: &Seat<State>, data: &mut State) -> Option<FrameMarker> {
+        self.inner_touch_target().last_frame(seat, data)
     }
 }
 

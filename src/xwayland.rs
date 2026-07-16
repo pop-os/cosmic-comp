@@ -115,6 +115,7 @@ impl State {
             &self.common.display_handle,
             None,
             std::iter::empty::<(OsString, OsString)>(),
+            std::iter::empty::<OsString>(),
             true,
             Stdio::null(),
             Stdio::null(),

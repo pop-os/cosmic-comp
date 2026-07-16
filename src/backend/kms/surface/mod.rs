@@ -1069,6 +1069,7 @@ impl SurfaceThreadState {
             None,
             #[cfg(feature = "debug")]
             Some((&self.egui, &self.timings)),
+            Some(self.target_node),
         )
         .map_err(|err| {
             anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
