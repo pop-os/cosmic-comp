@@ -1799,6 +1799,17 @@ impl Workspace {
             self.tiling_layer.render(
                 renderer,
                 render_focus.then_some(last_active_seat),
+                render_focus
+                    .then(|| {
+                        focused.as_ref().and_then(|target| {
+                            if let FocusTarget::Window(mapped) = target {
+                                Some(mapped)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .flatten(),
                 zone,
                 overview,
                 resize_indicator,

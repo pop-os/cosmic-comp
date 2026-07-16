@@ -4013,6 +4013,7 @@ impl TilingLayout {
         &self,
         renderer: &mut R,
         seat: Option<&Seat<State>>,
+        focused: Option<&CosmicMapped>,
         non_exclusive_zone: Rectangle<i32, Local>,
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
@@ -4143,6 +4144,7 @@ impl TilingLayout {
             old_geometries,
             is_overview,
             seat,
+            focused,
             &self.output,
             percentage,
             draw_groups,
@@ -5276,6 +5278,7 @@ fn render_new_tree_windows<R>(
     old_geometries: Option<HashMap<NodeId, Rectangle<i32, Local>>>,
     is_overview: bool,
     seat: Option<&Seat<State>>,
+    focused: Option<&CosmicMapped>,
     output: &Output,
     percentage: f32,
     transition: Option<f32>,
@@ -5295,14 +5298,19 @@ fn render_new_tree_windows<R>(
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
 {
-    let focused = seat
-        .and_then(|seat| {
-            seat.get_keyboard()
-                .unwrap()
-                .current_focus()
-                .and_then(|target| TilingLayout::currently_focused_node(target_tree, target))
-        })
-        .map(|(id, _)| id);
+    let focused = match seat.and_then(|seat| seat.get_keyboard().unwrap().current_focus()) {
+        Some(target @ KeyboardFocusTarget::Group(_)) => {
+            TilingLayout::currently_focused_node(target_tree, target).map(|(id, _)| id)
+        }
+        _ => focused.and_then(|mapped| {
+            let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
+            target_tree
+                .get(&node_id)
+                .ok()
+                .filter(|node| node.data().is_mapped(Some(mapped)))
+                .map(|_| node_id)
+        }),
+    };
     let focused_geo = if let Some(focused) = focused.as_ref() {
         geometries
             .as_ref()
