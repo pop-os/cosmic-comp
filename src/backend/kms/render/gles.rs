@@ -12,10 +12,9 @@ use smithay::{
         },
         drm::{CreateDrmNodeError, DrmNode},
         renderer::{
-            RendererSuper,
             gles::{GlesError, GlesRenderer, ffi},
             glow::GlowRenderer,
-            multigpu::{ApiDevice, Error as MultiError, GraphicsApi},
+            multigpu::{ApiDevice, GraphicsApi},
         },
     },
     reexports::drm::control::Device,
@@ -31,8 +30,6 @@ use std::{
     os::unix::prelude::AsFd,
     sync::atomic::{AtomicBool, Ordering},
 };
-
-use crate::backend::render::element::FromGlesError;
 
 /// Errors raised by the [`GbmGlesBackend`]
 #[derive(Debug, thiserror::Error)]
@@ -144,7 +141,10 @@ impl<A: AsFd + Device + Clone + 'static> GraphicsApi for GbmGlowBackend<A> {
                         })
                         .is_ok_and(|name| {
                             name.as_str().is_ok_and(|name| {
-                                name.contains("MTL") || name.contains("ARL") || name.contains("LNL")
+                                name.contains("TGL")
+                                    || name.contains("MTL")
+                                    || name.contains("ARL")
+                                    || name.contains("LNL")
                             })
                         });
 
@@ -208,17 +208,5 @@ impl ApiDevice for GbmGlowDevice {
 
     fn should_do_cross_device_exports(&self) -> bool {
         !self.intel_export_quirk
-    }
-}
-
-impl<T: GraphicsApi, A: AsFd + Device + Clone + 'static> FromGlesError
-    for MultiError<GbmGlowBackend<A>, T>
-where
-    T::Error: 'static,
-    <<T::Device as ApiDevice>::Renderer as RendererSuper>::Error: 'static,
-{
-    #[inline]
-    fn from_gles_error(err: GlesError) -> MultiError<GbmGlowBackend<A>, T> {
-        MultiError::Render(err)
     }
 }

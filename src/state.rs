@@ -19,6 +19,7 @@ use crate::{
             corner_radius::CornerRadiusState,
             drm::WlDrmState,
             image_capture_source::CosmicImageCaptureSourceState,
+            keyboard_layout::KeyboardLayoutState,
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
@@ -72,6 +73,7 @@ use smithay::{
     utils::{Clock, Monotonic, Point},
     wayland::{
         alpha_modifier::AlphaModifierState,
+        background_effect::BackgroundEffectState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
@@ -125,7 +127,7 @@ use std::{
     cmp::min,
     collections::HashSet,
     ffi::OsString,
-    process::Child,
+    process::{Child, Command},
     sync::{Arc, LazyLock, Once, atomic::AtomicBool},
     time::{Duration, Instant},
 };
@@ -223,6 +225,7 @@ pub struct State {
     pub common: Common,
     pub ready: Once,
     pub last_refresh: LastRefresh,
+    pub kiosk_command: Option<Command>,
 }
 smithay::delegate_dispatch2!(State);
 
@@ -279,6 +282,8 @@ pub struct Common {
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
     pub dbus_state: DBusState,
+    pub keyboard_layout_state: KeyboardLayoutState,
+    pub background_effect_state: BackgroundEffectState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -629,6 +634,7 @@ impl State {
         handle: LoopHandle<'static, State>,
         signal: LoopSignal,
         with_xwayland: bool,
+        kiosk_command: Option<Command>,
     ) -> State {
         let requested_languages = DesktopLanguageRequester::requested_languages();
         i18n_embed::select(&*LANG_LOADER, &Localizations, &requested_languages)
@@ -682,6 +688,9 @@ impl State {
         AlphaModifierState::new::<Self>(dh);
         SinglePixelBufferState::new::<Self>(dh);
         FixesState::new::<Self>(dh);
+        let keyboard_layout_state = KeyboardLayoutState::new::<State, _>(dh, client_not_sandboxed);
+
+        let background_effect_state = BackgroundEffectState::new::<Self>(dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
@@ -786,12 +795,14 @@ impl State {
                 xdg_activation_state,
                 xdg_foreign_state,
                 workspace_state,
+                background_effect_state,
                 a11y_state,
                 xwayland_scale: None,
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
                 dbus_state,
+                keyboard_layout_state,
 
                 #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
@@ -801,6 +812,7 @@ impl State {
             backend: BackendData::Unset,
             ready: Once::new(),
             last_refresh: LastRefresh::None,
+            kiosk_command,
         }
     }
 
@@ -930,19 +942,22 @@ impl Common {
         render_element_states: &RenderElementStates,
     ) {
         let shell = self.shell.read();
-        let processor = |surface: &WlSurface, states: &SurfaceData| {
-            let primary_scanout_output = update_surface_primary_scanout_output(
-                surface,
-                output,
-                states,
-                None,
-                render_element_states,
-                primary_scanout_output_compare,
-            );
-            if let Some(output) = primary_scanout_output {
-                with_fractional_scale(states, |fraction_scale| {
-                    fraction_scale.set_preferred_scale(output.current_scale().fractional_scale());
-                });
+        let processor = |namespace: Option<usize>| {
+            move |surface: &WlSurface, states: &SurfaceData| {
+                let primary_scanout_output = update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    namespace,
+                    render_element_states,
+                    primary_scanout_output_compare,
+                );
+                if let Some(output) = primary_scanout_output {
+                    with_fractional_scale(states, |fraction_scale| {
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
+                    });
+                }
             }
         };
 
@@ -950,7 +965,7 @@ impl Common {
         if let Some(session_lock) = shell.session_lock.as_ref()
             && let Some(lock_surface) = session_lock.surfaces.get(output)
         {
-            with_surfaces_surface_tree(lock_surface.wl_surface(), processor)
+            with_surfaces_surface_tree(lock_surface.wl_surface(), processor(None))
         }
 
         for seat in shell
@@ -962,7 +977,7 @@ impl Common {
 
             // cursor ...
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
-                with_surfaces_surface_tree(&wl_surface, processor);
+                with_surfaces_surface_tree(&wl_surface, processor(None));
             }
 
             // grabs
@@ -970,12 +985,12 @@ impl Common {
                 && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
             {
                 for (window, _) in grab_state.element().windows() {
-                    window.with_surfaces(processor);
+                    window.with_surfaces(processor(None));
                 }
             }
 
             if let Some(icon) = get_dnd_icon(seat) {
-                with_surfaces_surface_tree(&icon.surface, processor);
+                with_surfaces_surface_tree(&icon.surface, processor(None));
             }
         }
 
@@ -983,7 +998,7 @@ impl Common {
         for set in shell.workspaces.sets.values() {
             set.sticky_layer.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.with_surfaces(processor);
+                    window.with_surfaces(processor(None));
                 }
             });
         }
@@ -991,16 +1006,16 @@ impl Common {
         // normal windows
         for space in shell.workspaces.spaces() {
             if let Some(fs) = space.get_fullscreen(shell.seats.last_active()) {
-                fs.surface.with_surfaces(processor);
+                fs.surface.with_surfaces(processor(None));
             }
             space.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.with_surfaces(processor);
+                    window.with_surfaces(processor(None));
                 }
             });
             space.minimized_windows.iter().for_each(|m| {
                 for window in m.windows() {
-                    window.with_surfaces(processor);
+                    window.with_surfaces(processor(None));
                 }
             })
         }
@@ -1008,15 +1023,16 @@ impl Common {
         // OR windows
         shell.override_redirect_windows.iter().for_each(|or| {
             if let Some(wl_surface) = or.wl_surface() {
-                with_surfaces_surface_tree(&wl_surface, processor);
+                with_surfaces_surface_tree(&wl_surface, processor(None));
             }
         });
 
         // layer surfaces
         for o in shell.outputs() {
+            let namespace = shell.workspaces.active_num(o).1;
             let map = smithay::desktop::layer_map_for_output(o);
             for layer_surface in map.layers() {
-                layer_surface.with_surfaces(processor);
+                layer_surface.with_surfaces(processor(Some(namespace)));
             }
         }
     }

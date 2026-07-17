@@ -27,9 +27,9 @@ pub fn ready(common: &Common) {
             ),
             Err(err) => error!(?err, "Failed to run systemctl although booted with systemd",),
         };
+    }
 
-        if let Err(err) = notify(false, &[NotifyState::Ready]) {
-            error!(?err, "Failed to notify systemd");
-        }
+    if let Err(err) = notify(false, &[NotifyState::Ready]) {
+        error!(?err, "Failed to notify systemd");
     }
 }
