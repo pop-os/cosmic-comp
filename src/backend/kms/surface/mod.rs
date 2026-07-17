@@ -97,7 +97,7 @@ use std::{
         mpsc::{Receiver, SyncSender},
     },
     thread::JoinHandle,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod tearing;
@@ -167,6 +167,17 @@ pub struct SurfaceThreadState {
     /// Plot name for the presentation misprediction plot.
     presentation_misprediction_plot_name: tracy_client::PlotName,
     sequence_delta_plot_name: tracy_client::PlotName,
+
+    /// Tearing-mode async-submit counters, flushed on the tearing→not-tearing
+    /// transition. `rejected` stays 0: smithay handles async-flip rejection
+    /// internally (synchronous same-frame retry) and does not surface it.
+    counters: tearing::TearingCounters,
+    /// Timestamp of the last async (tearing) frame submission. Used to cap the
+    /// commit-driven immediate-rescheduling path at ~500fps.
+    last_submit: Option<Instant>,
+    /// Whether tearing mode was active on the previous render cycle, so the
+    /// counters can be flushed once when tearing turns off.
+    was_tearing: bool,
 }
 
 pub type GbmDrmOutput = DrmOutput<
@@ -560,6 +571,10 @@ fn surface_thread(
         time_since_presentation_plot_name,
         presentation_misprediction_plot_name,
         sequence_delta_plot_name,
+
+        counters: tearing::TearingCounters::default(),
+        last_submit: None,
+        was_tearing: false,
     };
 
     let signal = event_loop.get_signal();
@@ -914,6 +929,28 @@ impl SurfaceThreadState {
         self.send_frame_callbacks();
     }
 
+    /// Whether async (tearing) page flips should be used for this render
+    /// cycle: the `COSMIC_ALLOW_TEARING` env is enabled, the output is not
+    /// mirroring, and the active output's fullscreen surface committed an
+    /// `Async` presentation hint. Evaluated once per cycle and cached in a
+    /// local by the caller so the answer can't change mid-frame.
+    fn tearing_mode(&self) -> bool {
+        let shell = self.shell.read();
+        let output = self.mirroring.as_ref().unwrap_or(&self.output);
+        let hint = shell
+            .workspaces
+            .active(output)
+            .and_then(|(_, workspace)| {
+                let seat = shell.seats.last_active();
+                workspace.get_fullscreen(seat).and_then(|fullscreen| {
+                    fullscreen.surface.wl_surface().map(|surface| {
+                        crate::wayland::handlers::tearing_control::presentation_hint(&surface)
+                    })
+                })
+            });
+        tearing::tearing_active(self.mirroring.is_some(), hint)
+    }
+
     fn queue_redraw(&mut self, force: bool) {
         let Some(_compositor) = self.compositor.as_mut() else {
             return;
@@ -942,7 +979,19 @@ impl SurfaceThreadState {
         let estimated_presentation = self.timings.next_presentation_time(&self.clock);
         let render_start = self.timings.next_render_time(&self.clock);
 
-        let timer = if render_start.is_zero() {
+        // In tearing mode we don't pace rendering to the next estimated vblank:
+        // async flips present immediately, so we render/submit as soon as there
+        // is something to draw. The rate ceiling keeps this below ~500fps by
+        // falling back to normal vblank-paced scheduling if we submitted within
+        // the last 2ms (rather than busy-spinning an immediate timer).
+        let tearing_immediate = self.tearing_mode()
+            && self
+                .last_submit
+                .map_or(true, |last| last.elapsed() >= Duration::from_millis(2));
+
+        let timer = if tearing_immediate {
+            Timer::immediate()
+        } else if render_start.is_zero() {
             trace!("Running late for frame.");
             // TODO triple buffering
             Timer::immediate()
@@ -992,6 +1041,15 @@ impl SurfaceThreadState {
 
     #[profiling::function]
     fn redraw(&mut self, estimated_presentation: Duration) -> Result<()> {
+        // Evaluate tearing mode once per cycle; every per-frame decision below
+        // (cursor-plane compositing, async submit, counters) uses this local so
+        // the answer can't drift mid-frame.
+        let tearing = self.tearing_mode();
+        if self.was_tearing && !tearing {
+            self.counters.log_and_reset();
+        }
+        self.was_tearing = tearing;
+
         let Some(compositor) = self.compositor.as_mut() else {
             return Ok(());
         };
@@ -1050,6 +1108,14 @@ impl SurfaceThreadState {
         if has_active_fullscreen || animations_going {
             // skip overlay plane assign if we have a fullscreen surface or dynamic contents to save on tests
             remove_frame_flags |= FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
+        }
+
+        if tearing {
+            // An async commit may only change the primary plane's framebuffer;
+            // a cursor-plane update inside it is rejected with EINVAL (which
+            // would trigger a permanent sync-fallback storm). Composite the
+            // cursor into the primary plane instead of scanning it out.
+            remove_frame_flags |= FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT;
         }
 
         let mut vrr = matches!(self.vrr_mode, AdaptiveSync::Force);
@@ -1326,7 +1392,20 @@ impl SurfaceThreadState {
                     elem.sync.wait()?;
                 }
 
-                match compositor.queue_frame(feedback) {
+                let queue_result = if tearing {
+                    // Async (tearing) submit: the async flag is scoped to this
+                    // one frame inside smithay, which also retries synchronously
+                    // on driver rejection (logged there, not surfaced here).
+                    self.counters.submitted += 1;
+                    self.last_submit = Some(Instant::now());
+                    compositor.with_compositor(|c| {
+                        c.queue_frame_with_flags(feedback, FrameFlags::ALLOW_ASYNC_PAGE_FLIP)
+                    })
+                } else {
+                    compositor.queue_frame(feedback)
+                };
+
+                match queue_result {
                     x @ Ok(()) | x @ Err(FrameError::EmptyFrame) => {
                         self.timings.submitted_for_presentation(&self.clock);
 
