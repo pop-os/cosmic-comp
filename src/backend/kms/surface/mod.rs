@@ -935,6 +935,13 @@ impl SurfaceThreadState {
     /// `Async` presentation hint. Evaluated once per cycle and cached in a
     /// local by the caller so the answer can't change mid-frame.
     fn tearing_mode(&self) -> bool {
+        // Env gate first, before touching any lock: when tearing is disabled
+        // (the default config) this is a cached bool load, so the render hot
+        // path takes zero extra `shell` lock traffic — "zero delta when off".
+        if !tearing::tearing_env_enabled() {
+            return false;
+        }
+
         let shell = self.shell.read();
         let output = self.mirroring.as_ref().unwrap_or(&self.output);
         let hint = shell
@@ -984,6 +991,12 @@ impl SurfaceThreadState {
         // is something to draw. The rate ceiling keeps this below ~500fps by
         // falling back to normal vblank-paced scheduling if we submitted within
         // the last 2ms (rather than busy-spinning an immediate timer).
+        //
+        // This `tearing_mode()` evaluation is deliberately independent of the
+        // one in `redraw()`: this one only decides scheduling, that one decides
+        // submission. If the hint flips between the two, the result is benign
+        // (frame scheduled immediate but submitted sync, or vice versa) — never
+        // a broken state.
         let tearing_immediate = self.tearing_mode()
             && self
                 .last_submit
@@ -1043,7 +1056,10 @@ impl SurfaceThreadState {
     fn redraw(&mut self, estimated_presentation: Duration) -> Result<()> {
         // Evaluate tearing mode once per cycle; every per-frame decision below
         // (cursor-plane compositing, async submit, counters) uses this local so
-        // the answer can't drift mid-frame.
+        // the answer can't drift mid-frame. This evaluation is deliberately
+        // independent of the one in `queue_redraw()` (which decides scheduling);
+        // a hint flip between the two is benign — a frame may be scheduled
+        // immediate but submitted sync, or vice versa, never a broken state.
         let tearing = self.tearing_mode();
         if self.was_tearing && !tearing {
             self.counters.log_and_reset();
