@@ -3,7 +3,7 @@ use smithay::wayland::compositor::SurfaceData;
 
 use crate::wayland::protocols::corner_radius::{
     CacheableCorners, CacheablePadding, CornerRadiusData, CornerRadiusHandler, CornerRadiusState,
-    CornerRadiusSurface, delegate_corner_radius,
+    delegate_corner_radius,
 };
 
 use crate::state::State;
