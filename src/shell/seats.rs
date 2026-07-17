@@ -237,7 +237,16 @@ pub fn create_seat(
         )
     })
     .expect("Failed to load xkb configuration files");
-    seat.add_pointer();
+
+    let pointer = seat.add_pointer();
+
+    // If possible, set the cursor's position to the center of the screen upon initialization
+    if let Some(mode) = output.current_mode() {
+        let scale = output.current_scale().fractional_scale();
+        let logical_size = mode.size.to_f64().to_logical(scale);
+        pointer.set_location(Point::new(logical_size.w / 2.0, logical_size.h / 2.0));
+    }
+
     seat.add_touch();
 
     seat
