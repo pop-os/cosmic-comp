@@ -100,6 +100,7 @@ use std::{
     time::Duration,
 };
 
+mod tearing;
 mod timings;
 pub use self::timings::Timings;
 
