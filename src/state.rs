@@ -541,6 +541,13 @@ impl LockedBackend<'_> {
             output.set_adaptive_sync(final_config.0.vrr);
         }
 
+        // Restore cursor position relative to active output
+        for (seat, saved_output, rel_pos) in &saved_cursor_positions {
+            if &seat.active_output() == saved_output {
+                seat.set_pointer_position_relative_to_active_output(*rel_pos);
+            }
+        }
+
         match self {
             LockedBackend::Kms(state) => state.apply_config_for_outputs(
                 test_only,
@@ -585,13 +592,6 @@ impl LockedBackend<'_> {
             }
 
             layer_map_for_output(output).arrange();
-        }
-
-        // Restore cursor position relative to active output
-        for (seat, saved_output, rel_pos) in &saved_cursor_positions {
-            if &seat.active_output() == saved_output {
-                seat.set_pointer_position_relative_to_active_output(*rel_pos);
-            }
         }
 
         // Update layout for changes in resolution, scale, orientation
