@@ -1412,7 +1412,10 @@ impl SurfaceThreadState {
                     // Async (tearing) submit: the async flag is scoped to this
                     // one frame inside smithay, which also retries synchronously
                     // on driver rejection (logged there, not surfaced here).
-                    self.counters.submitted += 1;
+                    // `last_submit` is updated here, before the call, so the rate
+                    // ceiling throttles on submission attempts rather than only
+                    // on accepted ones; `counters.submitted` is only incremented
+                    // below once we know the submission was actually accepted.
                     self.last_submit = Some(Instant::now());
                     compositor.with_compositor(|c| {
                         c.queue_frame_with_flags(feedback, FrameFlags::ALLOW_ASYNC_PAGE_FLIP)
@@ -1427,6 +1430,12 @@ impl SurfaceThreadState {
 
                         // Update `state` after `queue_frame`, before any early return from errors
                         if x.is_ok() {
+                            if tearing {
+                                // Only count accepted async submissions; attempts that
+                                // errored (including EmptyFrame) are not "submitted".
+                                self.counters.submitted += 1;
+                            }
+
                             let new_state = QueueState::WaitingForVBlank {
                                 redraw_needed: false,
                             };
