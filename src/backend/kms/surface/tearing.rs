@@ -85,7 +85,7 @@ impl TearingCounters {
     // consumed by Task 6
     #[allow(dead_code)]
     pub fn log_and_reset(&mut self) {
-        tracing::info!(
+        tracing::warn!(
             submitted = self.submitted,
             rejected = self.rejected,
             "tearing mode counters"

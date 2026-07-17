@@ -1069,7 +1069,7 @@ impl SurfaceThreadState {
             self.counters.log_and_reset();
         }
         if !self.was_tearing && tearing {
-            tracing::info!("tearing mode engaged");
+            tracing::warn!("tearing mode engaged");
         }
         self.was_tearing = tearing;
 
