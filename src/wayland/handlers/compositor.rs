@@ -264,6 +264,9 @@ impl CompositorHandler for State {
         // and refresh smithays internal state
         self.common.on_commit(surface);
 
+        // promote the pending wp_tearing_control_v1 presentation hint to current
+        crate::wayland::handlers::tearing_control::on_commit(surface);
+
         // handle initial configure events and map windows if necessary
         let mapped = self.send_initial_configure_and_map(surface);
 

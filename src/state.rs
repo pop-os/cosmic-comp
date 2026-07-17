@@ -13,7 +13,10 @@ use crate::{
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
     utils::prelude::OutputExt,
     wayland::{
-        handlers::{data_device::get_dnd_icon, image_copy_capture::SessionHolder},
+        handlers::{
+            data_device::get_dnd_icon, image_copy_capture::SessionHolder,
+            tearing_control::TearingControlManagerState,
+        },
         protocols::{
             a11y::A11yState,
             corner_radius::CornerRadiusState,
@@ -280,6 +283,7 @@ pub struct Common {
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
     pub overlap_notify_state: OverlapNotifyState,
+    pub tearing_control_manager_state: TearingControlManagerState,
     pub a11y_state: A11yState,
     pub dbus_state: DBusState,
     pub keyboard_layout_state: KeyboardLayoutState,
@@ -655,6 +659,7 @@ impl State {
         let output_power_state = OutputPowerState::new::<Self, _>(dh, client_not_sandboxed);
         let overlap_notify_state =
             OverlapNotifyState::new::<Self, _>(dh, client_has_no_security_context);
+        let tearing_control_manager_state = TearingControlManagerState::new::<Self>(dh);
         let presentation_state = PresentationState::new::<Self>(dh, clock.id() as u32);
         let primary_selection_state = PrimarySelectionState::new::<Self>(dh);
         let cosmic_image_capture_source_state =
@@ -780,6 +785,7 @@ impl State {
                 output_configuration_state,
                 output_power_state,
                 overlap_notify_state,
+                tearing_control_manager_state,
                 presentation_state,
                 primary_selection_state,
                 ext_data_control_state,
