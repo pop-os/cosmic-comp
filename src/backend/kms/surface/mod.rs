@@ -955,6 +955,10 @@ impl SurfaceThreadState {
                     })
                 })
             });
+
+        // diagnostic: log hint state changes for the fullscreen surface (validation aid)
+        tracing::debug!(hint = ?hint, "tearing_mode evaluation");
+
         tearing::tearing_active(self.mirroring.is_some(), hint)
     }
 
@@ -1063,6 +1067,9 @@ impl SurfaceThreadState {
         let tearing = self.tearing_mode();
         if self.was_tearing && !tearing {
             self.counters.log_and_reset();
+        }
+        if !self.was_tearing && tearing {
+            tracing::info!("tearing mode engaged");
         }
         self.was_tearing = tearing;
 

@@ -194,6 +194,8 @@ where
                         .get_or_insert_threadsafe(TearingSurfaceData::default);
                     state.lock().unwrap().object = Some(control.downgrade());
                 });
+
+                tracing::info!(surface = ?surface.id(), "tearing_control: client created control object");
             }
             wp_tearing_control_manager_v1::Request::Destroy => {}
             _ => {}
@@ -221,9 +223,11 @@ where
         match request {
             wp_tearing_control_v1::Request::SetPresentationHint { hint } => {
                 if let WEnum::Value(hint) = hint {
+                    let parsed_hint: PresentationHint = hint.into();
+                    tracing::info!(surface = ?surface.id(), hint = ?parsed_hint, "tearing_control: hint set (pending until commit)");
                     with_states(&surface, |states| {
                         if let Some(state) = states.data_map.get::<TearingSurfaceData>() {
-                            state.lock().unwrap().pending = hint.into();
+                            state.lock().unwrap().pending = parsed_hint;
                         }
                     });
                 }
@@ -237,6 +241,8 @@ where
                         state.lock().unwrap().pending = PresentationHint::Vsync;
                     }
                 });
+
+                tracing::info!("tearing_control: control destroyed (pending reset to vsync)");
             }
             _ => {}
         }
