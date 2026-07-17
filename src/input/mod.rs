@@ -375,21 +375,24 @@ impl State {
                     let original_position = position;
                     position += event.delta().as_global();
                     let shell = self.common.shell.read();
-                    let output = shell
+                    let matching_output = shell
                         .outputs()
                         .find(|output| output.geometry().to_f64().contains(position))
-                        .cloned()
-                        .unwrap_or(current_output.clone());
+                        .cloned();
                     drop(shell);
+                    let needs_clamping = matching_output.is_none();
+                    let output = matching_output.unwrap_or_else(|| current_output.clone());
                     let output_geometry = output.geometry();
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        (output_geometry.loc.x + output_geometry.size.w - 1) as f64,
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        (output_geometry.loc.y + output_geometry.size.h - 1) as f64,
-                    );
+                    if needs_clamping {
+                        position.x = position.x.clamp(
+                            output_geometry.loc.x as f64,
+                            (output_geometry.loc.x + output_geometry.size.w - 1) as f64,
+                        );
+                        position.y = position.y.clamp(
+                            output_geometry.loc.y as f64,
+                            (output_geometry.loc.y + output_geometry.size.h - 1) as f64,
+                        );
+                    }
 
                     if ptr.is_grabbed() {
                         if seat
