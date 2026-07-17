@@ -115,7 +115,7 @@ impl ToplevelManagementHandler for State {
                 && self.common.config.cosmic_conf.cursor_follows_focus
                 && let Some(new_pos) = new_pos
             {
-                seat.set_active_output(output);
+                seat.set_active_output(output, false);
                 if let Some(ptr) = seat.get_pointer() {
                     let serial = SERIAL_COUNTER.next_serial();
                     ptr.motion(

@@ -241,15 +241,21 @@ pub fn create_seat(
     let pointer = seat.add_pointer();
 
     // If possible, set the cursor's position to the center of the screen upon initialization
-    if let Some(mode) = output.current_mode() {
-        let scale = output.current_scale().fractional_scale();
-        let logical_size = mode.size.to_f64().to_logical(scale);
-        pointer.set_location(Point::new(logical_size.w / 2.0, logical_size.h / 2.0));
+    if let Some(position) = get_logical_center_of_output(output) {
+        pointer.set_location(position);
     }
 
     seat.add_touch();
 
     seat
+}
+
+fn get_logical_center_of_output(output: &Output) -> Option<Point<f64, Logical>> {
+    output.current_mode().map(|mode| {
+        let scale = output.current_scale().fractional_scale();
+        let logical_size = mode.size.to_f64().to_logical(scale);
+        Point::new(logical_size.w / 2.0, logical_size.h / 2.0)
+    })
 }
 
 pub trait SeatExt {
@@ -261,7 +267,7 @@ pub trait SeatExt {
         self.focused_output()
             .unwrap_or_else(|| self.active_output())
     }
-    fn set_active_output(&self, output: &Output);
+    fn set_active_output(&self, output: &Output, move_cursor_to_center: bool);
     fn set_focused_output(&self, output: Option<&Output>);
     fn devices(&self) -> &Devices;
     fn supressed_keys(&self) -> &SupressedKeys;
@@ -309,7 +315,7 @@ impl SeatExt for Seat<State> {
         }
     }
 
-    fn set_active_output(&self, output: &Output) {
+    fn set_active_output(&self, output: &Output, move_cursor_to_center: bool) {
         *self
             .user_data()
             .get::<ActiveOutput>()
@@ -317,6 +323,15 @@ impl SeatExt for Seat<State> {
             .0
             .lock()
             .unwrap() = output.clone();
+
+        if move_cursor_to_center {
+            // Update the position of the cursor to the center
+            if let (Some(pointer), Some(position)) =
+                (self.get_pointer(), get_logical_center_of_output(output))
+            {
+                pointer.set_location(position);
+            }
+        }
     }
 
     fn set_focused_output(&self, output: Option<&Output>) {

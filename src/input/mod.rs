@@ -636,7 +636,7 @@ impl State {
                         for session in cursor_sessions_for_output(&shell, &current_output) {
                             session.set_cursor_pos(None);
                         }
-                        seat.set_active_output(&output);
+                        seat.set_active_output(&output, false);
                     }
 
                     for session in cursor_sessions_for_output(&shell, &output) {
