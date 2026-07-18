@@ -3,7 +3,7 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use cgmath::{Matrix3, SquareMatrix, Vector2};
+use glam::{Mat3, Vec2};
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -231,13 +231,11 @@ impl BlurElement {
         // compute input_to_geo so that it crops the extended capture radius
         let geo_scale = {
             let Scale { x, y } = geo.size / extended_geo.size;
-            Matrix3::from_nonuniform_scale(x as f32, y as f32)
-                .invert()
-                .unwrap()
+            Mat3::from_scale(Vec2::new(x as f32, y as f32)).inverse()
         };
         let geo_translation = {
             let offset = geo.loc - extended_geo.loc;
-            Matrix3::from_translation(-Vector2::new(
+            Mat3::from_translation(-Vec2::new(
                 (offset.x / extended_geo.size.w) as f32,
                 (offset.y / extended_geo.size.h) as f32,
             ))

@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
 
-use cgmath::{Matrix3, Vector2};
+use glam::{Mat3, Vec2};
 use smithay::{
     backend::renderer::{
         element::Kind,
@@ -113,26 +113,22 @@ impl ShadowShader {
             let mut shader_geo = Rectangle::new(Point::from((-width, -width)), shader_size);
 
             let window_geo = Rectangle::new(Point::new(0., 0.) - offset - shader_geo.loc, geo.size);
-            let area_size = Vector2::new(shader_geo.size.w, shader_geo.size.h);
-            let geo_loc = Vector2::new(-shader_geo.loc.x, -shader_geo.loc.y);
+            let area_size = Vec2::new(shader_geo.size.w as f32, shader_geo.size.h as f32);
+            let geo_loc = Vec2::new(-shader_geo.loc.x as f32, -shader_geo.loc.y as f32);
             shader_geo.loc += offset + geo.loc;
 
-            let input_to_geo = (Matrix3::from_nonuniform_scale(area_size.x, area_size.y)
-                * Matrix3::from_translation(Vector2::new(
+            let input_to_geo = Mat3::from_scale(area_size)
+                * Mat3::from_translation(Vec2::new(
                     -geo_loc.x / area_size.x,
                     -geo_loc.y / area_size.y,
-                )))
-            .cast::<f32>()
-            .unwrap();
+                ));
 
-            let window_geo_loc = Vector2::new(window_geo.loc.x, window_geo.loc.y);
-            let window_input_to_geo = (Matrix3::from_nonuniform_scale(area_size.x, area_size.y)
-                * Matrix3::from_translation(Vector2::new(
+            let window_geo_loc = Vec2::new(window_geo.loc.x as f32, window_geo.loc.y as f32);
+            let window_input_to_geo = Mat3::from_scale(area_size)
+                * Mat3::from_translation(Vec2::new(
                     -window_geo_loc.x / area_size.x,
                     -window_geo_loc.y / area_size.y,
-                )))
-            .cast::<f32>()
-            .unwrap();
+                ));
 
             let element = PixelShaderElement::new(
                 shader,
