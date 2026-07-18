@@ -599,7 +599,6 @@ pub fn render_window_to_buffer(
                     1.0.into(),
                     1.0,
                     common.clock.now(),
-                    blur_strength,
                     true,
                     &mut |elem, hotspot| {
                         elements.push(WindowCaptureElement::CursorElement(
@@ -621,7 +620,6 @@ pub fn render_window_to_buffer(
                     &dnd_icon.surface,
                     (location + dnd_icon.offset.to_f64()).to_i32_round(),
                     1.0,
-                    blur_strength,
                     &mut |elem| {
                         elements.push(
                             RelocateRenderElement::from_element(
@@ -821,7 +819,6 @@ pub fn render_cursor_to_buffer(
             1.0.into(),
             1.0,
             common.clock.now(),
-            0,
             true,
             &mut |elem, _| {
                 elements.push(

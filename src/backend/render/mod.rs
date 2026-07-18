@@ -479,7 +479,6 @@ pub fn cursor_elements<'a, 'frame, R>(
     seats: impl Iterator<Item = &'a Seat<State>>,
     zoom_state: Option<&ZoomState>,
     theme: &Theme,
-    blur_strength: usize,
     now: Time<Monotonic>,
     output: &Output,
     mode: CursorMode,
@@ -516,7 +515,6 @@ pub fn cursor_elements<'a, 'frame, R>(
                 scale.into(),
                 zoom_scale,
                 now,
-                blur_strength,
                 mode != CursorMode::NotDefault,
                 &mut |elem, hotspot| {
                     push(CosmicElement::Cursor(RescaleRenderElement::from_element(
@@ -541,7 +539,6 @@ pub fn cursor_elements<'a, 'frame, R>(
                 &dnd_icon.surface,
                 (location + dnd_icon.offset.to_f64()).to_i32_round(),
                 scale,
-                blur_strength,
                 &mut |elem| push(CosmicElement::Dnd(elem)),
             );
         }
@@ -738,7 +735,6 @@ where
         seats.iter(),
         zoom_level,
         &theme,
-        blur_strength,
         now,
         output,
         cursor_mode,
