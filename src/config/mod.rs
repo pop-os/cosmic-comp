@@ -947,6 +947,10 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     }
                 }
             }
+            "cursor_shake_to_find" => {
+                let new = get_config::<bool>(&config, "cursor_shake_to_find");
+                state.common.config.cosmic_conf.cursor_shake_to_find = new;
+            }
             "cursor_hide_timeout" => {
                 let new = get_config::<Option<u32>>(&config, "cursor_hide_timeout");
                 if new != state.common.config.cosmic_conf.cursor_hide_timeout {

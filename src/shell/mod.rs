@@ -2286,6 +2286,11 @@ impl Shell {
                         .is_some_and(|state| state.lock().unwrap().is_animating())
                 })
             })
+            || self.seats.iter().any(|seat| {
+                seat.user_data()
+                    .get::<crate::backend::render::cursor::CursorState>()
+                    .is_some_and(|state| state.lock().unwrap().is_magnifying())
+            })
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {

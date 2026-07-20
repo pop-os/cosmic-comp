@@ -316,6 +316,21 @@ impl State {
                     notify_cursor_activity(self, &seat);
                     let current_output = seat.active_output();
 
+                    if self.common.config.cosmic_conf.cursor_shake_to_find
+                        && let Some(cursor_state) =
+                            seat.user_data()
+                                .get::<crate::backend::render::cursor::CursorState>()
+                    {
+                        let active = {
+                            let mut cursor = cursor_state.lock().unwrap();
+                            cursor.detect_shake(event.delta(), std::time::Instant::now());
+                            cursor.is_magnifying()
+                        };
+                        if active {
+                            self.backend.schedule_render(&current_output);
+                        }
+                    }
+
                     let mut position = seat.get_pointer().unwrap().current_location().as_global();
 
                     let under = State::surface_under(position, &current_output, &shell)
