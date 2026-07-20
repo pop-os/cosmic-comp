@@ -2,7 +2,7 @@
 
 use std::borrow::{Borrow, BorrowMut};
 
-use glam::{Mat3, Vec2};
+use glam::{Affine2, Mat3, Vec2};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::{
     backend::renderer::{
@@ -63,18 +63,18 @@ where
         let view = elem.view();
 
         let transform = elem.transform();
-        let transform_matrix = Mat3::from_translation(Vec2::new(0.5, 0.5))
+        let transform_matrix = Affine2::from_translation(Vec2::new(0.5, 0.5))
             * transform.matrix()
-            * Mat3::from_translation(-Vec2::new(0.5, 0.5));
+            * Affine2::from_translation(-Vec2::new(0.5, 0.5));
 
         let geo_scale = {
             let Scale { x, y } = elem_geo.size.to_f64() / geo.size.to_f64();
-            Mat3::from_scale(Vec2::new(x as f32, y as f32))
+            Affine2::from_scale(Vec2::new(x as f32, y as f32))
         };
 
         let geo_translation = {
             let offset = (elem_geo.loc - geo.loc).to_f64();
-            Mat3::from_translation(Vec2::new(
+            Affine2::from_translation(Vec2::new(
                 (offset.x / elem_geo.size.w as f64) as f32,
                 (offset.y / elem_geo.size.h as f64) as f32,
             ))
@@ -82,16 +82,17 @@ where
 
         let buf_scale = {
             let Scale { x, y } = buf_size.to_f64() / view.src.size.to_f64();
-            Mat3::from_scale(Vec2::new(x as f32, y as f32))
+            Affine2::from_scale(Vec2::new(x as f32, y as f32))
         };
 
-        let buf_translation = Mat3::from_translation(Vec2::new(
+        let buf_translation = Affine2::from_translation(Vec2::new(
             (view.src.loc.x / buf_size.w as f64) as f32,
             (view.src.loc.y / buf_size.h as f64) as f32,
         ));
 
-        let input_to_geo =
-            transform_matrix * geo_scale * geo_translation * buf_scale * buf_translation;
+        let input_to_geo = Mat3::from(
+            transform_matrix * geo_scale * geo_translation * buf_scale * buf_translation,
+        );
 
         let uniforms = vec![
             Uniform::new("geo_size", (geometry.size.w as f32, geometry.size.h as f32)),

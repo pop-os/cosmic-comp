@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, cell::RefCell, collections::HashMap};
 
-use glam::{Mat3, Vec2};
+use glam::{Affine2, Mat3, Vec2};
 use smithay::{
     backend::renderer::{
         element::Kind,
@@ -117,18 +117,22 @@ impl ShadowShader {
             let geo_loc = Vec2::new(-shader_geo.loc.x as f32, -shader_geo.loc.y as f32);
             shader_geo.loc += offset + geo.loc;
 
-            let input_to_geo = Mat3::from_scale(area_size)
-                * Mat3::from_translation(Vec2::new(
-                    -geo_loc.x / area_size.x,
-                    -geo_loc.y / area_size.y,
-                ));
+            let input_to_geo = Mat3::from(
+                Affine2::from_scale(area_size)
+                    * Affine2::from_translation(Vec2::new(
+                        -geo_loc.x / area_size.x,
+                        -geo_loc.y / area_size.y,
+                    )),
+            );
 
             let window_geo_loc = Vec2::new(window_geo.loc.x as f32, window_geo.loc.y as f32);
-            let window_input_to_geo = Mat3::from_scale(area_size)
-                * Mat3::from_translation(Vec2::new(
-                    -window_geo_loc.x / area_size.x,
-                    -window_geo_loc.y / area_size.y,
-                ));
+            let window_input_to_geo = Mat3::from(
+                Affine2::from_scale(area_size)
+                    * Affine2::from_translation(Vec2::new(
+                        -window_geo_loc.x / area_size.x,
+                        -window_geo_loc.y / area_size.y,
+                    )),
+            );
 
             let element = PixelShaderElement::new(
                 shader,
