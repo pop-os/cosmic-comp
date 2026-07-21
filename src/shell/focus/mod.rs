@@ -243,13 +243,20 @@ impl Shell {
         // the floating stack, so there is nothing to suppress for them.
         {
             let mut shell = state.common.shell.write();
-            shell.no_raise_window = match raise {
+            let new_mark = match raise {
                 Raise::No => match target {
                     Some(KeyboardFocusTarget::Element(mapped)) => Some(mapped.clone()),
-                    _ => None,
+                    // Passive focus onto a non-window target (a layer surface,
+                    // the desktop, a group, etc.) must NOT clear the no-raise
+                    // suppression: the previously hovered window is still the
+                    // focus-stack top, so update_active() would re-raise it.
+                    // Keep the existing mark so sloppy-focus stays sticky until
+                    // an explicit focus (Raise::Yes) clears it.
+                    _ => shell.no_raise_window.clone(),
                 },
                 Raise::Yes => None,
             };
+            shell.no_raise_window = new_mark;
             shell.update_active();
         }
     }
