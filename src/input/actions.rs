@@ -667,6 +667,77 @@ impl State {
                 warn!("Ignoring deprecated action Move/SendToPreviousOutput");
             }
 
+            Action::MoveWorkspace(direction) => {
+                let active_output = seat.active_output();
+                let shell = self.common.shell.read();
+                let active = shell.active_space(&active_output).unwrap().handle;
+
+                let after = match (
+                    direction,
+                    self.common.config.cosmic_conf.workspaces.workspace_layout,
+                ) {
+                    (Direction::Left, WorkspaceLayout::Horizontal)
+                    | (Direction::Up, WorkspaceLayout::Vertical) => Some(false),
+                    (Direction::Right, WorkspaceLayout::Horizontal)
+                    | (Direction::Down, WorkspaceLayout::Vertical) => Some(true),
+                    _ => None,
+                };
+
+                if let Some(after) = after {
+                    let len = shell.workspaces.len(&active_output);
+                    let active_idx = shell.workspaces.active_num(&active_output).1;
+                    let wraparound = self
+                        .common
+                        .config
+                        .cosmic_conf
+                        .workspaces
+                        .workspace_wraparound;
+
+                    let dest = if after {
+                        if active_idx + 1 < len {
+                            Some(active_idx + 1)
+                        } else if wraparound && len > 1 {
+                            Some(0)
+                        } else {
+                            None
+                        }
+                    } else if active_idx > 0 {
+                        Some(active_idx - 1)
+                    } else if wraparound && len > 1 {
+                        Some(len - 1)
+                    } else {
+                        None
+                    };
+
+                    if let Some(dest) = dest {
+                        let other_handle =
+                            shell.workspaces.get(dest, &active_output).map(|w| w.handle);
+                        drop(shell);
+
+                        if let Some(other_handle) = other_handle {
+                            let mut shell = self.common.shell.write();
+                            let mut workspace_state = self.common.workspace_state.update();
+                            shell.workspaces.move_workspace(
+                                &active,
+                                &other_handle,
+                                &mut workspace_state,
+                                dest > active_idx,
+                            );
+
+                            let _ = shell.activate(
+                                &active_output,
+                                dest,
+                                WorkspaceDelta::new_shortcut(),
+                                &mut workspace_state,
+                            );
+
+                            drop(workspace_state);
+                            drop(shell);
+                        }
+                    }
+                }
+            }
+
             Action::MigrateWorkspaceToOutput(direction) => {
                 let active_output = seat.active_output();
                 let (active, next_output) = {
@@ -793,6 +864,18 @@ impl State {
             }
 
             Action::Move(direction) => {
+                if crate::utils::quirks::workspace_overview_is_open(&seat.active_output()) {
+                    return self.handle_shortcut_action(
+                        Action::MoveWorkspace(direction),
+                        seat,
+                        serial,
+                        time,
+                        pattern,
+                        Some(direction),
+                        true,
+                    );
+                }
+
                 let res = self
                     .common
                     .shell
