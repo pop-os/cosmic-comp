@@ -738,7 +738,23 @@ impl State {
 
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
-        let dbus_state = DBusState::init(&handle);
+        let (color_picker_tx, color_picker_rx) =
+            calloop::channel::channel::<crate::dbus::color_picker::Request>();
+        if let Err(err) = handle.insert_source(color_picker_rx, |event, _, state| {
+            if let calloop::channel::Event::Msg(req) = event {
+                match req {
+                    crate::dbus::color_picker::Request::ColorUnderCursor { reply } => {
+                        let res = crate::utils::color_under_cursor::color_under_cursor(state)
+                            .map_err(|e| e.to_string());
+                        let _ = reply.send(res);
+                    }
+                }
+            }
+        }) {
+            tracing::warn!(?err, "Failed to insert color picker event source");
+        }
+
+        let dbus_state = DBusState::init(&handle, color_picker_tx);
 
         State {
             common: Common {

@@ -801,6 +801,7 @@ dependencies = [
  "cosmic-text",
  "egui",
  "egui_plot",
+ "futures-channel",
  "futures-executor",
  "futures-util",
  "glam 0.33.2",
