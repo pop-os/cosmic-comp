@@ -337,7 +337,7 @@ impl State {
                                 // Constraint does not apply if not within region
                                 if !constraint.region().is_none_or(|x| {
                                     x.contains(
-                                        (ptr.current_location() - *surface_loc).to_i32_round(),
+                                        (ptr.current_location() - *surface_loc).to_i32_floor(),
                                     )
                                 }) {
                                     return;
@@ -382,14 +382,25 @@ impl State {
                         .unwrap_or(current_output.clone());
                     drop(shell);
                     let output_geometry = output.geometry();
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        (output_geometry.loc.x + output_geometry.size.w - 1) as f64,
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        (output_geometry.loc.y + output_geometry.size.h - 1) as f64,
-                    );
+
+                    let scale = output.current_scale().fractional_scale();
+                    let physical = output
+                        .current_mode()
+                        .map(|mode| output.current_transform().transform_size(mode.size))
+                        .unwrap_or_default();
+                    let logical = physical.to_f64().to_logical(scale);
+                    let output_geometry_loc = output_geometry.loc.to_f64();
+                    // output_geometry.size is a rounded value and may undershoot/overshoot the accurate logical size
+                    // We constrain the position with:
+                    // - output_geometry.size so that we don't send leave events to a fullscreen app
+                    // - logical size so that the position doesn't end up outside the actual size of the output
+                    // See https://github.com/pop-os/cosmic-comp/pull/2568
+                    let max_x = output_geometry_loc.x
+                        + logical.w.min(output_geometry.size.w as f64).next_down();
+                    let max_y = output_geometry_loc.y
+                        + logical.h.min(output_geometry.size.h as f64).next_down();
+                    position.x = position.x.clamp(output_geometry_loc.x, max_x);
+                    position.y = position.y.clamp(output_geometry_loc.y, max_y);
 
                     if ptr.is_grabbed() {
                         if seat
@@ -543,7 +554,7 @@ impl State {
 
                             if let Some(region) = &confine_region
                                 && !region
-                                    .contains((pos.as_logical() - *surface_loc).to_i32_round())
+                                    .contains((pos.as_logical() - *surface_loc).to_i32_floor())
                             {
                                 return (false, None);
                             }
@@ -614,7 +625,7 @@ impl State {
                                         PointerConstraint::Confined(confined) => confined.region(),
                                     };
                                     let point =
-                                        (ptr.current_location() - surface_location).to_i32_round();
+                                        (ptr.current_location() - surface_location).to_i32_floor();
                                     if region.is_none_or(|region| region.contains(point)) {
                                         constraint.activate();
                                     }
@@ -2210,7 +2221,7 @@ impl State {
                         if Rectangle::new(offset.as_local(), output_geo.size)
                             .intersection(output_geo)
                             .is_some_and(|geometry| {
-                                geometry.contains(global_pos.to_local(output).to_i32_round())
+                                geometry.contains(global_pos.to_local(output).to_i32_floor())
                             })
                             && let Some(element) = workspace.popup_element_under(location, seat)
                         {
@@ -2224,7 +2235,7 @@ impl State {
                         if Rectangle::new(offset.as_local(), output_geo.size)
                             .intersection(output_geo)
                             .is_some_and(|geometry| {
-                                geometry.contains(global_pos.to_local(output).to_i32_round())
+                                geometry.contains(global_pos.to_local(output).to_i32_floor())
                             })
                             && let Some(element) = workspace.toplevel_element_under(location, seat)
                         {
@@ -2427,7 +2438,7 @@ impl State {
                         if let Some(constraint) = constraint
                             && let Some(region) = constraint.region()
                         {
-                            let point_in_surface = (p - surface_offset.to_f64()).to_i32_round();
+                            let point_in_surface = (p - surface_offset.to_f64()).to_i32_floor();
                             return region.contains(point_in_surface);
                         }
                         true
