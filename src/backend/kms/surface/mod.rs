@@ -13,7 +13,9 @@ use crate::{
     utils::prelude::*,
     wayland::handlers::{
         compositor::recursive_frame_time_estimation,
-        image_copy_capture::{FrameHolder, PendingImageCopyData, SessionData, submit_buffer},
+        image_copy_capture::{
+            FrameHolder, PendingImageCopyData, SessionData, render_element_buffers, submit_buffer,
+        },
     },
 };
 
@@ -1674,7 +1676,7 @@ fn send_screencopy_result<'a>(
     pre_postprocess_data: &mut PrePostprocessData,
     tx: &std::sync::mpsc::Sender<PendingImageCopyData>,
     frame_result: &RenderFrameResult<GbmBuffer, GbmFramebuffer, CosmicElement<GlMultiRenderer<'a>>>,
-    elements: &[CosmicElement<GlMultiRenderer>],
+    elements: &[CosmicElement<GlMultiRenderer<'a>>],
     (session, frame, res): (
         &ScreencopySessionRef,
         ScreencopyFrame,
@@ -1848,6 +1850,8 @@ fn send_screencopy_result<'a>(
 
     let transform = output.current_transform();
 
+    let buffers = render_element_buffers(renderer, elements);
+
     if let Some(data) = submit_buffer(
         frame,
         renderer,
@@ -1855,6 +1859,7 @@ fn send_screencopy_result<'a>(
         transform,
         damage.as_deref(),
         sync,
+        buffers,
     )? {
         if frame_result.is_empty {
             data.frame
