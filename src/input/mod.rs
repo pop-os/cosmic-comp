@@ -2132,7 +2132,12 @@ impl State {
         let keyboard_grabbed = keyboard.with_grab(|_serial, grab| {
             grab.is::<SwapWindowGrab>() || grab.is::<PopupKeyboardGrab<State>>()
         }) == Some(true);
-        let is_grabbed = keyboard_grabbed || pointer.is_grabbed();
+        // A virtual-keyboard key can arrive while the seat's pointer is grabbed by that
+        // same on-screen keyboard's own button press (the implicit grab from clicking an OSK
+        // key). That pointer grab must not capture the injected key, otherwise e.g.
+        // pressing esc on a virtual keyboard gets swallowed here
+        let from_vk = matches!(backend_id, InputBackendId::VirtualKeyboard);
+        let is_grabbed = keyboard_grabbed || (pointer.is_grabbed() && !from_vk);
 
         let current_focus = keyboard.current_focus();
         //this should fall back to active output since there may not be a focused output
