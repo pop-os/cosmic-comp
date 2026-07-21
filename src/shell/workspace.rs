@@ -785,7 +785,7 @@ impl Workspace {
         location: Point<f64, Global>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        if !self.output.geometry().contains(location.to_i32_round()) {
+        if !self.output.geometry().contains(location.to_i32_floor()) {
             return None;
         }
         let location = location.to_local(&self.output);
@@ -834,7 +834,7 @@ impl Workspace {
         location: Point<f64, Global>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        if !self.output.geometry().contains(location.to_i32_round()) {
+        if !self.output.geometry().contains(location.to_i32_floor()) {
             return None;
         }
         let location = location.to_local(&self.output);
@@ -884,7 +884,7 @@ impl Workspace {
         overview: OverviewMode,
         seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
-        if !self.output.geometry().contains(location.to_i32_round()) {
+        if !self.output.geometry().contains(location.to_i32_floor()) {
             return None;
         }
         let location = location.to_local(&self.output);
@@ -934,7 +934,7 @@ impl Workspace {
         overview: OverviewMode,
         seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
-        if !self.output.geometry().contains(location.to_i32_round()) {
+        if !self.output.geometry().contains(location.to_i32_floor()) {
             return None;
         }
         let location = location.to_local(&self.output);

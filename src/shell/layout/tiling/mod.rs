@@ -3150,7 +3150,7 @@ impl TilingLayout {
         location_f64: Point<f64, Local>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         for (mapped, geo) in self.mapped() {
             if !mapped.bbox().contains((location - geo.loc).as_logical()) {
@@ -3177,7 +3177,7 @@ impl TilingLayout {
         location_f64: Point<f64, Local>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         for (mapped, geo) in self.mapped() {
             // Tiled windows are rendered cropped to their tile (`geo`), so input must be bound to the tile as well
@@ -3209,7 +3209,7 @@ impl TilingLayout {
         overview: OverviewMode,
         seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
@@ -3244,7 +3244,7 @@ impl TilingLayout {
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let tree = &self.queue.trees.back().unwrap().0;
         let root = tree.root_node_id()?;
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
@@ -3305,7 +3305,7 @@ impl TilingLayout {
                         ..
                     },
                 )) => {
-                    let test_point = (location.to_f64() - last_geometry.loc.to_f64()
+                    let test_point = (location_f64 - last_geometry.loc.to_f64()
                         + mapped.geometry().loc.to_f64().as_local())
                     .as_logical();
                     mapped
@@ -3410,7 +3410,7 @@ impl TilingLayout {
         }
 
         let location_f64 = location_f64.unwrap();
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(
             overview.active_trigger(),
@@ -3660,7 +3660,7 @@ impl TilingLayout {
                             TargetZone::WindowStack(id, last_geometry)
                         } else {
                             let left_right = {
-                                let relative_loc = (location.x - last_geometry.loc.x) as f64;
+                                let relative_loc = location_f64.x - last_geometry.loc.x as f64;
                                 if relative_loc < last_geometry.size.w as f64 / 2.0 {
                                     (Direction::Left, relative_loc / last_geometry.size.w as f64)
                                 } else {
@@ -3671,7 +3671,7 @@ impl TilingLayout {
                                 }
                             };
                             let up_down = {
-                                let relative_loc = (location.y - last_geometry.loc.y) as f64;
+                                let relative_loc = location_f64.y - last_geometry.loc.y as f64;
                                 if relative_loc < last_geometry.size.h as f64 / 2.0 {
                                     (Direction::Up, relative_loc / last_geometry.size.h as f64)
                                 } else {
