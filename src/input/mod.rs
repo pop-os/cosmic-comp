@@ -25,7 +25,8 @@ use crate::{
     },
     utils::{prelude::*, quirks::workspace_overview_is_open},
     wayland::handlers::{
-        image_copy_capture::SessionHolder, xwayland_keyboard_grab::XWaylandGrabSeat,
+        image_copy_capture::{SessionHolder, cursor_capture_constraints},
+        xwayland_keyboard_grab::XWaylandGrabSeat,
     },
 };
 use calloop::{
@@ -35,7 +36,7 @@ use calloop::{
 use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
-#[cfg(feature = "systemd")]
+#[cfg(feature = "logind")]
 use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
 use smithay::{
     backend::input::{
@@ -60,15 +61,12 @@ use smithay::{
     output::Output,
     reexports::{
         input::Device as InputDevice,
-        wayland_server::{
-            Resource as _,
-            protocol::{wl_shm::Format as ShmFormat, wl_surface::WlSurface},
-        },
+        wayland_server::{Resource as _, protocol::wl_surface::WlSurface},
     },
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle, SERIAL_COUNTER, Serial},
     wayland::{
         compositor::CompositorHandler,
-        image_copy_capture::{BufferConstraints, CursorSessionRef},
+        image_copy_capture::CursorSessionRef,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{PointerConstraint, with_pointer_constraint},
         seat::WaylandFocus,
@@ -337,7 +335,7 @@ impl State {
                                 // Constraint does not apply if not within region
                                 if !constraint.region().is_none_or(|x| {
                                     x.contains(
-                                        (ptr.current_location() - *surface_loc).to_i32_round(),
+                                        (ptr.current_location() - *surface_loc).to_i32_floor(),
                                     )
                                 }) {
                                     return;
@@ -382,14 +380,25 @@ impl State {
                         .unwrap_or(current_output.clone());
                     drop(shell);
                     let output_geometry = output.geometry();
-                    position.x = position.x.clamp(
-                        output_geometry.loc.x as f64,
-                        (output_geometry.loc.x + output_geometry.size.w - 1) as f64,
-                    );
-                    position.y = position.y.clamp(
-                        output_geometry.loc.y as f64,
-                        (output_geometry.loc.y + output_geometry.size.h - 1) as f64,
-                    );
+
+                    let scale = output.current_scale().fractional_scale();
+                    let physical = output
+                        .current_mode()
+                        .map(|mode| output.current_transform().transform_size(mode.size))
+                        .unwrap_or_default();
+                    let logical = physical.to_f64().to_logical(scale);
+                    let output_geometry_loc = output_geometry.loc.to_f64();
+                    // output_geometry.size is a rounded value and may undershoot/overshoot the accurate logical size
+                    // We constrain the position with:
+                    // - output_geometry.size so that we don't send leave events to a fullscreen app
+                    // - logical size so that the position doesn't end up outside the actual size of the output
+                    // See https://github.com/pop-os/cosmic-comp/pull/2568
+                    let max_x = output_geometry_loc.x
+                        + logical.w.min(output_geometry.size.w as f64).next_down();
+                    let max_y = output_geometry_loc.y
+                        + logical.h.min(output_geometry.size.h as f64).next_down();
+                    position.x = position.x.clamp(output_geometry_loc.x, max_x);
+                    position.y = position.y.clamp(output_geometry_loc.y, max_y);
 
                     if ptr.is_grabbed() {
                         if seat
@@ -543,7 +552,7 @@ impl State {
 
                             if let Some(region) = &confine_region
                                 && !region
-                                    .contains((pos.as_logical() - *surface_loc).to_i32_round())
+                                    .contains((pos.as_logical() - *surface_loc).to_i32_floor())
                             {
                                 return (false, None);
                             }
@@ -614,7 +623,7 @@ impl State {
                                         PointerConstraint::Confined(confined) => confined.region(),
                                     };
                                     let point =
-                                        (ptr.current_location() - surface_location).to_i32_round();
+                                        (ptr.current_location() - surface_location).to_i32_floor();
                                     if region.is_none_or(|region| region.contains(point)) {
                                         constraint.activate();
                                     }
@@ -639,37 +648,13 @@ impl State {
                         seat.set_active_output(&output);
                     }
 
-                    for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some((geometry, offset)) = seat.cursor_geometry(
-                            (position - output_geometry.loc.to_f64())
-                                .as_logical()
-                                .to_buffer(
-                                    output.current_scale().fractional_scale(),
-                                    output.current_transform(),
-                                    &output_geometry.size.to_f64().as_logical(),
-                                ),
-                            self.common.clock.now(),
-                        ) {
-                            if session
-                                .current_constraints()
-                                .map(|constraint| constraint.size != geometry.size)
-                                .unwrap_or(true)
-                            {
-                                let mut cursor_size = geometry.size;
-                                // Client shouldn't try to allocate 0x0 buffer
-                                if cursor_size == Size::new(0, 0) {
-                                    cursor_size = Size::new(1, 1);
-                                }
-                                session.update_constraints(BufferConstraints {
-                                    size: cursor_size,
-                                    shm: vec![ShmFormat::Argb8888],
-                                    dma: None,
-                                });
-                            }
-                            session.set_cursor_hotspot(offset);
-                            session.set_cursor_pos(Some(geometry.loc));
-                        }
-                    }
+                    update_output_image_copy_cursor_position(
+                        &shell,
+                        &self.common.clock,
+                        &output,
+                        &seat,
+                        position,
+                    );
                 }
             }
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -708,37 +693,13 @@ impl State {
                     ptr.frame(self);
 
                     let shell = self.common.shell.read();
-                    for session in cursor_sessions_for_output(&shell, &output) {
-                        if let Some((geometry, offset)) = seat.cursor_geometry(
-                            (position - output_geometry.loc.to_f64())
-                                .as_logical()
-                                .to_buffer(
-                                    output.current_scale().fractional_scale(),
-                                    output.current_transform(),
-                                    &output_geometry.size.to_f64().as_logical(),
-                                ),
-                            self.common.clock.now(),
-                        ) {
-                            if session
-                                .current_constraints()
-                                .map(|constraint| constraint.size != geometry.size)
-                                .unwrap_or(true)
-                            {
-                                let mut cursor_size = geometry.size;
-                                // Client shouldn't try to allocate 0x0 buffer
-                                if cursor_size == Size::new(0, 0) {
-                                    cursor_size = Size::new(1, 1);
-                                }
-                                session.update_constraints(BufferConstraints {
-                                    size: cursor_size,
-                                    shm: vec![ShmFormat::Argb8888],
-                                    dma: None,
-                                });
-                            }
-                            session.set_cursor_hotspot(offset);
-                            session.set_cursor_pos(Some(geometry.loc));
-                        }
-                    }
+                    update_output_image_copy_cursor_position(
+                        &shell,
+                        &self.common.clock,
+                        &output,
+                        &seat,
+                        position,
+                    );
                 }
             }
             InputEvent::PointerButton { event, .. } => {
@@ -2210,7 +2171,7 @@ impl State {
                         if Rectangle::new(offset.as_local(), output_geo.size)
                             .intersection(output_geo)
                             .is_some_and(|geometry| {
-                                geometry.contains(global_pos.to_local(output).to_i32_round())
+                                geometry.contains(global_pos.to_local(output).to_i32_floor())
                             })
                             && let Some(element) = workspace.popup_element_under(location, seat)
                         {
@@ -2224,7 +2185,7 @@ impl State {
                         if Rectangle::new(offset.as_local(), output_geo.size)
                             .intersection(output_geo)
                             .is_some_and(|geometry| {
-                                geometry.contains(global_pos.to_local(output).to_i32_round())
+                                geometry.contains(global_pos.to_local(output).to_i32_floor())
                             })
                             && let Some(element) = workspace.toplevel_element_under(location, seat)
                         {
@@ -2427,7 +2388,7 @@ impl State {
                         if let Some(constraint) = constraint
                             && let Some(region) = constraint.region()
                         {
-                            let point_in_surface = (p - surface_offset.to_f64()).to_i32_round();
+                            let point_in_surface = (p - surface_offset.to_f64()).to_i32_floor();
                             return region.contains(point_in_surface);
                         }
                         true
@@ -2440,7 +2401,7 @@ impl State {
                 if is_legal(pos_in_element) {
                     let x = workspace_origin.x + origin.x + pos_in_element.x;
                     let y = workspace_origin.y + origin.y + pos_in_element.y;
-                    Some((Point::new(x, y), output.clone()))
+                    Some((Point::<_, Global>::new(x, y), output.clone()))
                 } else {
                     None
                 }
@@ -2450,11 +2411,34 @@ impl State {
         };
 
         if let Some((point, output)) = point_and_output {
+            // TODO: Replace with `wl_pointer.warp`
             let original_position = pointer.current_location();
-            pointer.set_location(point);
+            let serial = SERIAL_COUNTER.next_serial();
+            let under = State::surface_under(point, &output, &self.common.shell.write())
+                .map(|(target, pos)| (target, pos.as_logical()));
+            let time = self.common.clock.now();
+            pointer.relative_motion(
+                self,
+                under.clone(),
+                &RelativeMotionEvent {
+                    delta: (0., 0.).into(),
+                    delta_unaccel: (0., 0.).into(),
+                    utime: time.as_micros(),
+                },
+            );
+            pointer.motion(
+                self,
+                under,
+                &MotionEvent {
+                    location: point.as_logical(),
+                    serial,
+                    time: time.as_millis(),
+                },
+            );
+            pointer.frame(self);
 
             let mut shell = self.common.shell.write();
-            shell.update_pointer_position(point.as_global().to_local(&output), &output);
+            shell.update_pointer_position(point.to_local(&output), &output);
 
             let seat = shell
                 .seats
@@ -2469,31 +2453,13 @@ impl State {
                     self.common.config.cosmic_conf.accessibility_zoom.view_moves,
                 );
 
-                let output_geometry = output.geometry();
-                for session in cursor_sessions_for_output(&shell, &output) {
-                    if let Some((geometry, offset)) = seat.cursor_geometry(
-                        point.to_buffer(
-                            output.current_scale().fractional_scale(),
-                            output.current_transform(),
-                            &output_geometry.size.to_f64().as_logical(),
-                        ),
-                        self.common.clock.now(),
-                    ) {
-                        if session
-                            .current_constraints()
-                            .map(|constraint| constraint.size != geometry.size)
-                            .unwrap_or(true)
-                        {
-                            session.update_constraints(BufferConstraints {
-                                size: geometry.size,
-                                shm: vec![ShmFormat::Argb8888],
-                                dma: None,
-                            });
-                        }
-                        session.set_cursor_hotspot(offset);
-                        session.set_cursor_pos(Some(geometry.loc));
-                    }
-                }
+                update_output_image_copy_cursor_position(
+                    &shell,
+                    &self.common.clock,
+                    &output,
+                    &seat,
+                    point,
+                );
             }
         }
     }
@@ -2553,4 +2519,37 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
         None
     };
     map_to_output.or_else(|| shell.builtin_output())
+}
+
+pub fn update_output_image_copy_cursor_position(
+    shell: &Shell,
+    clock: &Clock<Monotonic>,
+    output: &Output,
+    seat: &Seat<State>,
+    position: Point<f64, Global>,
+) {
+    let output_geometry = output.geometry();
+    for session in cursor_sessions_for_output(&shell, &output) {
+        if let Some(cursor_geometry) = seat.cursor_geometry(
+            (position - output_geometry.loc.to_f64())
+                .as_logical()
+                .to_buffer(
+                    output.current_scale().fractional_scale(),
+                    output.current_transform(),
+                    &output_geometry.size.to_f64().as_logical(),
+                ),
+            clock.now(),
+        ) {
+            let constraints = cursor_capture_constraints(Some(cursor_geometry));
+            if session
+                .current_constraints()
+                .map(|current_constraints| current_constraints.size != constraints.size)
+                .unwrap_or(true)
+            {
+                session.update_constraints(constraints);
+            }
+            session.set_cursor_hotspot(cursor_geometry.hotspot);
+            session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
+        }
+    }
 }
