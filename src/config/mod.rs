@@ -825,27 +825,17 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 // here. It was causing loss of focus when layout changes. I'll have to come back to
                 // this issue.
 
-                // Rebuild the per-connection isolated keyboard state with the new keymap
-                // after first releasing any keys that source still has held.
+                // libei `ei_keyboard` key events feed the shared seat, which updates its own
+                // keymap above. Just release any keys these sources still hold
                 let ei_connections = state
                     .common
-                    .ei_isolated_kbd
+                    .ei_keyboard_source
                     .keys()
                     .cloned()
                     .collect::<Vec<_>>();
                 for conn in &ei_connections {
                     state.release_ei_keyboard(conn);
                     state.clear_input_source_state(&InputBackendId::Ei(conn.clone()));
-                }
-                for source in state.common.ei_isolated_kbd.values_mut() {
-                    match smithay::input::keyboard::IsolatedKeyboardState::new(xkb_config_to_wl(
-                        &value,
-                    )) {
-                        Ok(new_state) => *source = new_state,
-                        Err(err) => {
-                            warn!(?err, "Failed to update libei isolated keyboard config")
-                        }
-                    }
                 }
                 state.common.config.cosmic_conf.xkb_config = value;
             }

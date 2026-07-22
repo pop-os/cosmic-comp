@@ -49,7 +49,7 @@ use smithay::{
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
         Seat,
-        keyboard::{FilterResult, KeysymHandle, Layout, ModifiersState, SerializedMods},
+        keyboard::{FilterResult, KeyboardSource, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
             GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
@@ -63,7 +63,7 @@ use smithay::{
         input::Device as InputDevice,
         wayland_server::{Resource as _, protocol::wl_surface::WlSurface},
     },
-    utils::{Clock, Logical, Monotonic, Point, Rectangle, SERIAL_COUNTER, Serial},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle, SERIAL_COUNTER, Serial, Size},
     wayland::{
         compositor::CompositorHandler,
         image_copy_capture::CursorSessionRef,
@@ -683,16 +683,15 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
-                    let (output, output_geometry, position) =
-                        if matches!(&backend_id, InputBackendId::Ei(_)) {
-                            // EI absolute coordinates are in the compositor's *global*
-                            // logical space: each advertised region carries its output's
-                            // global offset, so the client sends a global position. Use
-                            // the coordinate directly and find the output it lands in,
-                            // rather than mapping relative to the focused output (which
-                            // cannot address other monitors). This is the KWin/mutter
-                            // model.
-                            let position =
+                    let (output, position) = if matches!(&backend_id, InputBackendId::Ei(_)) {
+                        // EI absolute coordinates are in the compositor's *global*
+                        // logical space: each advertised region carries its output's
+                        // global offset, so the client sends a global position. Use
+                        // the coordinate directly and find the output it lands in,
+                        // rather than mapping relative to the focused output (which
+                        // cannot address other monitors). This is the KWin/mutter
+                        // model.
+                        let position =
                             smithay::backend::input::AbsolutePositionEvent::position_transformed(
                                 &event,
                                 // smithay's EI impl ignores the size and returns the
@@ -700,27 +699,26 @@ impl State {
                                 Size::from((0, 0)),
                             )
                             .as_global();
-                            let output = self
-                                .common
-                                .shell
-                                .read()
-                                .outputs()
-                                .find(|o| o.geometry().to_f64().contains(position))
-                                .cloned()
-                                .unwrap_or_else(|| seat.active_output());
-                            let output_geometry = output.geometry();
-                            (output, output_geometry, position)
-                        } else {
-                            let output = seat.active_output();
-                            let output_geometry = output.geometry();
-                            let position = output_geometry.loc.to_f64()
+                        let output = self
+                            .common
+                            .shell
+                            .read()
+                            .outputs()
+                            .find(|o| o.geometry().to_f64().contains(position))
+                            .cloned()
+                            .unwrap_or_else(|| seat.active_output());
+                        (output, position)
+                    } else {
+                        let output = seat.active_output();
+                        let output_geometry = output.geometry();
+                        let position = output_geometry.loc.to_f64()
                             + smithay::backend::input::AbsolutePositionEvent::position_transformed(
                                 &event,
                                 output_geometry.size.as_logical(),
                             )
                             .as_global();
-                            (output, output_geometry, position)
-                        };
+                        (output, position)
+                    };
                     let serial = SERIAL_COUNTER.next_serial();
                     let under = State::surface_under(position, &output, &self.common.shell.write())
                         .map(|(target, pos)| (target, pos.as_logical()));
@@ -1709,26 +1707,14 @@ impl State {
     }
 
     /// The modifier state held by the source that produced an event.
-    ///
-    /// For a libei connection this is its own isolated keyboard state; for everything else
-    /// it is the seat's (physical) keyboard.
     pub(crate) fn source_modifiers(
         &self,
-        backend_id: &InputBackendId,
+        _backend_id: &InputBackendId,
         seat: &Seat<State>,
     ) -> ModifiersState {
-        match backend_id {
-            InputBackendId::Ei(conn) => self
-                .common
-                .ei_isolated_kbd
-                .get(conn)
-                .map(|iso| iso.modifier_state())
-                .unwrap_or_default(),
-            _ => seat
-                .get_keyboard()
-                .map(|k| k.modifier_state())
-                .unwrap_or_default(),
-        }
+        seat.get_keyboard()
+            .map(|k| k.modifier_state())
+            .unwrap_or_default()
     }
 
     pub(crate) fn clear_input_source_state(&mut self, backend_id: &InputBackendId) {
@@ -1748,16 +1734,32 @@ impl State {
         }
     }
 
+    /// Release the keys this libei connection still holds on the shared seat, so they don't stay
+    /// stuck in the focused client. Keeps the connection's source valid (only clears held keys),
+    /// so it's safe to call both on disconnect and on a keymap change. Does not remove the source
+    /// from [`Common::ei_keyboard_source`], the disconnect path does that.
     pub(crate) fn release_ei_keyboard(&mut self, conn: &smithay::reexports::reis::eis::Connection) {
-        let pressed_keys = self
-            .common
-            .ei_isolated_kbd
-            .get(conn)
-            .map(|iso| iso.pressed_keys().collect::<Vec<_>>())
-            .unwrap_or_default();
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+        if let Some(source) = self.common.ei_keyboard_source.get(conn).copied() {
+            keyboard.release_source(self, source);
+        }
+    }
 
-        for keycode in pressed_keys.into_iter().rev() {
-            self.inject_ei_key_internal(conn, keycode, KeyState::Released, false);
+    /// Mirror the seat's current modifier state to every libei sender with a keyboard via
+    /// `ei_keyboard.modifiers`
+    pub(crate) fn broadcast_ei_keyboard_modifiers(&self, seat: &Seat<State>) {
+        if self.common.ei_seats.is_empty() {
+            return;
+        }
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
+        let s = keyboard.modifier_state().serialized;
+        for ei_seat in self.common.ei_seats.values() {
+            ei_seat.keyboard_modifiers(s.depressed, s.locked, s.latched, s.layout_effective);
         }
     }
 
@@ -1775,6 +1777,7 @@ impl State {
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
         if previous_modifiers != *modifiers {
             seat.set_last_modifier_change(backend_id, serial);
+            self.broadcast_ei_keyboard_modifiers(seat);
         }
 
         let current_focus = seat.get_keyboard().unwrap().current_focus();
@@ -1808,17 +1811,17 @@ impl State {
         result
     }
 
-    /// Inject a key through an isolated keyboard state: run it through the per-source shortcut
-    /// filter and deliver it to the focused client, keeping this source's modifier/key state
-    /// fully isolated from the physical keyboard. Shared by libei connections and virtual keyboards.
+    /// Inject a key from an auxiliary source (a virtual keyboard, or libei) into the shared
+    /// seat keyboard, tagged with `source` so its held keys are tracked independently of the
+    /// physical keyboard
     ///
-    /// `handle_shortcuts` is `false` when synthesizing releases during teardown, so still-held
-    /// keys are just forwarded without re-triggering bindings.
-    pub(crate) fn inject_isolated_key(
+    /// `handle_shortcuts` is `false` when synthesizing releases so still-held keys are just
+    /// forwarded without re-triggering bindings.
+    pub(crate) fn inject_source_key(
         &mut self,
+        source: KeyboardSource,
         backend_id: &InputBackendId,
         seat: &Seat<State>,
-        iso: &mut smithay::input::keyboard::IsolatedKeyboardState,
         keycode: Keycode,
         key_state: KeyState,
         handle_shortcuts: bool,
@@ -1828,11 +1831,11 @@ impl State {
         };
         let serial = SERIAL_COUNTER.next_serial();
         let time = self.common.clock.now().as_millis();
-        let previous_modifiers = iso.modifier_state();
+        let previous_modifiers = keyboard.modifier_state();
         let result = keyboard
-            .input_isolated(
+            .input_from_source(
+                source,
                 self,
-                iso,
                 keycode,
                 key_state,
                 serial,
@@ -1862,245 +1865,135 @@ impl State {
         }
     }
 
-    /// The seat's currently active keyboard layout group.
-    fn seat_active_layout(&mut self, seat: &Seat<State>) -> Option<Layout> {
-        let keyboard = seat.get_keyboard()?;
-        Some(keyboard.with_xkb_state(self, |context| {
-            context.xkb().lock().unwrap().active_layout()
-        }))
-    }
-
-    /// Inject a key from a libei connection through its isolated keyboard state.
+    /// Inject a real key from a libei connection's `ei_keyboard` into the shared seat keyboard,
+    /// tagged with the connection's source so it behaves like any other keyboard (its keycodes
+    /// are interpreted with the seat keymap, which the compositor already forced onto the
+    /// `ei_keyboard` device).
     pub(crate) fn inject_ei_key(
         &mut self,
         conn: &smithay::reexports::reis::eis::Connection,
         keycode: Keycode,
         key_state: KeyState,
     ) {
-        self.inject_ei_key_internal(conn, keycode, key_state, true);
-    }
-
-    fn inject_ei_key_internal(
-        &mut self,
-        conn: &smithay::reexports::reis::eis::Connection,
-        keycode: Keycode,
-        key_state: KeyState,
-        handle_shortcuts: bool,
-    ) {
         let seat = self.common.shell.read().seats.last_active().clone();
         let backend_id = InputBackendId::Ei(conn.clone());
-        // Temporarily take the isolated state out so we can borrow `self` mutably for delivery.
-        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
+        let Some(source) = self.common.ei_keyboard_source.get(conn).copied() else {
             return;
         };
-        // Mirror the seat's active layout group so injection matches the user's layout.
-        if let Some(layout) = self.seat_active_layout(&seat) {
-            iso.set_layout(layout);
-        }
-        self.inject_isolated_key(
-            &backend_id,
-            &seat,
-            &mut iso,
-            keycode,
-            key_state,
-            handle_shortcuts,
+        tracing::warn!(
+            "[ei-key] ei_keyboard keycode={} (evdev {}) state={:?}",
+            keycode.raw(),
+            keycode.raw().saturating_sub(8),
+            key_state
         );
-        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
+        self.inject_source_key(source, &backend_id, &seat, keycode, key_state, true);
     }
 
-    /// Resolve a keysym from a libei `ei_text` device to a keycode
+    /// Inject a keysym from a libei `ei_text` device.
     pub(crate) fn inject_ei_text_keysym(
         &mut self,
         conn: &smithay::reexports::reis::eis::Connection,
         keysym: u32,
         key_state: KeyState,
-        handle_shortcuts: bool,
     ) {
         use smithay::wayland::input_method::InputMethodSeat;
         use smithay::wayland::text_input::TextInputSeat;
 
+        let keysym_raw = keysym;
         let keysym = Keysym::new(keysym);
-
-        // Mirror the seat's active layout group onto this source, so the keysym resolves in
-        let active_layout = {
-            let seat = self.common.shell.read().seats.last_active().clone();
-            self.seat_active_layout(&seat)
-        };
-        if let Some(layout) = active_layout
-            && let Some(iso) = self.common.ei_isolated_kbd.get_mut(conn)
-        {
-            iso.set_layout(layout);
+        tracing::warn!(
+            "[ei-text] ei_text keysym={} (0x{:x}, {:?}) state={:?}",
+            keysym_raw,
+            keysym_raw,
+            keysym.key_char(),
+            key_state
+        );
+        // `ei_text` is a tap: act on the press, ignore the release.
+        if key_state != KeyState::Pressed {
+            return;
         }
-
-        // If this keysym was injected via the keycode path on press, its release must go the
-        // same way regardless of the current modifier state.
-        // e.g. Rustdesk may release the modifier *before* the key
-        let forced_keycode_release = key_state == KeyState::Released
-            && self
-                .common
-                .ei_text_keycode_held
-                .get(conn)
-                .is_some_and(|held| held.contains(&keysym));
-
-        // if a printable, non-control keysym with no modifier held + text-input protocol when a text-input client is focused then commit the character directly
-        // (which also handles out-of-layout / Unicode that has no keycode)
-        // otherwise go through to keycode injection, which reaches every app.
-        let no_mods = self.common.ei_isolated_kbd.get(conn).is_some_and(|iso| {
-            let m = iso.modifier_state();
-            !(m.ctrl || m.alt || m.shift || m.logo)
-        });
-        if !forced_keycode_release
-            && no_mods
-            && let Some(c) = keysym.key_char()
-            && !c.is_control()
-        {
-            let seat = self.common.shell.read().seats.last_active().clone();
-            // Only commit through text-input when we're the active input method (no real IME).
-            if !seat.input_method().has_instance() {
-                let text_input = seat.text_input();
-                let mut handled = false;
-                text_input.with_active_text_input(|ti, _surface| {
-                    // A text-input client is focused: commit on press, no-op on release.
-                    if key_state == KeyState::Pressed {
-                        ti.commit_string(Some(c.to_string()));
-                    }
-                    handled = true;
-                });
-                if handled {
-                    if key_state == KeyState::Pressed {
-                        text_input.done(false);
-                    }
-                    return;
-                }
-                // No active text-input: fall through to keycode injection (press and release).
-            }
-        }
-
-        // If the keysym exists in the active layout, inject its real keycode with the
-        // shift-level modifiers applied (no keymap change). Out-of-layout / Unicode keysyms
-        // have no keycode and can only be delivered via the text-input fast path above.
-        // TODO: update this doc when we have the final solution
-        let resolved = self
-            .common
-            .ei_isolated_kbd
-            .get(conn)
-            .and_then(|iso| iso.keycode_for_keysym(keysym));
-
-        match resolved {
-            Some((keycode, mask)) => {
-                // Remember (press) / forget (release) that this keysym is held via keycode
-                match key_state {
-                    KeyState::Pressed => {
-                        self.common
-                            .ei_text_keycode_held
-                            .entry(conn.clone())
-                            .or_default()
-                            .insert(keysym);
-                    }
-                    KeyState::Released => {
-                        if let Some(held) = self.common.ei_text_keycode_held.get_mut(conn) {
-                            held.remove(&keysym);
-                        }
-                    }
-                }
-                self.inject_ei_keysym_in_layout(conn, keycode, mask, key_state, handle_shortcuts)
-            }
-            // Out-of-layout / Unicode: bind a spare keycode to the keysym and inject it, on the
-            // press event only (KWin's fallback).
-            None if key_state == KeyState::Pressed => {
-                self.inject_ei_keysym_remapped(conn, keysym, handle_shortcuts)
-            }
-            None => {}
-        }
-    }
-
-    /// Inject an in-layout keysym by its real keycode, bracketing it with the shift-level
-    /// modifiers it needs (KWin's primary keysym-injection path).
-    fn inject_ei_keysym_in_layout(
-        &mut self,
-        conn: &smithay::reexports::reis::eis::Connection,
-        keycode: Keycode,
-        mask: u32,
-        key_state: KeyState,
-        handle_shortcuts: bool,
-    ) {
         let seat = self.common.shell.read().seats.last_active().clone();
         let Some(keyboard) = seat.get_keyboard() else {
             return;
         };
-        let backend_id = InputBackendId::Ei(conn.clone());
-        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
-            return;
-        };
 
-        if mask == 0 {
-            self.inject_isolated_key(
-                &backend_id,
-                &seat,
-                &mut iso,
-                keycode,
-                key_state,
-                handle_shortcuts,
+        let mods = keyboard.modifier_state();
+        let no_mods = !(mods.ctrl || mods.alt || mods.shift || mods.logo);
+        tracing::warn!(
+            "[ei-text]   seat mods: ctrl={} alt={} shift={} logo={} (no_mods={})",
+            mods.ctrl,
+            mods.alt,
+            mods.shift,
+            mods.logo,
+            no_mods
+        );
+
+        // A modifier is held on the seat (e.g. RustDesk sends Ctrl as an `ei_keyboard` keycode
+        // and `c` as an `ei_text` keysym, or the physical keyboard holds Shift). Resolve the
+        // keysym to a real keycode in the seat keymap and feed it through the shared seat so
+        // the held modifier combines (Ctrl+C, Shift+A) and compositor shortcuts fire (Super+T).
+        if !no_mods {
+            if let Some(keycode) = keyboard.keycode_for_keysym(keysym)
+                && let Some(source) = self.common.ei_keyboard_source.get(conn).copied()
+            {
+                let backend_id = InputBackendId::Ei(conn.clone());
+                tracing::warn!(
+                    "[ei-text]   -> shared-seat keycode inject (keycode={}) to combine with held mods",
+                    keycode.raw()
+                );
+                self.inject_source_key(
+                    source,
+                    &backend_id,
+                    &seat,
+                    keycode,
+                    KeyState::Pressed,
+                    true,
+                );
+                self.inject_source_key(
+                    source,
+                    &backend_id,
+                    &seat,
+                    keycode,
+                    KeyState::Released,
+                    true,
+                );
+                return;
+            }
+            // Out-of-layout keysym with a modifier held: no keycode to combine with, so fall
+            // through to the modifier-less path below (best effort; the modifier is lost).
+            tracing::warn!(
+                "[ei-text]   -> keysym not in seat keymap; falling back (modifier not applied)"
             );
-        } else {
-            // Momentarily OR in the level's modifiers, deliver them, send the key, then restore
-            // the real modifier state (so e.g. injecting `!` doesn't leave Shift stuck).
-            let mods = iso.serialized_mods();
-            iso.update_modifiers(SerializedMods {
-                depressed: mods.depressed | mask,
-                ..mods
+        }
+
+        // No modifier held: a printable, non-control character committed directly through the
+        // text-input protocol when a text-input client is focused (and no real IME). This also
+        // covers out-of-layout / Unicode that has no keycode.
+        if no_mods
+            && let Some(c) = keysym.key_char()
+            && !c.is_control()
+            && !seat.input_method().has_instance()
+        {
+            let text_input = seat.text_input();
+            let mut handled = false;
+            text_input.with_active_text_input(|ti, _surface| {
+                ti.commit_string(Some(c.to_string()));
+                handled = true;
             });
-            keyboard.input_isolated_modifiers(self, &iso);
-            self.inject_isolated_key(
-                &backend_id,
-                &seat,
-                &mut iso,
-                keycode,
-                key_state,
-                handle_shortcuts,
-            );
-            iso.update_modifiers(mods);
-            keyboard.input_isolated_modifiers(self, &iso);
+            if handled {
+                tracing::warn!("[ei-text]   -> committed via text-input protocol");
+                text_input.done(false);
+                return;
+            }
         }
 
-        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
-    }
-
-    /// Inject an out-of-layout keysym via a temporary spare-keycode keymap (KWin's fallback),
-    /// as an atomic press+release so the keymap only changes while no key is held.
-    fn inject_ei_keysym_remapped(
-        &mut self,
-        conn: &smithay::reexports::reis::eis::Connection,
-        keysym: Keysym,
-        handle_shortcuts: bool,
-    ) {
-        let seat = self.common.shell.read().seats.last_active().clone();
-        let backend_id = InputBackendId::Ei(conn.clone());
-        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
-            return;
-        };
-        if let Some(keycode) = iso.remap_keysym_to_spare_keycode(keysym) {
-            self.inject_isolated_key(
-                &backend_id,
-                &seat,
-                &mut iso,
-                keycode,
-                KeyState::Pressed,
-                handle_shortcuts,
-            );
-            self.inject_isolated_key(
-                &backend_id,
-                &seat,
-                &mut iso,
-                keycode,
-                KeyState::Released,
-                handle_shortcuts,
-            );
-            iso.restore_keymap();
-        } else {
-            tracing::warn!("EI text keysym {:?} could not be mapped; ignoring", keysym);
-        }
-        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
+        // Otherwise inject the keysym as a keycode tap via a temporary keymap delivered to just
+        // the focused client (reaches non-text-input apps: terminals, games, ...). This never
+        // touches the seat's own keyboard state.
+        tracing::warn!(
+            "[ei-text]   -> inject_text_keysyms (tap via temporary keymap, mods cleared)"
+        );
+        keyboard.inject_text_keysyms(self, &[keysym]);
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface

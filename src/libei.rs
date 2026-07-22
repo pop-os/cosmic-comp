@@ -3,7 +3,6 @@ use std::os::unix::net::UnixStream;
 use reis::eis;
 use smithay::reexports::reis;
 
-use smithay::backend::input::KeyState;
 use smithay::backend::libei::{EiInput, EiInputEvent, EiRegion};
 use smithay::input::keyboard::Keysym;
 use smithay::reexports::calloop;
@@ -83,27 +82,14 @@ pub fn setup_ei(
                         let conn = connection.eis_connection().clone();
                         let seat = connection.add_seat("default");
                         let wants_keyboard = device_types & DEVICE_TYPE_KEYBOARD != 0;
-                        // build the per-connection isolated keyboard state
-                        let isolated_kbd = if wants_keyboard {
+                        if wants_keyboard {
                             let conf = data.common.config.xkb_config();
+                            // The ei_keyboard device is given the compositor keymap; its key
+                            // events feed the shared seat like any other keyboard.
                             let _ = seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&conf));
-                            // The text device lets clients inject keysyms/utf8 directly independent of the keymap.
+                            // The text device lets clients inject keysyms/utf8 directly, delivered
                             seat.add_text("virtual text");
-                            match smithay::input::keyboard::IsolatedKeyboardState::new(
-                                xkb_config_to_wl(&conf),
-                            ) {
-                                Ok(iso) => Some(iso),
-                                Err(err) => {
-                                    tracing::warn!(
-                                        ?err,
-                                        "Failed to create libei isolated keyboard state"
-                                    );
-                                    None
-                                }
-                            }
-                        } else {
-                            None
-                        };
+                        }
                         if device_types & DEVICE_TYPE_POINTER != 0 {
                             seat.add_pointer("virtual pointer");
                             let regions = absolute_pointer_regions(data);
@@ -112,12 +98,13 @@ pub fn setup_ei(
                         if device_types & DEVICE_TYPE_TOUCHSCREEN != 0 {
                             seat.add_touch("virtual touch");
                         }
-                        // Track the seat so its virtual keyboard can be re-created when the
-                        // keyboard configuration changes at runtime.
+                        // Track the seat, and assign it a shared-seat source so its `ei_keyboard`
+                        // key events feed the seat keyboard with independent hold tracking.
                         if wants_keyboard {
-                            if let Some(iso) = isolated_kbd {
-                                data.common.ei_isolated_kbd.insert(conn.clone(), iso);
-                            }
+                            data.common.ei_keyboard_source.insert(
+                                conn.clone(),
+                                smithay::input::keyboard::KeyboardSource::new_auxiliary(),
+                            );
                             data.common.ei_seats.insert(conn, seat);
                             data.update_ei_input_method();
                         }
@@ -125,16 +112,18 @@ pub fn setup_ei(
                     EiInputEvent::Disconnected => {
                         let conn = connection.eis_connection().clone();
                         let backend_id = InputBackendId::Ei(conn.clone());
+                        // Release any keys/modifiers this remote still holds on the shared seat
                         data.release_ei_keyboard(&conn);
                         data.clear_input_source_state(&backend_id);
                         data.common.ei_seats.remove(&conn);
-                        data.common.ei_isolated_kbd.remove(&conn);
-                        data.common.ei_text_keycode_held.remove(&conn);
+                        data.common.ei_keyboard_source.remove(&conn);
                         data.update_ei_input_method();
+                        // Notify the remaining libei clients of the now-cleared modifier state
+                        let seat = data.common.shell.read().seats.last_active().clone();
+                        data.broadcast_ei_keyboard_modifiers(&seat);
                     }
                     EiInputEvent::Event(event) => {
                         use smithay::backend::input::{InputEvent, KeyboardKeyEvent};
-                        // Route keyboard input through the connection's isolated state
                         match event {
                             InputEvent::Keyboard { event } => {
                                 data.inject_ei_key(
@@ -156,15 +145,10 @@ pub fn setup_ei(
                         }
                     }
                     EiInputEvent::TextKeysym { keysym, state } => {
-                        data.inject_ei_text_keysym(
-                            connection.eis_connection(),
-                            keysym,
-                            state,
-                            true, // explicit keysym could cause shortcuts
-                        );
+                        data.inject_ei_text_keysym(connection.eis_connection(), keysym, state);
                     }
                     EiInputEvent::TextUtf8 { text } => {
-                        data.inject_ei_text(connection.eis_connection(), &text);
+                        data.inject_ei_text(&text);
                     }
                 })
             {
@@ -204,7 +188,7 @@ impl State {
     }
 
     /// Inject UTF-8 text (from an EI `ei_text` device) into the focused client.
-    pub fn inject_ei_text(&mut self, conn: &smithay::reexports::reis::eis::Connection, text: &str) {
+    pub fn inject_ei_text(&mut self, text: &str) {
         let seat = self.common.shell.read().seats.last_active().clone();
         // Only commit through text-input when we're the active input method (no real IME)
         if !seat.input_method().has_instance() {
@@ -220,53 +204,21 @@ impl State {
             }
         }
 
-        // Bind the whole chunk to spare keycodes in one temporary keymap per batch, so we
-        // change (and broadcast) the keymap ~once per chunk instead of once per character
+        // Bind the whole chunk to spare keycodes in one temporary keymap per batch (delivered
+        // to just the focused client), so we change the keymap ~once per chunk instead of once
+        // per character. Leaves the seat's own keyboard state untouched.
         let keysyms: Vec<Keysym> = text
             .chars()
             .map(Keysym::from_char)
             .filter(|keysym| keysym.raw() != 0)
             .collect();
+        let Some(keyboard) = seat.get_keyboard() else {
+            return;
+        };
         // At most ~247 keysyms fit one spare keymap (keycodes 9..=255); leave margin.
         const BATCH: usize = 240;
         for batch in keysyms.chunks(BATCH) {
-            self.inject_ei_text_batch(conn, batch);
+            keyboard.inject_text_keysyms(self, batch);
         }
-    }
-
-    /// Inject a batch of keysyms by binding them to consecutive spare keycodes in a single
-    /// temporary keymap (one keymap change for the whole batch), injecting each press+release,
-    /// then restoring the keymap. Never triggers shortcuts (literal text).
-    fn inject_ei_text_batch(
-        &mut self,
-        conn: &smithay::reexports::reis::eis::Connection,
-        keysyms: &[Keysym],
-    ) {
-        let seat = self.common.shell.read().seats.last_active().clone();
-        let backend_id = InputBackendId::Ei(conn.clone());
-        let Some(mut iso) = self.common.ei_isolated_kbd.remove(conn) else {
-            return;
-        };
-        let keycodes = iso.remap_keysyms_to_spare_keycodes(keysyms);
-        for keycode in keycodes.into_iter().flatten() {
-            self.inject_isolated_key(
-                &backend_id,
-                &seat,
-                &mut iso,
-                keycode,
-                KeyState::Pressed,
-                false,
-            );
-            self.inject_isolated_key(
-                &backend_id,
-                &seat,
-                &mut iso,
-                keycode,
-                KeyState::Released,
-                false,
-            );
-        }
-        iso.restore_keymap();
-        self.common.ei_isolated_kbd.insert(conn.clone(), iso);
     }
 }
