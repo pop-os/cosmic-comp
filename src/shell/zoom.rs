@@ -7,7 +7,7 @@ use cosmic::{
     theme,
     widget::{self, icon::Named},
 };
-use cosmic_comp_config::ZoomMovement;
+use cosmic_comp_config::{ZoomConfig, ZoomMovement};
 use cosmic_config::ConfigSet;
 use keyframe::{ease, functions::Linear};
 use smithay::{
@@ -447,7 +447,7 @@ pub enum MenuMessage {
 
 impl ZoomProgram {
     pub fn new(level: f64, movement: ZoomMovement, increment: u32) -> Self {
-        let mut increments = vec![25, 50, 100, 150, 200];
+        let mut increments = ZoomConfig::ZOOM_INCREMENT_PRESETS.to_vec();
         if !increments.contains(&increment) {
             increments.push(increment);
         }
@@ -828,7 +828,7 @@ impl Program for ZoomProgram {
                 if let Some(pos) = self.increments.iter().position(|val| *val == increment) {
                     self.increment_idx = pos;
                 } else {
-                    let mut increments = vec![25, 50, 100, 150, 200];
+                    let mut increments = ZoomConfig::ZOOM_INCREMENT_PRESETS.to_vec();
                     if !increments.contains(&increment) {
                         increments.push(increment);
                     }
