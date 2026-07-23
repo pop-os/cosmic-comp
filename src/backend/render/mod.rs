@@ -1359,11 +1359,11 @@ where
                         ),
                         Uniform::new(
                             "color_mode",
-                            screen_filter
-                                .filter
-                                .color_filter
-                                .map(|val| val as u8 as f32)
-                                .unwrap_or(0.),
+                            if screen_filter.filter.color_filter_enabled {
+                                screen_filter.filter.color_filter as u8 as f32
+                            } else {
+                                0.
+                            },
                         ),
                     ],
                 );

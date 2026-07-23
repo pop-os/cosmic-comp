@@ -147,20 +147,21 @@ impl From<CompTransformDef> for Transform {
 #[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq)]
 pub struct ScreenFilter {
     pub inverted: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub color_filter: Option<ColorFilter>,
+    pub color_filter_enabled: bool,
+    pub color_filter: ColorFilter,
 }
 
 impl ScreenFilter {
     pub fn is_noop(&self) -> bool {
-        !self.inverted && self.color_filter.is_none()
+        !self.inverted && !self.color_filter_enabled
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 // these values need to match with offscreen.frag
 pub enum ColorFilter {
+    #[default]
     Greyscale = 1,
     Protanopia = 2,
     Deuteranopia = 3,
@@ -320,6 +321,10 @@ impl Config {
             state
                 .common
                 .a11y_state
+                .set_screen_filter_state(filter_conf.color_filter_enabled);
+            state
+                .common
+                .a11y_state
                 .set_screen_filter(filter_conf.color_filter);
         });
 
@@ -389,7 +394,8 @@ impl Config {
 
         ScreenFilter {
             inverted: false,
-            color_filter: None,
+            color_filter_enabled: false,
+            color_filter: Greyscale,
         }
     }
 
