@@ -785,6 +785,25 @@ impl State {
                 let serial = SERIAL_COUNTER.next_serial();
                 let button = event.button_code();
 
+                // Track buttons held by a libei source so they can be released if the connection
+                // drops mid-press
+                if let InputBackendId::Ei(conn) = &backend_id {
+                    match event.state() {
+                        ButtonState::Pressed => {
+                            self.common
+                                .ei_pointer_buttons
+                                .entry(conn.clone())
+                                .or_default()
+                                .insert(button);
+                        }
+                        ButtonState::Released => {
+                            if let Some(held) = self.common.ei_pointer_buttons.get_mut(conn) {
+                                held.remove(&button);
+                            }
+                        }
+                    }
+                }
+
                 let mut pass_event = !seat.supressed_buttons().remove(&backend_id, button);
                 if event.state() == ButtonState::Pressed {
                     // change the keyboard focus unless the pointer is grabbed
@@ -1746,6 +1765,37 @@ impl State {
         if let Some(source) = self.common.ei_keyboard_source.get(conn).copied() {
             keyboard.release_source(self, source);
         }
+    }
+
+    /// Release any pointer buttons this libei connection still holds
+    pub(crate) fn release_ei_pointer(&mut self, conn: &smithay::reexports::reis::eis::Connection) {
+        let buttons: Vec<u32> = self
+            .common
+            .ei_pointer_buttons
+            .get(conn)
+            .map(|held| held.iter().copied().collect())
+            .unwrap_or_default();
+        if buttons.is_empty() {
+            return;
+        }
+        let seat = self.common.shell.read().seats.last_active().clone();
+        let Some(pointer) = seat.get_pointer() else {
+            return;
+        };
+        let time = self.common.clock.now().as_millis();
+        for button in buttons {
+            let serial = SERIAL_COUNTER.next_serial();
+            pointer.button(
+                self,
+                &smithay::input::pointer::ButtonEvent {
+                    button,
+                    state: smithay::backend::input::ButtonState::Released,
+                    serial,
+                    time,
+                },
+            );
+        }
+        pointer.frame(self);
     }
 
     /// Mirror the seat's current modifier state to every libei sender with a keyboard via

@@ -112,11 +112,13 @@ pub fn setup_ei(
                     EiInputEvent::Disconnected => {
                         let conn = connection.eis_connection().clone();
                         let backend_id = InputBackendId::Ei(conn.clone());
-                        // Release any keys/modifiers this remote still holds on the shared seat
+                        // Release any keys/modifiers and pointer buttons this remote still holds
                         data.release_ei_keyboard(&conn);
+                        data.release_ei_pointer(&conn);
                         data.clear_input_source_state(&backend_id);
                         data.common.ei_seats.remove(&conn);
                         data.common.ei_keyboard_source.remove(&conn);
+                        data.common.ei_pointer_buttons.remove(&conn);
                         data.update_ei_input_method();
                         // Notify the remaining libei clients of the now-cleared modifier state
                         let seat = data.common.shell.read().seats.last_active().clone();

@@ -262,6 +262,13 @@ pub struct Common {
         smithay::input::keyboard::KeyboardSource,
     >,
 
+    /// Pointer buttons currently held by each libei connection, so they can be released when the
+    /// connection drops
+    pub ei_pointer_buttons: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        std::collections::HashSet<u32>,
+    >,
+
     pub kiosk_child: Option<Child>,
     pub theme: cosmic::Theme,
 
@@ -772,6 +779,7 @@ impl State {
                 gesture_state: None,
                 ei_seats: std::collections::HashMap::new(),
                 ei_keyboard_source: std::collections::HashMap::new(),
+                ei_pointer_buttons: std::collections::HashMap::new(),
 
                 kiosk_child: None,
                 theme: cosmic::theme::system_preference(),
