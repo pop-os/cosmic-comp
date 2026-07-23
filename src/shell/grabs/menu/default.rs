@@ -8,7 +8,7 @@ use crate::{
     config::Config,
     fl,
     shell::{
-        CosmicSurface, PointGlobalExt, Shell,
+        CosmicSurface, PointGlobalExt, Raise, Shell,
         element::{CosmicMapped, CosmicWindow},
         grabs::ReleaseMode,
     },
@@ -24,7 +24,7 @@ fn toggle_stacking(state: &mut State, mapped: &CosmicMapped) {
     let seat = shell.seats.last_active().clone();
     if let Some(new_focus) = shell.toggle_stacking(&seat, mapped) {
         std::mem::drop(shell);
-        Shell::set_focus(state, Some(&new_focus), &seat, None, false);
+        Shell::set_focus(state, Some(&new_focus), &seat, None, false, Raise::Yes);
     }
 }
 
@@ -78,7 +78,7 @@ fn move_fullscreen_prev_workspace(state: &mut State, surface: &CosmicSurface) {
     );
     if let Some((target, _)) = res {
         std::mem::drop(shell);
-        Shell::set_focus(state, Some(&target), &seat, None, true);
+        Shell::set_focus(state, Some(&target), &seat, None, true, Raise::Yes);
     }
 }
 
@@ -104,7 +104,7 @@ fn move_fullscreen_next_workspace(state: &mut State, surface: &CosmicSurface) {
     );
     if let Some((target, _)) = res {
         std::mem::drop(shell);
-        Shell::set_focus(state, Some(&target), &seat, None, true);
+        Shell::set_focus(state, Some(&target), &seat, None, true, Raise::Yes);
     }
 }
 
@@ -130,7 +130,7 @@ fn move_element_prev_workspace(state: &mut State, mapped: &CosmicMapped) {
     );
     if let Some((target, _)) = res {
         std::mem::drop(shell);
-        Shell::set_focus(state, Some(&target), &seat, None, true);
+        Shell::set_focus(state, Some(&target), &seat, None, true, Raise::Yes);
     }
 }
 
@@ -156,7 +156,7 @@ fn move_element_next_workspace(state: &mut State, mapped: &CosmicMapped) {
     );
     if let Some((target, _point)) = res {
         std::mem::drop(shell);
-        Shell::set_focus(state, Some(&target), &seat, None, true)
+        Shell::set_focus(state, Some(&target), &seat, None, true, Raise::Yes)
     }
 }
 
@@ -304,7 +304,7 @@ pub fn window_items(
                         &state.common.event_loop_handle,
                     ) {
                         std::mem::drop(shell);
-                        Shell::set_focus(state, Some(&target), &seat, None, false);
+                        Shell::set_focus(state, Some(&target), &seat, None, false, Raise::Yes);
                     }
                 });
             })
@@ -594,7 +594,7 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
                     {
                         let seat = shell.seats.last_active().clone();
                         std::mem::drop(shell);
-                        Shell::set_focus(state, Some(&target), &seat, None, true);
+                        Shell::set_focus(state, Some(&target), &seat, None, true, Raise::Yes);
                     }
                 });
             })

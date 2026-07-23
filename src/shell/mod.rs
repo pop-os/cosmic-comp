@@ -97,6 +97,8 @@ mod seats;
 mod workspace;
 pub mod zoom;
 pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
+// Re-export Raise so call sites can `use crate::shell::Raise;` alongside Shell.
+pub use self::focus::Raise;
 pub use self::seats::*;
 pub use self::workspace::*;
 use self::zoom::{OutputZoomState, ZoomState};
@@ -296,6 +298,19 @@ pub struct Shell {
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
+
+    /// The single window that currently holds focus but must NOT be
+    /// auto-raised, because focus arrived from the pointer while
+    /// raise-on-hover was disabled (`focus_follows_cursor_raise == false`).
+    ///
+    /// `update_active()` — and the periodic focus-reconciliation pass that
+    /// also calls it — skip raising this window, so it stays at its current
+    /// stacking depth. The mark is set by `set_focus` when passed `Raise::No`
+    /// and cleared when passed `Raise::Yes` (any explicit focus). Only one
+    /// window is tracked: focus-follows-cursor is inherently a single-pointer
+    /// gesture, so a per-seat map would add complexity without user-visible
+    /// benefit in the common single-seat case.
+    no_raise_window: Option<CosmicMapped>,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -1713,6 +1728,8 @@ impl Shell {
             appearance_conf: config.cosmic_conf.appearance_settings,
             zoom_state: None,
             tiling_exceptions,
+            // No window starts marked as no-raise; the mark is set on demand.
+            no_raise_window: None,
 
             #[cfg(feature = "debug")]
             debug_active: false,

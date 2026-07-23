@@ -10,7 +10,7 @@ use smithay::{
 };
 
 use crate::{
-    shell::{CosmicSurface, Shell, WorkspaceDelta, focus::target::KeyboardFocusTarget},
+    shell::{CosmicSurface, Raise, Shell, WorkspaceDelta, focus::target::KeyboardFocusTarget},
     utils::prelude::*,
     wayland::protocols::{
         toplevel_info::ToplevelInfoHandler,
@@ -131,7 +131,7 @@ impl ToplevelManagementHandler for State {
                 }
             }
 
-            Shell::set_focus(self, Some(&target), &seat, None, false);
+            Shell::set_focus(self, Some(&target), &seat, None, false, Raise::Yes);
             return;
         }
     }
@@ -168,7 +168,7 @@ impl ToplevelManagementHandler for State {
         );
         if let Some((target, _)) = res {
             std::mem::drop(shell);
-            Shell::set_focus(self, Some(&target), &seat, None, true);
+            Shell::set_focus(self, Some(&target), &seat, None, true, Raise::Yes);
         }
     }
 
@@ -191,7 +191,7 @@ impl ToplevelManagementHandler for State {
             shell.fullscreen_request(window, output, &self.common.event_loop_handle)
         {
             std::mem::drop(shell);
-            Shell::set_focus(self, Some(&target), &seat, None, true);
+            Shell::set_focus(self, Some(&target), &seat, None, true, Raise::Yes);
         }
     }
 

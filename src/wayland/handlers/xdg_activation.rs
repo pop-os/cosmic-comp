@@ -1,3 +1,4 @@
+use crate::shell::Raise;
 use crate::shell::WorkspaceDelta;
 use crate::shell::focus::target::KeyboardFocusTarget;
 use crate::{shell::ActivationKey, state::ClientState, utils::prelude::*};
@@ -259,6 +260,7 @@ impl State {
                 &seat,
                 None,
                 false,
+                Raise::Yes,
             );
         } else if let Some((workspace, _)) = shell.workspace_for_surface(surface) {
             let current_workspace = shell.active_space(&current_output).unwrap();
@@ -275,7 +277,7 @@ impl State {
                 };
 
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, false);
+                Shell::set_focus(self, Some(&target), &seat, None, false, Raise::Yes);
             } else {
                 if let Some(surface) = shell
                     .workspaces
