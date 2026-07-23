@@ -858,7 +858,7 @@ impl XwmHandler for State {
             if let Some(target) = res {
                 let seat = shell.seats.last_active().clone();
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, false);
+                Shell::set_focus_on_x11_map(self, &target, &seat, false);
             }
         }
     }
