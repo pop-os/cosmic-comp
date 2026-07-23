@@ -398,8 +398,16 @@ impl CosmicSurface {
                     });
                     with_states(toplevel.wl_surface(), |data| {
                         if let Some(kde_data) = data.data_map.get::<KdeDecorationData>() {
-                            for obj in kde_data.lock().unwrap().objs.iter() {
-                                obj.mode(KdeMode::Server);
+                            let kde_data = kde_data.lock().unwrap();
+                            // Prefer the recorded xdg preference; fall back to
+                            // the client's kde-decoration request.
+                            let mode = match previous_mode {
+                                Some(DecorationMode::ServerSide) => KdeMode::Server,
+                                Some(_) => KdeMode::Client,
+                                None => kde_data.mode.unwrap_or(KdeMode::Client),
+                            };
+                            for obj in kde_data.objs.iter() {
+                                obj.mode(mode);
                             }
                         }
                     })
@@ -1051,6 +1059,82 @@ impl SpaceElement for CosmicSurface {
     }
 }
 
+/// Enter/leave pairing bookkeeping for keyboard focus, generic so the
+/// decision table is unit-testable (a [`CosmicSurface`] cannot be constructed
+/// without a live compositor).
+#[derive(Debug)]
+pub struct EnteredTracker<S>(Mutex<Option<S>>);
+
+impl<S> Default for EnteredTracker<S> {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
+
+/// What an `enter` for a surface must translate to on the wire.
+#[derive(Debug)]
+pub enum EnterAction<S> {
+    /// The surface already holds an unpaired `enter` - don't re-send it.
+    AlreadyHeld,
+    /// Send the `enter`, releasing the stale holder first when one exists.
+    Enter { stale: Option<S> },
+}
+
+impl<S: Clone + PartialEq> EnteredTracker<S> {
+    /// The surface currently holding an unpaired `enter`, if it is still alive.
+    pub fn held(&self, alive: impl Fn(&S) -> bool) -> Option<S> {
+        self.0.lock().unwrap().clone().filter(|s| alive(s))
+    }
+
+    /// Record an `enter` for `next` and decide what to send on the wire.
+    pub fn on_enter(&self, next: &S, alive: impl Fn(&S) -> bool) -> EnterAction<S> {
+        let mut guard = self.0.lock().unwrap();
+        if guard.as_ref() == Some(next) {
+            return EnterAction::AlreadyHeld;
+        }
+        let stale = guard.replace(next.clone()).filter(|s| alive(s));
+        EnterAction::Enter { stale }
+    }
+
+    /// Record a `leave` for `left`; a leave for a non-holder changes nothing.
+    pub fn on_leave(&self, left: &S) {
+        let mut guard = self.0.lock().unwrap();
+        if guard.as_ref() == Some(left) {
+            *guard = None;
+        }
+    }
+}
+
+/// Tracks, per seat, which [`CosmicSurface`] holds the keyboard focus on the
+/// wire (received an `enter` not yet paired with a `leave`). All toplevel
+/// enters/leaves funnel through [`CosmicSurface`]'s [`KeyboardTarget`] impl,
+/// making this the ground truth for focus bookkeeping.
+#[derive(Debug, Default)]
+pub struct KeyboardEnteredSurface(EnteredTracker<CosmicSurface>);
+
+impl KeyboardEnteredSurface {
+    pub fn get(seat: &Seat<State>) -> Option<CosmicSurface> {
+        seat.user_data()
+            .get_or_insert::<Self, _>(Self::default)
+            .0
+            .held(IsAlive::alive)
+    }
+
+    fn on_enter(seat: &Seat<State>, surface: &CosmicSurface) -> EnterAction<CosmicSurface> {
+        seat.user_data()
+            .get_or_insert::<Self, _>(Self::default)
+            .0
+            .on_enter(surface, IsAlive::alive)
+    }
+
+    fn on_leave(seat: &Seat<State>, surface: &CosmicSurface) {
+        seat.user_data()
+            .get_or_insert::<Self, _>(Self::default)
+            .0
+            .on_leave(surface)
+    }
+}
+
 impl KeyboardTarget<State> for CosmicSurface {
     fn enter(
         &self,
@@ -1063,6 +1147,20 @@ impl KeyboardTarget<State> for CosmicSurface {
             keys = vec![];
         }
 
+        match KeyboardEnteredSurface::on_enter(seat, self) {
+            // A focus-target swap resolved to the same surface; re-sending
+            // `enter` without an intervening `leave` is a protocol violation.
+            EnterAction::AlreadyHeld => return,
+            // Release a stale unpaired `enter` left on another surface, or the
+            // client ends up believing two of its windows are focused at once.
+            EnterAction::Enter {
+                stale: Some(previous),
+            } => {
+                KeyboardTarget::leave(&previous, seat, data, serial);
+            }
+            EnterAction::Enter { stale: None } => {}
+        }
+
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 KeyboardTarget::enter(toplevel.wl_surface(), seat, data, keys, serial)
@@ -1072,6 +1170,8 @@ impl KeyboardTarget<State> for CosmicSurface {
     }
 
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: smithay::utils::Serial) {
+        KeyboardEnteredSurface::on_leave(seat, self);
+
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {
                 KeyboardTarget::leave(toplevel.wl_surface(), seat, data, serial)
@@ -1138,5 +1238,81 @@ fn with_toplevel_state<T, F: FnOnce(Option<&smithay::wayland::shell::xdg::Toplev
         toplevel.with_pending_state(|pending| cb(Some(pending)))
     } else {
         toplevel.with_committed_state(cb)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EnterAction, EnteredTracker};
+
+    fn alive(_: &u32) -> bool {
+        true
+    }
+
+    #[test]
+    fn first_enter_records_and_releases_nothing() {
+        let tracker = EnteredTracker::default();
+        match tracker.on_enter(&1, alive) {
+            EnterAction::Enter { stale: None } => {}
+            other => panic!("expected a clean enter, got {other:?}"),
+        }
+        assert_eq!(tracker.held(alive), Some(1));
+    }
+
+    #[test]
+    fn re_entering_the_holder_is_a_noop() {
+        // Regression: the compositor re-sent `enter` to the surface holding
+        // the focus on every stack extraction (14 enters vs 7 leaves on the
+        // wire in one session).
+        let tracker = EnteredTracker::default();
+        tracker.on_enter(&1, alive);
+        assert!(matches!(
+            tracker.on_enter(&1, alive),
+            EnterAction::AlreadyHeld
+        ));
+        assert_eq!(tracker.held(alive), Some(1));
+    }
+
+    #[test]
+    fn entering_releases_a_stale_alive_holder() {
+        // Regression: a missed leave let a client believe two of its windows
+        // were focused at once (for 71s in the captured session), making it
+        // deny fullscreen requests.
+        let tracker = EnteredTracker::default();
+        tracker.on_enter(&1, alive);
+        match tracker.on_enter(&2, alive) {
+            EnterAction::Enter { stale: Some(1) } => {}
+            other => panic!("expected the stale holder to be released, got {other:?}"),
+        }
+        assert_eq!(tracker.held(alive), Some(2));
+    }
+
+    #[test]
+    fn entering_does_not_release_a_dead_holder() {
+        let tracker = EnteredTracker::default();
+        tracker.on_enter(&1, alive);
+        match tracker.on_enter(&2, |s| *s != 1) {
+            EnterAction::Enter { stale: None } => {}
+            other => panic!("expected no release for a dead holder, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn leave_clears_only_the_holder() {
+        // Pairing: a leave for a surface that does not hold the enter must
+        // not clear the record of the one that does.
+        let tracker = EnteredTracker::default();
+        tracker.on_enter(&1, alive);
+        tracker.on_leave(&2);
+        assert_eq!(tracker.held(alive), Some(1));
+        tracker.on_leave(&1);
+        assert_eq!(tracker.held(alive), None);
+    }
+
+    #[test]
+    fn held_ignores_a_dead_holder() {
+        let tracker = EnteredTracker::default();
+        tracker.on_enter(&1, alive);
+        assert_eq!(tracker.held(|_| false), None);
     }
 }

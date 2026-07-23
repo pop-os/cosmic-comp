@@ -1,5 +1,8 @@
 use crate::{
-    shell::{CosmicSurface, MinimizedWindow, Shell, Trigger, element::CosmicMapped},
+    shell::{
+        CosmicSurface, MinimizedWindow, Shell, Trigger,
+        element::{CosmicMapped, surface::KeyboardEnteredSurface},
+    },
     state::{Common, State},
     utils::prelude::*,
     wayland::handlers::{xdg_shell::PopupGrabData, xwayland_keyboard_grab::XWaylandGrabSeatData},
@@ -7,7 +10,7 @@ use crate::{
 use indexmap::IndexSet;
 use smithay::{
     desktop::{PopupUngrabStrategy, layer_map_for_output},
-    input::{Seat, pointer::MotionEvent},
+    input::{Seat, keyboard::KeyboardTarget, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     utils::{IsAlive, Point, SERIAL_COUNTER, Serial},
@@ -416,6 +419,17 @@ fn update_focus_state(
             .xwayland_notify_focus_change(target.cloned(), serial);
         ActiveFocus::set(seat, target.cloned());
         keyboard.set_focus(state, target.cloned(), serial);
+        // Smithay skips enter/leave when the focus target is unchanged, but a
+        // stack's active tab may have changed underneath the same target -
+        // move the wire focus to it (an enter must be paired with modifiers).
+        if let Some(KeyboardFocusTarget::Element(mapped)) = target
+            && let Some(stack) = mapped.stack_ref()
+            && keyboard.current_focus().as_ref() == target
+            && KeyboardEnteredSurface::get(seat).as_ref() != Some(&stack.active())
+        {
+            KeyboardTarget::enter(mapped, seat, state, Vec::new(), serial);
+            KeyboardTarget::modifiers(mapped, seat, state, keyboard.modifier_state(), serial);
+        }
         std::mem::drop(keyboard);
 
         //update the focused output or set it to the active output
@@ -513,7 +527,27 @@ impl Common {
 
             if let Some(target) = last_known_focus {
                 if target.alive() {
-                    if focus_target_is_valid(&mut shell, seat, &output, target) {
+                    if focus_target_is_valid(&mut shell, seat, &output, target.clone()) {
+                        // The active tab can change without any set_focus call
+                        // (activation is deferred to an idle, tabs die or get
+                        // reordered) - keep the wire focus on the active tab.
+                        if let KeyboardFocusTarget::Element(mapped) = &target
+                            && let Some(stack) = mapped.stack_ref()
+                            && KeyboardEnteredSurface::get(seat).as_ref() != Some(&stack.active())
+                            && let Some(keyboard) = seat.get_keyboard()
+                            && keyboard.current_focus().as_ref() == Some(&target)
+                        {
+                            std::mem::drop(shell);
+                            let serial = SERIAL_COUNTER.next_serial();
+                            KeyboardTarget::enter(mapped, seat, state, Vec::new(), serial);
+                            KeyboardTarget::modifiers(
+                                mapped,
+                                seat,
+                                state,
+                                keyboard.modifier_state(),
+                                serial,
+                            );
+                        }
                         continue; // Focus is valid
                     } else {
                         trace!("Wrong Window, focus fixup");

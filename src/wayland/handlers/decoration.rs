@@ -9,6 +9,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
+    utils::IsAlive,
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
@@ -125,14 +126,11 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
-        let mode = if let Some(mapped) = self.common.shell.read().element_for_surface(surface) {
-            if mapped.is_stack() {
-                KdeMode::Server
-            } else {
-                KdeMode::Client
-            }
-        } else {
-            KdeMode::Client
+        // Send `Server` for a stacked window (forced SSD) without recording
+        // it - `state.mode` tracks the client's own preference.
+        let mode = match self.common.shell.read().element_for_surface(surface) {
+            Some(mapped) if mapped.alive() && mapped.is_stack() => KdeMode::Server,
+            _ => KdeMode::Client,
         };
 
         with_states(surface, |states| {
@@ -143,9 +141,6 @@ impl KdeDecorationHandler for State {
                 .unwrap();
 
             state.objs.push(decoration.clone());
-            if state.mode.is_none() {
-                state.mode = Some(mode)
-            }
         });
 
         decoration.mode(mode);

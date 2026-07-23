@@ -2623,6 +2623,7 @@ impl Shell {
         mut state: Option<FullscreenRestoreState>,
         loop_handle: &LoopHandle<'static, State>,
     ) -> CosmicMapped {
+        let mut stack_died = false;
         if let Some(FullscreenRestoreState::Stack { state: stack_state }) = &state {
             if let Some(mapped) = self.mapped().find(|m| **m == stack_state.stack)
                 && let Some(stack) = mapped.stack_ref()
@@ -2631,11 +2632,14 @@ impl Shell {
                 stack.add_window(surface, Some(idx), None);
                 return mapped.clone();
             } else {
+                // The original stack is gone - restore as a fresh single-window
+                // stack so the surface keeps stack decorations.
+                stack_died = true;
                 state = None;
             }
         }
 
-        let window = if state.as_ref().is_some_and(|s| s.was_stack()) {
+        let window = if stack_died || state.as_ref().is_some_and(|s| s.was_stack()) {
             CosmicMapped::from(CosmicStack::new(
                 std::iter::once(surface),
                 loop_handle.clone(),
@@ -2643,6 +2647,10 @@ impl Shell {
                 self.appearance_conf,
             ))
         } else {
+            // Reset forced-SSD/tiled state possibly left over from a stack the
+            // surface was extracted out of mid-transition.
+            surface.try_force_undecorated(false);
+            surface.set_tiled(false);
             CosmicMapped::from(CosmicWindow::new(
                 surface,
                 loop_handle.clone(),
@@ -4905,10 +4913,19 @@ impl Shell {
                 return None;
             }
 
-            // Must be set before `unmap_surface()`.
-            // `Workspace::unmap_surface` may call intermediate `configure()` internally, which would send
-            // a configure event without the fullscreen state, causing clients like Chromium to cancel the transition.
-            mapped.set_fullscreen(true);
+            // A multi-tab stack extracts via `remove_idx`, which only stages
+            // pending state - the extracted surface's first configure is the
+            // one `map_fullscreen` sends, already carrying `Fullscreen`.
+            // Everything else unmaps through `unmap_element`, which flushes a
+            // configure mid-unmap; pre-set `Fullscreen` on the requesting
+            // surface (never the whole mapped element - that leaks pending
+            // `Fullscreen` onto sibling tabs) so that configure doesn't read
+            // as a denial to clients like Chromium.
+            if !mapped.stack_ref().is_some_and(|s| s.len() > 1)
+                && let Some((target, _)) = mapped.windows().find(|(w, _)| w == surface)
+            {
+                target.set_fullscreen(true);
+            }
 
             let from = workspace.element_geometry(&mapped).unwrap();
             let (surface, state) = workspace.unmap_surface(surface).unwrap();
