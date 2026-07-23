@@ -195,6 +195,10 @@ pub struct ZoomConfig {
     pub enable_mouse_zoom_shortcuts: bool,
 }
 
+impl ZoomConfig {
+    pub const ZOOM_INCREMENT_PRESETS: &[u32] = &[10, 25, 50, 75, 100, 150, 200];
+}
+
 impl Default for ZoomConfig {
     fn default() -> Self {
         ZoomConfig {
