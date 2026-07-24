@@ -229,6 +229,12 @@ impl State {
                         &TabletDescriptor::from(&device),
                     );
                 }
+                let has_keyboard = device.has_capability(DeviceCapability::Keyboard);
+                std::mem::drop(shell);
+                // send the seat's current modifier state to the new ei keyboard
+                if has_keyboard && let InputBackendId::Ei(conn) = &backend_id {
+                    self.send_ei_keyboard_modifiers(conn);
+                }
             }
             InputEvent::DeviceRemoved { device } => {
                 for seat in &mut self.common.shell.read().seats.iter() {
@@ -1809,6 +1815,30 @@ impl State {
         };
         let s = keyboard.modifier_state().serialized;
         for ei_seat in self.common.ei_seats.values() {
+            ei_seat.keyboard_modifiers(s.depressed, s.locked, s.latched, s.layout_effective);
+        }
+    }
+
+    /// Send the seat's current modifier state to a single libei connection, used when that
+    /// connection's `ei_keyboard` device is created. The EI spec expects the current (nonzero)
+    /// modifier state to be announced once the device is live, so the client doesn't have to
+    /// wait for the next change to learn e.g. that Caps Lock is on.
+    pub(crate) fn send_ei_keyboard_modifiers(
+        &self,
+        conn: &smithay::reexports::reis::eis::Connection,
+    ) {
+        let Some(ei_seat) = self.common.ei_seats.get(conn) else {
+            return;
+        };
+        let mods = {
+            let shell = self.common.shell.read();
+            shell
+                .seats
+                .last_active()
+                .get_keyboard()
+                .map(|keyboard| keyboard.modifier_state().serialized)
+        };
+        if let Some(s) = mods {
             ei_seat.keyboard_modifiers(s.depressed, s.locked, s.latched, s.layout_effective);
         }
     }
