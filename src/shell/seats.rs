@@ -5,7 +5,7 @@ use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex};
 use crate::{
     backend::render::cursor::CursorState,
     config::{Config, xkb_config_to_wl},
-    input::{ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
+    input::{InputBackendId, ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
 };
 use smithay::{
@@ -82,12 +82,25 @@ impl Seats {
         self.last_active = Some(seat.clone());
     }
 
-    pub fn for_device<D: Device>(&self, device: &D) -> Option<&Seat<State>> {
-        self.iter().find(|seat| {
-            let userdata = seat.user_data();
-            let devices = userdata.get::<Devices>().unwrap();
-            devices.has_device(device)
-        })
+    pub fn for_device<D: Device>(
+        &self,
+        device: &D,
+        backend_id: &InputBackendId,
+    ) -> Option<&Seat<State>> {
+        self.iter()
+            .find(|seat| {
+                let userdata = seat.user_data();
+                let devices = userdata.get::<Devices>().unwrap();
+                devices.has_device(device, backend_id)
+            })
+            .or_else(|| {
+                // EI devices can be transiently unregistered while the compositor recreates
+                // the absolute-pointer device (e.g. on a scale/geometry change), which would
+                // otherwise drop all pointer/touch input until the client re-binds it. EI is
+                // single-seat, so fall back to the active seat here, matching the EI keyboard
+                // path, which always targets the active seat.
+                matches!(backend_id, InputBackendId::Ei(_)).then(|| self.last_active())
+            })
     }
 }
 
@@ -96,6 +109,7 @@ impl Devices {
         &self,
         device: &D,
         led_state: LedState,
+        backend_id: &InputBackendId,
     ) -> Vec<DeviceCapability> {
         let id = device.id();
         let mut map = self.capabilities.borrow_mut();
@@ -113,7 +127,7 @@ impl Devices {
             .cloned()
             .filter(|c| map.values().flatten().all(|has| *c != *has))
             .collect::<Vec<_>>();
-        map.insert(id, caps);
+        map.insert((backend_id.clone(), id), caps);
 
         if device.has_capability(DeviceCapability::Keyboard)
             && let Some(device) = <dyn Any>::downcast_ref::<InputDevice>(device)
@@ -126,11 +140,18 @@ impl Devices {
         new_caps
     }
 
-    pub fn has_device<D: Device>(&self, device: &D) -> bool {
-        self.capabilities.borrow().contains_key(&device.id())
+    /// Whether the given backend's device with this id is registered on the seat.
+    pub fn has_device<D: Device>(&self, device: &D, backend_id: &InputBackendId) -> bool {
+        self.capabilities
+            .borrow()
+            .contains_key(&(backend_id.clone(), device.id()))
     }
 
-    pub fn remove_device<D: Device>(&self, device: &D) -> Vec<DeviceCapability> {
+    pub fn remove_device<D: Device>(
+        &self,
+        device: &D,
+        backend_id: &InputBackendId,
+    ) -> Vec<DeviceCapability> {
         let id = device.id();
 
         let mut keyboards = self.keyboards.borrow_mut();
@@ -139,7 +160,7 @@ impl Devices {
         }
 
         let mut map = self.capabilities.borrow_mut();
-        map.remove(&id)
+        map.remove(&(backend_id.clone(), id))
             .unwrap_or_default()
             .into_iter()
             .filter(|c| map.values().flatten().all(|has| *c != *has))
@@ -155,7 +176,8 @@ impl Devices {
 
 #[derive(Default)]
 pub struct Devices {
-    capabilities: RefCell<HashMap<String, Vec<DeviceCapability>>>,
+    // Keyed by `(backend, device_id)`
+    capabilities: RefCell<HashMap<(InputBackendId, String), Vec<DeviceCapability>>>,
     // Used for updating keyboard leds on kms backend
     keyboards: RefCell<Vec<InputDevice>>,
 }
@@ -185,7 +207,7 @@ struct FocusedOutput(pub Mutex<Option<Output>>);
 pub struct PointerConstraintHint(pub Mutex<Option<(WlSurface, Point<f64, Logical>)>>);
 
 #[derive(Default)]
-pub struct LastModifierChange(pub Mutex<Option<Serial>>);
+pub struct LastModifierChange(pub Mutex<(HashMap<InputBackendId, Serial>, Option<Serial>)>);
 
 pub fn create_seat(
     dh: &DisplayHandle,
@@ -265,6 +287,9 @@ pub trait SeatExt {
     fn supressed_buttons(&self) -> &SupressedButtons;
     fn modifiers_shortcut_queue(&self) -> &ModifiersShortcutQueue;
     fn last_modifier_change(&self) -> Option<Serial>;
+    fn last_modifier_change_for(&self, backend_id: &InputBackendId) -> Option<Serial>;
+    fn set_last_modifier_change(&self, backend_id: &InputBackendId, serial: Serial);
+    fn clear_last_modifier_change(&self, backend_id: &InputBackendId);
     fn pointer_constraint_hint(&self) -> Option<(WlSurface, Point<f64, Logical>)>;
     fn set_pointer_constraint_hint(&self, hint: Option<(WlSurface, Point<f64, Logical>)>);
 
@@ -343,13 +368,48 @@ impl SeatExt for Seat<State> {
     }
 
     fn last_modifier_change(&self) -> Option<Serial> {
-        *self
-            .user_data()
+        self.user_data()
             .get::<LastModifierChange>()
             .unwrap()
             .0
             .lock()
             .unwrap()
+            .1
+    }
+
+    fn last_modifier_change_for(&self, backend_id: &InputBackendId) -> Option<Serial> {
+        self.user_data()
+            .get::<LastModifierChange>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap()
+            .0
+            .get(backend_id)
+            .copied()
+    }
+
+    fn set_last_modifier_change(&self, backend_id: &InputBackendId, serial: Serial) {
+        let mut guard = self
+            .user_data()
+            .get::<LastModifierChange>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap();
+        guard.0.insert(backend_id.clone(), serial);
+        guard.1 = Some(serial);
+    }
+
+    fn clear_last_modifier_change(&self, backend_id: &InputBackendId) {
+        self.user_data()
+            .get::<LastModifierChange>()
+            .unwrap()
+            .0
+            .lock()
+            .unwrap()
+            .0
+            .remove(backend_id);
     }
 
     fn pointer_constraint_hint(&self) -> Option<(WlSurface, Point<f64, Logical>)> {

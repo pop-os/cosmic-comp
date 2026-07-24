@@ -4,12 +4,15 @@ use crate::{
     config::{CompOutputConfig, ScreenFilter},
     shell::Shell,
     state::BackendData,
-    utils::{env::dev_var, prelude::*},
-    wayland::protocols::output_power::OutputPowerState,
+    utils::{env::dev_var, global::remove_global_with_timer, prelude::*},
+    wayland::protocols::{drm::WlDrmState, output_power::OutputPowerState},
 };
 
-use anyhow::{Context, Result};
-use calloop::LoopSignal;
+use anyhow::{self, Context, Result};
+use calloop::{
+    LoopSignal,
+    timer::{TimeoutAction, Timer},
+};
 use cosmic_comp_config::output::comp::{AdaptiveSync, OutputState};
 use indexmap::IndexMap;
 use render::gles::GbmGlowBackend;
@@ -32,11 +35,12 @@ use smithay::{
             control::{Device as _, connector::Interface, crtc},
         },
         input::{self, Libinput},
+        wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1::TrancheFlags,
         wayland_server::{Client, DisplayHandle},
     },
     utils::{Clock, DevPath, Monotonic, Size},
     wayland::{
-        dmabuf::DmabufGlobal,
+        dmabuf::{DmabufFeedbackBuilder, DmabufGlobal},
         drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd},
         relative_pointer::RelativePointerManagerState,
     },
@@ -48,12 +52,12 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, RwLock, atomic::AtomicBool},
+    time::Duration,
 };
 
 mod device;
 mod drm_helpers;
 pub mod render;
-mod socket;
 mod surface;
 use device::*;
 pub(crate) use surface::Surface;
@@ -74,6 +78,7 @@ pub struct KmsState {
     libinput: Libinput,
 
     pub syncobj_state: Option<DrmSyncobjState>,
+    pub dmabuf_global: Option<DmabufGlobal>,
 }
 
 pub struct KmsGuard<'a> {
@@ -131,6 +136,7 @@ pub fn init_backend(
         libinput: libinput_context,
 
         syncobj_state: None,
+        dmabuf_global: None,
     });
 
     // manually add already present gpus
@@ -142,9 +148,10 @@ pub fn init_backend(
         }
     }
 
-    if let Err(err) = state.backend.kms().select_primary_gpu(dh) {
+    if let Err(err) = state.select_primary_gpu(dh) {
         warn!("Failed to determine primary gpu: {}", err);
     }
+    state.update_default_feedback();
 
     if let Err(err) = state.refresh_output_config() {
         info!(
@@ -204,7 +211,7 @@ fn init_libinput(
             state.backend.kms().input_devices.remove(&*device.name());
         }
 
-        state.process_input_event(event);
+        state.process_input_event(event, crate::input::InputBackendId::Normal);
 
         for output in state.common.shell.read().outputs() {
             state.backend.kms().schedule_render(output);
@@ -317,11 +324,13 @@ fn init_udev(
 
                 {
                     let backend = state.backend.kms();
-                    if matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. })
-                        && backend.primary_node.read().unwrap().is_none()
-                        && let Err(err) = state.backend.kms().select_primary_gpu(&dh)
-                    {
-                        warn!("Failed to determine a new primary gpu: {}", err);
+                    if matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. }) {
+                        if backend.primary_node.read().unwrap().is_none()
+                            && let Err(err) = state.select_primary_gpu(&dh)
+                        {
+                            warn!("Failed to determine a new primary gpu: {}", err);
+                        }
+                        state.update_default_feedback();
                     }
                 }
 
@@ -465,50 +474,118 @@ impl State {
             device.drm.pause();
         }
     }
-}
 
-impl KmsState {
     fn select_primary_gpu(&mut self, dh: &DisplayHandle) -> Result<()> {
         // We don't have to check the allow/blocklist here,
         // as any disallowed devices won't be in `self.drm_devices`.
 
-        let mut primary_node = self.primary_node.write().unwrap();
+        let kms = self.backend.kms();
+        let mut primary_node = kms.primary_node.write().unwrap();
         let _ = primary_node.take(); // if we error don't leave an old node in place
-        *primary_node = determine_primary_gpu(&self.drm_devices, self.session.seat())?;
+        *primary_node = determine_primary_gpu(&kms.drm_devices, kms.session.seat())?;
 
         if let Some(node) = *primary_node {
             info!("Using {} as primary gpu for rendering.", node);
-            self.software_renderer.take();
-        } else if self.software_renderer.is_none() {
+            kms.software_renderer.take();
+
+            // setup minimal feedback. We will update it in `update_default_feedback`
+            let primary_formats = kms
+                .drm_devices
+                .values()
+                .find(|dev| dev.inner.render_node == node)
+                .unwrap()
+                .texture_formats
+                .clone();
+            let feedback = DmabufFeedbackBuilder::new(node.dev_id(), primary_formats.clone())
+                .build()
+                .unwrap();
+
+            if let Some(global) = kms.dmabuf_global.as_ref() {
+                self.common
+                    .dmabuf_state
+                    .set_default_feedback(global, &feedback);
+            } else {
+                let dmabuf_global = self
+                    .common
+                    .dmabuf_state
+                    .create_global_with_default_feedback::<State>(dh, &feedback);
+                kms.dmabuf_global = Some(dmabuf_global);
+            };
+
+            let device_path = node
+                .dev_path_with_type(NodeType::Render)
+                .or_else(|| node.dev_path())
+                .ok_or(anyhow::anyhow!(
+                    "Could not determine path for gpu node: {}",
+                    node
+                ))?;
+
+            if let Some(drm) = self.common.wl_drm_state.as_mut() {
+                drm.update_device(device_path, primary_formats);
+            } else {
+                self.common.wl_drm_state = Some(WlDrmState::new::<State>(
+                    dh,
+                    device_path,
+                    primary_formats,
+                    kms.dmabuf_global.as_ref().unwrap(),
+                ));
+            }
+        } else if kms.software_renderer.is_none() {
             info!("Failed to find a suitable gpu, using software renderingr");
-            self.software_renderer = match software_renderer() {
+            kms.software_renderer = match software_renderer() {
                 Ok(renderer) => Some(renderer),
                 Err(err) => {
                     error!(?err, "Failed to initialize software EGL renderer.");
                     None
                 }
             };
+
+            if let Some(drm) = self.common.wl_drm_state.take() {
+                remove_global_with_timer(dh, &self.common.event_loop_handle, drm.global().clone());
+            }
+            if let Some(global) = kms.dmabuf_global.take() {
+                self.common
+                    .dmabuf_state
+                    .disable_global::<State>(dh, &global);
+                let source = Timer::from_duration(Duration::from_secs(5));
+                let res =
+                    self.common
+                        .event_loop_handle
+                        .insert_source(source, move |_, _, state| {
+                            state
+                                .common
+                                .dmabuf_state
+                                .destroy_global::<State>(&state.common.display_handle, global);
+                            TimeoutAction::Drop
+                        });
+                if let Err(err) = res {
+                    tracing::error!(
+                        "failed to insert timer source to destroy output global: {}",
+                        err
+                    );
+                }
+            }
         }
 
         if !crate::utils::env::bool_var("COSMIC_DISABLE_SYNCOBJ").unwrap_or(false) {
             if let Some(primary_node) = primary_node
                 .as_ref()
                 .and_then(|node| node.node_with_type(NodeType::Primary).and_then(|x| x.ok()))
-                && let Some(device) = self.drm_devices.get(&primary_node)
+                && let Some(device) = kms.drm_devices.get(&primary_node)
             {
                 let import_device = device.drm.device().device_fd().clone();
                 if supports_syncobj_eventfd(&import_device) {
-                    if let Some(state) = self.syncobj_state.as_mut() {
+                    if let Some(state) = kms.syncobj_state.as_mut() {
                         state.update_device(import_device);
                     } else {
                         let syncobj_state = DrmSyncobjState::new::<State>(dh, import_device);
-                        self.syncobj_state = Some(syncobj_state);
+                        kms.syncobj_state = Some(syncobj_state);
                     }
                     return Ok(());
                 }
             }
 
-            if let Some(old_state) = self.syncobj_state.take() {
+            if let Some(old_state) = kms.syncobj_state.take() {
                 dh.remove_global::<State>(old_state.into_global());
             }
         }
@@ -516,6 +593,45 @@ impl KmsState {
         Ok(())
     }
 
+    fn update_default_feedback(&mut self) {
+        let kms = self.backend.kms();
+        let primary_node = kms.primary_node.read().unwrap();
+        if let Some(primary_node) = *primary_node {
+            let primary_formats = kms
+                .drm_devices
+                .values()
+                .find(|dev| dev.inner.render_node == primary_node)
+                .unwrap()
+                .texture_formats
+                .clone();
+
+            let mut feedback =
+                DmabufFeedbackBuilder::new(primary_node.dev_id(), primary_formats.clone());
+            for dev in kms
+                .drm_devices
+                .values()
+                .filter(|dev| dev.inner.render_node != primary_node)
+            {
+                feedback = feedback.add_preference_tranche(
+                    dev.inner.render_node.dev_id(),
+                    TrancheFlags::Sampling,
+                    dev.texture_formats.iter().cloned(),
+                    6..=6,
+                );
+            }
+
+            let default_feedback = feedback.build().unwrap();
+            self.common.dmabuf_state.set_default_feedback(
+                kms.dmabuf_global
+                    .as_ref()
+                    .expect("Primary node but no dmabuf global?"),
+                &default_feedback,
+            );
+        }
+    }
+}
+
+impl KmsState {
     pub fn switch_vt(&mut self, num: i32) -> Result<(), anyhow::Error> {
         self.session.change_vt(num).map_err(Into::into)
     }
@@ -523,29 +639,25 @@ impl KmsState {
     pub fn dmabuf_imported(
         &mut self,
         client: Option<Client>,
-        global: &DmabufGlobal,
+        _global: &DmabufGlobal,
         dmabuf: Dmabuf,
     ) -> Result<DrmNode> {
+        let device_node = dmabuf
+            .node()
+            .unwrap_or_else(|| self.primary_node.read().unwrap().unwrap());
         let mut device = self
             .drm_devices
             .values_mut()
-            .find(|device| {
-                device
-                    .socket
-                    .as_ref()
-                    .map(|s| &s.dmabuf_global == global)
-                    .unwrap_or(false)
-            })
-            .context("Couldn't find gpu for dmabuf global")?;
+            .find(|dev| dev.inner.render_node == device_node)
+            .ok_or(anyhow::anyhow!(
+                "Unable to find device for node: {}",
+                device_node
+            ))?;
 
         // If device advertised to client doesn't support format/modifier, select
         // first device that does. This is needed for image-copy from
         // output/toplevel on a different node.
-        //
-        // TODO: After
-        // https://gitlab.freedesktop.org/wayland/wayland-protocols/-/merge_requests/268,
-        // only try the device specified explicitly by the client, if set.
-        if !device.texture_formats.contains(&dmabuf.format()) {
+        if dmabuf.node().is_none() && !device.texture_formats.contains(&dmabuf.format()) {
             device = self
                 .drm_devices
                 .values_mut()

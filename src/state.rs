@@ -248,6 +248,28 @@ pub struct Common {
 
     pub gesture_state: Option<GestureState>,
 
+    /// Active libei sender seats, keyed by their `eis` connection. Tracked so their virtual
+    /// keyboards can be re-created when the keyboard configuration changes at runtime.
+    pub ei_seats: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        smithay::backend::libei::EiInputSeat,
+    >,
+
+    /// The shared-seat [`KeyboardSource`] assigned to each libei connection, so its
+    /// `ei_keyboard` key events feed the seat keyboard with independent per-source hold
+    /// tracking (and can be released together on disconnect). Keyed by connection.
+    pub ei_keyboard_source: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        smithay::input::keyboard::KeyboardSource,
+    >,
+
+    /// Pointer buttons currently held by each libei connection, so they can be released when the
+    /// connection drops
+    pub ei_pointer_buttons: std::collections::HashMap<
+        smithay::reexports::reis::eis::Connection,
+        std::collections::HashSet<u32>,
+    >,
+
     pub kiosk_child: Option<Child>,
     pub theme: cosmic::Theme,
 
@@ -276,7 +298,7 @@ pub struct Common {
     pub idle_inhibiting_surfaces: HashSet<WlSurface>,
     pub shm_state: ShmState,
     pub cursor_shape_manager_state: CursorShapeManagerState,
-    pub wl_drm_state: WlDrmState<Option<DrmNode>>,
+    pub wl_drm_state: Option<WlDrmState<Option<DrmNode>>>,
     pub viewporter_state: ViewporterState,
     pub kde_decoration_state: KdeDecorationState,
     pub xdg_decoration_state: XdgDecorationState,
@@ -326,7 +348,7 @@ pub enum LockedBackend<'a> {
 pub struct SurfaceDmabufFeedback {
     pub render_feedback: DmabufFeedback,
     pub overlay_scanout_feedback: Option<DmabufFeedback>,
-    pub primary_scanout_feedback: Option<DmabufFeedback>,
+    pub primary_scanout_feedback: DmabufFeedback,
 }
 
 #[derive(Debug)]
@@ -671,7 +693,7 @@ impl State {
         let cursor_shape_manager_state = CursorShapeManagerState::new::<State>(dh);
         let seat_state = SeatState::<Self>::new();
         let viewporter_state = ViewporterState::new::<Self>(dh);
-        let wl_drm_state = WlDrmState::<Option<DrmNode>>::default();
+        let wl_drm_state = None;
         let kde_decoration_state = KdeDecorationState::new::<Self>(dh, Mode::Client);
         let xdg_decoration_state = XdgDecorationState::new::<Self>(dh);
         let session_lock_manager_state =
@@ -757,6 +779,9 @@ impl State {
                 should_stop: false,
                 kiosk_exit_code: None,
                 gesture_state: None,
+                ei_seats: std::collections::HashMap::new(),
+                ei_keyboard_source: std::collections::HashMap::new(),
+                ei_pointer_buttons: std::collections::HashMap::new(),
 
                 kiosk_child: None,
                 theme: cosmic::theme::system_preference(),
@@ -1063,10 +1088,7 @@ impl Common {
                         surface,
                         render_element_states,
                         &feedback.render_feedback,
-                        feedback
-                            .primary_scanout_feedback
-                            .as_ref()
-                            .unwrap_or(&feedback.render_feedback),
+                        &feedback.primary_scanout_feedback,
                     )
                 },
             )
