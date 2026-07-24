@@ -98,16 +98,17 @@ pub fn setup_ei(
                         if device_types & DEVICE_TYPE_TOUCHSCREEN != 0 {
                             seat.add_touch("virtual touch");
                         }
-                        // Track the seat, and assign it a shared-seat source so its `ei_keyboard`
-                        // key events feed the seat keyboard with independent hold tracking.
+                        // Kb-capable connections get a shared-seat source so their `ei_keyboard`
+                        // key events feed the seat keyboard tracking.
                         if wants_keyboard {
                             data.common.ei_keyboard_source.insert(
                                 conn.clone(),
                                 smithay::input::keyboard::KeyboardSource::new_auxiliary(),
                             );
-                            data.common.ei_seats.insert(conn, seat);
-                            data.update_ei_input_method();
                         }
+                        // Track the seat for every connection
+                        data.common.ei_seats.insert(conn, seat);
+                        data.update_ei_input_method();
                     }
                     EiInputEvent::Disconnected => {
                         let conn = connection.eis_connection().clone();
@@ -167,7 +168,7 @@ impl State {
     /// active, so `ei_text` UTF-8 can be committed into the focused app even without a real
     /// IME, but only when none is bound (a real IME always wins)
     pub(crate) fn update_ei_input_method(&mut self) {
-        let active = !self.common.ei_seats.is_empty();
+        let active = !self.common.ei_keyboard_source.is_empty();
         let seats = self
             .common
             .shell
