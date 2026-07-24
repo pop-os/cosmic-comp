@@ -808,10 +808,15 @@ impl XwmHandler for State {
         match property {
             // STEAM_GAME changed — a deferred game-mode enter may now resolve to it
             // (e.g. the launcher tags the game window after it maps), or the active
-            // game surface may have been retagged onto a different window.
+            // game surface may have been retagged onto a different window. Defer to
+            // an idle: these can enter/exit game mode (fullscreen/minimize), which
+            // drops decoration iced elements that unregister calloop sources —
+            // unsafe while this XWM dispatch borrows the loop's source registry.
             WmWindowProperty::SteamGame => {
-                self.try_resolve_pending_game_mode();
-                self.refresh_active_game_surface();
+                self.common.event_loop_handle.insert_idle(|state| {
+                    state.try_resolve_pending_game_mode();
+                    state.refresh_active_game_surface();
+                });
             }
             // An overlay marker toggled — recompute overlay-visible + the fast-path gate.
             WmWindowProperty::SteamOverlay | WmWindowProperty::ExternalOverlay => {

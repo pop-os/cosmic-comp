@@ -535,7 +535,17 @@ pub fn init(handle: &LoopHandle<'static, State>, executor: &ThreadPool) -> GameM
 
     if let Err(err) = handle.insert_source(cmd_rx, |event, _, state| {
         if let calloop::channel::Event::Msg(cmd) = event {
-            state.handle_game_mode_command(cmd);
+            // Defer to an idle callback rather than running inline: handling a
+            // command can enter/exit game mode, which fullscreens/minimizes windows
+            // and drops their decoration iced elements — and an iced element's Drop
+            // unregisters a calloop source. Doing that here, while this channel
+            // source is mid-dispatch and the loop's source registry is borrowed,
+            // panics ("RefCell already borrowed"). The idle runs once dispatch has
+            // released the loop. (This mirrors how the input path defers window ops.)
+            state
+                .common
+                .event_loop_handle
+                .insert_idle(move |state| state.handle_game_mode_command(cmd));
         }
     }) {
         warn!(?err, "Failed to register game-mode command channel");
