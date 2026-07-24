@@ -74,7 +74,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{Clock, Monotonic, Physical, Point, Rectangle, Transform},
+    utils::{Clock, IsAlive, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
         dmabuf::{DmabufFeedbackBuilder, get_dmabuf},
         image_copy_capture::{
@@ -152,6 +152,9 @@ pub struct SurfaceThreadState {
 
     loop_handle: LoopHandle<'static, Self>,
     clock: Clock<Monotonic>,
+
+    min_vrr: Option<u32>,
+    min_vrr_frame_time: Option<Duration>,
 
     #[cfg(feature = "debug")]
     egui: EguiState,
@@ -550,6 +553,10 @@ fn surface_thread(
         shell,
         loop_handle: event_loop.handle(),
         clock: Clock::new(),
+
+        min_vrr: None,
+        min_vrr_frame_time: None,
+
         #[cfg(feature = "debug")]
         egui,
 
@@ -700,18 +707,21 @@ impl SurfaceThreadState {
                 .flatten(),
             )
         });
+        self.min_vrr = min_hz;
         let interval =
             Duration::from_secs_f64(1_000. / drm_helpers::calculate_refresh_rate(mode) as f64);
         self.timings.set_refresh_interval(Some(interval));
 
         const SAFETY_MARGIN: u32 = 2; // Magic two frames margin taken from kwin to not trigger low-framerate-compensation
         let min_min_refresh_interval = Duration::from_secs_f64(1. / 30.); // 30Hz
-        self.timings.set_min_refresh_interval(Some(
+        self.min_vrr_frame_time = Some(
             min_hz
                 .map(|min| Duration::from_secs_f64(1. / (min + SAFETY_MARGIN) as f64))
                 .unwrap_or(min_min_refresh_interval) // alternatively use 30Hz
-                .max(min_min_refresh_interval),
-        ));
+                .min(min_min_refresh_interval),
+        );
+        self.timings
+            .set_min_refresh_interval(self.min_vrr_frame_time);
 
         if crate::utils::env::bool_var("COSMIC_DISABLE_DIRECT_SCANOUT").unwrap_or(false) {
             self.frame_flags.remove(FrameFlags::ALLOW_SCANOUT);
@@ -1023,24 +1033,17 @@ impl SurfaceThreadState {
             let shell = self.shell.read();
             let animations_going = shell.animations_going();
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
-            if let Some((_, workspace)) = shell.workspaces.active(output) {
-                let seat = shell.seats.last_active();
-                if let Some(fullscreen_surface) = workspace.get_fullscreen(seat) {
-                    const _30_FPS: Duration = Duration::from_nanos(1_000_000_000 / 30);
-                    (
-                        true,
-                        fullscreen_surface
-                            .surface
-                            .wl_surface()
-                            .is_some_and(|surface| {
-                                recursive_frame_time_estimation(&self.clock, &surface)
-                                    .is_some_and(|dur| dur <= _30_FPS)
-                            }),
-                        animations_going,
-                    )
-                } else {
-                    (false, false, animations_going)
-                }
+            if let Some(fullscreen_surface) = output.is_foreground_fullscreen_occupied()
+                && fullscreen_surface.alive()
+            {
+                let min_vrr_frame_time = self
+                    .min_vrr_frame_time
+                    .unwrap_or(Duration::from_nanos(1_000_000_000 / 30));
+                let drives_refresh_rate = fullscreen_surface.wl_surface().is_some_and(|surface| {
+                    recursive_frame_time_estimation(&self.clock, &surface)
+                        .is_some_and(|dur| dur <= min_vrr_frame_time)
+                });
+                (true, drives_refresh_rate, animations_going)
             } else {
                 (false, false, animations_going)
             }
