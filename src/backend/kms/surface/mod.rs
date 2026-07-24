@@ -1006,12 +1006,20 @@ impl SurfaceThreadState {
             &self.shell.read(),
         );
 
+        // Acquiring a renderer can fail transiently when the underlying DRM
+        // device is lost (e.g. after a GPU reset). Propagate the error instead
+        // of unwrapping: `redraw` is fallible and its caller already logs the
+        // failure and reschedules a redraw, so we recover on the next frame
+        // once the device comes back, rather than aborting the whole
+        // compositor. See https://github.com/pop-os/cosmic-comp/issues/649
         let mut renderer = if render_node != self.target_node {
             self.api
                 .renderer(&render_node, &self.target_node, compositor.format())
-                .unwrap()
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?
         } else {
-            self.api.single_renderer(&self.target_node).unwrap()
+            self.api
+                .single_renderer(&self.target_node)
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?
         };
 
         self.timings.start_render(&self.clock);
@@ -1267,7 +1275,10 @@ impl SurfaceThreadState {
                 })
                 .context("Failed to draw to offscreen render target")?;
 
-            renderer = self.api.single_renderer(&self.target_node).unwrap();
+            renderer = self
+                .api
+                .single_renderer(&self.target_node)
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?;
 
             elements = postprocess_elements(
                 &mut renderer,
