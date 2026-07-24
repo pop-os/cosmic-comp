@@ -764,8 +764,9 @@ impl State {
         }
 
         // Safety-net retry for a deferred enter (e.g. the game window mapped
-        // since the last tick).
+        // since the last tick) and for a game surface retagged onto another window.
         self.try_resolve_pending_game_mode();
+        self.refresh_active_game_surface();
 
         // Safety net for overlay presence (an overlay window mapped/unmapped) and
         // for an input grab whose window has gone away — the low-latency paths are
@@ -883,6 +884,66 @@ impl State {
                 // matching the explicit Enter-command path (which refreshes after).
                 self.refresh_overlay_visible();
             }
+        }
+    }
+
+    /// Re-resolve the fullscreened game surface after a `STEAM_GAME` tag change.
+    ///
+    /// `enter_game_mode` treats a re-enter for the *same* app id as a no-op, so
+    /// moving an app id from one window to another (e.g. a client switching
+    /// between overlay windows that share an app id) would otherwise leave the
+    /// old window fullscreened. This detects that the active game surface has lost
+    /// its app-id tag and switches to whichever mapped window still carries it.
+    /// It runs synchronously in the property/refresh hooks (no render in between),
+    /// so the swap is seamless. A no-op for a normal game, whose window keeps its
+    /// tag for the whole session.
+    pub fn refresh_active_game_surface(&mut self) {
+        let (app_id, overlay_asserted) = {
+            let shell = self.common.shell.read();
+            let gm = &shell.game_mode;
+            // Only when actively fullscreening a concrete surface.
+            let (true, Some(app_id), Some(surface)) =
+                (gm.active, gm.app_id, gm.game_surface.as_ref())
+            else {
+                return;
+            };
+            // Current surface still carries the active app id — nothing to do.
+            if surface.steam_appid() == Some(app_id) {
+                return;
+            }
+            (app_id, gm.overlay_asserted)
+        };
+
+        // The fullscreened surface lost its tag. Switch to another window still
+        // tagged with the active app id, if one exists. Check both mapped windows
+        // AND our own minimized peers: a peer that shares the app id was minimized
+        // on entry (so it isn't in `mapped()` and `find_game_surface` can't see
+        // it) — `exit_game_mode` below un-minimizes it so the following
+        // `enter_game_mode` can then resolve to it. If nothing carries the app id,
+        // leave the current surface up: this may be a transient untag mid-retag, or
+        // the window is closing (the refresh tick / destroy path handles a vanished
+        // surface). We never exit game mode from here on our own.
+        let has_replacement = {
+            let shell = self.common.shell.read();
+            find_game_surface(&shell, app_id).is_some()
+                || shell
+                    .game_mode
+                    .minimized
+                    .iter()
+                    .any(|s| s.steam_appid() == Some(app_id))
+        };
+        if has_replacement {
+            info!(target: GAMING_TARGET, app_id, "re-resolving game surface after a tag change");
+            // exit clears the stale fullscreen + un-minimizes peers so the new
+            // target is visible to find_game_surface; enter fullscreens it. Both
+            // run before the next render, so there is no intermediate frame.
+            self.exit_game_mode();
+            self.enter_game_mode(app_id);
+            // exit_game_mode's mem::take cleared any client overlay assertion, and
+            // enter_game_mode re-read it as false — restore it so a QAM overlay and
+            // its fast-path gate survive the swap.
+            self.common.shell.write().game_mode.overlay_asserted = overlay_asserted;
+            self.refresh_overlay_visible();
         }
     }
 

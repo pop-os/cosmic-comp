@@ -807,8 +807,12 @@ impl XwmHandler for State {
         // lock held (XWM dispatch), so the handlers can take their own.
         match property {
             // STEAM_GAME changed — a deferred game-mode enter may now resolve to it
-            // (e.g. the launcher tags the game window after it maps).
-            WmWindowProperty::SteamGame => self.try_resolve_pending_game_mode(),
+            // (e.g. the launcher tags the game window after it maps), or the active
+            // game surface may have been retagged onto a different window.
+            WmWindowProperty::SteamGame => {
+                self.try_resolve_pending_game_mode();
+                self.refresh_active_game_surface();
+            }
             // An overlay marker toggled — recompute overlay-visible + the fast-path gate.
             WmWindowProperty::SteamOverlay | WmWindowProperty::ExternalOverlay => {
                 self.refresh_overlay_visible();
