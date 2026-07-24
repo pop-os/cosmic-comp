@@ -85,6 +85,9 @@ pub struct CosmicCompConfig {
     pub autotile_behavior: TileBehavior,
     /// Active hint enabled
     pub active_hint: bool,
+    /// Dim the panel (and other layer-shell surfaces) on outputs that do not have keyboard focus.
+    /// Only takes effect with more than one output
+    pub dim_inactive_panels: bool,
     /// Enables changing keyboard focus to windows when the cursor passes into them
     pub focus_follows_cursor: bool,
     /// Enables warping the cursor to the focused window when focus changes due to keyboard input
@@ -130,6 +133,7 @@ impl Default for CosmicCompConfig {
             autotile: Default::default(),
             autotile_behavior: Default::default(),
             active_hint: true,
+            dim_inactive_panels: false,
             focus_follows_cursor: false,
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
