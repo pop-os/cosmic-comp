@@ -5,7 +5,8 @@ use crate::{
     state::{BackendData, State},
     utils::prelude::OutputExt,
     wayland::protocols::{
-        output_configuration::OutputConfigurationState, workspace::WorkspaceUpdateGuard,
+        keyboard_layout::KeyboardLayoutState, output_configuration::OutputConfigurationState,
+        workspace::WorkspaceUpdateGuard,
     },
 };
 use anyhow::Context;
@@ -807,19 +808,17 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         if let Err(err) = keyboard.set_xkb_config(state, xkb_config_to_wl(&value)) {
                             error!(?err, "Failed to load provided xkb config");
                             // TODO Revert to default?
-                        }
-
-                        // Press and release the numlock key to update modifiers.
-                        if old_modifier_state.num_lock != keyboard.modifier_state().num_lock {
-                            const NUMLOCK_SCANCODE: u32 = 69;
-                            change_modifier_state(&keyboard, NUMLOCK_SCANCODE, state);
-                        }
-                        if old_modifier_state.caps_lock != keyboard.modifier_state().caps_lock {
-                            const CAPSLOCK_SCANCODE: u32 = 58;
-                            change_modifier_state(&keyboard, CAPSLOCK_SCANCODE, state);
+                        } else if keyboard.set_modifier_state(old_modifier_state) != 0 {
+                            keyboard.advertise_modifier_state(state);
+                            <State as smithay::input::SeatHandler>::led_state_changed(
+                                state,
+                                &seat,
+                                keyboard.led_state(),
+                            );
                         }
                     }
                 }
+                KeyboardLayoutState::refresh(state);
                 state.common.config.cosmic_conf.xkb_config = value;
             }
             "keyboard_config" => {

@@ -28,6 +28,7 @@ use crate::{
         image_copy_capture::{SessionHolder, cursor_capture_constraints},
         xwayland_keyboard_grab::XWaylandGrabSeat,
     },
+    wayland::protocols::keyboard_layout::KeyboardLayoutState,
 };
 use calloop::{
     RegistrationToken,
@@ -303,6 +304,12 @@ impl State {
                             self.common.config.dynamic_conf.numlock_mut().last_state =
                                 keyboard.modifier_state().num_lock;
                         }
+                    }
+
+                    if previous_modifiers.serialized.layout_effective
+                        != keyboard.modifier_state().serialized.layout_effective
+                    {
+                        KeyboardLayoutState::refresh(self);
                     }
                 }
             }
@@ -1631,6 +1638,8 @@ impl State {
         let key_matches = |binding_key: Keysym| -> bool {
             raw_syms.contains(&binding_key) || latin_sym.is_some_and(|sym| sym == binding_key)
         };
+        let keycode_matches =
+            |binding_keycode: u32| -> bool { event.key_code().raw() == binding_keycode };
 
         let mut shell = self.common.shell.write();
 
@@ -1917,6 +1926,7 @@ impl State {
 
                 // is this a released (triggered) modifier-only binding?
                 if binding.key.is_none()
+                    && binding.keycode.is_none()
                     && event.state() == KeyState::Released
                     && !cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                     && modifiers_queue.take(binding)
@@ -1930,6 +1940,7 @@ impl State {
 
                 // could this potentially become a modifier-only binding?
                 if binding.key.is_none()
+                    && binding.keycode.is_none()
                     && event.state() == KeyState::Pressed
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
@@ -1938,9 +1949,9 @@ impl State {
                 }
 
                 // is this a normal binding?
-                if binding.key.is_some()
+                if (binding.key.is_some_and(key_matches)
+                    || binding.keycode.is_some_and(keycode_matches))
                     && event.state() == KeyState::Pressed
-                    && key_matches(binding.key.unwrap())
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
                     modifiers_queue.clear();
