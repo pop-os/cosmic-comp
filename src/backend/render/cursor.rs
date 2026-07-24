@@ -38,7 +38,7 @@ use smithay::{
     wayland::compositor::{get_role, with_states},
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     io::Read,
     sync::Mutex,
     time::{Duration, Instant},
@@ -270,6 +270,53 @@ pub struct CursorStateInner {
     hidden: bool,
     idle_timer: Option<RegistrationToken>,
     last_armed: Option<Instant>,
+
+    // shake-to-find
+    shake_path: VecDeque<PathSample>,
+    shake_path_position: Point<f64, Logical>,
+    magnify_until: Option<Instant>,
+    magnify_target: f32,
+    magnification: f32,
+    anim_from: f32,
+    anim_start: Option<Instant>,
+}
+
+/// One sampled pointer position on the recent motion path.
+#[derive(Clone, Copy)]
+struct PathSample {
+    position: Point<f64, Logical>,
+    time: Instant,
+}
+
+/// How far back the motion path is considered when looking for a shake.
+const SHAKE_INTERVAL: Duration = Duration::from_millis(1000);
+/// Path-length / bounding-box-diagonal ratio required to count as a shake.
+const SHAKE_SENSITIVITY: f64 = 4.0;
+/// Minimum bounding-box diagonal (logical px) before a shake is considered.
+const SHAKE_DIAGONAL_MIN: f64 = 100.0;
+/// Two deltas count as "the same direction" if both lie within this tolerance.
+const SHAKE_SAME_SIGN_TOLERANCE: f64 = 1.0;
+/// Keep the cursor enlarged for this long after the last detected shake.
+const SHAKE_HOLD: Duration = Duration::from_millis(2000);
+/// Extra magnification added by each shake, growing from the normal cursor size.
+const OVER_MAGNIFICATION: f32 = 1.0;
+/// Duration of the grow/shrink animation.
+const MAGNIFICATION_ANIM: Duration = Duration::from_millis(200);
+
+/// small movement is ignored and direction stays the same
+fn same_direction(a: f64, b: f64) -> bool {
+    (a >= -SHAKE_SAME_SIGN_TOLERANCE && b >= -SHAKE_SAME_SIGN_TOLERANCE)
+        || (a <= SHAKE_SAME_SIGN_TOLERANCE && b <= SHAKE_SAME_SIGN_TOLERANCE)
+}
+
+/// `InOutCubic` easing
+fn ease_in_out_cubic(t: f32) -> f32 {
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        let f = -2.0 * t + 2.0;
+        1.0 - f * f * f / 2.0
+    }
 }
 
 impl CursorStateInner {
@@ -289,6 +336,117 @@ impl CursorStateInner {
 
     pub fn size(&self) -> u32 {
         self.cursor_size
+    }
+
+    /// Feed one relative-motion event into the shake detector.
+    pub fn detect_shake(&mut self, delta: Point<f64, Logical>, now: Instant) {
+        // Drop samples that have aged out of the time window.
+        while let Some(oldest) = self.shake_path.front() {
+            if now.duration_since(oldest.time) >= SHAKE_INTERVAL {
+                self.shake_path.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if delta.x != 0.0 || delta.y != 0.0 {
+            self.shake_path_position += delta;
+            let sample = PathSample {
+                position: self.shake_path_position,
+                time: now,
+            };
+
+            if self.shake_path.len() >= 2 {
+                let last = self.shake_path[self.shake_path.len() - 1].position;
+                let prev = self.shake_path[self.shake_path.len() - 2].position;
+                let last_delta = last - prev;
+                if same_direction(last_delta.x, delta.x) && same_direction(last_delta.y, delta.y) {
+                    *self.shake_path.back_mut().unwrap() = sample;
+                } else {
+                    self.shake_path.push_back(sample);
+                }
+            } else {
+                self.shake_path.push_back(sample);
+            }
+        }
+
+        if self.shake_path.len() < 2 {
+            return;
+        }
+
+        let first = self.shake_path[0].position;
+        let (mut left, mut top, mut right, mut bottom) = (first.x, first.y, first.x, first.y);
+        let mut path_length = 0.0;
+        for i in 1..self.shake_path.len() {
+            let p = self.shake_path[i].position;
+            left = left.min(p.x);
+            top = top.min(p.y);
+            right = right.max(p.x);
+            bottom = bottom.max(p.y);
+
+            let step = p - self.shake_path[i - 1].position;
+            path_length += step.x.hypot(step.y);
+        }
+
+        let diagonal = (right - left).hypot(bottom - top);
+        if diagonal < SHAKE_DIAGONAL_MIN {
+            return;
+        }
+
+        // Path noticeably longer than the diagonal => a shake gesture.
+        if path_length / diagonal > SHAKE_SENSITIVITY {
+            self.grow(now);
+            self.shake_path.clear();
+        }
+    }
+
+    /// grow the cursor by one more increment (unbounded)
+    fn grow(&mut self, now: Instant) {
+        self.animate_to(self.magnify_target + OVER_MAGNIFICATION, now);
+        self.magnify_until = Some(now + SHAKE_HOLD);
+    }
+
+    /// Start a 200ms `InOutCubic` tween from the current size to `target`.
+    fn animate_to(&mut self, target: f32, now: Instant) {
+        if (target - self.magnify_target).abs() < f32::EPSILON {
+            return;
+        }
+        self.anim_from = self.magnification;
+        self.anim_start = Some(now);
+        self.magnify_target = target;
+    }
+
+    /// Advance the magnification animation and return the current factor.
+    pub fn animated_magnification(&mut self, now: Instant) -> f32 {
+        // Begin shrinking back once the hold window elapses.
+        if let Some(until) = self.magnify_until
+            && now >= until
+        {
+            self.magnify_until = None;
+            self.animate_to(1.0, now);
+        }
+
+        self.magnification = match self.anim_start {
+            Some(start) => {
+                let t = (now.duration_since(start).as_secs_f32()
+                    / MAGNIFICATION_ANIM.as_secs_f32())
+                .clamp(0.0, 1.0);
+                if t >= 1.0 {
+                    self.anim_start = None;
+                }
+                self.anim_from + (self.magnify_target - self.anim_from) * ease_in_out_cubic(t)
+            }
+            None => self.magnify_target,
+        };
+        self.magnification
+    }
+
+    /// Whether the cursor is currently magnified or pending; drives continued redraws.
+    pub fn is_magnifying(&self) -> bool {
+        self.magnify_until.is_some()
+            || self.anim_start.is_some()
+            || self.magnification > 1.001
+            || self.magnify_target > 1.001
     }
 }
 
@@ -324,6 +482,14 @@ impl Default for CursorStateInner {
             hidden: false,
             idle_timer: None,
             last_armed: None,
+
+            shake_path: VecDeque::new(),
+            shake_path_position: Point::from((0.0, 0.0)),
+            magnify_until: None,
+            magnify_target: 1.0,
+            magnification: 1.0,
+            anim_from: 1.0,
+            anim_start: None,
         }
     }
 }
