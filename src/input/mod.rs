@@ -1820,6 +1820,35 @@ impl State {
             )));
         }
 
+        // Open the focused window's context menu (Alt+Space, the traditional
+        // "window system menu" shortcut). Hardcoded rather than going through
+        // the configurable shortcuts system - see the PrivateAction::OpenWindowMenu
+        // doc comment for why. NOTE: Super+M is already bound to Maximize by
+        // default (see /usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults) -
+        // do not reuse it here, it would silently shadow that binding.
+        if !shortcuts_inhibited
+            && event.state() == KeyState::Pressed
+            && modifiers.alt
+            && !modifiers.logo
+            && !modifiers.ctrl
+            && !modifiers.shift
+            && key_matches(Keysym::space)
+        {
+            seat.supressed_keys().add(&handle, None);
+            return FilterResult::Intercept(Some((
+                Action::Private(PrivateAction::OpenWindowMenu),
+                shortcuts::Binding {
+                    modifiers: shortcuts::Modifiers {
+                        alt: true,
+                        ..Default::default()
+                    },
+                    keycode: None,
+                    key: Some(Keysym::space),
+                    description: None,
+                },
+            )));
+        }
+
         if let Some(mut a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
             if event.state() == KeyState::Released {
                 let removed =

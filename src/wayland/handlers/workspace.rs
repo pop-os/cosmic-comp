@@ -74,6 +74,20 @@ impl WorkspaceHandler for State {
                         }
                     }
                 }
+                Request::Rename { workspace, name } => {
+                    let mut shell = self.common.shell.write();
+                    if let Some(workspace_) = shell.workspaces.space_for_handle_mut(&workspace) {
+                        workspace_.name = Some(name.clone());
+                        let pinned = workspace_.pinned;
+                        self.common
+                            .workspace_state
+                            .update()
+                            .set_workspace_name(&workspace, name);
+                        if pinned {
+                            shell.workspaces.persist(&self.common.config);
+                        }
+                    }
+                }
                 Request::MoveBefore {
                     workspace,
                     other_workspace,

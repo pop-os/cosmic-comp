@@ -19,6 +19,14 @@ pub enum PrivateAction {
         shortcuts::action::ResizeEdge,
         shortcuts::State,
     ),
+    /// Opens the focused window's context menu at its top-left corner.
+    /// Hardcoded to Super+M rather than routed through the configurable
+    /// shortcuts system, so it works independent of cosmic-settings-config:
+    /// unlike a mouse right-click on the (server-side-decoration-only)
+    /// title bar, this reaches windows with client-side decorations too
+    /// (the majority of modern GTK4/Qt6/Electron apps), which otherwise have
+    /// no way to open this menu at all.
+    OpenWindowMenu,
 }
 
 /// Convert `cosmic_settings_config::shortcuts::State` to `smithay::backend::input::KeyState`.

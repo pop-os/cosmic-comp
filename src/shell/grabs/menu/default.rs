@@ -1,3 +1,5 @@
+use cosmic_comp_config::WorkspaceAssignment;
+use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts::Action;
 use smithay::{
     input::pointer::MotionEvent, reexports::wayland_server::protocol::wl_surface::WlSurface,
@@ -16,6 +18,7 @@ use crate::{
     utils::{prelude::SeatExt, screenshot::screenshot_window},
     wayland::protocols::workspace::WorkspaceHandle,
 };
+use tracing::error;
 
 use super::{Item, ResizeEdge};
 
@@ -246,6 +249,7 @@ pub fn window_items(
     let screenshot_clone = window.clone();
     let stack_clone = window.clone();
     let sticky_clone = window.clone();
+    let pin_clone = window.clone();
     let close_clone = window.clone();
 
     vec![
@@ -545,6 +549,71 @@ pub fn window_items(
             })
             .toggled(is_sticky),
         ),
+        Some({
+            let app_id = window.active_window().app_id();
+            let pinned_workspace = config
+                .cosmic_conf
+                .workspace_assignments
+                .iter()
+                .find(|rule| rule.app_id == app_id)
+                .map(|rule| rule.workspace);
+            let label = match pinned_workspace {
+                Some(number) => {
+                    fl!("window-menu-pinned-to-workspace", number = (number as usize))
+                }
+                None => fl!("window-menu-pin-to-workspace"),
+            };
+            Item::new(label, move |handle| {
+                let app_id = app_id.clone();
+                let mapped = pin_clone.clone();
+                let _ = handle.insert_idle(move |state| {
+                    let mut assignments = state
+                        .common
+                        .config
+                        .cosmic_conf
+                        .workspace_assignments
+                        .clone();
+                    if assignments.iter().any(|rule| rule.app_id == app_id) {
+                        assignments.retain(|rule| rule.app_id != app_id);
+                    } else {
+                        let shell = state.common.shell.read();
+                        let window = mapped.active_window();
+                        let Some(wl_surface) = window.wl_surface() else {
+                            return;
+                        };
+                        let Some((workspace_handle, output)) =
+                            shell.workspace_for_surface(&wl_surface)
+                        else {
+                            return;
+                        };
+                        let Some(idx) = shell
+                            .workspaces
+                            .spaces_for_output(&output)
+                            .position(|space| space.handle == workspace_handle)
+                        else {
+                            return;
+                        };
+                        drop(shell);
+                        assignments.push(WorkspaceAssignment {
+                            app_id: app_id.clone(),
+                            workspace: (idx + 1) as u32,
+                        });
+                    }
+                    // Persist via cosmic-config; the compositor's own config
+                    // watcher applies it (and other clients see it too).
+                    if let Err(err) = state
+                        .common
+                        .config
+                        .cosmic_helper
+                        .set("workspace_assignments", &assignments)
+                    {
+                        error!(?err, "Failed to update workspace_assignments key");
+                    }
+                });
+            })
+            .toggled(pinned_workspace.is_some())
+            .disabled(is_sticky)
+        }),
         Some(Item::Separator),
         if is_stacked {
             Some(Item::new(fl!("window-menu-close-all"), move |_handle| {

@@ -102,6 +102,16 @@ pub struct CosmicCompConfig {
     /// Hide the cursor after this many seconds of pointer inactivity (None disables)
     pub cursor_hide_timeout: Option<u32>,
     pub activation_policy: ActivationPolicy,
+    /// Rules mapping an application id to the workspace (1-based index) new
+    /// windows of that app should open on, regardless of the active workspace.
+    pub workspace_assignments: Vec<WorkspaceAssignment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct WorkspaceAssignment {
+    pub app_id: String,
+    /// 1-based workspace number, matching what the workspaces UI shows.
+    pub workspace: u32,
 }
 
 impl Default for CosmicCompConfig {
@@ -140,6 +150,7 @@ impl Default for CosmicCompConfig {
             appearance_settings: AppearanceConfig::default(),
             cursor_hide_timeout: None,
             activation_policy: ActivationPolicy::default(),
+            workspace_assignments: Vec::new(),
         }
     }
 }

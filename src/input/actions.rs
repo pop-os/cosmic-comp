@@ -18,7 +18,8 @@ use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     input::{Seat, pointer::MotionEvent},
-    utils::{Point, Serial},
+    utils::{Point, SERIAL_COUNTER, Serial},
+    wayland::seat::WaylandFocus,
 };
 #[cfg(not(feature = "debug"))]
 use tracing::info;
@@ -103,6 +104,36 @@ impl State {
                         .shell
                         .write()
                         .finish_resize(direction, edge.into());
+                }
+            }
+
+            Action::Private(PrivateAction::OpenWindowMenu) => {
+                let Some(surface) = seat
+                    .get_keyboard()
+                    .and_then(|kb| kb.current_focus())
+                    .and_then(|focus| focus.wl_surface().map(|s| s.into_owned()))
+                else {
+                    return;
+                };
+
+                let menu_serial = SERIAL_COUNTER.next_serial();
+                let res = self.common.shell.read().menu_request(
+                    false,
+                    &surface,
+                    seat,
+                    menu_serial,
+                    // No click position to anchor to (keyboard-triggered); open
+                    // at the window's top-left corner. menu_request derives the
+                    // window's own geometry from the surface internally.
+                    Point::from((0, 0)),
+                    false,
+                    &self.common.config,
+                    &self.common.event_loop_handle,
+                );
+                if let Some((grab, focus)) = res {
+                    seat.get_pointer()
+                        .unwrap()
+                        .set_grab(self, grab, menu_serial, focus);
                 }
             }
         }

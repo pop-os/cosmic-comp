@@ -23,7 +23,7 @@ use crate::{
     },
 };
 use cosmic_comp_config::{
-    AppearanceConfig, TileBehavior, ZoomConfig, ZoomMovement,
+    AppearanceConfig, TileBehavior, WorkspaceAssignment, ZoomConfig, ZoomMovement,
     workspace::{PinnedWorkspace, WorkspaceLayout, WorkspaceMode},
 };
 use cosmic_config::ConfigSet;
@@ -296,6 +296,7 @@ pub struct Shell {
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
+    workspace_assignments: Vec<WorkspaceAssignment>,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -400,7 +401,8 @@ fn create_workspace(
         WorkspaceCapabilities::Activate
             | WorkspaceCapabilities::SetTilingState
             | WorkspaceCapabilities::Pin
-            | WorkspaceCapabilities::Move,
+            | WorkspaceCapabilities::Move
+            | WorkspaceCapabilities::Rename,
     );
     Workspace::new(
         workspace_handle,
@@ -440,7 +442,8 @@ fn create_workspace_from_pinned(
         WorkspaceCapabilities::Activate
             | WorkspaceCapabilities::SetTilingState
             | WorkspaceCapabilities::Pin
-            | WorkspaceCapabilities::Move,
+            | WorkspaceCapabilities::Move
+            | WorkspaceCapabilities::Rename,
     );
 
     if let Some(ref name) = pinned.name {
@@ -1713,6 +1716,7 @@ impl Shell {
             appearance_conf: config.cosmic_conf.appearance_settings,
             zoom_state: None,
             tiling_exceptions,
+            workspace_assignments: config.cosmic_conf.workspace_assignments.clone(),
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -2845,13 +2849,29 @@ impl Shell {
         };
 
         let pending_activation = self.pending_activations.remove(&(&window).into());
-        let workspace_handle = match pending_activation {
+        let mut workspace_handle = match pending_activation {
             Some(ActivationContext::Workspace(handle)) => Some(handle),
             _ => None,
         };
 
         let should_be_fullscreen = output.is_some();
         let mut output = output.unwrap_or_else(|| seat.active_output());
+
+        // App->workspace assignment: if this app_id has a configured home
+        // workspace, send the window there. Deliberately overrides any
+        // activation context, so the rule holds no matter where the app was
+        // launched from. `workspace` in the config is 1-based.
+        if let Some(rule) = {
+            let app_id = window.app_id();
+            self.workspace_assignments
+                .iter()
+                .find(|rule| rule.app_id == app_id)
+        } {
+            let idx = rule.workspace.saturating_sub(1) as usize;
+            if let Some(ws) = self.workspaces.get(idx, &output) {
+                workspace_handle = Some(ws.handle);
+            }
+        }
 
         // this is beyond stupid, just to make the borrow checker happy
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
@@ -5014,6 +5034,10 @@ impl Shell {
         I: Iterator<Item = &'a ApplicationException>,
     {
         self.tiling_exceptions = layout::TilingExceptions::new(exceptions);
+    }
+
+    pub fn update_workspace_assignments(&mut self, assignments: Vec<WorkspaceAssignment>) {
+        self.workspace_assignments = assignments;
     }
 
     pub fn take_presentation_feedback(
