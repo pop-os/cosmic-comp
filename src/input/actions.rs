@@ -136,6 +136,26 @@ impl State {
                     &mut self.common.workspace_state.update(),
                 );
             }
+            SwipeAction::GridMove(direction) => {
+                let columns = self.common.shell.read().workspaces.grid_columns as usize;
+                let current_output = seat.active_output();
+                let mut shell = self.common.shell.write();
+                let active = shell.workspaces.active_num(&current_output).1;
+                let total = shell.workspaces.len(&current_output);
+                if let Some(target) =
+                    grid_target_index(active, direction, columns, total, wraparound)
+                {
+                    let _ = shell.activate(
+                        &current_output,
+                        target,
+                        WorkspaceDelta::new_gesture(matches!(
+                            direction,
+                            Direction::Right | Direction::Down
+                        )),
+                        &mut self.common.workspace_state.update(),
+                    );
+                }
+            }
         }
     }
 
@@ -204,6 +224,37 @@ impl State {
             }
 
             Action::NextWorkspace => {
+                if self.common.config.cosmic_conf.workspaces.workspace_layout
+                    == WorkspaceLayout::Grid
+                {
+                    let Some(direction) = pattern.inferred_direction() else {
+                        return;
+                    };
+                    let wraparound = self
+                        .common
+                        .config
+                        .cosmic_conf
+                        .workspaces
+                        .workspace_wraparound;
+                    let columns =
+                        self.common.shell.read().workspaces.grid_columns as usize;
+                    let current_output = seat.active_output();
+                    let mut shell = self.common.shell.write();
+                    let active = shell.workspaces.active_num(&current_output).1;
+                    let total = shell.workspaces.len(&current_output);
+                    if let Some(target) =
+                        grid_target_index(active, direction, columns, total, wraparound)
+                    {
+                        let _ = shell.activate(
+                            &current_output,
+                            target,
+                            WorkspaceDelta::new_shortcut(),
+                            &mut self.common.workspace_state.update(),
+                        );
+                    }
+                    return;
+                }
+
                 if let Some(direction) = pattern.inferred_direction()
                     && (((direction == Direction::Left || direction == Direction::Right)
                         && self.common.config.cosmic_conf.workspaces.workspace_layout
@@ -243,6 +294,37 @@ impl State {
             }
 
             Action::PreviousWorkspace => {
+                if self.common.config.cosmic_conf.workspaces.workspace_layout
+                    == WorkspaceLayout::Grid
+                {
+                    let Some(direction) = pattern.inferred_direction() else {
+                        return;
+                    };
+                    let wraparound = self
+                        .common
+                        .config
+                        .cosmic_conf
+                        .workspaces
+                        .workspace_wraparound;
+                    let columns =
+                        self.common.shell.read().workspaces.grid_columns as usize;
+                    let current_output = seat.active_output();
+                    let mut shell = self.common.shell.write();
+                    let active = shell.workspaces.active_num(&current_output).1;
+                    let total = shell.workspaces.len(&current_output);
+                    if let Some(target) =
+                        grid_target_index(active, direction, columns, total, wraparound)
+                    {
+                        let _ = shell.activate(
+                            &current_output,
+                            target,
+                            WorkspaceDelta::new_shortcut(),
+                            &mut self.common.workspace_state.update(),
+                        );
+                    }
+                    return;
+                }
+
                 if let Some(direction) = pattern.inferred_direction()
                     && (((direction == Direction::Left || direction == Direction::Right)
                         && self.common.config.cosmic_conf.workspaces.workspace_layout
@@ -338,6 +420,52 @@ impl State {
             }
 
             x @ Action::MoveToNextWorkspace | x @ Action::SendToNextWorkspace => {
+                if self.common.config.cosmic_conf.workspaces.workspace_layout
+                    == WorkspaceLayout::Grid
+                {
+                    let Some(direction) = pattern.inferred_direction() else {
+                        return;
+                    };
+                    let Some(focused_output) = seat.focused_output() else {
+                        return;
+                    };
+                    let wraparound = self
+                        .common
+                        .config
+                        .cosmic_conf
+                        .workspaces
+                        .workspace_wraparound;
+                    let columns =
+                        self.common.shell.read().workspaces.grid_columns as usize;
+                    let res = {
+                        let mut shell = self.common.shell.write();
+                        let active = shell.workspaces.active_num(&focused_output).1;
+                        let total = shell.workspaces.len(&focused_output);
+                        grid_target_index(active, direction, columns, total, wraparound)
+                            .ok_or(InvalidWorkspaceIndex)
+                            .and_then(|target| {
+                                shell.move_current(
+                                    seat,
+                                    (&focused_output, Some(target)),
+                                    matches!(x, Action::MoveToNextWorkspace),
+                                    Some(direction),
+                                    &mut self.common.workspace_state.update(),
+                                    &self.common.event_loop_handle,
+                                )
+                            })
+                    };
+                    if let Ok(Some((target, _point))) = res {
+                        Shell::set_focus(
+                            self,
+                            Some(&target),
+                            seat,
+                            None,
+                            matches!(x, Action::MoveToNextWorkspace),
+                        );
+                    }
+                    return;
+                }
+
                 if let Some(direction) = pattern.inferred_direction()
                     && (((direction == Direction::Left || direction == Direction::Right)
                         && self.common.config.cosmic_conf.workspaces.workspace_layout
@@ -430,6 +558,52 @@ impl State {
             }
 
             x @ Action::MoveToPreviousWorkspace | x @ Action::SendToPreviousWorkspace => {
+                if self.common.config.cosmic_conf.workspaces.workspace_layout
+                    == WorkspaceLayout::Grid
+                {
+                    let Some(direction) = pattern.inferred_direction() else {
+                        return;
+                    };
+                    let Some(focused_output) = seat.focused_output() else {
+                        return;
+                    };
+                    let wraparound = self
+                        .common
+                        .config
+                        .cosmic_conf
+                        .workspaces
+                        .workspace_wraparound;
+                    let columns =
+                        self.common.shell.read().workspaces.grid_columns as usize;
+                    let res = {
+                        let mut shell = self.common.shell.write();
+                        let active = shell.workspaces.active_num(&focused_output).1;
+                        let total = shell.workspaces.len(&focused_output);
+                        grid_target_index(active, direction, columns, total, wraparound)
+                            .ok_or(InvalidWorkspaceIndex)
+                            .and_then(|target| {
+                                shell.move_current(
+                                    seat,
+                                    (&focused_output, Some(target)),
+                                    matches!(x, Action::MoveToPreviousWorkspace),
+                                    Some(direction),
+                                    &mut self.common.workspace_state.update(),
+                                    &self.common.event_loop_handle,
+                                )
+                            })
+                    };
+                    if let Ok(Some((target, _point))) = res {
+                        Shell::set_focus(
+                            self,
+                            Some(&target),
+                            seat,
+                            None,
+                            matches!(x, Action::MoveToPreviousWorkspace),
+                        );
+                    }
+                    return;
+                }
+
                 if let Some(direction) = pattern.inferred_direction()
                     && (((direction == Direction::Left || direction == Direction::Right)
                         && self.common.config.cosmic_conf.workspaces.workspace_layout
@@ -771,6 +945,15 @@ impl State {
                                 | (Direction::Down, WorkspaceLayout::Vertical) => {
                                     Action::NextWorkspace
                                 }
+                                // Grid: all 4 directions stay in the workspace grid.
+                                // The Grid branches of Next/PreviousWorkspace resolve
+                                // the actual move from the binding's inferred direction.
+                                (Direction::Left | Direction::Up, WorkspaceLayout::Grid) => {
+                                    Action::PreviousWorkspace
+                                }
+                                (Direction::Right | Direction::Down, WorkspaceLayout::Grid) => {
+                                    Action::NextWorkspace
+                                }
                                 _ => Action::SwitchOutput(direction),
                             };
 
@@ -827,6 +1010,13 @@ impl State {
                             }
                             (Direction::Right, WorkspaceLayout::Horizontal)
                             | (Direction::Down, WorkspaceLayout::Vertical) => {
+                                Action::MoveToNextWorkspace
+                            }
+                            // Grid: see the matching comment in the Focus arm above.
+                            (Direction::Left | Direction::Up, WorkspaceLayout::Grid) => {
+                                Action::MoveToPreviousWorkspace
+                            }
+                            (Direction::Right | Direction::Down, WorkspaceLayout::Grid) => {
                                 Action::MoveToNextWorkspace
                             }
                             _ => Action::MoveToOutput(direction),
@@ -1114,6 +1304,75 @@ impl State {
     }
 }
 
+// Grid mode: compute the target workspace index for a directional move.
+// Left/Right step by 1 within the current row (wrapping at row edges, staying
+// in the same row). Up/Down step by exactly `columns` (wrapping top<->bottom
+// in the same column). `total` is the current (fixed, in Grid mode) workspace
+// count for this output; rows is derived from it since columns evenly divides
+// the total.
+fn grid_target_index(
+    active: usize,
+    direction: Direction,
+    columns: usize,
+    total: usize,
+    wraparound: bool,
+) -> Option<usize> {
+    let columns = columns.max(1);
+    let rows = (total / columns).max(1);
+    let col = active % columns;
+    let row = active / columns;
+    grid_target_index_inner(active, direction, columns, rows, col, row, wraparound)
+}
+
+fn grid_target_index_inner(
+    active: usize,
+    direction: Direction,
+    columns: usize,
+    rows: usize,
+    col: usize,
+    row: usize,
+    wraparound: bool,
+) -> Option<usize> {
+    match direction {
+        Direction::Left => {
+            if col > 0 {
+                Some(active - 1)
+            } else if wraparound {
+                Some(active + columns - 1)
+            } else {
+                None
+            }
+        }
+        Direction::Right => {
+            if col + 1 < columns {
+                Some(active + 1)
+            } else if wraparound {
+                Some(active - (columns - 1))
+            } else {
+                None
+            }
+        }
+        Direction::Up => {
+            if row > 0 {
+                Some(active - columns)
+            } else if wraparound {
+                Some(active + columns * (rows - 1))
+            } else {
+                None
+            }
+        }
+        Direction::Down => {
+            if row + 1 < rows {
+                Some(active + columns)
+            } else if wraparound {
+                Some(active - columns * (rows - 1))
+            } else {
+                None
+            }
+        }
+    }
+}
+
 fn to_next_workspace(
     shell: &mut Shell,
     seat: &Seat<State>,
@@ -1177,4 +1436,86 @@ fn to_previous_workspace(
         },
         workspace_state,
     )
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+
+    // 3x2 grid, indices:
+    //   0 1 2
+    //   3 4 5
+    const COLS: usize = 3;
+    const TOTAL: usize = 6;
+
+    fn go(active: usize, dir: Direction, wrap: bool) -> Option<usize> {
+        grid_target_index(active, dir, COLS, TOTAL, wrap)
+    }
+
+    #[test]
+    fn right_within_row() {
+        assert_eq!(go(0, Direction::Right, true), Some(1));
+        assert_eq!(go(3, Direction::Right, true), Some(4));
+    }
+
+    #[test]
+    fn right_wraps_within_same_row() {
+        assert_eq!(go(2, Direction::Right, true), Some(0));
+        assert_eq!(go(5, Direction::Right, true), Some(3));
+        assert_eq!(go(2, Direction::Right, false), None);
+        assert_eq!(go(5, Direction::Right, false), None);
+    }
+
+    #[test]
+    fn left_within_row() {
+        assert_eq!(go(1, Direction::Left, true), Some(0));
+        assert_eq!(go(5, Direction::Left, true), Some(4));
+    }
+
+    #[test]
+    fn left_wraps_within_same_row() {
+        assert_eq!(go(0, Direction::Left, true), Some(2));
+        assert_eq!(go(3, Direction::Left, true), Some(5));
+        assert_eq!(go(0, Direction::Left, false), None);
+        assert_eq!(go(3, Direction::Left, false), None);
+    }
+
+    #[test]
+    fn down_preserves_column() {
+        assert_eq!(go(0, Direction::Down, true), Some(3));
+        assert_eq!(go(1, Direction::Down, true), Some(4));
+        assert_eq!(go(2, Direction::Down, true), Some(5));
+    }
+
+    #[test]
+    fn down_wraps_to_top_same_column() {
+        assert_eq!(go(3, Direction::Down, true), Some(0));
+        assert_eq!(go(4, Direction::Down, true), Some(1));
+        assert_eq!(go(5, Direction::Down, true), Some(2));
+        assert_eq!(go(5, Direction::Down, false), None);
+    }
+
+    #[test]
+    fn up_preserves_column() {
+        assert_eq!(go(3, Direction::Up, true), Some(0));
+        assert_eq!(go(4, Direction::Up, true), Some(1));
+        assert_eq!(go(5, Direction::Up, true), Some(2));
+    }
+
+    #[test]
+    fn up_wraps_to_bottom_same_column() {
+        assert_eq!(go(0, Direction::Up, true), Some(3));
+        assert_eq!(go(1, Direction::Up, true), Some(4));
+        assert_eq!(go(2, Direction::Up, true), Some(5));
+        assert_eq!(go(0, Direction::Up, false), None);
+    }
+
+    #[test]
+    fn degenerate_dimensions_do_not_panic() {
+        // columns=0 clamps to 1; single-column grid
+        assert_eq!(grid_target_index(0, Direction::Down, 0, 2, true), Some(1));
+        // 1x1 grid: every move is either None or self-target (never panics)
+        let _ = grid_target_index(0, Direction::Left, 1, 1, true);
+        let _ = grid_target_index(0, Direction::Up, 1, 1, true);
+    }
 }

@@ -1064,6 +1064,28 @@ impl State {
                                 3 => None, // TODO: 3 finger gestures
                                 4 => {
                                     if self.common.config.cosmic_conf.workspaces.workspace_layout
+                                        == WorkspaceLayout::Grid
+                                    {
+                                        // Grid: all four directions are workspace moves.
+                                        gesture_state.direction.map(|direction| {
+                                            let direction = if natural_scroll {
+                                                match direction {
+                                                    Direction::Left => Direction::Right,
+                                                    Direction::Right => Direction::Left,
+                                                    Direction::Up => Direction::Down,
+                                                    Direction::Down => Direction::Up,
+                                                }
+                                            } else {
+                                                direction
+                                            };
+                                            SwipeAction::GridMove(direction)
+                                        })
+                                    } else if self
+                                        .common
+                                        .config
+                                        .cosmic_conf
+                                        .workspaces
+                                        .workspace_layout
                                         == WorkspaceLayout::Horizontal
                                     {
                                         match gesture_state.direction {
@@ -1118,6 +1140,13 @@ impl State {
                                     matches!(x, SwipeAction::NextWorkspace),
                                 )
                             }
+                            Some(SwipeAction::GridMove(direction)) => {
+                                self.common.shell.write().update_workspace_delta(
+                                    &seat.active_output(),
+                                    gesture_state.delta,
+                                    matches!(direction, Direction::Right | Direction::Down),
+                                )
+                            }
                             _ => {}
                         }
                     } else {
@@ -1158,6 +1187,22 @@ impl State {
                                     } else {
                                         velocity / seat.active_output().geometry().size.h as f64
                                     };
+                                let _ = self.common.shell.write().end_workspace_swipe(
+                                    &seat.active_output(),
+                                    norm_velocity,
+                                    &mut self.common.workspace_state.update(),
+                                );
+                            }
+                            Some(SwipeAction::GridMove(direction)) => {
+                                let velocity = gesture_state.velocity();
+                                let norm_velocity = if matches!(
+                                    direction,
+                                    Direction::Left | Direction::Right
+                                ) {
+                                    velocity / seat.active_output().geometry().size.w as f64
+                                } else {
+                                    velocity / seat.active_output().geometry().size.h as f64
+                                };
                                 let _ = self.common.shell.write().end_workspace_swipe(
                                     &seat.active_output(),
                                     norm_velocity,
