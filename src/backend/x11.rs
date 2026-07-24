@@ -6,6 +6,7 @@ use crate::{
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
+    wayland::protocols::drm::WlDrmState,
 };
 use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::output::comp::OutputConfig;
@@ -497,7 +498,7 @@ where
         .common
         .dmabuf_state
         .create_global_with_default_feedback::<State>(dh, &default_feedback);
-    let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
+    state.common.wl_drm_state = Some(WlDrmState::new::<State>(
         dh,
         render_node
             .dev_path_with_type(NodeType::Render)
@@ -508,7 +509,7 @@ where
             ))?,
         renderer.dmabuf_formats(),
         &dmabuf_global,
-    );
+    ));
 
     info!("EGL hardware-acceleration enabled.");
 

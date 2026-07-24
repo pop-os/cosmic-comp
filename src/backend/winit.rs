@@ -6,6 +6,7 @@ use crate::{
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
+    wayland::protocols::drm::WlDrmState,
 };
 use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::output::comp::{OutputConfig, TransformDef};
@@ -273,7 +274,7 @@ fn init_egl_client_side(
                 .create_global_with_default_feedback::<State>(dh, &feedback);
 
             let render_node = render_node.unwrap().unwrap();
-            let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
+            state.common.wl_drm_state = Some(WlDrmState::new::<State>(
                 dh,
                 render_node
                     .dev_path_with_type(NodeType::Render)
@@ -284,7 +285,7 @@ fn init_egl_client_side(
                     ))?,
                 dmabuf_formats,
                 &dmabuf_global,
-            );
+            ));
 
             info!("EGL hardware-acceleration enabled.");
         }

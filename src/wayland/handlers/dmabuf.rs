@@ -40,7 +40,7 @@ impl DmabufHandler for State {
     fn new_surface_feedback(
         &mut self,
         surface: &WlSurface,
-        global: &DmabufGlobal,
+        _global: &DmabufGlobal,
     ) -> Option<DmabufFeedback> {
         let BackendData::Kms(kms) = &self.backend else {
             return None;
@@ -57,18 +57,7 @@ impl DmabufHandler for State {
                 f.ended_at.is_none() && f.surface.has_surface(surface, WindowSurfaceType::all())
             });
 
-        let node = kms
-            .drm_devices
-            .values()
-            .find(|device| {
-                device
-                    .socket
-                    .as_ref()
-                    .map(|s| &s.dmabuf_global == global)
-                    .unwrap_or(false)
-            })?
-            .inner
-            .render_node;
+        let node = kms.primary_node.read().unwrap().unwrap();
         let kms_surface = kms
             .drm_devices
             .values()
@@ -77,9 +66,7 @@ impl DmabufHandler for State {
 
         Some(with_states(surface, |data| {
             if is_fullscreen {
-                feedback
-                    .primary_scanout_feedback
-                    .unwrap_or(feedback.render_feedback)
+                feedback.primary_scanout_feedback
             } else if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
                 feedback
                     .overlay_scanout_feedback

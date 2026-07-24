@@ -1522,7 +1522,7 @@ fn get_surface_dmabuf_feedback(
     render_node: DrmNode,
     target_node: DrmNode,
     render_formats: FormatSet,
-    _target_formats: FormatSet,
+    target_formats: FormatSet,
     primary_plane_formats: FormatSet,
     overlay_plane_formats: Option<FormatSet>,
 ) -> SurfaceDmabufFeedback {
@@ -1540,60 +1540,40 @@ fn get_surface_dmabuf_feedback(
             .cloned()
             .collect::<FormatSet>()
     });
-    let builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
 
-    /*
-    // Sadly no implementation would pick this up as a preferred render tranche,
-    // where the combined formats would increase our chances of doing a dmabuf copy.
-    // .. So we should probably not advertise this on the off-chance it actually triggers bugs.
-    //
+    let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats.clone());
 
-    let combined_formats = render_formats.intersection(&target_formats).cloned().collect::<FormatSet>();
-    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
-        builder = builder.add_preference_tranche(
-            render_node.dev_id(),
-            None,
-            combined_formats,
-        );
-    };
-
-    // We also can't advertise scan out tranches for the actual display device,
-    // as e.g. the nvidia driver might then send us dmabufs, that makes e.g. the iris hangs on import...
-    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
+    if target_node != render_node {
         builder = builder.add_preference_tranche(
             target_node.dev_id(),
-            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-            combined_formats,
+            zwp_linux_dmabuf_feedback_v1::TrancheFlags::Sampling,
+            target_formats,
+            6..=6,
         );
     };
-
-    // So no fun combinations, we gotta wait for dmabuf-v6
-    */
-
     let render_feedback = builder.clone().build().unwrap();
-    let primary_scanout_feedback = (target_node == render_node).then(|| {
+
+    let primary_scanout_feedback = builder
+        .clone()
+        .add_preference_tranche(
+            target_node.dev_id(),
+            zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout,
+            primary_plane_formats,
+            4..=6,
+        )
+        .build()
+        .unwrap();
+    let overlay_scanout_feedback = overlay_plane_formats.map(|formats| {
         builder
-            .clone()
             .add_preference_tranche(
-                render_node.dev_id(),
-                Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                primary_plane_formats,
+                target_node.dev_id(),
+                zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout,
+                formats,
+                4..=6,
             )
             .build()
             .unwrap()
     });
-    let overlay_scanout_feedback = overlay_plane_formats
-        .filter(|_| target_node == render_node)
-        .map(|formats| {
-            builder
-                .add_preference_tranche(
-                    render_node.dev_id(),
-                    Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                    formats,
-                )
-                .build()
-                .unwrap()
-        });
 
     SurfaceDmabufFeedback {
         render_feedback,
