@@ -177,16 +177,20 @@ impl ClientData for ClientState {
     fn disconnected(&self, client_id: ClientId, _reason: DisconnectReason) {
         self.evlh.insert_idle(move |state| {
             if let BackendData::Kms(kms_state) = &mut state.backend {
+                let primary = *kms_state.primary_node.read().unwrap();
+                // A multi-GPU client can be active on several nodes, so remove its
+                // id from every device it imported on
+                let mut freed_device = false;
                 for device in kms_state.drm_devices.values_mut() {
                     if device.inner.active_clients.remove(&client_id)
-                        && !device
-                            .inner
-                            .in_use(kms_state.primary_node.read().unwrap().as_ref())
+                        && !device.inner.in_use(primary.as_ref())
                     {
-                        if let Err(err) = kms_state.refresh_used_devices() {
-                            warn!(?err, "Failed to init devices.");
-                        };
-                        break;
+                        freed_device = true;
+                    }
+                }
+                if freed_device {
+                    if let Err(err) = kms_state.refresh_used_devices() {
+                        warn!(?err, "Failed to init devices.");
                     }
                 }
             }
@@ -567,7 +571,10 @@ impl LockedBackend<'_> {
                         shell.seats.iter(),
                         workspace_state,
                         xdg_activation_state,
-                    )
+                    );
+                    if let Some(session_lock) = &mut shell.session_lock {
+                        session_lock.surfaces.remove(output);
+                    }
                 }
             }
 
