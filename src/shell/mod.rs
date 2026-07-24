@@ -944,7 +944,7 @@ impl Workspaces {
             if let Some(new_output) = new_output {
                 for seat in seats {
                     if &seat.active_output() == output {
-                        seat.set_active_output(&new_output);
+                        seat.set_active_output(&new_output, true);
                     }
                     if seat.focused_output().as_ref() == Some(output) {
                         seat.set_focused_output(None);
@@ -3144,7 +3144,7 @@ impl Shell {
                 node, focus_stack, ..
             })) => {
                 let new_pos = if follow {
-                    seat.set_active_output(to_output);
+                    seat.set_active_output(to_output, false);
                     self.workspaces
                         .idx_for_handle(to_output, &to)
                         .and_then(|to_idx| {
@@ -3362,7 +3362,7 @@ impl Shell {
 
         let new_pos = if follow {
             if let Some(seat) = seat {
-                seat.set_active_output(&to_output);
+                seat.set_active_output(&to_output, false);
             }
             self.workspaces
                 .idx_for_handle(&to_output, to)
@@ -3473,7 +3473,7 @@ impl Shell {
         }
         let new_pos = if follow {
             if let Some(seat) = seat {
-                seat.set_active_output(&to_output);
+                seat.set_active_output(&to_output, false);
             }
             self.workspaces
                 .idx_for_handle(&to_output, to)

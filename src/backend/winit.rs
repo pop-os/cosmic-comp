@@ -310,7 +310,7 @@ impl State {
                 for seat in self.common.shell.read().seats.iter() {
                     let devices = seat.user_data().get::<Devices>().unwrap();
                     if devices.has_device(&WinitVirtualDevice) {
-                        seat.set_active_output(&self.backend.winit().output);
+                        seat.set_active_output(&self.backend.winit().output, false);
                         break;
                     }
                 }

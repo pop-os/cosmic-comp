@@ -499,7 +499,7 @@ impl Common {
                 }
                 if !shell.outputs().any(|o| o == &active_output) {
                     if let Some(other) = shell.outputs().next() {
-                        seat.set_active_output(other);
+                        seat.set_active_output(other, true);
                     }
                     continue;
                 }
