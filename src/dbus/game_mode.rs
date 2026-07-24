@@ -867,10 +867,11 @@ impl State {
         }
     }
 
-    /// If a deferred [`State::enter_game_mode`] is pending and a window tagged
-    /// with that app id now exists, enter game mode for it. Called from the
-    /// refresh tick, `map_window_notify`, and the `STEAM_GAME` property hook —
-    /// this is what turns the deferred request live.
+    /// If a deferred [`State::enter_game_mode`] is pending and a window resolving
+    /// to that app id now exists, enter game mode for it. Called from the
+    /// `map_window_notify` and `STEAM_GAME` property hooks (X11) and the refresh
+    /// tick — the latter is what resolves a native-Wayland target like the launcher
+    /// (which hits neither X11 hook), driven by its own map/commit activity.
     pub fn try_resolve_pending_game_mode(&mut self) {
         let pending = self.common.shell.read().game_mode.pending_app_id;
         if let Some(app_id) = pending {
@@ -907,8 +908,10 @@ impl State {
             else {
                 return;
             };
-            // Current surface still carries the active app id — nothing to do.
-            if surface.steam_appid() == Some(app_id) {
+            // Current surface still resolves to the active app id — nothing to do.
+            // Uses `app_id_of` (not the raw atom) so the launcher, matched by its
+            // Wayland `app_id`, isn't seen as "untagged" and re-resolved every tick.
+            if app_id_of(surface) == app_id {
                 return;
             }
             (app_id, gm.overlay_asserted)
@@ -930,7 +933,7 @@ impl State {
                     .game_mode
                     .minimized
                     .iter()
-                    .any(|s| s.steam_appid() == Some(app_id))
+                    .any(|s| app_id_of(s) == app_id)
         };
         if has_replacement {
             info!(target: GAMING_TARGET, app_id, "re-resolving game surface after a tag change");
@@ -1124,12 +1127,22 @@ fn find_game_surface(
     shell: &Shell,
     app_id: u32,
 ) -> Option<(CosmicSurface, Output, Vec<CosmicSurface>)> {
+    // 0 is `app_id_of`'s "unknown" sentinel (any untagged, non-launcher window),
+    // never a valid game-mode target. Guard against it so an accidental
+    // `enter_game(0)` can't fullscreen an arbitrary window + minimize everything.
+    if app_id == 0 {
+        return None;
+    }
     shell.workspaces.spaces().find_map(|ws| {
         let windows: Vec<CosmicSurface> =
             ws.mapped().map(|mapped| mapped.active_window()).collect();
+        // Match on `app_id_of` (not the raw `STEAM_GAME` atom) so the launcher —
+        // a native-Wayland toplevel that can't carry `STEAM_GAME`, recognized by
+        // its Wayland `app_id` (see `LAUNCHER_APP_IDS`) — is a first-class game-mode
+        // target: `enter_game_mode(LAUNCHER_APP_ID)` fullscreens it like a game.
         let game = windows
             .iter()
-            .find(|surface| surface.steam_appid() == Some(app_id))?
+            .find(|surface| app_id_of(surface) == app_id)?
             .clone();
         // Peers to minimize on entry. The real overlays (Steam overlay, MangoHud)
         // are override-redirect — never in `mapped()`, so never in this list — and

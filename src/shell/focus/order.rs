@@ -281,8 +281,12 @@ fn render_input_order_internal<R: 'static>(
             callback(Stage::OverrideRedirect { surface, location })?;
         }
 
-        // sticky window popups
-        callback(Stage::StickyPopups(&set.sticky_layer))?;
+        // sticky window popups — suppressed under an exclusive game so nothing
+        // desktop renders over the fullscreen game (real overlays are
+        // override-redirect, handled above).
+        if !game_mode_exclusive {
+            callback(Stage::StickyPopups(&set.sticky_layer))?;
+        }
     }
 
     if should_include_windows(element_filter) {
@@ -379,8 +383,8 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    // sticky windows
-    if should_include_windows(element_filter) {
+    // sticky windows — suppressed under an exclusive game (see sticky popups above)
+    if should_include_windows(element_filter) && !game_mode_exclusive {
         callback(Stage::Sticky(&set.sticky_layer))?;
     }
 
