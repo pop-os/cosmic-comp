@@ -68,12 +68,6 @@ use crate::{
 mod grabs;
 pub use self::grabs::*;
 
-pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
-pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
-/// Crossfade length when a window's reflowed buffer replaces the stretched
-/// pre-slide content at the end of a panel slide.
-pub const SLIDE_CROSSFADE_DURATION: Duration = Duration::from_millis(220);
-
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
     pub(crate) space: Space<CosmicMapped>,
@@ -177,7 +171,7 @@ enum Animation {
         target_geometry: Rectangle<i32, Local>,
     },
     /// Fade-in animation for newly mapped maximized windows.
-    /// Window starts at 0% opacity and fades to 100% over ANIMATION_DURATION.
+    /// Window starts at 0% opacity and fades to 100% over the animation duration.
     MapFadeIn {
         start: Instant,
         geometry: Rectangle<i32, Local>,
@@ -195,31 +189,31 @@ impl Animation {
         }
     }
 
-    fn alpha(&self) -> f32 {
+    fn alpha(&self, motion: crate::backend::render::animations::motion::Motion) -> f32 {
         match self {
             Animation::Tiled { .. } | Animation::ClientPipelinedResize { .. } => 1.0,
             Animation::Minimize { start, .. } => {
                 let percentage = Instant::now()
                     .duration_since(*start)
-                    .min(MINIMIZE_ANIMATION_DURATION)
+                    .min(motion.minimize)
                     .as_secs_f32()
-                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32();
+                    / motion.minimize.as_secs_f32();
                 1.0 - ((percentage - 0.5).max(0.0) * 2.0)
             }
             Animation::Unminimize { start, .. } => {
                 let percentage = Instant::now()
                     .duration_since(*start)
-                    .min(MINIMIZE_ANIMATION_DURATION)
+                    .min(motion.minimize)
                     .as_secs_f32()
-                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32();
+                    / motion.minimize.as_secs_f32();
                 (percentage * 2.0).min(1.0)
             }
             Animation::MapFadeIn { start, .. } => {
                 let percentage = Instant::now()
                     .duration_since(*start)
-                    .min(ANIMATION_DURATION)
+                    .min(motion.animation)
                     .as_secs_f32()
-                    / ANIMATION_DURATION.as_secs_f32();
+                    / motion.animation.as_secs_f32();
                 ease(EaseInOutCubic, 0.0, 1.0, percentage)
             }
         }
@@ -249,6 +243,7 @@ impl Animation {
         current_geometry: Rectangle<i32, Local>,
         tiled_state: Option<&TiledCorners>,
         gaps: (i32, i32),
+        motion: crate::backend::render::animations::motion::Motion,
     ) -> Rectangle<i32, Local> {
         let (duration, target_rect) = match self {
             Animation::Minimize {
@@ -256,7 +251,7 @@ impl Animation {
             }
             | Animation::Unminimize {
                 target_geometry, ..
-            } => (MINIMIZE_ANIMATION_DURATION, *target_geometry),
+            } => (motion.minimize, *target_geometry),
             Animation::MapFadeIn { geometry, .. } => {
                 // MapFadeIn doesn't change geometry, just alpha.
                 // Return the target geometry immediately.
@@ -270,11 +265,11 @@ impl Animation {
                 } else {
                     current_geometry
                 };
-                (ANIMATION_DURATION, target_geometry)
+                (motion.animation, target_geometry)
             }
             Animation::ClientPipelinedResize {
                 target_geometry, ..
-            } => (ANIMATION_DURATION, *target_geometry),
+            } => (motion.animation, *target_geometry),
         };
         let previous_rect = *self.previous_geometry();
         let start = *self.start();
@@ -801,7 +796,8 @@ impl FloatingLayout {
 
         // Send first configure 1 frame ahead on the curve
         let frame_interval = Duration::from_millis(16);
-        let first_progress = frame_interval.as_secs_f64() / ANIMATION_DURATION.as_secs_f64();
+        let first_progress =
+            frame_interval.as_secs_f64() / self.theme.motion.animation.as_secs_f64();
         let first_geo: Rectangle<i32, Local> = ease(
             EaseInOutCubic,
             EaseRectangle(original_geometry),
@@ -853,7 +849,8 @@ impl FloatingLayout {
 
         // Send first configure 1 frame ahead on the curve
         let frame_interval = Duration::from_millis(16);
-        let first_progress = frame_interval.as_secs_f64() / ANIMATION_DURATION.as_secs_f64();
+        let first_progress =
+            frame_interval.as_secs_f64() / self.theme.motion.animation.as_secs_f64();
         let first_geo: Rectangle<i32, Local> = ease(
             EaseInOutCubic,
             EaseRectangle(current_geo),
@@ -911,7 +908,8 @@ impl FloatingLayout {
 
         // Send first configure 1 frame ahead on the curve
         let frame_interval = Duration::from_millis(16);
-        let first_progress = frame_interval.as_secs_f64() / ANIMATION_DURATION.as_secs_f64();
+        let first_progress =
+            frame_interval.as_secs_f64() / self.theme.motion.animation.as_secs_f64();
         let first_geo: Rectangle<i32, Local> = ease(
             EaseInOutCubic,
             EaseRectangle(current_geo),
@@ -2157,6 +2155,7 @@ impl FloatingLayout {
                         current_geometry,
                         tiled_state.as_ref(),
                         self.gaps(),
+                        self.theme.motion,
                     )
                 } else {
                     current_geometry
@@ -2808,8 +2807,8 @@ impl FloatingLayout {
                 } = anim
                 {
                     let elapsed = now.duration_since(*start);
-                    let progress = elapsed.min(ANIMATION_DURATION).as_secs_f64()
-                        / ANIMATION_DURATION.as_secs_f64();
+                    let progress = elapsed.min(self.theme.motion.animation).as_secs_f64()
+                        / self.theme.motion.animation.as_secs_f64();
 
                     // Only send if animation is still running and enough time passed
                     let time_since_last = now.duration_since(*last_configure_time);
@@ -2819,9 +2818,9 @@ impl FloatingLayout {
                         if pending < 3 {
                             // Send configure for 1 frame ahead on the curve
                             let lookahead_progress = (elapsed + frame_interval)
-                                .min(ANIMATION_DURATION)
+                                .min(self.theme.motion.animation)
                                 .as_secs_f64()
-                                / ANIMATION_DURATION.as_secs_f64();
+                                / self.theme.motion.animation.as_secs_f64();
                             let mut lookahead_geo: Rectangle<i32, Local> = ease(
                                 EaseInOutCubic,
                                 EaseRectangle(*previous_geometry),
@@ -2873,7 +2872,7 @@ impl FloatingLayout {
                     ..
                 } = anim
                     && !*finalized
-                    && now.duration_since(*start) >= ANIMATION_DURATION
+                    && now.duration_since(*start) >= self.theme.motion.animation
                 {
                     tracing::debug!(
                         app_id = %mapped.active_window().app_id(),
@@ -2920,7 +2919,7 @@ impl FloatingLayout {
                     }
                     // Safety: don't wait forever if client never reaches target
                     let total_elapsed = now.duration_since(*start);
-                    if total_elapsed > ANIMATION_DURATION * 3 {
+                    if total_elapsed > self.theme.motion.animation * 3 {
                         tracing::warn!(
                             app_id = %mapped.active_window().app_id(),
                             "[PIPELINE] Buffer never reached target, force-removing animation"
@@ -2940,9 +2939,9 @@ impl FloatingLayout {
                     !target_matches
                 }
                 Animation::Tiled { .. } | Animation::MapFadeIn { .. } => {
-                    now.duration_since(*anim.start()) < ANIMATION_DURATION
+                    now.duration_since(*anim.start()) < self.theme.motion.animation
                 }
-                _ => now.duration_since(*anim.start()) < MINIMIZE_ANIMATION_DURATION,
+                _ => now.duration_since(*anim.start()) < self.theme.motion.minimize,
             }
         });
         if self.animations.is_empty() != was_empty {
@@ -3012,7 +3011,10 @@ impl FloatingLayout {
 
                 let anim_opt = self.animations.get(elem);
                 let (geometry, elem_alpha) = if let Some(anim) = anim_opt {
-                    (*anim.previous_geometry(), alpha * anim.alpha())
+                    (
+                        *anim.previous_geometry(),
+                        alpha * anim.alpha(self.theme.motion),
+                    )
                 } else {
                     let geo = self.space.element_geometry(elem)?;
                     (geo.as_local(), alpha)
@@ -3079,7 +3081,10 @@ impl FloatingLayout {
                 if needs_blur {
                     let anim_opt = self.animations.get(elem);
                     let (geometry, elem_alpha) = if let Some(anim) = anim_opt {
-                        (*anim.previous_geometry(), alpha * anim.alpha())
+                        (
+                            *anim.previous_geometry(),
+                            alpha * anim.alpha(self.theme.motion),
+                        )
                     } else {
                         let geo = self.space.element_geometry(elem)?;
                         (geo.as_local(), alpha)
@@ -3178,7 +3183,10 @@ impl FloatingLayout {
             .filter_map(|elem| {
                 let anim_opt = self.animations.get(elem);
                 let (geometry, elem_alpha) = if let Some(anim) = anim_opt {
-                    (*anim.previous_geometry(), alpha * anim.alpha())
+                    (
+                        *anim.previous_geometry(),
+                        alpha * anim.alpha(self.theme.motion),
+                    )
                 } else {
                     let geo = self.space.element_geometry(elem)?;
                     (geo.as_local(), alpha)
@@ -3249,7 +3257,12 @@ impl FloatingLayout {
                 let (geometry, alpha) = self
                     .animations
                     .get(elem)
-                    .map(|anim| (*anim.previous_geometry(), alpha * anim.alpha()))
+                    .map(|anim| {
+                        (
+                            *anim.previous_geometry(),
+                            alpha * anim.alpha(self.theme.motion),
+                        )
+                    })
                     .unwrap_or_else(|| {
                         (self.space.element_geometry(elem).unwrap().as_local(), alpha)
                     });
@@ -3545,11 +3558,11 @@ impl FloatingLayout {
                                 output_h = output_geometry.size.h,
                                 "[PIPELINE_RENDER] frame"
                             );
-                            (geo, alpha * anim.alpha())
+                            (geo, alpha * anim.alpha(self.theme.motion))
                         }
                         _ => {
                             let geo = *anim.previous_geometry();
-                            (geo, alpha * anim.alpha())
+                            (geo, alpha * anim.alpha(self.theme.motion))
                         }
                     }
                 })
@@ -3582,6 +3595,7 @@ impl FloatingLayout {
                                 .unwrap_or(geometry),
                             elem.floating_tiled.lock().unwrap().as_ref(),
                             self.gaps(),
+                            self.theme.motion,
                         ),
                     )
                 } else {
@@ -3636,6 +3650,7 @@ impl FloatingLayout {
                             .unwrap_or(geometry),
                         elem.floating_tiled.lock().unwrap().as_ref(),
                         self.gaps(),
+                        self.theme.motion,
                     );
 
                     let buffer_size = elem.geometry().size.as_local();
@@ -3725,6 +3740,7 @@ impl FloatingLayout {
                                 .unwrap_or(geometry),
                             elem.floating_tiled.lock().unwrap().as_ref(),
                             self.gaps(),
+                            self.theme.motion,
                         );
 
                         tracing::debug!(
@@ -3978,6 +3994,7 @@ impl FloatingLayout {
                             .unwrap_or(geometry),
                         elem.floating_tiled.lock().unwrap().as_ref(),
                         self.gaps(),
+                        self.theme.motion,
                     );
 
                     let buffer_size = elem.geometry().size;
@@ -4183,7 +4200,7 @@ impl FloatingLayout {
                     && let Some(start) = snapshot.fade_start
                 {
                     let t = (start.elapsed().as_secs_f32()
-                        / SLIDE_CROSSFADE_DURATION.as_secs_f32())
+                        / self.theme.motion.slide_crossfade.as_secs_f32())
                     .min(1.0);
                     if t >= 1.0 {
                         remove = true;
@@ -4226,7 +4243,7 @@ impl FloatingLayout {
                                 .as_logical()
                                 .to_physical_precise_round(output_scale),
                             output_scale.into(),
-                            alpha * mode.alpha().unwrap_or(1.0),
+                            alpha * mode.alpha(self.theme.motion.animation).unwrap_or(1.0),
                         )
                         .into_iter()
                         .map(CosmicMappedRenderElement::Window)

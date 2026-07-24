@@ -97,7 +97,6 @@ use crate::{
 };
 
 pub mod auto_hide;
-pub mod ease;
 pub mod element;
 pub mod focus;
 pub mod grabs;
@@ -130,9 +129,6 @@ use self::{
     },
 };
 
-const ANIMATION_DURATION: Duration = Duration::from_millis(200);
-const LAYER_FADE_IN_DURATION: Duration = Duration::from_millis(200);
-const LAYER_FADE_OUT_DURATION: Duration = Duration::from_millis(100);
 const GESTURE_MAX_LENGTH: f64 = 150.0;
 const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
 const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
@@ -158,17 +154,17 @@ pub enum OverviewMode {
 }
 
 impl OverviewMode {
-    pub fn alpha(&self) -> Option<f32> {
+    pub fn alpha(&self, animation: Duration) -> Option<f32> {
         match self {
             OverviewMode::Started(_, start) => {
                 let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                    / animation.as_millis() as f32;
                 Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
             OverviewMode::Active(_) => Some(1.0),
             OverviewMode::Ended(_, end) => {
                 let percentage = Instant::now().duration_since(*end).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                    / animation.as_millis() as f32;
                 if percentage < 1.0 {
                     Some(ease(EaseInOutCubic, 1.0, 0.0, percentage))
                 } else {
@@ -211,17 +207,17 @@ pub enum ResizeMode {
 }
 
 impl ResizeMode {
-    pub fn alpha(&self) -> Option<f32> {
+    pub fn alpha(&self, animation: Duration) -> Option<f32> {
         match self {
             ResizeMode::Started(_, start, _) => {
                 let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                    / animation.as_millis() as f32;
                 Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
             ResizeMode::Active(_, _) => Some(1.0),
             ResizeMode::Ended(end, _) => {
                 let percentage = Instant::now().duration_since(*end).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                    / animation.as_millis() as f32;
                 if percentage < 1.0 {
                     Some(ease(EaseInOutCubic, 1.0, 0.0, percentage))
                 } else {
@@ -266,18 +262,18 @@ pub enum HomeMode {
 
 impl HomeMode {
     /// Returns the current opacity for home-only surfaces (0.0 = hidden, 1.0 = visible)
-    pub fn alpha(&self) -> f32 {
+    pub fn alpha(&self, animation: Duration) -> f32 {
         match self {
             HomeMode::None => 0.0,
             HomeMode::FadingIn(start) => {
                 let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                    / animation.as_millis() as f32;
                 ease(EaseInOutCubic, 0.0, 1.0, percentage.min(1.0))
             }
             HomeMode::Active => 1.0,
             HomeMode::FadingOut(start) => {
                 let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                    / animation.as_millis() as f32;
                 ease(EaseInOutCubic, 1.0, 0.0, percentage.min(1.0))
             }
         }
@@ -289,23 +285,23 @@ impl HomeMode {
     }
 
     /// Returns true if an animation is in progress
-    pub fn is_animating(&self) -> bool {
+    pub fn is_animating(&self, animation: Duration) -> bool {
         match self {
             HomeMode::FadingIn(start) | HomeMode::FadingOut(start) => {
-                Instant::now().duration_since(*start) < ANIMATION_DURATION
+                Instant::now().duration_since(*start) < animation
             }
             _ => false,
         }
     }
 
     /// Start transition to home mode
-    pub fn enter(&mut self) {
+    pub fn enter(&mut self, animation: Duration) {
         match self {
             HomeMode::None => *self = HomeMode::FadingIn(Instant::now()),
             HomeMode::FadingOut(start) => {
                 // Reverse the animation from current position
                 let elapsed = Instant::now().duration_since(*start);
-                let remaining = ANIMATION_DURATION.saturating_sub(elapsed);
+                let remaining = animation.saturating_sub(elapsed);
                 *self = HomeMode::FadingIn(Instant::now() - remaining);
             }
             _ => {} // Already active or fading in
@@ -313,13 +309,13 @@ impl HomeMode {
     }
 
     /// Start transition out of home mode
-    pub fn exit(&mut self) {
+    pub fn exit(&mut self, animation: Duration) {
         match self {
             HomeMode::Active => *self = HomeMode::FadingOut(Instant::now()),
             HomeMode::FadingIn(start) => {
                 // Reverse the animation from current position
                 let elapsed = Instant::now().duration_since(*start);
-                let remaining = ANIMATION_DURATION.saturating_sub(elapsed);
+                let remaining = animation.saturating_sub(elapsed);
                 *self = HomeMode::FadingOut(Instant::now() - remaining);
             }
             _ => {} // Already none or fading out
@@ -327,15 +323,15 @@ impl HomeMode {
     }
 
     /// Update animation state, transitioning to final state when complete
-    pub fn update(&mut self) {
+    pub fn update(&mut self, animation: Duration) {
         match self {
             HomeMode::FadingIn(start) => {
-                if Instant::now().duration_since(*start) >= ANIMATION_DURATION {
+                if Instant::now().duration_since(*start) >= animation {
                     *self = HomeMode::Active;
                 }
             }
             HomeMode::FadingOut(start) => {
-                if Instant::now().duration_since(*start) >= ANIMATION_DURATION {
+                if Instant::now().duration_since(*start) >= animation {
                     *self = HomeMode::None;
                 }
             }
@@ -896,8 +892,7 @@ impl WorkspaceDelta {
         }
     }
 
-    pub fn new_gesture_end(delta: f64, velocity: f64, forward: bool) -> Self {
-        let params: SpringParams = SpringParams::new(1.0, 1000.0, 0.0001);
+    pub fn new_gesture_end(delta: f64, velocity: f64, forward: bool, params: SpringParams) -> Self {
         WorkspaceDelta::GestureEnd {
             start: Instant::now(),
             forward,
@@ -1165,7 +1160,7 @@ impl WorkspaceSet {
             match start {
                 WorkspaceDelta::Shortcut(st) => {
                     if Instant::now().duration_since(st).as_millis() as f32
-                        >= ANIMATION_DURATION.as_millis() as f32
+                        >= self.theme.motion.animation.as_millis() as f32
                     {
                         self.previously_active = None;
                     }
@@ -2450,6 +2445,8 @@ impl Shell {
         velocity: f64,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
+        // Snapshot the theme's window spring for the velocity-seeded release.
+        let window_spring = self.theme.motion.window_spring;
         let result =
             match &mut self.workspaces.mode {
                 WorkspaceMode::OutputBound => {
@@ -2478,6 +2475,7 @@ impl Shell {
                                         delta.abs(),
                                         velocity.abs(),
                                         forward,
+                                        window_spring,
                                     ),
                                     workspace_state,
                                 )?;
@@ -2487,6 +2485,7 @@ impl Shell {
                                         1.0 - delta.abs(),
                                         velocity.abs(),
                                         !forward,
+                                        window_spring,
                                     ),
                                     workspace_state,
                                 )?;
@@ -2520,6 +2519,7 @@ impl Shell {
                                         delta.abs(),
                                         velocity.abs(),
                                         forward,
+                                        window_spring,
                                     ),
                                     workspace_state,
                                 )?;
@@ -2529,6 +2529,7 @@ impl Shell {
                                         1.0 - delta.abs(),
                                         velocity.abs(),
                                         !forward,
+                                        window_spring,
                                     ),
                                     workspace_state,
                                 )?;
@@ -3170,7 +3171,7 @@ impl Shell {
             self.resize_mode,
             ResizeMode::None | ResizeMode::Active(_, _)
         );
-        let home = self.home_mode.is_animating();
+        let home = self.home_mode.is_animating(self.theme.motion.animation);
         let voice = self.voice_mode.is_animating();
         let voice_orb = self.voice_orb_state.needs_continuous_render();
         let workspaces = self
@@ -3226,7 +3227,7 @@ impl Shell {
             clients.extend(workspace.update_animations());
         }
         // Update home mode animation
-        self.home_mode.update();
+        self.home_mode.update(self.theme.motion.animation);
         // Update voice mode fade animation and coordinate orb showing/hiding
         self.update_voice_mode_fade();
         // Update voice orb animation - track if shrinking_from_attached just completed
@@ -4223,12 +4224,14 @@ impl Shell {
         if from == target {
             return;
         }
+        let motion = self.theme.motion;
         self.active_layer_resize_anim = Some(layer_resize_anim::LayerResizeAnim::new(
             surface_id.clone(),
             output.clone(),
             anchor_right,
             from,
             target,
+            motion,
         ));
         // Apply the first frame immediately so the motion starts this dispatch.
         self.update_layer_resize_animation();
@@ -4752,8 +4755,10 @@ impl Shell {
             let (reverse_duration, trigger) =
                 if let OverviewMode::Started(trigger, start) = self.overview_mode.clone() {
                     (
-                        ANIMATION_DURATION
-                            - Instant::now().duration_since(start).min(ANIMATION_DURATION),
+                        self.theme.motion.animation
+                            - Instant::now()
+                                .duration_since(start)
+                                .min(self.theme.motion.animation),
                         Some(trigger),
                     )
                 } else {
@@ -4765,7 +4770,7 @@ impl Shell {
 
     pub fn overview_mode(&self) -> (OverviewMode, Option<SwapIndicator>) {
         if let OverviewMode::Started(trigger, timestamp) = &self.overview_mode
-            && Instant::now().duration_since(*timestamp) > ANIMATION_DURATION
+            && Instant::now().duration_since(*timestamp) > self.theme.motion.animation
         {
             return (
                 OverviewMode::Active(trigger.clone()),
@@ -4773,7 +4778,7 @@ impl Shell {
             );
         }
         if let OverviewMode::Ended(_, timestamp) = &self.overview_mode
-            && Instant::now().duration_since(*timestamp) > ANIMATION_DURATION
+            && Instant::now().duration_since(*timestamp) > self.theme.motion.animation
         {
             return (OverviewMode::None, None);
         }
@@ -4793,18 +4798,18 @@ impl Shell {
 
     /// Get the current opacity for home-only surfaces (0.0-1.0)
     pub fn home_alpha(&self) -> f32 {
-        self.home_mode.alpha()
+        self.home_mode.alpha(self.theme.motion.animation)
     }
 
     /// Exit home mode visually only (fade out home surfaces without restoring windows)
     /// Use this when another mode like voice mode takes over
     pub fn exit_home_visual_only(&mut self) {
-        self.home_mode.exit();
+        self.home_mode.exit(self.theme.motion.animation);
     }
 
     /// Enter home mode (with animation) and minimize all windows
     pub fn enter_home(&mut self) {
-        self.home_mode.enter();
+        self.home_mode.enter(self.theme.motion.animation);
 
         // If voice mode is active and attached to a window, transition to floating
         // since the window will be minimized
@@ -4873,7 +4878,7 @@ impl Shell {
 
     /// Exit home mode (with animation) and restore previously minimized windows
     pub fn exit_home(&mut self, seat: &Seat<State>, loop_handle: &LoopHandle<'static, State>) {
-        self.home_mode.exit();
+        self.home_mode.exit(self.theme.motion.animation);
 
         // Restore windows that were minimized by home mode
         let surfaces_to_restore = std::mem::take(&mut self.home_minimized_surfaces);
@@ -4884,12 +4889,12 @@ impl Shell {
 
     /// Update home mode animation state
     pub fn update_home_animation(&mut self) {
-        self.home_mode.update();
+        self.home_mode.update(self.theme.motion.animation);
     }
 
     /// Check if home mode animation is in progress
     pub fn home_animation_going(&self) -> bool {
-        self.home_mode.is_animating()
+        self.home_mode.is_animating(self.theme.motion.animation)
     }
 
     /// Get the set of home-only surface IDs
@@ -4954,6 +4959,9 @@ impl Shell {
     /// Set a surface's hidden state (via layer_surface_visibility protocol)
     pub fn set_surface_hidden(&mut self, surface_id: ObjectId, hidden: bool) {
         use crate::wayland::protocols::layer_surface_visibility::LayerTransition;
+        // Snapshot the theme's motion tokens once; the open/close animations
+        // capture this so their sampling needs no theme handle.
+        let motion = self.theme.motion;
         // Decide whether to slide or fade. A surface that explicitly requested
         // `Fade` never slides (even if edge-anchored); otherwise fall back to
         // the anchor-based heuristic.
@@ -4966,21 +4974,20 @@ impl Shell {
         // surface we first capture how "open" it currently is, so the close can start
         // from there (a seamless reverse) instead of snapping to full-open and
         // popping. `close_backdate_ms` is how far to back-date the LayerClose:
-        //   - mid-open at linear progress p → (1 - p) · CLOSE_DURATION (symmetry)
-        //   - never shown (still pending first commit) → CLOSE_DURATION (already hidden)
+        //   - mid-open at linear progress p → (1 - p) · motion.layer_open (symmetry)
+        //   - never shown (still pending first commit) → motion.layer_open (already hidden)
         //   - fully open / resting → 0 (full close from the top)
         let close_backdate_ms: u64 = if hidden {
-            let backdate = if let Some(o) =
-                self.layer_opens.iter().find(|o| o.surface_id == surface_id)
-            {
-                let p = (o.start.elapsed().as_secs_f32() / layer_open::OPEN_DURATION.as_secs_f32())
-                    .clamp(0.0, 1.0);
-                ((1.0 - p) * layer_open::CLOSE_DURATION.as_millis() as f32) as u64
-            } else if self.pending_layer_opens.contains(&surface_id) {
-                layer_open::CLOSE_DURATION.as_millis() as u64
-            } else {
-                0
-            };
+            let backdate =
+                if let Some(o) = self.layer_opens.iter().find(|o| o.surface_id == surface_id) {
+                    let p = (o.start.elapsed().as_secs_f32() / motion.layer_open.as_secs_f32())
+                        .clamp(0.0, 1.0);
+                    ((1.0 - p) * motion.layer_open.as_millis() as f32) as u64
+                } else if self.pending_layer_opens.contains(&surface_id) {
+                    motion.layer_open.as_millis() as u64
+                } else {
+                    0
+                };
             self.remove_layer_open(&surface_id);
             backdate
         } else {
@@ -5007,7 +5014,7 @@ impl Shell {
                     .iter_mut()
                     .find(|s| s.surface_id == surface_id)
                 {
-                    existing.visibility.start_hide();
+                    existing.visibility.start_hide(motion);
                 } else {
                     let mut slide = layer_slide::LayerSlide::new(
                         surface_id.clone(),
@@ -5015,7 +5022,7 @@ impl Shell {
                         width,
                         exclusive_zone,
                     );
-                    slide.visibility.start_hide();
+                    slide.visibility.start_hide(motion);
                     self.layer_slides.push(slide);
                 }
                 // Configure all floating windows at their final size right
@@ -5047,7 +5054,7 @@ impl Shell {
                         .iter_mut()
                         .find(|s| s.surface_id == surface_id)
                     {
-                        existing.visibility.start_show();
+                        existing.visibility.start_show(motion);
                     } else {
                         let mut slide = layer_slide::LayerSlide::new_hidden(
                             surface_id.clone(),
@@ -5055,7 +5062,7 @@ impl Shell {
                             width,
                             exclusive_zone,
                         );
-                        slide.visibility.start_show();
+                        slide.visibility.start_show(motion);
                         self.layer_slides.push(slide);
                     }
                     // Configure all floating windows at their final size right
@@ -5088,6 +5095,7 @@ impl Shell {
                     .push(layer_open::LayerClose::new_backdated(
                         surface_id.clone(),
                         close_backdate_ms,
+                        motion,
                     ));
             } else {
                 let was_hidden = self.hidden_surfaces.remove(&surface_id);
@@ -5100,7 +5108,7 @@ impl Shell {
                     .iter()
                     .find(|c| c.surface_id == surface_id)
                     .map(|c| {
-                        (c.start.elapsed().as_secs_f32() / layer_open::CLOSE_DURATION.as_secs_f32())
+                        (c.start.elapsed().as_secs_f32() / motion.layer_open.as_secs_f32())
                             .clamp(0.0, 1.0)
                     });
                 self.rise_surfaces.insert(surface_id.clone());
@@ -5121,20 +5129,20 @@ impl Shell {
                     // so its first frame matches the close's current alpha/scale/
                     // offset (the easing is point-symmetric about (0.5, 0.5)),
                     // then it rises the rest of the way — no jump.
-                    let backdate = ((1.0 - close_progress)
-                        * layer_open::OPEN_DURATION.as_millis() as f32)
-                        as u64;
+                    let backdate =
+                        ((1.0 - close_progress) * motion.layer_open.as_millis() as f32) as u64;
                     self.layer_closes.retain(|c| c.surface_id != surface_id);
                     self.layer_opens.retain(|o| o.surface_id != surface_id);
                     self.layer_opens.push(layer_open::LayerOpen::new_backdated(
                         surface_id.clone(),
                         backdate,
+                        motion,
                     ));
                 } else if was_fading_out {
                     // Legacy plain fade-out still in flight — rise in from scratch.
                     self.layer_opens.retain(|o| o.surface_id != surface_id);
                     self.layer_opens
-                        .push(layer_open::LayerOpen::new(surface_id));
+                        .push(layer_open::LayerOpen::new(surface_id, motion));
                 }
             }
         }
@@ -5278,8 +5286,9 @@ impl Shell {
             .iter()
             .filter_map(|(surface_id, start)| {
                 let elapsed = now.saturating_duration_since(*start);
-                let progress =
-                    (elapsed.as_secs_f32() / LAYER_FADE_IN_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+                let progress = (elapsed.as_secs_f32()
+                    / self.theme.motion.layer_fade_in.as_secs_f32())
+                .clamp(0.0, 1.0);
                 if progress >= 1.0 {
                     None
                 } else {
@@ -5327,7 +5336,7 @@ impl Shell {
         let now = Instant::now();
         self.layer_fade_in.retain(|_, start| {
             let elapsed = now.saturating_duration_since(*start);
-            elapsed < LAYER_FADE_IN_DURATION
+            elapsed < self.theme.motion.layer_fade_in
         });
     }
 
@@ -5371,7 +5380,7 @@ impl Shell {
     }
 
     /// Get the map of layer surfaces currently fading out with their alpha values.
-    /// Alpha goes from 1.0 → 0.0 over LAYER_FADE_OUT_DURATION.
+    /// Alpha goes from 1.0 → 0.0 over the layer fade-out duration.
     pub fn layer_fade_out_alphas(&self) -> std::collections::HashMap<ObjectId, f32> {
         let now = Instant::now();
         let mut result: std::collections::HashMap<ObjectId, f32> = self
@@ -5379,8 +5388,9 @@ impl Shell {
             .iter()
             .filter_map(|(surface_id, start)| {
                 let elapsed = now.saturating_duration_since(*start);
-                let progress =
-                    (elapsed.as_secs_f32() / LAYER_FADE_OUT_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+                let progress = (elapsed.as_secs_f32()
+                    / self.theme.motion.layer_fade_out.as_secs_f32())
+                .clamp(0.0, 1.0);
                 if progress >= 1.0 {
                     None
                 } else {
@@ -5406,7 +5416,7 @@ impl Shell {
         let mut completed = Vec::new();
         self.layer_fade_out.retain(|surface_id, start| {
             let elapsed = now.saturating_duration_since(*start);
-            if elapsed >= LAYER_FADE_OUT_DURATION {
+            if elapsed >= self.theme.motion.layer_fade_out {
                 tracing::debug!(
                     ?surface_id,
                     elapsed_ms = elapsed.as_millis(),
@@ -5467,8 +5477,9 @@ impl Shell {
                 "activate_pending_fade_in: starting open (slide-up) animation on buffer commit"
             );
             self.layer_opens.retain(|o| o.surface_id != *surface_id);
+            let motion = self.theme.motion;
             self.layer_opens
-                .push(layer_open::LayerOpen::new(surface_id.clone()));
+                .push(layer_open::LayerOpen::new(surface_id.clone(), motion));
         }
     }
 
@@ -5727,11 +5738,11 @@ impl Shell {
     pub fn surface_home_visibility(&self, surface_id: &ObjectId) -> (bool, f32) {
         if self.home_only_surfaces.contains(surface_id) {
             // Home-only surface: visible when at home or animating
-            let alpha = self.home_mode.alpha();
+            let alpha = self.home_mode.alpha(self.theme.motion.animation);
             (alpha > 0.0, alpha)
         } else if self.hide_on_home_surfaces.contains(surface_id) {
             // Hide-on-home surface: visible when NOT at home (inverse alpha)
-            let alpha = 1.0 - self.home_mode.alpha();
+            let alpha = 1.0 - self.home_mode.alpha(self.theme.motion.animation);
             (alpha > 0.0, alpha)
         } else {
             // Always-visible surface (default)
@@ -5743,10 +5754,10 @@ impl Shell {
     pub fn should_surface_be_visible(&self, surface_id: &ObjectId, is_home: bool) -> bool {
         if self.home_only_surfaces.contains(surface_id) {
             // Home-only surface: visible when at home or during animation
-            is_home || self.home_mode.alpha() > 0.0
+            is_home || self.home_mode.alpha(self.theme.motion.animation) > 0.0
         } else if self.hide_on_home_surfaces.contains(surface_id) {
             // Hide-on-home surface: visible when NOT at home or during animation
-            !is_home || self.home_mode.alpha() < 1.0
+            !is_home || self.home_mode.alpha(self.theme.motion.animation) < 1.0
         } else {
             // Always-visible surface (default)
             true
@@ -5782,7 +5793,7 @@ impl Shell {
 
     pub fn resize_mode(&self) -> (ResizeMode, Option<ResizeIndicator>) {
         if let ResizeMode::Started(binding, timestamp, direction) = &self.resize_mode
-            && Instant::now().duration_since(*timestamp) > ANIMATION_DURATION
+            && Instant::now().duration_since(*timestamp) > self.theme.motion.animation
         {
             return (
                 ResizeMode::Active(binding.clone(), *direction),
@@ -5790,7 +5801,7 @@ impl Shell {
             );
         }
         if let ResizeMode::Ended(timestamp, _) = self.resize_mode
-            && Instant::now().duration_since(timestamp) > ANIMATION_DURATION
+            && Instant::now().duration_since(timestamp) > self.theme.motion.animation
         {
             return (ResizeMode::None, None);
         }
@@ -5928,12 +5939,12 @@ impl Shell {
     ) {
         match &self.overview_mode {
             OverviewMode::Started(trigger, timestamp)
-                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > self.theme.motion.animation =>
             {
                 self.overview_mode = OverviewMode::Active(trigger.clone());
             }
             OverviewMode::Ended(_, timestamp)
-                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > self.theme.motion.animation =>
             {
                 self.overview_mode = OverviewMode::None;
                 self.swap_indicator = None;
@@ -5943,12 +5954,12 @@ impl Shell {
 
         match &self.resize_mode {
             ResizeMode::Started(binding, timestamp, direction)
-                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > self.theme.motion.animation =>
             {
                 self.resize_mode = ResizeMode::Active(binding.clone(), *direction);
             }
             ResizeMode::Ended(timestamp, _)
-                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > self.theme.motion.animation =>
             {
                 self.resize_mode = ResizeMode::None;
                 self.resize_indicator = None;
@@ -6910,13 +6921,14 @@ impl Shell {
                     "map_layer: starting first-open slide-in"
                 );
                 // Start hidden, then immediately begin the slide-in.
+                let motion = self.theme.motion;
                 let mut slide = layer_slide::LayerSlide::new_hidden(
                     surface_id.clone(),
                     edge,
                     width,
                     exclusive_zone,
                 );
-                slide.visibility.start_show();
+                slide.visibility.start_show(motion);
                 self.layer_slides.push(slide);
                 // Override exclusive_zone to 0 for the start of the animation,
                 // then re-arrange so other surfaces don't jump immediately.

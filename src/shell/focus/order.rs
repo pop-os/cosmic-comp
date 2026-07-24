@@ -16,9 +16,8 @@ use smithay::{
 use crate::{
     backend::render::{ElementFilter, HomeVisibilityContext},
     shell::{
-        SeatExt, Shell, Workspace, WorkspaceDelta,
-        focus::target::KeyboardFocusTarget,
-        layout::{floating::FloatingLayout, tiling::ANIMATION_DURATION},
+        SeatExt, Shell, Workspace, WorkspaceDelta, focus::target::KeyboardFocusTarget,
+        layout::floating::FloatingLayout,
     },
     utils::{
         geometry::*,
@@ -203,7 +202,7 @@ fn render_input_order_internal<R: 'static>(
                         0.0,
                         1.0,
                         Instant::now().duration_since(*st).as_millis() as f32
-                            / ANIMATION_DURATION.as_millis() as f32,
+                            / shell.theme().motion.animation.as_millis() as f32,
                     ),
                 ),
                 WorkspaceDelta::Gesture {

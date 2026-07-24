@@ -13,13 +13,9 @@
 //! - **Hidden**: Surface is fully off-screen.
 //! - **SlidingIn**: Animate surface back on-screen.
 
+use crate::backend::render::animations::motion;
 use std::time::{Duration, Instant};
 use wayland_backend::server::ObjectId;
-
-/// Duration of the slide-out (hide) animation (design `--duration-slow`).
-pub const SLIDE_OUT_DURATION: Duration = super::ease::SPRING_DURATION;
-/// Duration of the slide-in (show) animation (design `--duration-slow`).
-pub const SLIDE_IN_DURATION: Duration = super::ease::SPRING_DURATION;
 
 /// Which edge the surface slides toward.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +38,8 @@ pub enum SlideVisibility {
         start: Instant,
         from_factor: f32,
         duration: Duration,
+        /// Motion tokens captured from the theme when the slide began.
+        motion: motion::Motion,
     },
     /// Fully hidden (factor = 1.0, fully off-screen).
     Hidden,
@@ -50,6 +48,8 @@ pub enum SlideVisibility {
         start: Instant,
         from_factor: f32,
         duration: Duration,
+        /// Motion tokens captured from the theme when the slide began.
+        motion: motion::Motion,
     },
 }
 
@@ -62,9 +62,10 @@ impl SlideVisibility {
                 start,
                 from_factor,
                 duration,
+                motion,
             } => {
                 let t = progress_clamped(*start, *duration);
-                let eased = super::ease::ease_spring(t);
+                let eased = motion.ease_spring(t);
                 from_factor + (1.0 - from_factor) * eased
             }
             Self::Hidden => 1.0,
@@ -72,9 +73,10 @@ impl SlideVisibility {
                 start,
                 from_factor,
                 duration,
+                motion,
             } => {
                 let t = progress_clamped(*start, *duration);
-                let eased = super::ease::ease_spring(t);
+                let eased = motion.ease_spring(t);
                 from_factor * (1.0 - eased)
             }
         }
@@ -126,48 +128,54 @@ impl SlideVisibility {
         }
     }
 
-    /// Begin sliding out (hiding).
-    pub fn start_hide(&mut self) {
+    /// Begin sliding out (hiding). `motion` is the theme snapshot captured by the
+    /// caller (which has the theme handle); the slide uses `motion.panel_slide`
+    /// and `motion.ease_spring`.
+    pub fn start_hide(&mut self, motion: motion::Motion) {
         match self {
             Self::Visible => {
                 *self = Self::SlidingOut {
                     start: Instant::now(),
                     from_factor: 0.0,
-                    duration: SLIDE_OUT_DURATION,
+                    duration: motion.panel_slide,
+                    motion,
                 };
             }
             Self::SlidingIn { .. } => {
                 // Reverse from current position; remaining distance is 1 - current.
                 let current = self.factor();
-                let duration = SLIDE_OUT_DURATION.mul_f32((1.0 - current).clamp(0.0, 1.0));
+                let duration = motion.panel_slide.mul_f32((1.0 - current).clamp(0.0, 1.0));
                 *self = Self::SlidingOut {
                     start: Instant::now(),
                     from_factor: current,
                     duration,
+                    motion,
                 };
             }
             _ => {} // Already hiding or hidden
         }
     }
 
-    /// Begin sliding in (showing).
-    pub fn start_show(&mut self) {
+    /// Begin sliding in (showing). See [`Self::start_hide`] for `motion`.
+    pub fn start_show(&mut self, motion: motion::Motion) {
         match self {
             Self::Hidden => {
                 *self = Self::SlidingIn {
                     start: Instant::now(),
                     from_factor: 1.0,
-                    duration: SLIDE_IN_DURATION,
+                    duration: motion.panel_slide,
+                    motion,
                 };
             }
             Self::SlidingOut { .. } => {
                 // Reverse from current position; remaining distance is the current factor.
                 let current = self.factor();
-                let duration = SLIDE_IN_DURATION.mul_f32(current.clamp(0.0, 1.0));
+                let duration = motion.panel_slide.mul_f32(current.clamp(0.0, 1.0));
                 *self = Self::SlidingIn {
                     start: Instant::now(),
                     from_factor: current,
                     duration,
+                    motion,
                 };
             }
             _ => {} // Already showing or visible

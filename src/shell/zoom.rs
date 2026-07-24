@@ -54,7 +54,7 @@ use crate::{
 };
 
 use super::{
-    ANIMATION_DURATION, check_grab_preconditions,
+    check_grab_preconditions,
     focus::target::PointerFocusTarget,
     grabs::{ContextMenu, Item, MenuAlignment, MenuGrab},
 };
@@ -74,6 +74,8 @@ pub struct OutputZoomState {
     focal_point: Point<f64, Local>,
     previous_point: Option<(Point<f64, Local>, Instant)>,
     pub(super) element: ZoomElement,
+    /// Motion tokens captured from the theme at creation.
+    motion: crate::backend::render::animations::motion::Motion,
 }
 
 impl OutputZoomState {
@@ -86,6 +88,8 @@ impl OutputZoomState {
         loop_handle: LoopHandle<'static, State>,
         theme: CompTheme,
     ) -> OutputZoomState {
+        // Capture motion tokens before `theme` is moved into the IcedElement.
+        let motion = theme.motion;
         let cursor_position = seat.get_pointer().unwrap().current_location().as_global();
         let output_geometry = output.geometry().to_f64();
         let focal_point = if output_geometry.contains(cursor_position) {
@@ -134,19 +138,20 @@ impl OutputZoomState {
             focal_point,
             previous_point: None,
             element,
+            motion,
         }
     }
 
     pub fn animating_focal_point(&mut self) -> Point<f64, Local> {
         if let Some((old_point, start)) = self.previous_point.as_ref() {
             let duration_since = Instant::now().duration_since(*start);
-            if duration_since > ANIMATION_DURATION {
+            if duration_since > self.motion.animation {
                 self.previous_point.take();
                 return self.focal_point;
             }
 
             let percentage =
-                duration_since.as_millis() as f32 / ANIMATION_DURATION.as_millis() as f32;
+                duration_since.as_millis() as f32 / self.motion.animation.as_millis() as f32;
             ease(
                 Linear,
                 EasePoint(*old_point),
@@ -170,7 +175,7 @@ impl OutputZoomState {
     pub fn animating_level(&self) -> f64 {
         if let Some((old_level, start)) = self.previous_level.as_ref() {
             let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                / ANIMATION_DURATION.as_millis() as f32;
+                / self.motion.animation.as_millis() as f32;
 
             ease(Linear, *old_level, self.level, percentage)
         } else {
@@ -186,7 +191,7 @@ impl OutputZoomState {
         if self
             .previous_level
             .as_ref()
-            .is_some_and(|(_, start)| Instant::now().duration_since(*start) > ANIMATION_DURATION)
+            .is_some_and(|(_, start)| Instant::now().duration_since(*start) > self.motion.animation)
         {
             self.previous_level.take();
         }

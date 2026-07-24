@@ -27,6 +27,9 @@ pub struct CompTheme {
     pub active_hint: u32,
     /// Gap sizes: (outer_gap, inner_gap) in logical pixels.
     pub gaps: (u32, u32),
+    /// Motion tokens (durations, easing curves, springs) resolved from `theme`.
+    /// Read by every animation instead of hardcoded constants.
+    pub motion: crate::backend::render::animations::motion::Motion,
 }
 
 impl std::fmt::Debug for CompTheme {
@@ -51,6 +54,7 @@ impl Default for CompTheme {
         let is_dark = true;
         let theme: Arc<dyn ThemeInterface> = Arc::new(DEFAULT_THEME_PAIR.load(is_dark));
         Self {
+            motion: crate::backend::render::animations::motion::Motion::from_theme(&*theme),
             theme,
             is_dark,
             active_hint: 3,
@@ -62,6 +66,7 @@ impl Default for CompTheme {
 impl CompTheme {
     pub fn new(theme: Arc<dyn ThemeInterface>, is_dark: bool) -> Self {
         Self {
+            motion: crate::backend::render::animations::motion::Motion::from_theme(&*theme),
             theme,
             is_dark,
             active_hint: 3,
@@ -127,6 +132,7 @@ impl CompTheme {
         );
 
         Self {
+            motion: crate::backend::render::animations::motion::Motion::from_theme(&*theme),
             theme,
             is_dark,
             active_hint: 3,

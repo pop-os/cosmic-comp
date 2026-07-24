@@ -4,8 +4,9 @@
 //!
 //! Replaces the old live drag-resize: a programmatic width change (the
 //! maximize/restore double-click today, width presets later) animates the panel
-//! from its current width to a target width using the shared `--ease-spring` /
-//! `--duration-slow` curve ([`super::ease`]). Each tick the eased width is forced
+//! from its current width to a target width using the shared `--ease-spring`
+//! curve and `PANEL_SLIDE` timing (`crate::backend::render::animations::motion`).
+//! Each tick the eased width is forced
 //! onto the surface via [`super::Shell::override_active_layer_resize`] — the same
 //! path the live drag used — so windows reflow in lockstep and the client adopts
 //! each `configure` exactly as it did during a drag.
@@ -15,7 +16,7 @@ use std::time::Instant;
 use smithay::output::Output;
 use wayland_backend::server::ObjectId;
 
-use super::ease::{SPRING_DURATION, ease_spring};
+use crate::backend::render::animations::motion;
 
 /// Per-surface width resize animation.
 #[derive(Debug, Clone)]
@@ -33,6 +34,8 @@ pub struct LayerResizeAnim {
     pub from_width: i32,
     /// Target width to settle at (logical px).
     pub to_width: i32,
+    /// Motion tokens captured from the theme when the resize began.
+    motion: motion::Motion,
 }
 
 impl LayerResizeAnim {
@@ -42,6 +45,7 @@ impl LayerResizeAnim {
         anchor_right: bool,
         from_width: i32,
         to_width: i32,
+        motion: motion::Motion,
     ) -> Self {
         Self {
             surface_id,
@@ -50,14 +54,15 @@ impl LayerResizeAnim {
             start: Instant::now(),
             from_width,
             to_width,
+            motion,
         }
     }
 
-    /// Eased progress `t ∈ [0,1]` over [`SPRING_DURATION`].
+    /// Eased progress `t ∈ [0,1]` over `motion.panel_slide`.
     pub fn factor(&self) -> f32 {
-        let progress =
-            (self.start.elapsed().as_secs_f32() / SPRING_DURATION.as_secs_f32()).clamp(0.0, 1.0);
-        ease_spring(progress)
+        let progress = (self.start.elapsed().as_secs_f32() / self.motion.panel_slide.as_secs_f32())
+            .clamp(0.0, 1.0);
+        self.motion.ease_spring(progress)
     }
 
     /// The current interpolated width in logical px.
@@ -68,6 +73,6 @@ impl LayerResizeAnim {
 
     /// True while the animation is still running.
     pub fn is_animating(&self) -> bool {
-        self.start.elapsed() < SPRING_DURATION
+        self.start.elapsed() < self.motion.panel_slide
     }
 }
