@@ -374,6 +374,16 @@ impl BackendData {
         }
     }
 
+    pub fn schedule_frame_callbacks(&mut self, output: &Output) {
+        match self {
+            // Winit drives frame callbacks from its fixed render loop.
+            BackendData::Winit(_) => {}
+            BackendData::X11(state) => state.schedule_render(output),
+            BackendData::Kms(state) => state.schedule_frame_callbacks(output),
+            _ => unreachable!("No backend was initialized"),
+        }
+    }
+
     pub fn dmabuf_imported(
         &mut self,
         client: Option<Client>,

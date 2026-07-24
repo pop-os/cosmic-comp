@@ -599,6 +599,17 @@ impl KmsState {
         }
     }
 
+    pub fn schedule_frame_callbacks(&mut self, output: &Output) {
+        for surface in self
+            .drm_devices
+            .values()
+            .flat_map(|d| d.inner.surfaces.values())
+            .filter(|s| s.output == *output || s.output.mirroring().is_some_and(|o| &o == output))
+        {
+            surface.schedule_frame_callbacks();
+        }
+    }
+
     pub fn target_node_for_output(&self, output: &Output) -> Option<DrmNode> {
         self.drm_devices
             .values()
