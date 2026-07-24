@@ -83,7 +83,8 @@ use crate::{
                 toplevel_leave_output, toplevel_leave_workspace,
             },
             workspace::{
-                WorkspaceGroupHandle, WorkspaceHandle, WorkspaceState, WorkspaceUpdateGuard,
+                WorkspaceGroupHandle, WorkspaceHandle, WorkspaceIdAlreadySetError, WorkspaceState,
+                WorkspaceUpdateGuard,
             },
         },
     },
@@ -916,6 +917,41 @@ impl Workspaces {
             }
         }
         self.sets.insert(output.clone(), set);
+    }
+
+    pub fn ensure_pinned_workspaces(
+        &mut self,
+        output: &Output,
+        count: usize,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+    ) -> Result<bool, WorkspaceIdAlreadySetError> {
+        let set = &mut self.sets[output];
+        let mut created = false;
+
+        while set.workspaces.len() < count {
+            set.add_empty_workspace(workspace_state);
+            let workspace_idx = set.workspaces.len() - 1;
+            let workspace = &mut set.workspaces[workspace_idx];
+            let id = random_workspace_id();
+            workspace.pinned = true;
+            workspace_state.set_id(&workspace.handle, &id)?;
+            workspace.id = Some(id);
+            workspace_state.add_workspace_state(&workspace.handle, WState::Pinned);
+            created = true;
+        }
+
+        if self.mode == WorkspaceMode::Global {
+            for (other_output, set) in self.sets.iter_mut() {
+                if other_output == output {
+                    continue;
+                }
+                while set.workspaces.len() < count {
+                    set.add_empty_workspace(workspace_state);
+                }
+            }
+        }
+
+        Ok(created)
     }
 
     pub fn remove_output<'a>(
@@ -5139,4 +5175,55 @@ pub fn check_grab_preconditions(
     }
 
     Some(start_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smithay::{
+        output::{PhysicalProperties, Subpixel},
+        reexports::wayland_server::Display,
+    };
+
+    #[test]
+    fn ensure_pinned_workspaces_creates_and_pins_missing_workspaces() {
+        let display = Display::<State>::new().unwrap();
+        let mut workspace_state =
+            crate::wayland::protocols::workspace::WorkspaceState::new(&display.handle(), |_| true);
+        let output = Output::new(
+            "test-output".into(),
+            PhysicalProperties {
+                size: (200, 150).into(),
+                subpixel: Subpixel::HorizontalRgb,
+                make: "test".into(),
+                model: "test".into(),
+                serial_number: "test".into(),
+            },
+        );
+        let mut workspaces = Workspaces {
+            sets: IndexMap::new(),
+            backup_set: None,
+            layout: WorkspaceLayout::Horizontal,
+            mode: WorkspaceMode::OutputBound,
+            autotile: false,
+            autotile_behavior: TileBehavior::Global,
+            theme: cosmic::theme::system_preference(),
+            appearance: AppearanceConfig::default(),
+            persisted_workspaces: Vec::new(),
+        };
+        workspaces.add_output(&output, &mut workspace_state.update());
+
+        let created = workspaces
+            .ensure_pinned_workspaces(&output, 3, &mut workspace_state.update())
+            .unwrap();
+
+        let workspaces = &workspaces.sets[&output].workspaces;
+        assert!(created);
+        assert_eq!(workspaces.len(), 3);
+        assert!(
+            workspaces[1..]
+                .iter()
+                .all(|workspace| workspace.pinned && workspace.id.is_some())
+        );
+    }
 }

@@ -18,6 +18,7 @@ use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     input::{Seat, pointer::MotionEvent},
+    output::Output,
     utils::{Point, Serial},
 };
 #[cfg(not(feature = "debug"))]
@@ -33,6 +34,38 @@ fn propagate_by_default(action: &shortcuts::Action) -> bool {
         action,
         shortcuts::Action::Focus(_) | shortcuts::Action::Move(_)
     )
+}
+
+/// Resolve an output by exact connector name (e.g. "DP-1"), falling back to a
+/// case-insensitive substring match on the EDID model (e.g. "LS32A70").
+/// Ambiguous model matches are refused, as multiple identical monitors cannot
+/// be reliably distinguished by model.
+fn output_for_query<'a>(outputs: impl Iterator<Item = &'a Output>, query: &str) -> Option<Output> {
+    let query_lower = query.to_lowercase();
+    let mut model_match: Option<&Output> = None;
+    let mut ambiguous = false;
+    for output in outputs {
+        if output.name() == query {
+            return Some(output.clone());
+        }
+        if output
+            .physical_properties()
+            .model
+            .to_lowercase()
+            .contains(&query_lower)
+        {
+            if model_match.is_some() {
+                ambiguous = true;
+            } else {
+                model_match = Some(output);
+            }
+        }
+    }
+    if ambiguous {
+        warn!("output query {query:?} matches multiple outputs, ignoring");
+        return None;
+    }
+    model_match.cloned()
 }
 
 impl State {
@@ -522,16 +555,18 @@ impl State {
 
             Action::SwitchOutput(direction) => {
                 let current_output = seat.active_output();
-                let mut shell = self.common.shell.write();
-
-                let next_output = shell.next_output(&current_output, direction).cloned();
+                let next_output = self
+                    .common
+                    .shell
+                    .read()
+                    .next_output(&current_output, direction)
+                    .cloned();
 
                 if let Some(next_output) = next_output {
-                    let res = {
-                        let mut workspace_guard = self.common.workspace_state.update();
-                        if propagate
-                            && let Some((serial, prev_output, prev_idx)) =
-                                shell.previous_workspace_idx.take()
+                    if propagate {
+                        let mut shell = self.common.shell.write();
+                        if let Some((serial, prev_output, prev_idx)) =
+                            shell.previous_workspace_idx.take()
                             && seat.last_modifier_change().is_some_and(|s| s == serial)
                             && prev_output == current_output
                         {
@@ -539,49 +574,89 @@ impl State {
                                 &current_output,
                                 prev_idx,
                                 WorkspaceDelta::new_shortcut(),
-                                &mut workspace_guard,
+                                &mut self.common.workspace_state.update(),
                             );
                         }
+                    }
 
-                        let idx = shell.workspaces.active_num(&next_output).1;
-                        let res = shell.activate(
-                            &next_output,
-                            idx,
-                            WorkspaceDelta::new_shortcut(),
-                            &mut workspace_guard,
-                        );
-                        seat.set_active_output(&next_output);
-                        res
-                    };
+                    self.switch_to_output(&next_output, None, seat, serial, time);
+                }
+            }
 
-                    if let Ok(new_pos) = res {
-                        let workspace = shell.workspaces.active(&next_output).unwrap().1;
-                        let new_target = workspace
-                            .focus_stack
-                            .get(seat)
-                            .last()
-                            .cloned()
-                            .map(Into::<KeyboardFocusTarget>::into);
-                        std::mem::drop(shell);
+            Action::WorkspaceOnOutput(query, key_num) => {
+                let target_output = {
+                    let shell = self.common.shell.read();
+                    output_for_query(shell.outputs(), &query)
+                };
+                let workspace = match key_num {
+                    0 => 9,
+                    x => x - 1,
+                };
 
-                        let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
-                        Shell::set_focus(self, new_target.as_ref(), seat, None, update_cursor);
+                if let Some(output) = target_output {
+                    self.switch_to_output(&output, Some(workspace as usize), seat, serial, time);
+                } else {
+                    warn!("WorkspaceOnOutput: no output matches {query:?}");
+                }
+            }
 
-                        if let Some(ptr) = seat.get_pointer() {
-                            // Update cursor position if `set_focus` didn't already
-                            if !update_cursor {
-                                ptr.motion(
-                                    self,
-                                    None,
-                                    &MotionEvent {
-                                        location: new_pos.to_f64().as_logical(),
-                                        serial,
-                                        time,
-                                    },
-                                );
-                            }
-                            ptr.frame(self);
+            x @ Action::MoveToWorkspaceOnOutput(..) | x @ Action::SendToWorkspaceOnOutput(..) => {
+                let (query, key_num, follow): (String, u8, bool) = match x {
+                    Action::MoveToWorkspaceOnOutput(query, n) => (query, n, true),
+                    Action::SendToWorkspaceOnOutput(query, n) => (query, n, false),
+                    _ => unreachable!(),
+                };
+                let target_output = {
+                    let shell = self.common.shell.read();
+                    output_for_query(shell.outputs(), &query)
+                };
+                let Some(target_output) = target_output else {
+                    warn!("Move/SendToWorkspaceOnOutput: no output matches {query:?}");
+                    return;
+                };
+                let workspace = match key_num {
+                    0 => 9,
+                    x => x - 1,
+                };
+                let mut shell = self.common.shell.write();
+                let res = {
+                    let mut workspace_guard = self.common.workspace_state.update();
+                    match shell.workspaces.ensure_pinned_workspaces(
+                        &target_output,
+                        workspace as usize + 1,
+                        &mut workspace_guard,
+                    ) {
+                        Ok(true) => shell.workspaces.persist(&self.common.config),
+                        Ok(false) => {}
+                        Err(err) => {
+                            error!(?err, "Failed to pin implicitly created workspaces");
+                            return;
                         }
+                    }
+                    shell.move_current(
+                        seat,
+                        (&target_output, Some(workspace as usize)),
+                        follow,
+                        None,
+                        &mut workspace_guard,
+                        &self.common.event_loop_handle,
+                    )
+                };
+
+                if follow && let Ok(Some((target, new_pos))) = res {
+                    std::mem::drop(shell);
+                    Shell::set_focus(self, Some(&target), seat, None, follow);
+                    if let Some(ptr) = seat.get_pointer() {
+                        ptr.motion(
+                            self,
+                            None,
+                            &MotionEvent {
+                                location: new_pos.to_f64().as_logical(),
+                                serial,
+                                time,
+                            },
+                        );
+                        ptr.frame(self);
                     }
                 }
             }
@@ -1038,6 +1113,87 @@ impl State {
 
             // Do nothing
             Action::Disable => (),
+        }
+    }
+
+    /// Activate `workspace_idx` (or the currently-active workspace) on `target`
+    /// and transfer keyboard focus + pointer there.
+    pub(crate) fn switch_to_output(
+        &mut self,
+        target: &Output,
+        workspace_idx: Option<usize>,
+        seat: &Seat<State>,
+        serial: Serial,
+        time: u32,
+    ) {
+        let current_output = seat.active_output();
+        if *target == current_output {
+            let already_active = workspace_idx
+                .map(|idx| self.common.shell.read().workspaces.active_num(target).1 == idx)
+                .unwrap_or(true);
+            // Returning here means the requested index is already active, so it exists and needs
+            // no implicit creation.
+            if already_active {
+                return;
+            }
+        }
+
+        let mut shell = self.common.shell.write();
+        let res = {
+            let mut workspace_guard = self.common.workspace_state.update();
+            if let Some(workspace_idx) = workspace_idx {
+                match shell.workspaces.ensure_pinned_workspaces(
+                    target,
+                    workspace_idx + 1,
+                    &mut workspace_guard,
+                ) {
+                    Ok(true) => shell.workspaces.persist(&self.common.config),
+                    Ok(false) => {}
+                    Err(err) => {
+                        error!(?err, "Failed to pin implicitly created workspaces");
+                        return;
+                    }
+                }
+            }
+            let idx = workspace_idx.unwrap_or_else(|| shell.workspaces.active_num(target).1);
+            let res = shell.activate(
+                target,
+                idx,
+                WorkspaceDelta::new_shortcut(),
+                &mut workspace_guard,
+            );
+            seat.set_active_output(target);
+            res
+        };
+
+        if let Ok(new_pos) = res {
+            let workspace = shell.workspaces.active(target).unwrap().1;
+            let new_target = workspace
+                .focus_stack
+                .get(seat)
+                .last()
+                .cloned()
+                .map(Into::<KeyboardFocusTarget>::into);
+            std::mem::drop(shell);
+
+            let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
+            Shell::set_focus(self, new_target.as_ref(), seat, None, update_cursor);
+
+            if let Some(ptr) = seat.get_pointer() {
+                // Update cursor position if `set_focus` didn't already
+                if !update_cursor {
+                    ptr.motion(
+                        self,
+                        None,
+                        &MotionEvent {
+                            location: new_pos.to_f64().as_logical(),
+                            serial,
+                            time,
+                        },
+                    );
+                }
+                ptr.frame(self);
+            }
         }
     }
 
