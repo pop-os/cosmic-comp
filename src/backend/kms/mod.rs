@@ -32,7 +32,11 @@ use smithay::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
         drm::{
             Device as _,
-            control::{Device as _, connector::Interface, crtc},
+            control::{
+                Device as _,
+                connector::{Interface, State as ConnectorState},
+                crtc,
+            },
         },
         input::{self, Libinput},
         wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1::TrancheFlags,
@@ -250,13 +254,18 @@ fn determine_primary_gpu(
 
     // try to find builtin display
     for dev in drm_devices.values() {
-        if dev.inner.surfaces.values().any(|s| {
-            if let Ok(conn_info) = dev.drm.device().get_connector(s.connector, false) {
-                let i = conn_info.interface();
-                i == Interface::EmbeddedDisplayPort || i == Interface::LVDS || i == Interface::DSI
-            } else {
-                false
-            }
+        let drm = dev.drm.device();
+        let res_handles = drm.resource_handles()?;
+        let connectors = res_handles.connectors();
+        if connectors.iter().any(|conn| {
+            let Ok(conn_info) = drm.get_connector(*conn, false) else {
+                return false;
+            };
+            let i = conn_info.interface();
+            conn_info.state() == ConnectorState::Connected
+                && (i == Interface::EmbeddedDisplayPort
+                    || i == Interface::LVDS
+                    || i == Interface::DSI)
         }) {
             return Ok(Some(dev.inner.render_node));
         }
