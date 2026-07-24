@@ -150,9 +150,10 @@ impl A11yKeyboardMonitorState {
     }
 
     pub fn key_event(&self, modifiers: &ModifiersState, keysym: &KeysymHandle, state: KeyState) {
+        let has_key_grab = self.has_key_grab(modifiers, keysym.modified_sym());
         let clients = self.clients.lock().unwrap();
         for (unique_name, client) in clients.0.iter() {
-            if !client.watched && !self.has_key_grab(modifiers, keysym.modified_sym()) {
+            if !client.watched && !has_key_grab {
                 continue;
             }
 
