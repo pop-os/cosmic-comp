@@ -227,42 +227,114 @@ fn determine_boot_gpu(seat: String) -> Option<DrmNode> {
     primary_node.and_then(|x| x.node_with_type(NodeType::Render).and_then(Result::ok))
 }
 
+/// Returns true, if the device exposes any internal panel connector
+/// (eDP/LVDS/DSI).
+///
+/// We deliberately scan all connectors reported by the device instead of only
+/// active surfaces: an internal panel might not have a surface (yet) - e.g.
+/// the lid is closed at boot, the internal output is disabled in the output
+/// configuration, or no CRTC could be assigned - but its presence still
+/// identifies this device as the GPU wired to the internal panel.
+fn has_builtin_display(dev: &Device) -> bool {
+    let drm_device = dev.drm.device();
+    drm_device
+        .resource_handles()
+        .ok()
+        .into_iter()
+        .flat_map(|res| res.connectors().to_vec())
+        .any(|conn| {
+            drm_device
+                .get_connector(conn, false)
+                .ok()
+                .is_some_and(|conn_info| {
+                    matches!(
+                        conn_info.interface(),
+                        Interface::EmbeddedDisplayPort | Interface::LVDS | Interface::DSI
+                    )
+                })
+        })
+}
+
 fn determine_primary_gpu(
     drm_devices: &IndexMap<DrmNode, Device>,
     seat: String,
 ) -> Result<Option<DrmNode>> {
-    if let Some(device) = dev_var("COSMIC_RENDER_DEVICE")
-        && let Some(node) = drm_devices.values().find_map(|dev| {
+    // Support full device paths (e.g. `/dev/dri/renderD128`) in
+    // COSMIC_RENDER_DEVICE. `dev_var` resolves bare node names relative to
+    // `/dev/dri/` internally, so absolute paths would silently fail to match.
+    if let Ok(value) = std::env::var("COSMIC_RENDER_DEVICE") {
+        if value.starts_with('/') {
+            match DrmNode::from_path(&value) {
+                Ok(node) => {
+                    let node = node
+                        .node_with_type(NodeType::Render)
+                        .and_then(Result::ok)
+                        .unwrap_or(node);
+                    if let Some(found) = drm_devices.values().find_map(|dev| {
+                        (dev.inner.render_node == node).then_some(dev.inner.render_node)
+                    }) {
+                        debug!("Selecting {} as primary gpu: COSMIC_RENDER_DEVICE", found);
+                        return Ok(Some(found));
+                    } else {
+                        warn!(
+                            "COSMIC_RENDER_DEVICE={} does not match any usable render device, \
+                             falling back to automatic selection",
+                            value
+                        );
+                    }
+                }
+                Err(err) => warn!(
+                    ?err,
+                    "COSMIC_RENDER_DEVICE={} is not a valid DRM device path, \
+                     falling back to automatic selection",
+                    value
+                ),
+            }
+        }
+    }
+
+    if let Some(device) = dev_var("COSMIC_RENDER_DEVICE") {
+        if let Some(node) = drm_devices.values().find_map(|dev| {
             device
                 .matches(&dev.inner.render_node)
                 .then_some(dev.inner.render_node)
-        })
-    {
-        return Ok(Some(node));
+        }) {
+            debug!("Selecting {} as primary gpu: COSMIC_RENDER_DEVICE", node);
+            return Ok(Some(node));
+        } else {
+            warn!(
+                "COSMIC_RENDER_DEVICE is set, but does not match any usable render device, \
+                 falling back to automatic selection"
+            );
+        }
     }
 
-    // try to find builtin display
-    for dev in drm_devices.values() {
-        if dev.inner.surfaces.values().any(|s| {
-            if let Ok(conn_info) = dev.drm.device().get_connector(s.connector, false) {
-                let i = conn_info.interface();
-                i == Interface::EmbeddedDisplayPort || i == Interface::LVDS || i == Interface::DSI
-            } else {
-                false
-            }
-        }) {
-            return Ok(Some(dev.inner.render_node));
-        }
+    // try to find a device with a builtin display (eDP/LVDS/DSI).
+    //
+    // This mirrors the behaviour mutter and kwin adopted for hybrid laptops,
+    // where the dGPU may enumerate before the iGPU on the PCI bus and/or be
+    // flagged as boot_vga (e.g. ASUS laptops with NVIDIA dGPU + AMD iGPU).
+    if let Some(dev) = drm_devices
+        .values()
+        .find(|dev| !dev.inner.is_software && has_builtin_display(dev))
+    {
+        debug!(
+            "Selecting {} as primary gpu: device has builtin display",
+            dev.inner.render_node
+        );
+        return Ok(Some(dev.inner.render_node));
     }
 
     // else try to find the boot gpu
     let boot = determine_boot_gpu(seat);
-    if let Some(boot) = boot
-        && drm_devices
+    if let Some(boot) = boot {
+        if drm_devices
             .values()
             .any(|dev| dev.inner.render_node == boot)
-    {
-        return Ok(Some(boot));
+        {
+            debug!("Selecting {} as primary gpu: boot gpu", boot);
+            return Ok(Some(boot));
+        }
     }
 
     // else just take the first
