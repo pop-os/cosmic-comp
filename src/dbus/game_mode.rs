@@ -779,20 +779,60 @@ impl State {
         // else exits game mode, leaving it stranded on a dead surface. Return to
         // the launcher — it is still fullscreen on its own workspace, so switching
         // there shows it full-size (and the dead game's now-empty workspace reaps).
-        let game_gone = {
+        let dead_app = {
             let shell = self.common.shell.read();
             let gm = &shell.game_mode;
-            gm.active
-                && gm.app_id != Some(LAUNCHER_APP_ID)
-                // Not already waiting for the launcher to map — otherwise, if the
-                // launcher is also gone, this would re-fire (and re-log) every tick;
-                // try_resolve_pending_game_mode quietly retries the pending enter.
-                && gm.pending_app_id != Some(LAUNCHER_APP_ID)
-                && gm.game_surface.as_ref().is_some_and(|s| !s.alive())
+            (gm.active && gm.game_surface.as_ref().is_some_and(|s| !s.alive()))
+                .then_some((gm.app_id, gm.pending_app_id))
         };
-        if game_gone {
-            info!(target: GAMING_TARGET, "game window gone; returning to the launcher");
-            self.enter_game_mode(LAUNCHER_APP_ID);
+        if let Some((app_id, pending)) = dead_app {
+            if app_id == Some(LAUNCHER_APP_ID) {
+                // The launcher itself died — leave game mode entirely, sliding back
+                // to the desktop instead of an instant jump when its now-empty
+                // workspace reaps.
+                info!(target: GAMING_TARGET, "launcher window gone; leaving game mode");
+                self.exit_game_mode();
+            } else if pending != Some(LAUNCHER_APP_ID) {
+                // A game died — return to the launcher (still fullscreen on its own
+                // workspace, so it comes back full-size). The pending guard avoids
+                // re-firing every tick if the launcher is also gone (deferred);
+                // try_resolve_pending_game_mode then quietly retries.
+                info!(target: GAMING_TARGET, "game window gone; returning to the launcher");
+                self.enter_game_mode(LAUNCHER_APP_ID);
+            }
+        }
+
+        // The game-mode window must stay fullscreen while active. Something else
+        // (e.g. an exclusive layer-shell surface like the start menu taking focus
+        // on another output) can drop its fullscreen out from under us; restore it
+        // on its output WITHOUT stealing keyboard focus, so game mode is exclusive
+        // and inviolable but the panel/menu the user opened still works.
+        let restore_fullscreen = {
+            let shell = self.common.shell.read();
+            let gm = &shell.game_mode;
+            let alive_surface = gm
+                .game_surface
+                .as_ref()
+                .filter(|s| gm.active && s.alive())
+                .cloned();
+            alive_surface.and_then(|game| {
+                let still_fullscreen = shell
+                    .workspaces
+                    .spaces()
+                    .any(|ws| ws.get_fullscreen_surfaces().any(|f| f.surface == game));
+                (!still_fullscreen)
+                    .then(|| gm.output.clone().map(|output| (game, output)))
+                    .flatten()
+            })
+        };
+        if let Some((game, output)) = restore_fullscreen {
+            warn!(target: GAMING_TARGET, "game surface lost fullscreen; restoring");
+            let loop_handle = self.common.event_loop_handle.clone();
+            let _ = self
+                .common
+                .shell
+                .write()
+                .fullscreen_request(&game, output, &loop_handle);
         }
 
         // Safety-net retry for a deferred enter (e.g. the game window mapped
