@@ -658,8 +658,11 @@ pub struct GameMode {
     /// / tearing support, external) are reported for THIS output, not just the
     /// first one, so they're correct on multi-monitor setups.
     pub output: Option<Output>,
-    /// Windows we minimized on entry, restored verbatim on exit.
-    pub minimized: Vec<CosmicSurface>,
+    /// The desktop workspace game mode was first entered from, restored on a full
+    /// exit. Each game-mode app is fullscreened on its own (clean, auto-reaped)
+    /// workspace and switching between apps is a workspace switch, so nothing is
+    /// minimized; this only records where "normal desktop" was.
+    pub home_workspace: Option<WorkspaceHandle>,
     /// Set when entry was requested but no window carrying that app id was mapped
     /// yet; resolved by `try_resolve_pending_game_mode` (the refresh tick and the
     /// `STEAM_GAME` property hook) once a matching window appears.

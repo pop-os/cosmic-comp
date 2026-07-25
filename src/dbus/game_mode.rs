@@ -21,15 +21,17 @@ use calloop::{LoopHandle, channel::Sender};
 use futures_executor::ThreadPool;
 use smithay::backend::drm::VrrSupport;
 use smithay::output::Output;
+use smithay::utils::IsAlive;
 use smithay::xwayland::X11Surface;
 use tracing::{debug, info, warn};
 use zbus::{interface, object_server::SignalEmitter};
 
 use crate::logger::GAMING_TARGET;
 use crate::shell::focus::target::KeyboardFocusTarget;
-use crate::shell::{CosmicSurface, GameMode, Shell};
+use crate::shell::{CosmicSurface, GameMode, Shell, WorkspaceDelta};
 use crate::state::State;
 use crate::utils::prelude::OutputExt;
+use crate::wayland::protocols::workspace::WorkspaceHandle;
 
 /// Well-known bus name cosmic-comp owns for gaming control.
 const BUS_NAME: &str = "one.playtron.GameMode";
@@ -773,6 +775,26 @@ impl State {
             bridge.notify_capabilities_changed();
         }
 
+        // The fullscreened game's window died (e.g. closed via Alt+F4) and nothing
+        // else exits game mode, leaving it stranded on a dead surface. Return to
+        // the launcher — it is still fullscreen on its own workspace, so switching
+        // there shows it full-size (and the dead game's now-empty workspace reaps).
+        let game_gone = {
+            let shell = self.common.shell.read();
+            let gm = &shell.game_mode;
+            gm.active
+                && gm.app_id != Some(LAUNCHER_APP_ID)
+                // Not already waiting for the launcher to map — otherwise, if the
+                // launcher is also gone, this would re-fire (and re-log) every tick;
+                // try_resolve_pending_game_mode quietly retries the pending enter.
+                && gm.pending_app_id != Some(LAUNCHER_APP_ID)
+                && gm.game_surface.as_ref().is_some_and(|s| !s.alive())
+        };
+        if game_gone {
+            info!(target: GAMING_TARGET, "game window gone; returning to the launcher");
+            self.enter_game_mode(LAUNCHER_APP_ID);
+        }
+
         // Safety-net retry for a deferred enter (e.g. the game window mapped
         // since the last tick) and for a game surface retagged onto another window.
         self.try_resolve_pending_game_mode();
@@ -808,71 +830,99 @@ impl State {
         // GameMode literal below would otherwise reset it via `..Default`).
         let prev_overlay_asserted = self.common.shell.read().game_mode.overlay_asserted;
 
-        // Handle the already-active cases up front, keyed on the app id — NOT on a
-        // resolved surface. The active game lives in `fullscreen_surfaces` and its
-        // peers in `minimized_windows`, both of which `find_game_surface` (which
-        // scans only `mapped()`) cannot see. So we must decide before resolving:
-        //   * same app id  → relabel no-op.
-        //   * different app → exit first, which un-minimizes the old game's peers
-        //     (including the new target if it was a minimized peer) back into
-        //     `mapped()` so `find_game_surface` can then see it.
+        // Already active on this app id — clear any pending marker and return.
         {
             let shell = self.common.shell.read();
-            let active = shell.game_mode.active;
-            let same_app = shell.game_mode.app_id == Some(app_id);
-            drop(shell);
-            if active && same_app {
-                let mut shell = self.common.shell.write();
-                shell.game_mode.app_id = Some(app_id);
-                shell.game_mode.pending_app_id = None;
+            if shell.game_mode.active && shell.game_mode.app_id == Some(app_id) {
+                drop(shell);
+                self.common.shell.write().game_mode.pending_app_id = None;
                 return;
-            }
-            if active {
-                self.exit_game_mode();
             }
         }
 
-        // Resolve the window tagged with this app id, anywhere. Strict: if no
-        // mapped window carries the app id yet, defer until one appears or is
-        // tagged (resolved from the refresh tick / property hook).
-        let target = {
+        // Resolve the app's window anywhere: already fullscreen on its own
+        // game-mode workspace, or a normal window on the desktop. Defer if it
+        // isn't mapped yet (resolved later from the refresh tick / property hook).
+        let resolved = {
             let shell = self.common.shell.read();
             find_game_surface(&shell, app_id)
         };
-
-        let Some((game, output, others)) = target else {
-            // Only mark it pending — leave `app_id`/`ActiveAppId` untouched so a
-            // not-yet-entered game isn't reported as active.
+        let Some((game, source_ws, output, is_fullscreen)) = resolved else {
             self.common.shell.write().game_mode.pending_app_id = Some(app_id);
             info!(target: GAMING_TARGET, app_id, "game mode deferred: no window with this app id yet");
             return;
         };
 
-        let mut shell = self.common.shell.write();
-        let seat = shell.seats.last_active().clone();
-        info!(target: GAMING_TARGET, app_id, minimized = others.len(), "entering game mode");
+        let seat = self.common.shell.read().seats.last_active().clone();
+        // Record the normal-desktop workspace only on the first entry into game
+        // mode, so a full exit can return there; app switches keep that origin.
+        let first_entry = !self.common.shell.read().game_mode.active;
 
-        // Fullscreen the game on ITS output — this is what turns on the gaming
-        // fast path. Then minimize that workspace's peers.
-        let focus = shell.fullscreen_request(&game, output.clone(), &loop_handle);
-        for surface in &others {
-            shell.minimize_request(surface);
-        }
+        let focus_target = {
+            let mut shell = self.common.shell.write();
 
-        shell.game_mode = GameMode {
-            active: true,
-            app_id: Some(app_id),
-            game_surface: Some(game),
-            output: Some(output),
-            minimized: others,
-            pending_app_id: None,
-            overlay_asserted: prev_overlay_asserted,
-            ..Default::default()
+            let home_workspace = if first_entry {
+                shell.active_space(&output).map(|ws| ws.handle)
+            } else {
+                shell.game_mode.home_workspace
+            };
+
+            let focus = if is_fullscreen {
+                // Already fullscreen on its own workspace — just switch to it. The
+                // slide (or, in Phase 2, cross-fade) is the whole transition.
+                info!(target: GAMING_TARGET, app_id, "switching to game-mode workspace");
+                if let Some(idx) = shell.workspaces.idx_for_handle(&output, &source_ws) {
+                    let _ = shell.activate(
+                        &output,
+                        idx,
+                        WorkspaceDelta::new_shortcut(),
+                        &mut self.common.workspace_state.update(),
+                    );
+                }
+                Some(KeyboardFocusTarget::Fullscreen(game.clone()))
+            } else {
+                // Normal desktop window: move it onto the trailing empty (clean)
+                // workspace — background/shell are suppressed there by
+                // `game_mode_exclusive` — sliding to it, then fullscreen it.
+                // Nothing is minimized; the desktop it came from is left intact.
+                let target = shell
+                    .workspaces
+                    .spaces_for_output(&output)
+                    .find(|ws| ws.is_empty())
+                    .or_else(|| shell.workspaces.spaces_for_output(&output).last())
+                    .map(|ws| ws.handle);
+                if let Some(target) = target {
+                    info!(target: GAMING_TARGET, app_id, "moving app onto a clean game-mode workspace");
+                    let _ = shell.move_window(
+                        Some(&seat),
+                        &game,
+                        &source_ws,
+                        &target,
+                        true, // follow: slide to the new workspace
+                        None,
+                        &mut self.common.workspace_state.update(),
+                        &loop_handle,
+                    );
+                }
+                shell.fullscreen_request(&game, output.clone(), &loop_handle)
+            };
+
+            shell.game_mode = GameMode {
+                active: true,
+                app_id: Some(app_id),
+                game_surface: Some(game),
+                output: Some(output),
+                home_workspace,
+                pending_app_id: None,
+                overlay_asserted: prev_overlay_asserted,
+                ..Default::default()
+            };
+
+            focus
         };
-        drop(shell);
 
         // Give the game keyboard focus so it receives input immediately.
-        if let Some(target) = focus {
+        if let Some(target) = focus_target {
             Shell::set_focus(self, Some(&target), &seat, None, true);
         }
     }
@@ -928,28 +978,19 @@ impl State {
         };
 
         // The fullscreened surface lost its tag. Switch to another window still
-        // tagged with the active app id, if one exists. Check both mapped windows
-        // AND our own minimized peers: a peer that shares the app id was minimized
-        // on entry (so it isn't in `mapped()` and `find_game_surface` can't see
-        // it) — `exit_game_mode` below un-minimizes it so the following
-        // `enter_game_mode` can then resolve to it. If nothing carries the app id,
-        // leave the current surface up: this may be a transient untag mid-retag, or
-        // the window is closing (the refresh tick / destroy path handles a vanished
-        // surface). We never exit game mode from here on our own.
+        // carrying the active app id, if one exists (`find_game_surface` now also
+        // sees fullscreen windows). If nothing carries it, leave the current
+        // surface up: this may be a transient untag mid-retag, or the window is
+        // closing (the refresh tick's destroy handling covers a vanished surface).
+        // We never exit game mode from here on our own.
         let has_replacement = {
             let shell = self.common.shell.read();
             find_game_surface(&shell, app_id).is_some()
-                || shell
-                    .game_mode
-                    .minimized
-                    .iter()
-                    .any(|s| app_id_of(s) == app_id)
         };
         if has_replacement {
             info!(target: GAMING_TARGET, app_id, "re-resolving game surface after a tag change");
-            // exit clears the stale fullscreen + un-minimizes peers so the new
-            // target is visible to find_game_surface; enter fullscreens it. Both
-            // run before the next render, so there is no intermediate frame.
+            // exit returns to the desktop (reaping the stale workspace); enter then
+            // fullscreens the newly-tagged window on a fresh workspace.
             self.exit_game_mode();
             self.enter_game_mode(app_id);
             // exit_game_mode's mem::take cleared any client overlay assertion, and
@@ -960,7 +1001,10 @@ impl State {
         }
     }
 
-    /// Exit gaming mode: un-fullscreen the game and restore minimized windows.
+    /// Fully leave game mode: un-fullscreen the current app (so its clean
+    /// game-mode workspace empties and auto-reaps) and return to the normal
+    /// desktop workspace we entered from. Nothing was minimized, so there is
+    /// nothing to restore.
     pub fn exit_game_mode(&mut self) {
         let loop_handle = self.common.event_loop_handle.clone();
         let mut shell = self.common.shell.write();
@@ -970,21 +1014,40 @@ impl State {
         }
 
         let game_mode = std::mem::take(&mut shell.game_mode);
-        let seat = shell.seats.last_active().clone();
 
-        // Un-fullscreen returns the focus target for the restored game window —
-        // taking `game_mode` cleared any input grab, so restore focus explicitly
-        // (otherwise keyboard focus is left parked on a now-gone grab/game state).
-        let restored = if let Some(game) = &game_mode.game_surface {
-            shell.unfullscreen_request(game, &loop_handle)
-        } else {
-            None
-        };
-        for surface in &game_mode.minimized {
-            shell.unminimize_request(surface, &seat, &loop_handle);
+        // Un-fullscreen the game so its now-empty game-mode workspace auto-reaps.
+        if let Some(game) = &game_mode.game_surface {
+            let _ = shell.unfullscreen_request(game, &loop_handle);
+        }
+
+        // Slide back to the desktop workspace game mode was entered from. That
+        // workspace may have been auto-reaped once the app moved off it and it
+        // emptied, so fall back to the first workspace on the game's output —
+        // exit must never strand us on the game-mode workspace.
+        let target = game_mode
+            .home_workspace
+            .and_then(|home| {
+                shell
+                    .workspaces
+                    .space_for_handle(&home)
+                    .map(|w| w.output().clone())
+                    .and_then(|output| {
+                        shell
+                            .workspaces
+                            .idx_for_handle(&output, &home)
+                            .map(|idx| (output, idx))
+                    })
+            })
+            .or_else(|| game_mode.output.clone().map(|output| (output, 0)));
+        if let Some((output, idx)) = target {
+            let _ = shell.activate(
+                &output,
+                idx,
+                WorkspaceDelta::new_shortcut(),
+                &mut self.common.workspace_state.update(),
+            );
         }
         drop(shell);
-        Shell::set_focus(self, restored.as_ref(), &seat, None, true);
         info!(target: GAMING_TARGET, "exited game mode");
     }
 
@@ -1133,38 +1196,37 @@ fn app_id_of(surface: &CosmicSurface) -> u32 {
 /// workspace on every output. Returns the window, the output it currently lives
 /// on, and its co-workspace peers (everything else on that workspace, to be
 /// minimized). `None` if no mapped window carries that app id yet.
+/// Locate the window carrying `app_id` anywhere, returning it with its workspace
+/// handle, output, and whether it is ALREADY fullscreen (i.e. already in game mode
+/// on that workspace) rather than a normal window on the desktop. Matches on
+/// `app_id_of` (not the raw `STEAM_GAME` atom) so the native-Wayland launcher —
+/// which can't carry the atom and is recognized by its Wayland `app_id` (see
+/// `LAUNCHER_APP_IDS`) — resolves too.
 fn find_game_surface(
     shell: &Shell,
     app_id: u32,
-) -> Option<(CosmicSurface, Output, Vec<CosmicSurface>)> {
+) -> Option<(CosmicSurface, WorkspaceHandle, Output, bool)> {
     // 0 is `app_id_of`'s "unknown" sentinel (any untagged, non-launcher window),
     // never a valid game-mode target. Guard against it so an accidental
-    // `enter_game(0)` can't fullscreen an arbitrary window + minimize everything.
+    // `enter_game(0)` can't fullscreen an arbitrary window.
     if app_id == 0 {
         return None;
     }
     shell.workspaces.spaces().find_map(|ws| {
-        let windows: Vec<CosmicSurface> =
-            ws.mapped().map(|mapped| mapped.active_window()).collect();
-        // Match on `app_id_of` (not the raw `STEAM_GAME` atom) so the launcher —
-        // a native-Wayland toplevel that can't carry `STEAM_GAME`, recognized by
-        // its Wayland `app_id` (see `LAUNCHER_APP_IDS`) — is a first-class game-mode
-        // target: `enter_game_mode(LAUNCHER_APP_ID)` fullscreens it like a game.
-        let game = windows
-            .iter()
-            .find(|surface| app_id_of(surface) == app_id)?
-            .clone();
-        // Peers to minimize on entry. The real overlays (Steam overlay, MangoHud)
-        // are override-redirect — never in `mapped()`, so never in this list — and
-        // already render above the game via `Stage::OverrideRedirect`. A non-OR
-        // overlay/Big-Picture toplevel can't render above a fullscreen game anyway,
-        // so minimizing it (and restoring on exit) is cleaner than leaving an
-        // invisible un-minimized window behind the game.
-        let peers: Vec<CosmicSurface> = windows
-            .into_iter()
-            .filter(|surface| surface != &game)
-            .collect();
-        Some((game, ws.output().clone(), peers))
+        // A window already fullscreen on a workspace is already in game mode there
+        // — return it so we just switch to that workspace instead of re-entering.
+        if let Some(fs) = ws
+            .get_fullscreen_surfaces()
+            .find(|f| app_id_of(&f.surface) == app_id)
+        {
+            return Some((fs.surface.clone(), ws.handle, ws.output().clone(), true));
+        }
+        // Otherwise a normal (desktop) window carrying the app id.
+        let game = ws
+            .mapped()
+            .map(|mapped| mapped.active_window())
+            .find(|surface| app_id_of(surface) == app_id)?;
+        Some((game, ws.handle, ws.output().clone(), false))
     })
 }
 
