@@ -1101,7 +1101,13 @@ impl State {
         }
 
         if zoom_seat == *seat {
-            let new_level = (current_level + change).max(1.0);
+            let new_level = if change > 0.0 {
+                current_level * (1.0 + change)
+            } else {
+                current_level / (1.0 - change)
+            };
+            let new_level = if new_level < 1.01 { 1.0 } else { new_level };
+
             shell.trigger_zoom(
                 seat,
                 Some(&output),
