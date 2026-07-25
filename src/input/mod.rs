@@ -1093,7 +1093,10 @@ impl State {
                             }
 
                             if event.source() == AxisSource::Wheel {
-                                percentage *= 5.;
+                                let increment =
+                                    self.common.config.cosmic_conf.accessibility_zoom.increment
+                                        as f64;
+                                percentage *= increment / 2.0;
                             }
 
                             let change = -(percentage / 100.);
