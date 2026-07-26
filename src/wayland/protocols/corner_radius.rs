@@ -12,6 +12,7 @@ use smithay::reexports::wayland_server::New;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{HookId, Logical, Point, Rectangle};
 use smithay::wayland::compositor::Cacheable;
+use smithay::wayland::compositor::SurfaceData;
 use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::wlr_layer::WlrLayerShellHandler;
@@ -28,6 +29,49 @@ use wayland_backend::server::GlobalId;
 
 type ToplevelHookId = Mutex<Option<(HookId, Weak<CosmicCornerRadiusToplevelV1>)>>;
 type LayerHookId = Mutex<Option<(HookId, Weak<CosmicCornerRadiusLayerV1>)>>;
+
+/// Which of the double-buffered corner-radius values the client itself
+/// submitted since the surface was last committed.
+///
+/// The radius and padding hints are validated against the surface geometry in
+/// a pre-commit hook, which runs on *every* commit. Without this marker a
+/// client would be killed whenever a compositor-initiated resize (tiling,
+/// maximise, snapping, a resize animation) made a previously legal radius too
+/// large for the new geometry, even though the client never sent a new
+/// request and had no way to avoid it. Only state the client actually
+/// submitted may raise a protocol error.
+#[derive(Debug, Default, Clone, Copy)]
+struct Submitted {
+    corners: bool,
+    padding: bool,
+}
+
+type SubmittedState = Mutex<Submitted>;
+
+fn mark_corners_submitted(surface_data: &SurfaceData) {
+    let submitted = surface_data
+        .data_map
+        .get_or_insert_threadsafe(SubmittedState::default);
+    submitted.lock().unwrap().corners = true;
+}
+
+fn mark_padding_submitted(surface_data: &SurfaceData) {
+    let submitted = surface_data
+        .data_map
+        .get_or_insert_threadsafe(SubmittedState::default);
+    submitted.lock().unwrap().padding = true;
+}
+
+/// Reads and clears the markers. Called once per commit from the pre-commit
+/// hooks, so a value is only ever validated against the geometry it was
+/// submitted with.
+fn take_submitted(surface_data: &SurfaceData) -> Submitted {
+    let submitted = surface_data
+        .data_map
+        .get_or_insert_threadsafe(SubmittedState::default);
+    let mut guard = submitted.lock().unwrap();
+    std::mem::take(&mut *guard)
+}
 
 #[derive(Debug)]
 pub struct CornerRadiusState {
@@ -374,6 +418,7 @@ where
                     let mut cached = s.cached_state.get::<CacheableCorners>();
                     let pending = cached.pending();
                     *pending = CacheableCorners(guard.corners);
+                    mark_corners_submitted(s);
                 });
                 drop(guard);
 
@@ -505,6 +550,7 @@ where
                     let mut cached = s.cached_state.get::<CacheableCorners>();
                     let pending = cached.pending();
                     *pending = CacheableCorners(guard.corners);
+                    mark_corners_submitted(s);
                 });
                 drop(guard);
 
@@ -568,6 +614,7 @@ where
                     let mut cached = s.cached_state.get::<CacheablePadding>();
                     let pending = cached.pending();
                     *pending = CacheablePadding(guard.padding);
+                    mark_padding_submitted(s);
                 });
                 drop(guard);
 
@@ -609,6 +656,14 @@ where
 
 fn xdg_radius_hook<D: 'static>(_state: &mut D, _dh: &DisplayHandle, surface: &WlSurface) {
     with_states(surface, |surface_data| {
+        // Only a radius the client submitted itself may be fatal. A radius
+        // that only became too large because the surface geometry shrank is
+        // clamped when rendering (see `surface_corners`), so there is nothing
+        // to protect against here and killing the client would be a bug.
+        if !take_submitted(surface_data).corners {
+            return;
+        }
+
         let corners = *surface_data
             .cached_state
             .get::<CacheableCorners>()
@@ -654,9 +709,32 @@ fn pad_rect(
     Some(rect)
 }
 
+fn post_layer_error(
+    surface_data: &SurfaceData,
+    error: cosmic_corner_radius_layer_v1::Error,
+    reason: &str,
+) {
+    if let Some(hook) = surface_data.data_map.get::<LayerHookId>() {
+        let hook_ref = hook.lock().unwrap();
+        if let Some((_, obj)) = hook_ref.as_ref()
+            && let Ok(obj) = obj.upgrade()
+        {
+            obj.post_error(error as u32, format!("{obj:?} {reason}"));
+        }
+    }
+}
+
 fn layer_radius_hook<D: 'static>(_state: &mut D, _dh: &DisplayHandle, surface: &WlSurface) {
     let bbox = bbox_from_surface_tree(surface, Point::default());
     with_states(surface, |surface_data| {
+        // Only values the client submitted itself may be fatal. Values that
+        // only became too large because the surface was resized are clamped
+        // when rendering (see `surface_corners` / `surface_padding`).
+        let submitted = take_submitted(surface_data);
+        if !submitted.corners && !submitted.padding {
+            return;
+        }
+
         let corners = *surface_data
             .cached_state
             .get::<CacheableCorners>()
@@ -667,37 +745,39 @@ fn layer_radius_hook<D: 'static>(_state: &mut D, _dh: &DisplayHandle, surface: &
             .pending();
         let empty = Padding::default();
         let Some(padded_box) = pad_rect(bbox, padding.0.as_ref().unwrap_or(&empty)) else {
-            if let Some(hook) = surface_data.data_map.get::<LayerHookId>() {
-                let hook_ref = hook.lock().unwrap();
-                if let Some((_, obj)) = hook_ref.as_ref()
-                    && let Ok(obj) = obj.upgrade()
-                {
-                    obj.post_error(
-                        cosmic_corner_radius_layer_v1::Error::PaddingTooLarge as u32,
-                        format!("{obj:?} padding too large"),
-                    );
-                }
+            if submitted.padding {
+                post_layer_error(
+                    surface_data,
+                    cosmic_corner_radius_layer_v1::Error::PaddingTooLarge,
+                    "padding too large",
+                );
             }
             return;
         };
 
-        if corners.0.as_ref().is_some_and(|corners| {
-            let half_min_dim = (padded_box.size.w.min(padded_box.size.h) / 2) as u32;
-            corners.top_right > half_min_dim
-                || corners.top_left > half_min_dim
-                || corners.bottom_right > half_min_dim
-                || corners.bottom_left > half_min_dim
-        }) && let Some(hook) = surface_data.data_map.get::<LayerHookId>()
+        // A surface that isn't mapped yet has no size to validate against;
+        // `bbox_from_surface_tree` reports an empty rectangle for it. Treating
+        // that as "every radius is too large" kills clients that set a radius
+        // before their first buffer, so skip it, the same way the xdg hook
+        // skips surfaces that have no window geometry yet.
+        if padded_box.size.w <= 0 || padded_box.size.h <= 0 {
+            return;
+        }
+
+        if submitted.corners
+            && corners.0.as_ref().is_some_and(|corners| {
+                let half_min_dim = (padded_box.size.w.min(padded_box.size.h) / 2) as u32;
+                corners.top_right > half_min_dim
+                    || corners.top_left > half_min_dim
+                    || corners.bottom_right > half_min_dim
+                    || corners.bottom_left > half_min_dim
+            })
         {
-            let hook_ref = hook.lock().unwrap();
-            if let Some((_, obj)) = hook_ref.as_ref()
-                && let Ok(obj) = obj.upgrade()
-            {
-                obj.post_error(
-                    cosmic_corner_radius_layer_v1::Error::RadiusTooLarge as u32,
-                    format!("{obj:?} corner radius too large"),
-                );
-            }
+            post_layer_error(
+                surface_data,
+                cosmic_corner_radius_layer_v1::Error::RadiusTooLarge,
+                "corner radius too large",
+            );
         }
     });
 }
