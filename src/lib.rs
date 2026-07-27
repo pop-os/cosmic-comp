@@ -159,6 +159,10 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     logger::init_logger()?;
     info!("Cosmic starting up!");
 
+    // This thread runs the event loop. Recorded before any iced element exists,
+    // so ProgramLoop can tell inline-safe calls from ones that must be deferred.
+    utils::iced::mark_main_thread();
+
     profiling::register_thread!("Main Thread");
     #[cfg(feature = "profile-with-tracy")]
     tracy_client::Client::start();
@@ -380,11 +384,12 @@ fn init_wayland_display(
 }
 
 fn refresh(state: &mut State) {
-    // Reap executor sources from iced elements dropped off the loop thread
-    // (see drain_pending_executor_removals). This is a post-dispatch point, so
-    // LoopHandle::remove is safe here; do it unconditionally, before the refresh
-    // throttle below can early-return.
-    crate::utils::iced::drain_pending_executor_removals(&state.common.event_loop_handle);
+    // Run the loop-bound work iced elements deferred to this thread: idle
+    // callbacks parked by programs running on a render thread, and the teardown
+    // of elements dropped there (see drain_deferred_loop_work). This is a
+    // post-dispatch point, so touching the loop is safe here; do it
+    // unconditionally, before the refresh throttle below can early-return.
+    crate::utils::iced::drain_deferred_loop_work(&state.common.event_loop_handle);
 
     if matches!(state.last_refresh, LastRefresh::Scheduled(_)) {
         return;

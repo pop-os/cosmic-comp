@@ -114,7 +114,7 @@ pub enum Item {
     Entry {
         title: String,
         shortcut: Option<String>,
-        on_press: Arc<Box<dyn Fn(&LoopHandle<'_, State>) + Send + Sync>>,
+        on_press: Arc<Box<dyn Fn(&crate::utils::iced::ProgramLoop) + Send + Sync>>,
         toggled: bool,
         submenu: bool,
         disabled: bool,
@@ -151,7 +151,7 @@ impl fmt::Debug for Item {
 }
 
 impl Item {
-    pub fn new<S: Into<String>, F: Fn(&LoopHandle<'_, State>) + Send + Sync + 'static>(
+    pub fn new<S: Into<String>, F: Fn(&crate::utils::iced::ProgramLoop) + Send + Sync + 'static>(
         title: S,
         on_press: F,
     ) -> Item {
@@ -254,7 +254,7 @@ impl Program for ContextMenu {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, crate::state::State>,
+        loop_handle: &crate::utils::iced::ProgramLoop,
         last_seat: Option<&(Seat<State>, Serial)>,
     ) -> Task<Self::Message> {
         match message {

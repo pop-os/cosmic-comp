@@ -607,7 +607,7 @@ impl Program for ZoomProgram {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, State>,
+        loop_handle: &crate::utils::iced::ProgramLoop,
         last_seat: Option<&(Seat<State>, Serial)>,
     ) -> iced_runtime::Task<Self::Message> {
         match message {

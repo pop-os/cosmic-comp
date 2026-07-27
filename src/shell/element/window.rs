@@ -1232,7 +1232,7 @@ impl Program for CosmicWindowInternal {
     fn update(
         &mut self,
         message: Self::Message,
-        loop_handle: &LoopHandle<'static, crate::state::State>,
+        loop_handle: &crate::utils::iced::ProgramLoop,
         last_seat: Option<&(Seat<State>, Serial)>,
     ) -> Task<Self::Message> {
         match message {
