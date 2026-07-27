@@ -835,6 +835,32 @@ impl State {
                 .fullscreen_request(&game, output, &loop_handle);
         }
 
+        // In game mode the game must FILL the output gamescope-style: a legacy or
+        // fixed-res game that commits a smaller buffer is upscaled to fit rather
+        // than shown small in a black output. Mark the game's fullscreen surface
+        // to render output-filling; the flag lives on the FullscreenSurface, so it
+        // clears automatically when the game leaves fullscreen.
+        {
+            let game = {
+                let shell = self.common.shell.read();
+                shell
+                    .game_mode
+                    .active
+                    .then(|| shell.game_mode.game_surface.clone())
+                    .flatten()
+            };
+            if let Some(game) = game {
+                let mut shell = self.common.shell.write();
+                if let Some(ws) = shell
+                    .workspaces
+                    .spaces_mut()
+                    .find(|ws| ws.get_fullscreen_surfaces().any(|f| f.surface == game))
+                {
+                    ws.set_fullscreen_fill_output(&game, true);
+                }
+            }
+        }
+
         // Safety-net retry for a deferred enter (e.g. the game window mapped
         // since the last tick) and for a game surface retagged onto another window.
         self.try_resolve_pending_game_mode();

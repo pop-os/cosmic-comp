@@ -318,6 +318,17 @@ impl Shell {
             })
             .collect::<Vec<_>>();
 
+        // In game mode the game must stay "activated" even when an exclusive
+        // layer surface (e.g. the Super start-menu) takes keyboard focus —
+        // otherwise a client like a GTK/Flutter toplevel drops to its default
+        // size on deactivation and shrinks out of fullscreen. Keeping it
+        // activated does not affect where keys go (the layer still has focus).
+        let game_fullscreen = self
+            .game_mode
+            .active
+            .then(|| self.game_mode.game_surface.clone())
+            .flatten();
+
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
             let set = self.workspaces.sets.get_mut(&output).unwrap();
             for focused in focused_windows.iter() {
@@ -338,15 +349,16 @@ impl Shell {
 
             let workspace = &mut set.workspaces[set.active];
             for fs in workspace.get_fullscreen_surfaces() {
-                let is_focused = self.seats.iter().any(|seat| {
-                    if let Some(KeyboardFocusTarget::Fullscreen(s)) =
-                        seat.get_keyboard().unwrap().current_focus()
-                    {
-                        s == fs.surface
-                    } else {
-                        false
-                    }
-                });
+                let is_focused = game_fullscreen.as_ref() == Some(&fs.surface)
+                    || self.seats.iter().any(|seat| {
+                        if let Some(KeyboardFocusTarget::Fullscreen(s)) =
+                            seat.get_keyboard().unwrap().current_focus()
+                        {
+                            s == fs.surface
+                        } else {
+                            false
+                        }
+                    });
                 fs.surface.set_activated(is_focused);
                 fs.surface.send_configure();
             }
