@@ -29,7 +29,11 @@ use smithay::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
         drm::{
             Device as _,
-            control::{Device as _, connector::Interface, crtc},
+            control::{
+                Device as _,
+                connector::{Interface, State as ConnectorState},
+                crtc,
+            },
         },
         input::{self, Libinput},
         wayland_server::{Client, DisplayHandle},
@@ -42,7 +46,7 @@ use smithay::{
     },
 };
 use surface::GbmDrmOutput;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use std::{
     collections::{HashMap, HashSet},
@@ -227,6 +231,20 @@ fn determine_boot_gpu(seat: String) -> Option<DrmNode> {
     primary_node.and_then(|x| x.node_with_type(NodeType::Render).and_then(Result::ok))
 }
 
+/// Returns `true` if a connector on the given interface, in the given state,
+/// represents a connected built-in laptop panel (eDP / LVDS / DSI).
+///
+/// Only *connected* internal panels count: a laptop lid may expose an eDP
+/// connector that is currently disconnected (e.g. lid closed), and that must
+/// not be treated as the built-in display for primary-gpu selection.
+fn is_internal_connected(interface: Interface, state: ConnectorState) -> bool {
+    state == ConnectorState::Connected
+        && matches!(
+            interface,
+            Interface::EmbeddedDisplayPort | Interface::LVDS | Interface::DSI
+        )
+}
+
 fn determine_primary_gpu(
     drm_devices: &IndexMap<DrmNode, Device>,
     seat: String,
@@ -241,17 +259,53 @@ fn determine_primary_gpu(
         return Ok(Some(node));
     }
 
-    // try to find builtin display
+    // Try to find a builtin display (eDP / LVDS / DSI) on any *connected* connector.
+    //
+    // We must inspect all of the device's connectors here, not just the ones that
+    // already have a `Surface`: during startup a connector may not have been turned
+    // into a `Surface` yet (or its `Surface` creation may have transiently failed),
+    // and skipping it would make us miss the internal panel and pick the wrong render
+    // gpu on a hybrid (e.g. Intel + NVIDIA) laptop.
     for dev in drm_devices.values() {
-        if dev.inner.surfaces.values().any(|s| {
-            if let Ok(conn_info) = dev.drm.device().get_connector(s.connector, false) {
-                let i = conn_info.interface();
-                i == Interface::EmbeddedDisplayPort || i == Interface::LVDS || i == Interface::DSI
-            } else {
-                false
+        let node = dev.inner.render_node;
+        let drm = dev.drm.device();
+        let res_handles = match drm.resource_handles() {
+            Ok(res_handles) => res_handles,
+            Err(err) => {
+                // Don't abort selection for all devices if one device misbehaves.
+                warn!(
+                    ?err,
+                    ?node,
+                    "Failed to read resource handles while looking for a built-in panel, skipping device"
+                );
+                continue;
             }
-        }) {
-            return Ok(Some(dev.inner.render_node));
+        };
+
+        let has_internal_panel = res_handles.connectors().iter().any(|conn| {
+            match drm.get_connector(*conn, false) {
+                Ok(conn_info) => {
+                    let internal = is_internal_connected(conn_info.interface(), conn_info.state());
+                    trace!(
+                        ?node,
+                        connector = ?conn,
+                        interface = ?conn_info.interface(),
+                        state = ?conn_info.state(),
+                        internal,
+                        "Considering connector for primary gpu"
+                    );
+                    internal
+                }
+                Err(err) => {
+                    trace!(?err, connector = ?conn, ?node, "Failed to query connector, ignoring");
+                    false
+                }
+            }
+        });
+
+        if has_internal_panel {
+            info!(?node, "Using gpu with connected built-in panel as primary");
+            return Ok(Some(node));
         }
     }
 
@@ -1174,5 +1228,51 @@ impl KmsGuard<'_> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::is_internal_connected;
+    use smithay::reexports::drm::control::connector::{Interface, State as ConnectorState};
+
+    #[test]
+    fn only_connected_internal_panels_count() {
+        // Built-in panel interfaces count as internal only while connected.
+        for iface in [
+            Interface::EmbeddedDisplayPort,
+            Interface::LVDS,
+            Interface::DSI,
+        ] {
+            assert!(
+                is_internal_connected(iface, ConnectorState::Connected),
+                "{iface:?} while connected should be internal"
+            );
+            assert!(
+                !is_internal_connected(iface, ConnectorState::Disconnected),
+                "{iface:?} while disconnected should not be internal"
+            );
+            assert!(
+                !is_internal_connected(iface, ConnectorState::Unknown),
+                "{iface:?} in unknown state should not be internal"
+            );
+        }
+
+        // External / desktop interfaces are never treated as the built-in panel,
+        // even when connected (this is the case that regressed the hybrid-laptop
+        // boot: an external HDMI/DP must not decide primary-gpu selection).
+        for iface in [
+            Interface::HDMIA,
+            Interface::HDMIB,
+            Interface::DisplayPort,
+            Interface::DVID,
+            Interface::DVII,
+            Interface::VGA,
+        ] {
+            assert!(
+                !is_internal_connected(iface, ConnectorState::Connected),
+                "{iface:?} while connected should not be internal"
+            );
+        }
     }
 }
