@@ -313,6 +313,19 @@ impl GameModeBridge {
         });
     }
 
+    /// `LauncherKeyPressed` — the launcher key (bare Super) was pressed while
+    /// game mode is active. Pure event, no state to mirror.
+    pub fn notify_launcher_key(&self) {
+        let Some(conn) = self.conn.get().cloned() else {
+            return;
+        };
+        self.spawn(async move {
+            if let Ok(emitter) = SignalEmitter::new(&conn, OBJECT_PATH) {
+                let _ = GameModeInterface::launcher_key_pressed(&emitter).await;
+            }
+        });
+    }
+
     /// Property changes for the tunables (fps limit / tearing / vrr / scaling).
     pub fn notify_tunables_changed(&self) {
         let Some(conn) = self.conn.get().cloned() else {
@@ -520,6 +533,12 @@ impl GameModeInterface {
 
     #[zbus(signal)]
     async fn capabilities_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+
+    /// The launcher key (bare Super) was pressed while game mode is active. The
+    /// launcher (matching `LAUNCHER_APP_IDS`) subscribes and decides what to do
+    /// (toggle its overlay, minimize the game, ...). A pure event, no state.
+    #[zbus(signal)]
+    async fn launcher_key_pressed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 }
 
 // ──────────────────────────── lifecycle / wiring ───────────────────────────
