@@ -3001,7 +3001,11 @@ impl State {
                             return ControlFlow::Break(Ok(Some(element)));
                         }
                     }
-                    Stage::Workspace { workspace, offset } => {
+                    Stage::Workspace {
+                        workspace,
+                        offset,
+                        alpha: _,
+                    } => {
                         let location = global_pos + offset.as_global().to_f64();
                         let output = workspace.output();
                         let output_geo = output.geometry().to_local(output);
@@ -3180,7 +3184,11 @@ impl State {
                             return ControlFlow::Break(Ok(Some(under)));
                         }
                     }
-                    Stage::Workspace { workspace, offset } => {
+                    Stage::Workspace {
+                        workspace,
+                        offset,
+                        alpha: _,
+                    } => {
                         let global_pos = global_pos + offset.to_f64().as_global();
                         if let Some(under) =
                             workspace.toplevel_surface_under(global_pos, overview.clone(), seat)

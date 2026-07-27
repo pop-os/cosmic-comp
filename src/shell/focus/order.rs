@@ -71,6 +71,9 @@ pub enum Stage<'a> {
     Workspace {
         workspace: &'a Workspace,
         offset: Point<i32, Logical>,
+        /// Uniform opacity for the whole workspace (1.0 except during a
+        /// `WorkspaceDelta::Crossfade`, where the incoming workspace fades in).
+        alpha: f32,
     },
 }
 pub fn render_input_order<R: Default + 'static>(
@@ -185,7 +188,11 @@ fn render_input_order_internal<R: 'static>(
         };
     let has_fullscreen = game_mode_exclusive || (fullscreen.is_some() && !overview_is_open);
 
-    let (previous, current_offset) = match previous.as_ref() {
+    // For a transition: `previous` = (outgoing workspace, has_fullscreen, its
+    // offset); plus the incoming `current_offset` and the two opacities.
+    // A slide keeps both opaque and moves them apart; a Crossfade keeps both at
+    // offset 0 (stacked) and fades the incoming one in over the opaque outgoing.
+    let (previous, current_offset, previous_alpha, current_alpha) = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
             let layout = shell.workspaces.layout;
 
@@ -194,57 +201,80 @@ fn render_input_order_internal<R: 'static>(
             };
             let has_fullscreen = workspace.get_fullscreen(seat).is_some();
 
-            let (forward, percentage) = match start {
-                WorkspaceDelta::Shortcut(st) => (
-                    *previous_idx < current.1,
-                    ease(
-                        EaseInOutCubic,
-                        0.0,
-                        1.0,
-                        Instant::now().duration_since(*st).as_millis() as f32
-                            / shell.theme().motion.animation.as_millis() as f32,
+            if let WorkspaceDelta::Crossfade(st) = start {
+                let t: f32 = ease(
+                    EaseInOutCubic,
+                    0.0f32,
+                    1.0f32,
+                    Instant::now().duration_since(*st).as_millis() as f32
+                        / shell.theme().motion.slide_crossfade.as_millis() as f32,
+                )
+                .clamp(0.0, 1.0);
+                // Both stacked at offset 0; outgoing opaque (drawn under),
+                // incoming fades in (drawn over, emitted first == topmost).
+                (
+                    Some((previous, has_fullscreen, Point::default())),
+                    Point::default(),
+                    1.0f32,
+                    t,
+                )
+            } else {
+                let (forward, percentage) = match start {
+                    WorkspaceDelta::Shortcut(st) => (
+                        *previous_idx < current.1,
+                        ease(
+                            EaseInOutCubic,
+                            0.0,
+                            1.0,
+                            Instant::now().duration_since(*st).as_millis() as f32
+                                / shell.theme().motion.animation.as_millis() as f32,
+                        ),
                     ),
-                ),
-                WorkspaceDelta::Gesture {
-                    percentage: prog,
-                    forward,
-                } => (*forward, *prog as f32),
-                WorkspaceDelta::GestureEnd {
-                    start,
-                    spring,
-                    forward,
-                } => (
-                    *forward,
-                    (spring.value_at(Instant::now().duration_since(*start)) as f32).clamp(0.0, 1.0),
-                ),
-            };
+                    WorkspaceDelta::Gesture {
+                        percentage: prog,
+                        forward,
+                    } => (*forward, *prog as f32),
+                    WorkspaceDelta::GestureEnd {
+                        start,
+                        spring,
+                        forward,
+                    } => (
+                        *forward,
+                        (spring.value_at(Instant::now().duration_since(*start)) as f32)
+                            .clamp(0.0, 1.0),
+                    ),
+                    WorkspaceDelta::Crossfade(_) => unreachable!("handled above"),
+                };
 
-            let offset = Point::<i32, Logical>::from(match (layout, forward) {
-                (WorkspaceLayout::Vertical, true) => {
-                    (0, (-output_size.h as f32 * percentage).round() as i32)
-                }
-                (WorkspaceLayout::Vertical, false) => {
-                    (0, (output_size.h as f32 * percentage).round() as i32)
-                }
-                (WorkspaceLayout::Horizontal, true) => {
-                    ((-output_size.w as f32 * percentage).round() as i32, 0)
-                }
-                (WorkspaceLayout::Horizontal, false) => {
-                    ((output_size.w as f32 * percentage).round() as i32, 0)
-                }
-            });
+                let offset = Point::<i32, Logical>::from(match (layout, forward) {
+                    (WorkspaceLayout::Vertical, true) => {
+                        (0, (-output_size.h as f32 * percentage).round() as i32)
+                    }
+                    (WorkspaceLayout::Vertical, false) => {
+                        (0, (output_size.h as f32 * percentage).round() as i32)
+                    }
+                    (WorkspaceLayout::Horizontal, true) => {
+                        ((-output_size.w as f32 * percentage).round() as i32, 0)
+                    }
+                    (WorkspaceLayout::Horizontal, false) => {
+                        ((output_size.w as f32 * percentage).round() as i32, 0)
+                    }
+                });
 
-            (
-                Some((previous, has_fullscreen, offset)),
-                Point::<i32, Logical>::from(match (layout, forward) {
-                    (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
-                    (WorkspaceLayout::Vertical, false) => (0, -(output_size.h - offset.y)),
-                    (WorkspaceLayout::Horizontal, true) => (output_size.w + offset.x, 0),
-                    (WorkspaceLayout::Horizontal, false) => (-(output_size.w - offset.x), 0),
-                }),
-            )
+                (
+                    Some((previous, has_fullscreen, offset)),
+                    Point::<i32, Logical>::from(match (layout, forward) {
+                        (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
+                        (WorkspaceLayout::Vertical, false) => (0, -(output_size.h - offset.y)),
+                        (WorkspaceLayout::Horizontal, true) => (output_size.w + offset.x, 0),
+                        (WorkspaceLayout::Horizontal, false) => (-(output_size.w - offset.x), 0),
+                    }),
+                    1.0f32,
+                    1.0f32,
+                )
+            }
         }
-        None => (None, Point::default()),
+        None => (None, Point::default(), 1.0f32, 1.0f32),
     };
 
     // Top-level layer shell popups
@@ -388,13 +418,14 @@ fn render_input_order_internal<R: 'static>(
     }
 
     if should_include_windows(element_filter) {
-        // workspace windows
+        // workspace windows (the incoming workspace — fades in during a crossfade)
         callback(Stage::Workspace {
             workspace,
             offset: current_offset,
+            alpha: current_alpha,
         })?;
 
-        // previous workspace windows
+        // previous workspace windows (the outgoing workspace)
         if let Some((previous_handle, _, offset)) = previous.as_ref() {
             let Some(workspace) = shell.workspaces.space_for_handle(previous_handle) else {
                 return ControlFlow::Break(Err(OutputNoMode));
@@ -402,6 +433,7 @@ fn render_input_order_internal<R: 'static>(
             callback(Stage::Workspace {
                 workspace,
                 offset: *offset,
+                alpha: previous_alpha,
             })?;
         }
     }

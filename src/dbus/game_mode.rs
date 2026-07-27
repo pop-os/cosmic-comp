@@ -908,14 +908,16 @@ impl State {
             };
 
             let focus = if is_fullscreen {
-                // Already fullscreen on its own workspace — just switch to it. The
-                // slide (or, in Phase 2, cross-fade) is the whole transition.
-                info!(target: GAMING_TARGET, app_id, "switching to game-mode workspace");
+                // Already fullscreen on its own workspace — switch to it with a
+                // cross-fade (each game-mode workspace is a single fullscreen
+                // surface, so this dissolves launcher<->game like gamescope, no
+                // slide).
+                info!(target: GAMING_TARGET, app_id, "cross-fading to game-mode workspace");
                 if let Some(idx) = shell.workspaces.idx_for_handle(&output, &source_ws) {
                     let _ = shell.activate(
                         &output,
                         idx,
-                        WorkspaceDelta::new_shortcut(),
+                        WorkspaceDelta::new_crossfade(),
                         &mut self.common.workspace_state.update(),
                     );
                 }

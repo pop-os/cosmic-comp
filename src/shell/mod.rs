@@ -883,6 +883,11 @@ pub enum WorkspaceDelta {
         spring: Spring,
         forward: bool,
     },
+    /// Time-driven cross-fade (no slide): the outgoing workspace stays opaque and
+    /// the incoming one fades in over it. Used for the game-mode launcher<->game
+    /// switch, where each workspace is a single fullscreen surface (so alpha
+    /// blending is exact, with no overlapping-window double-exposure).
+    Crossfade(Instant),
     // InvalidGesture(f64), TODO
     // InvalidGestureEnd(Instant, Spring), TODO
 }
@@ -912,10 +917,16 @@ impl WorkspaceDelta {
         WorkspaceDelta::Shortcut(Instant::now())
     }
 
+    pub fn new_crossfade() -> Self {
+        WorkspaceDelta::Crossfade(Instant::now())
+    }
+
     pub fn is_animating(&self) -> bool {
         matches!(
             self,
-            WorkspaceDelta::Shortcut(_) | WorkspaceDelta::GestureEnd { .. }
+            WorkspaceDelta::Shortcut(_)
+                | WorkspaceDelta::GestureEnd { .. }
+                | WorkspaceDelta::Crossfade(_)
         )
     }
 }
@@ -1171,6 +1182,13 @@ impl WorkspaceSet {
                 WorkspaceDelta::GestureEnd { start, spring, .. } => {
                     if Instant::now().duration_since(start).as_millis()
                         > spring.duration().as_millis()
+                    {
+                        self.previously_active = None;
+                    }
+                }
+                WorkspaceDelta::Crossfade(st) => {
+                    if Instant::now().duration_since(st).as_millis() as f32
+                        >= self.theme.motion.slide_crossfade.as_millis() as f32
                     {
                         self.previously_active = None;
                     }

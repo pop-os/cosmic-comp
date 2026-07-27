@@ -2171,7 +2171,11 @@ where
                     },
                 );
             }
-            Stage::Workspace { workspace, offset } => {
+            Stage::Workspace {
+                workspace,
+                offset,
+                alpha,
+            } => {
                 elements.extend(
                     match workspace.render(
                         renderer,
@@ -2182,7 +2186,9 @@ where
                         active_hint,
                         &theme,
                         element_filter.clone(),
-                        voice_mode_alpha,
+                        // Multiply the workspace-transition opacity (1.0 except
+                        // during a crossfade) into the existing window-alpha slot.
+                        voice_mode_alpha * alpha,
                         attached_orb_state.as_ref(),
                         scanout_node,
                     ) {
