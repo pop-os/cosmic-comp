@@ -393,10 +393,12 @@ impl State {
                     // - output_geometry.size so that we don't send leave events to a fullscreen app
                     // - logical size so that the position doesn't end up outside the actual size of the output
                     // See https://github.com/pop-os/cosmic-comp/pull/2568
-                    let max_x = output_geometry_loc.x
-                        + logical.w.min(output_geometry.size.w as f64).next_down();
-                    let max_y = output_geometry_loc.y
-                        + logical.h.min(output_geometry.size.h as f64).next_down();
+                    let max_x = (output_geometry_loc.x
+                        + logical.w.min(output_geometry.size.w as f64))
+                    .next_down();
+                    let max_y = (output_geometry_loc.y
+                        + logical.h.min(output_geometry.size.h as f64))
+                    .next_down();
                     position.x = position.x.clamp(output_geometry_loc.x, max_x);
                     position.y = position.y.clamp(output_geometry_loc.y, max_y);
 
