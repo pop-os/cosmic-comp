@@ -254,6 +254,7 @@ pub struct PendingWindow {
     pub surface: CosmicSurface,
     pub seat: Seat<State>,
     pub fullscreen: Option<Output>,
+    pub minimized: bool,
     pub maximized: bool,
     pub sticky: bool,
 }
@@ -2828,6 +2829,7 @@ impl Shell {
             surface: window,
             seat,
             fullscreen: output,
+            minimized: should_be_minimized,
             maximized: should_be_maximized,
             sticky: mut should_be_sticky,
         } = self.pending_windows.remove(pos);
@@ -2911,6 +2913,7 @@ impl Shell {
         if let Some(FocusTarget::Window(focused)) = maybe_focused
             && let Some(stack) = focused.stack_ref()
             && !is_dialog
+            && !should_be_minimized
             && !should_be_maximized
             && !(workspace.is_tiled(&focused.active_window()) && floating_exception)
         {
@@ -2960,8 +2963,13 @@ impl Shell {
             self.maximize_request(&mapped, &seat, false, loop_handle);
         }
 
-        let new_target = if (workspace_output == seat.active_output()
-            && active_handle == workspace_handle)
+        if should_be_minimized {
+            self.minimize_request(&window);
+        }
+
+        let new_target = if should_be_minimized {
+            None
+        } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)
             || should_be_sticky
         {
             // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
@@ -3085,6 +3093,7 @@ impl Shell {
                     surface,
                     seat: seat.clone(),
                     fullscreen: None,
+                    minimized: false,
                     maximized: false,
                     sticky: false,
                 });
