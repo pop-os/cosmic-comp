@@ -261,9 +261,34 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
     }
 }
 
+/// Executor sources orphaned by an `IcedElementInternal` that was dropped off
+/// the main loop thread — e.g. on a KMS surface render thread still holding an
+/// `Arc` clone of a window's decoration in its cached frame. `LoopHandle::remove`
+/// borrows a `RefCell` the main event loop also borrows while dispatching, so
+/// calling it off-thread (or mid-dispatch) panics with "RefCell already
+/// borrowed" and takes the whole compositor down. Instead we stash the token
+/// here and drain it from the main loop's post-dispatch refresh, where removal
+/// is safe. `RegistrationToken` is a plain key, so this is cheap and `Send`.
+static PENDING_EXECUTOR_REMOVALS: Mutex<Vec<RegistrationToken>> = Mutex::new(Vec::new());
+
+/// Remove executor sources left behind by `IcedElementInternal`s dropped off the
+/// loop thread. Call from the main thread at a post-dispatch point (see
+/// `crate::refresh`), where `LoopHandle::remove` is safe.
+pub fn drain_pending_executor_removals(handle: &LoopHandle<'static, crate::state::State>) {
+    let tokens = std::mem::take(&mut *PENDING_EXECUTOR_REMOVALS.lock().unwrap());
+    for token in tokens {
+        handle.remove(token);
+    }
+}
+
 impl<P: Program + Send + 'static> Drop for IcedElementInternal<P> {
     fn drop(&mut self) {
-        self.handle.remove(self.executor_token.take().unwrap());
+        // May run on a non-main thread (a surface render thread that held the
+        // last Arc to this element), so we must NOT touch the loop handle here.
+        // Defer the source removal to the main-loop drain above.
+        if let Some(token) = self.executor_token.take() {
+            PENDING_EXECUTOR_REMOVALS.lock().unwrap().push(token);
+        }
     }
 }
 

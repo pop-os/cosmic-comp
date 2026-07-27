@@ -380,6 +380,12 @@ fn init_wayland_display(
 }
 
 fn refresh(state: &mut State) {
+    // Reap executor sources from iced elements dropped off the loop thread
+    // (see drain_pending_executor_removals). This is a post-dispatch point, so
+    // LoopHandle::remove is safe here; do it unconditionally, before the refresh
+    // throttle below can early-return.
+    crate::utils::iced::drain_pending_executor_removals(&state.common.event_loop_handle);
+
     if matches!(state.last_refresh, LastRefresh::Scheduled(_)) {
         return;
     }
