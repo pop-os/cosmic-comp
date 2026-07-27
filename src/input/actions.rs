@@ -118,6 +118,13 @@ impl State {
 
     pub fn handle_swipe_action(&mut self, action: gestures::SwipeAction, seat: &Seat<State>) {
         use gestures::SwipeAction;
+
+        // Matches the guards on the `NextWorkspace`/`PreviousWorkspace` shortcut arms below;
+        // the gesture path reaches the same helpers and must not bypass them.
+        if !workspaces_enabled() {
+            return;
+        }
+
         let wraparound: bool = self
             .common
             .config

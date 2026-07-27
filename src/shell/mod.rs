@@ -78,7 +78,7 @@ use tracing::error;
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
     config::Config,
-    utils::{prelude::*, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
+    utils::{prelude::*, process::workspaces_enabled, quirks::WORKSPACE_OVERVIEW_NAMESPACE},
     wayland::{
         handlers::{
             toplevel_management::minimize_rectangle, xdg_activation::ActivationContext,
@@ -1030,38 +1030,80 @@ fn create_workspace_from_pinned(
     )
 }
 
-/* We will probably need this again at some point
+/// Fold `workspace` into `into`, moving every window across and dropping the now-empty
+/// workspace from the protocol.
+///
+/// Both workspaces must already sit on the same output: call [`Workspace::set_output`] on
+/// `workspace` first, so the per-output toplevel bookkeeping is already correct by the time
+/// we get here.
 fn merge_workspaces(
     mut workspace: Workspace,
     into: &mut Workspace,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
-    toplevel_info_state: &mut ToplevelInfoState<State, CosmicSurface>,
+    seats: &[Seat<State>],
 ) {
-    if into.fullscreen.is_some() {
-        // Don't handle the returned original workspace, for this nieche case.
-        let _ = workspace.remove_fullscreen();
-    }
-
+    // Re-parent the toplevel -> workspace association for everything we are about to move.
+    // Collect first and de-duplicate: a maximized tiled window is mapped in both layers, and a
+    // surface part-way through un-fullscreening is in `fullscreen_surfaces` as well as its
+    // layer. `toplevel_enter_workspace` is a bare `Vec::push` with no dedup of its own, so
+    // visiting a surface twice would emit `ext_workspace_enter` twice for it.
+    let mut moving = Vec::new();
+    let note = |toplevel: CosmicSurface, moving: &mut Vec<CosmicSurface>| {
+        if !moving.contains(&toplevel) {
+            moving.push(toplevel);
+        }
+    };
     for element in workspace.mapped() {
-        // fixup toplevel state
         for (toplevel, _) in element.windows() {
-            toplevel_info_state.toplevel_leave_workspace(&toplevel, &workspace.handle);
-            toplevel_info_state.toplevel_enter_workspace(&toplevel, &into.handle);
+            note(toplevel, &mut moving);
         }
     }
-    // Merge minimized windows, updating toplevel workspace tracking
     for minimized in &workspace.minimized_windows {
         for toplevel in minimized.windows() {
-            toplevel_info_state.toplevel_leave_workspace(&toplevel, &workspace.handle);
-            toplevel_info_state.toplevel_enter_workspace(&toplevel, &into.handle);
+            note(toplevel, &mut moving);
         }
     }
-    into.minimized_windows.extend(workspace.minimized_windows.drain(..));
+    for fullscreen in &workspace.fullscreen_surfaces {
+        note(fullscreen.surface.clone(), &mut moving);
+    }
+    for toplevel in &moving {
+        toplevel_leave_workspace(toplevel, &workspace.handle);
+        toplevel_enter_workspace(toplevel, &into.handle);
+    }
+
+    // Carry the per-seat focus history across. Without this the moved windows are absent from
+    // `into`'s focus stack, and every lookup that resolves through it - `get_fullscreen` most
+    // notably - stops finding them. `FocusStack::iter` yields newest-first and `append` pushes
+    // onto the top, so walk it in reverse to preserve the relative order.
+    for seat in seats {
+        let previous = workspace
+            .focus_stack
+            .get(seat)
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        // Whatever held the top of `into`'s stack keeps it. `Workspace::render` gates the
+        // fullscreen render path on `focus_stack.last()`, so letting the departing output's
+        // most-recent window win would drop a live fullscreen - a game, in practice - behind
+        // the windows we just merged in.
+        let keep_on_top = into.focus_stack.get(seat).last().cloned();
+        let mut stack = into.focus_stack.get_mut(seat);
+        for target in previous.into_iter().rev() {
+            stack.append(target);
+        }
+        if let Some(target) = keep_on_top {
+            stack.append(target);
+        }
+    }
+
+    into.minimized_windows
+        .extend(workspace.minimized_windows.drain(..));
+    into.fullscreen_surfaces
+        .extend(workspace.fullscreen_surfaces.drain(..));
     into.tiling_layer.merge(workspace.tiling_layer);
     into.floating_layer.merge(workspace.floating_layer);
     workspace_state.remove_workspace(workspace.handle);
 }
-*/
 
 impl WorkspaceSet {
     fn new(
@@ -1519,6 +1561,8 @@ impl Workspaces {
             return;
         }
 
+        let seats = seats.cloned().collect::<Vec<_>>();
+
         if let Some(set) = self.sets.shift_remove(output) {
             {
                 let map = layer_map_for_output(output);
@@ -1532,7 +1576,7 @@ impl Workspaces {
             // and hope enumeration order works in our favor.
             let new_output = self.sets.get_index(0).map(|(o, _)| o.clone());
             if let Some(new_output) = new_output {
-                for seat in seats {
+                for seat in &seats {
                     if &seat.active_output() == output {
                         seat.set_active_output(&new_output);
                     }
@@ -1546,6 +1590,22 @@ impl Workspaces {
                 for (i, mut workspace) in set.workspaces.into_iter().enumerate() {
                     if workspace.can_auto_remove(xdg_activation_state) {
                         workspace_state.remove_workspace(workspace.handle);
+                    } else if !workspaces_enabled() && !new_set.workspaces.is_empty() {
+                        // Workspaces are disabled for this product (no `cosmic-workspaces`
+                        // installed), so unplugging an output must not leave a second
+                        // window-bearing workspace behind on the surviving one. Fold the
+                        // windows into its active workspace instead of appending the whole
+                        // workspace, which is what used to strand the user on "workspace 2"
+                        // after a monitor round-trip.
+                        workspace.set_output(&new_output, false);
+                        let target = new_set.active.min(new_set.workspaces.len() - 1);
+                        merge_workspaces(
+                            workspace,
+                            &mut new_set.workspaces[target],
+                            workspace_state,
+                            &seats,
+                        );
+                        new_set.workspaces[target].refresh();
                     } else {
                         // update workspace protocol state
                         workspace_state.remove_workspace_state(&workspace.handle, WState::Active);

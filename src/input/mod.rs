@@ -28,7 +28,7 @@ use crate::{
         zoom::ZoomState,
     },
     state::BackendData,
-    utils::{prelude::*, quirks::workspace_overview_is_open},
+    utils::{prelude::*, process::workspaces_enabled, quirks::workspace_overview_is_open},
     wayland::handlers::{
         image_copy_capture::SessionHolder, xwayland_keyboard_grab::XWaylandGrabSeat,
     },
@@ -1384,7 +1384,13 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
+                    // With workspaces disabled the multi-finger swipe has nothing to switch
+                    // to, so don't claim the gesture - hand it to the client instead. This
+                    // also disables the update/end arms, which both key off `gesture_state`.
+                    if event.fingers() >= 3
+                        && workspaces_enabled()
+                        && !workspace_overview_is_open(&seat.active_output())
+                    {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();

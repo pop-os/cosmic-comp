@@ -17,6 +17,25 @@
 const MIN_PLAUSIBLE_DPI: f64 = 20.0;
 const MAX_PLAUSIBLE_DPI: f64 = 600.0;
 
+/// Target pixel density (DPI) that maps to 100% scale on a built-in panel.
+/// Laptop screens are viewed from ~50-60cm, so they tolerate a denser target
+/// than a desktop monitor before the UI needs scaling up.
+const LAPTOP_DPI_TARGET: u32 = 144;
+
+/// Target pixel density (DPI) that maps to 100% scale on an external monitor.
+///
+/// Set to 100 rather than the upstream 144-derived 120 because AgentOS displays
+/// are routinely viewed from further than a desk-bound office monitor, and a
+/// 120 target left the whole ~105-120 DPI class (27" 1440p, 34" 3440x1440,
+/// 49" 5120x1440) at 100%, which reads too small at that distance.
+///
+/// The value is chosen for margin, not to hit one panel: the snap-to-50 in
+/// [`scale_from_dpi`] means every target in ~93..=108 produces an identical
+/// table, and 100 sits centrally in that window. Below ~93 it would start
+/// pulling in the genuinely low-density ~92 DPI class (32" 1440p,
+/// 57" 5120x1440); above ~108 it stops catching 27" 1440p at all.
+const DESKTOP_DPI_TARGET: u32 = 100;
+
 /// Compute a recommended fractional scale for an output from its physical size
 /// and active resolution.
 ///
@@ -63,7 +82,7 @@ pub fn calculate_scale(embedded: bool, monitor_size_mm: (u32, u32), resolution: 
     match diag {
         _diag if diag < 20. || embedded => {
             // likely laptop
-            scale_from_dpi(dpi, 144, shorter_res)
+            scale_from_dpi(dpi, LAPTOP_DPI_TARGET, shorter_res)
         }
         // 16:10 has a height of 19.6, anything lower is most likely an ultrawide
         _diag if diag >= 40. && h_in >= 19. => {
@@ -75,7 +94,7 @@ pub fn calculate_scale(embedded: bool, monitor_size_mm: (u32, u32), resolution: 
         }
         _ => {
             // likely desktop
-            scale_from_dpi(dpi, 120, shorter_res)
+            scale_from_dpi(dpi, DESKTOP_DPI_TARGET, shorter_res)
         }
     }
 }
@@ -166,9 +185,14 @@ mod test {
             // Larger sizes 16:9
             for &diag_in in &[27.0, 32.0, 38.0] {
                 assert_eq!(scale(false, diag_in, 1920, 1080), 100);
-                assert_eq!(scale(false, diag_in, 2560, 1440), 100);
                 assert_eq!(scale(false, diag_in, 3840, 2160), 200);
             }
+            // At 1440p the 27" is ~109 DPI and scales to 150%, while the 32"
+            // (~92 DPI) and 38" (~77 DPI) are genuinely low-density and stay at
+            // 100%. See `DESKTOP_DPI_TARGET`.
+            assert_eq!(scale(false, 27.0, 2560, 1440), 150);
+            assert_eq!(scale(false, 32.0, 2560, 1440), 100);
+            assert_eq!(scale(false, 38.0, 2560, 1440), 100);
 
             // Smaller sizes 21:9
             for &diag_in in &[26.0, 29.0] {
@@ -180,16 +204,24 @@ mod test {
             // Larger sizes 21:9
             for &diag_in in &[34.0, 45.0] {
                 assert_eq!(scale(false, diag_in, 2560, 1080), 100);
-                assert_eq!(scale(false, diag_in, 3440, 1440), 100);
                 assert_eq!(scale(false, diag_in, 5120, 2160), 200);
             }
+            // 34" 3440x1440 is ~110 DPI — the same density class as a 27" 1440p
+            // — so it scales to 150%. The 45" (~83 DPI) stays at 100%.
+            assert_eq!(scale(false, 34.0, 3440, 1440), 150);
+            assert_eq!(scale(false, 45.0, 3440, 1440), 100);
 
             // Various sizes 32:9
             for &diag_in in &[45.0, 49.0, 57.0] {
                 assert_eq!(scale(false, diag_in, 3840, 1080), 100);
-                assert_eq!(scale(false, diag_in, 5120, 1440), 100);
                 assert_eq!(scale(false, diag_in, 7680, 2160), 200);
             }
+            // At 5120x1440 the 45" (~118 DPI) and 49" (~109 DPI) land in the
+            // same density class as a 27" 1440p and scale to 150%; the 57"
+            // (~93 DPI) stays at 100%.
+            assert_eq!(scale(false, 45.0, 5120, 1440), 150);
+            assert_eq!(scale(false, 49.0, 5120, 1440), 150);
+            assert_eq!(scale(false, 57.0, 5120, 1440), 100);
         }
 
         // TVs (non-embedded)
@@ -256,6 +288,21 @@ mod test {
         // reads as ~11 DPI and would be misclassified as a giant TV (200%).
         // Fall back to the resolution-only guess (100%) instead.
         assert_eq!(calculate_scale(false, (6000, 3360), (2560, 1440)), 1.0);
+    }
+
+    /// Regression test pinned to real hardware rather than a synthesised
+    /// diagonal: the EDID values a 27" LG UltraGear (1440p native) and a
+    /// Samsung eDP laptop panel actually report, as read back from
+    /// `cosmic-randr list`. The monitor must recommend 150%, and lowering
+    /// `DESKTOP_DPI_TARGET` must not disturb the embedded panel.
+    #[test]
+    fn real_hardware_recommendations() {
+        // LG ULTRAGEAR 27" 1440p on DisplayPort — ~109 DPI.
+        assert_eq!(calculate_scale(false, (600, 340), (2560, 1440)), 1.5);
+        // Same panel driven at its (30Hz-only) 4K mode is ~163 DPI -> 200%.
+        assert_eq!(calculate_scale(false, (600, 340), (3840, 2160)), 2.0);
+        // Samsung ATNA40HQ08-0 built-in panel — ~242 DPI, unchanged at 200%.
+        assert_eq!(calculate_scale(true, (300, 190), (2880, 1800)), 2.0);
     }
 
     #[test]
