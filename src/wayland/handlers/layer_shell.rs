@@ -224,6 +224,11 @@ impl WlrLayerShellHandler for State {
         shell.output_agnostic_layers.remove(&surface_id);
         shell.exclusive_focus_granted.remove(&surface_id);
 
+        // Release this surface's blurred backdrop. It is a full-output-sized GPU
+        // texture, and the cache is otherwise only pruned when a whole output
+        // goes away, so skipping this leaks one texture per destroyed layer.
+        crate::backend::render::blur::clear_layer_blur_texture_for_surface(&surface_id);
+
         // Clean up any edge-resize state for this surface: a panel destroyed mid
         // drag/animation must not leave a stuck ghost, grab target, spring or settle.
         // (A stuck settle in particular would keep the dispatch loop re-evaluating

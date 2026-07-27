@@ -395,6 +395,11 @@ fn refresh(state: &mut State) {
     // unconditionally, before the refresh throttle below can early-return.
     crate::utils::iced::drain_deferred_loop_work(&state.common.event_loop_handle);
 
+    // Release blurred backdrops belonging to windows that have since closed.
+    // Self-throttling, and skips rather than blocks if a render thread holds the
+    // cache, so it is safe to call unconditionally from here.
+    crate::backend::render::blur::reap_dead_blur_textures();
+
     if matches!(state.last_refresh, LastRefresh::Scheduled(_)) {
         return;
     }

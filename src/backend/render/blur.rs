@@ -43,12 +43,15 @@ use smithay::{
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{LazyLock, RwLock};
+use std::sync::{LazyLock, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use wayland_backend::server::ObjectId;
 
 use super::element::AsGlowRenderer;
 use crate::shell::element::{CosmicMapped, CosmicMappedKey};
+// For `CosmicMappedKey::alive`, which is how a cached blur texture learns its
+// window is gone (see `reap_dead_blur_textures`).
+use smithay::utils::IsAlive;
 
 // =============================================================================
 // Constants
@@ -531,8 +534,15 @@ pub struct BlurredTextureInfo {
     pub capture_size: (i32, i32),
 }
 
-/// Cache key combining output name and window key hash
-type BlurCacheKey = (String, u64);
+/// Cache key combining output name and the window's identity key.
+///
+/// `CosmicMappedKey` holds a `Weak`, so a cached entry can be asked whether its
+/// window still exists and reaped once it does not — see
+/// [`reap_dead_blur_textures`]. This used to key on a hash of the `Weak`'s raw
+/// pointer, which both leaked (nothing could tell a dead entry from a live one)
+/// and risked a freed window's address being reused by a new window that then
+/// inherited its blurred backdrop.
+type BlurCacheKey = (String, CosmicMappedKey);
 
 /// Global cache of blurred textures per window per output.
 /// For iterative rendering: each blur window has its own cached texture
@@ -553,14 +563,6 @@ pub static BLUR_GROUP_CONTENT_STATE: LazyLock<RwLock<HashMap<BlurGroupContentKey
 pub static BLUR_GROUP_LAST_UPDATE: LazyLock<RwLock<HashMap<BlurGroupContentKey, Instant>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
-/// Compute a hash for a window key (for cache lookup)
-fn window_key_hash(key: &CosmicMappedKey) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    key.hash(&mut hasher);
-    hasher.finish()
-}
-
 /// Store a blurred texture for a specific window on an output.
 /// This is used for iterative multi-pass blur where each blur window
 /// gets its own texture capturing everything behind it.
@@ -569,7 +571,7 @@ pub fn cache_blur_texture_for_window(
     window_key: &CosmicMappedKey,
     info: BlurredTextureInfo,
 ) {
-    let key = (output_name.to_string(), window_key_hash(window_key));
+    let key = (output_name.to_string(), window_key.clone());
     if let Ok(mut cache) = BLUR_TEXTURE_CACHE.write() {
         cache.insert(key, info);
     }
@@ -580,7 +582,7 @@ pub fn get_cached_blur_texture_for_window(
     output_name: &str,
     window_key: &CosmicMappedKey,
 ) -> Option<BlurredTextureInfo> {
-    let key = (output_name.to_string(), window_key_hash(window_key));
+    let key = (output_name.to_string(), window_key.clone());
     if let Ok(cache) = BLUR_TEXTURE_CACHE.read() {
         cache.get(&key).cloned()
     } else {
@@ -636,6 +638,65 @@ pub fn get_cached_blur_texture_for_layer(
 pub fn clear_layer_blur_textures_for_output(output_name: &str) {
     if let Ok(mut cache) = LAYER_BLUR_TEXTURE_CACHE.try_write() {
         cache.retain(|(out, _), _| out != output_name);
+    }
+}
+
+/// Drop the cached blur texture for a destroyed layer surface, on every output.
+///
+/// Layer surfaces come and go for the whole session (a panel or launcher
+/// re-creating its surface, a menu opening and closing), and each one that was
+/// blurred owns a full-output-sized GPU texture in here. Without this the cache
+/// only ever shrank when an entire output was removed, so those textures
+/// accumulated for as long as the compositor ran. Keyed across outputs because a
+/// surface may have been blurred on more than one.
+pub fn clear_layer_blur_texture_for_surface(surface_id: &ObjectId) {
+    if let Ok(mut cache) = LAYER_BLUR_TEXTURE_CACHE.write() {
+        let before = cache.len();
+        cache.retain(|(_, id), _| id != surface_id);
+        let removed = before - cache.len();
+        if removed > 0 {
+            tracing::debug!(
+                removed,
+                remaining = cache.len(),
+                "dropped layer blur textures for destroyed surface"
+            );
+        }
+    }
+}
+
+/// Drop cached window blur textures whose window no longer exists.
+///
+/// The window cache has no destroy hook to hang off — a window can go away via
+/// xdg, X11, or the client simply disconnecting — so instead of chasing every
+/// path we ask each key's `Weak` whether its window is still alive. Cheap: the
+/// map holds one entry per *blurred* window per output, and this only takes the
+/// write lock when it can get it uncontended, so a render thread mid-frame is
+/// never blocked. Throttled, since `refresh` runs every loop iteration.
+pub fn reap_dead_blur_textures() {
+    static LAST_REAP: Mutex<Option<Instant>> = Mutex::new(None);
+
+    {
+        let Ok(mut last) = LAST_REAP.lock() else {
+            return;
+        };
+        let now = Instant::now();
+        if last.is_some_and(|t| now.duration_since(t) < Duration::from_secs(1)) {
+            return;
+        }
+        *last = Some(now);
+    }
+
+    if let Ok(mut cache) = BLUR_TEXTURE_CACHE.try_write() {
+        let before = cache.len();
+        cache.retain(|(_, key), _| key.alive());
+        let removed = before - cache.len();
+        if removed > 0 {
+            tracing::debug!(
+                removed,
+                remaining = cache.len(),
+                "reaped blur textures for closed windows"
+            );
+        }
     }
 }
 
