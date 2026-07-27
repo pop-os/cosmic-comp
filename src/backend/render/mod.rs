@@ -666,6 +666,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("geo_size", UniformType::_2f),
             UniformName::new("corner_radius", UniformType::_4f),
             UniformName::new("input_to_geo", UniformType::Matrix3x3),
+            UniformName::new("scale", UniformType::_1f),
         ],
     )?;
     let shadow_shader = renderer.compile_custom_pixel_shader(

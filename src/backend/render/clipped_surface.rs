@@ -121,6 +121,7 @@ where
                     transpose: false,
                 },
             ),
+            Uniform::new("scale", scale.x as f32),
         ];
 
         Self {

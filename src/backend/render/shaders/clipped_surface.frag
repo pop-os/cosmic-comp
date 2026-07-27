@@ -25,6 +25,7 @@ uniform float tint;
 uniform vec2 geo_size;
 uniform vec4 corner_radius;
 uniform mat3 input_to_geo;
+uniform float scale;
 
 float rounding_alpha(vec2 coords, vec2 size) {
     vec2 center;
@@ -47,7 +48,11 @@ float rounding_alpha(vec2 coords, vec2 size) {
     }
 
     float dist = distance(coords, center);
-    float half_px = 0.5;
+    // `coords` is in logical pixels, so the antialiasing band has to be scaled
+    // down to stay half a *physical* pixel wide. Leaving it at 0.5 logical made
+    // the corner fade `scale` times softer than the outline drawn over it —
+    // visible as a light, blurry rim on the corners only at 125%/200%.
+    float half_px = 0.5 / scale;
     return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
 }
 
