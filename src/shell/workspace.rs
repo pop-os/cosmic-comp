@@ -216,12 +216,6 @@ pub struct FullscreenSurface {
     pub previous_geometry: Option<Rectangle<i32, Local>>,
     start_at: Option<Instant>,
     pub ended_at: Option<Instant>,
-    /// Always scale this surface to fill the output (gamescope-style), even
-    /// settled, instead of centering a smaller committed buffer in black. Set
-    /// for the game-mode surface so any game — including a legacy/fixed-res one
-    /// that commits a smaller buffer — fills the display. See `fullscreen_geometry_for`
-    /// and the render-time rescale in `render`.
-    pub fill_output: bool,
 }
 
 impl PartialEq for FullscreenSurface {
@@ -875,31 +869,7 @@ impl Workspace {
         full_geo
     }
     pub fn fullscreen_geometry_for(&self, fullscreen: &FullscreenSurface) -> Rectangle<i32, Local> {
-        if fullscreen.fill_output {
-            return self.fill_output_geometry(&fullscreen.surface);
-        }
         self.fullscreen_geometry_for_surface(&fullscreen.surface)
-    }
-
-    /// Aspect-preserving UPSCALE of `surface` to fill the output (gamescope's
-    /// default scaler): scale the surface's committed size up uniformly to fit,
-    /// centered. Upscale-only — a buffer already at or larger than the output
-    /// renders 1:1 (centered, cropped by the output) rather than being softened
-    /// by a downscale. The render path (`render`) applies the matching rescale
-    /// when `FullscreenSurface::fill_output` is set, so a game that commits a
-    /// smaller buffer fills the display instead of sitting small in black.
-    fn fill_output_geometry(&self, surface: &CosmicSurface) -> Rectangle<i32, Local> {
-        let out = self.output.geometry().size.as_local();
-        // bbox() is the committed-buffer extent (small when the client shrank),
-        // matching `fullscreen_geometry_for_surface` and the render rescale below.
-        let src = surface.bbox().size;
-        if src.w <= 0 || src.h <= 0 || out.w <= 0 || out.h <= 0 {
-            return Rectangle::from_size(out);
-        }
-        let scale = f64::min(out.w as f64 / src.w as f64, out.h as f64 / src.h as f64).max(1.0);
-        let w = ((src.w as f64) * scale).round() as i32;
-        let h = ((src.h as f64) * scale).round() as i32;
-        Rectangle::new(Point::from(((out.w - w) / 2, (out.h - h) / 2)), Size::from((w, h)))
     }
 
     pub fn element_for_surface<S>(&self, surface: &S) -> Option<&CosmicMapped>
@@ -1306,7 +1276,6 @@ impl Workspace {
                     previous_geometry: previous.map(|p| p.previous_geometry),
                     start_at: None,
                     ended_at: None,
-                    fill_output: false,
                 });
                 self.dirty.store(true, Ordering::SeqCst);
                 None
@@ -1417,24 +1386,7 @@ impl Workspace {
             previous_geometry,
             start_at: Some(Instant::now()),
             ended_at: None,
-            fill_output: false,
         });
-    }
-
-    /// Mark (or clear) a tracked fullscreen surface to always fill the output —
-    /// see `FullscreenSurface::fill_output`. Used by game mode so the game fills
-    /// the display gamescope-style regardless of the buffer size it commits.
-    pub fn set_fullscreen_fill_output<S>(&mut self, surface: &S, fill: bool)
-    where
-        CosmicSurface: PartialEq<S>,
-    {
-        if let Some(fs) = self
-            .fullscreen_surfaces
-            .iter_mut()
-            .find(|f| f.ended_at.is_none() && &f.surface == surface)
-        {
-            fs.fill_output = fill;
-        }
     }
 
 
@@ -1854,26 +1806,17 @@ impl Workspace {
                 .as_logical()
                 .to_physical_precise_round(output_scale);
 
-            // Rescale the surface to the target geometry when animating, or
-            // (game mode) always, so a game filling the output is upscaled to
-            // fit rather than centered small in black. `target_geo` is the
-            // aspect-fit rect for a `fill_output` surface (see `fullscreen_geometry_for`).
+            // Only rescale geometry when animating (entrance/exit). A settled
+            // fullscreen game must be left UNWRAPPED so it keeps the direct-
+            // scanout fast path — wrapping it composites the buffer, which blacks
+            // out scanout-only Proton/Vulkan buffers.
             let animation_rescale = |elem| {
-                // Unscaled source size of the rendered content: the committed
-                // buffer bbox for a fill_output surface (so a smaller buffer is
-                // upscaled to fill), or the window geometry for the animation.
-                let src = if fullscreen.fill_output {
-                    fullscreen.surface.bbox().size
-                } else {
-                    fullscreen.surface.0.geometry().size
-                };
-                if (fullscreen.is_animating() || fullscreen.fill_output)
-                    && src.w > 0
-                    && src.h > 0
+                let fullscreen_geo = fullscreen.surface.0.geometry();
+                if fullscreen.is_animating() && fullscreen_geo.size.w > 0 && fullscreen_geo.size.h > 0
                 {
                     let scale = Scale {
-                        x: target_geo.size.w as f64 / src.w as f64,
-                        y: target_geo.size.h as f64 / src.h as f64,
+                        x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
+                        y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
                     };
 
                     RescaleRenderElement::from_element(elem, render_loc, scale).into()

@@ -1104,9 +1104,9 @@ fn merge_workspaces(
     }
 
     into.minimized_windows
-        .extend(workspace.minimized_windows.drain(..));
+        .append(&mut workspace.minimized_windows);
     into.fullscreen_surfaces
-        .extend(workspace.fullscreen_surfaces.drain(..));
+        .append(&mut workspace.fullscreen_surfaces);
     into.tiling_layer.merge(workspace.tiling_layer);
     into.floating_layer.merge(workspace.floating_layer);
     workspace_state.remove_workspace(workspace.handle);
