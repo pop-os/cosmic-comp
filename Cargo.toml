@@ -127,6 +127,9 @@ optional = true
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
+# Runtime detection of parking_lot lock cycles (see utils::deadlock). Adds
+# bookkeeping to every lock acquisition, so keep it out of release builds.
+deadlock-detection = ["parking_lot/deadlock_detection"]
 stacking = []
 logind = ["logind-zbus"]
 systemd = ["libsystemd", "logind"]

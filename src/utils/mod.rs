@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub mod apply;
+pub mod deadlock;
 pub mod env;
 mod ids;
 pub(crate) use self::ids::id_gen;

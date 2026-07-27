@@ -163,6 +163,10 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     // so ProgramLoop can tell inline-safe calls from ones that must be deferred.
     utils::iced::mark_main_thread();
 
+    // Off by default; reports parking_lot lock cycles (e.g. a nested shell
+    // read() racing a writer) that would otherwise hang the compositor silently.
+    utils::deadlock::spawn_watchdog();
+
     profiling::register_thread!("Main Thread");
     #[cfg(feature = "profile-with-tracy")]
     tracy_client::Client::start();
