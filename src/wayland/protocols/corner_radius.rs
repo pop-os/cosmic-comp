@@ -190,7 +190,7 @@ where
                     let radius_exists = with_states(surface.wl_surface(), |surface_data| {
                         let hook_id = surface_data
                             .data_map
-                            .get_or_insert_threadsafe(|| ToplevelHookId::new(None));
+                            .get_or_insert_threadsafe(|| LayerHookId::new(None));
                         let guard = hook_id.lock().unwrap();
                         guard.as_ref().map(|(_, t)| t.upgrade().is_ok())
                     });
