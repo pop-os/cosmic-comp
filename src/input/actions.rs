@@ -167,23 +167,6 @@ impl State {
     ) {
         use shortcuts::Action;
 
-        // In game mode the bare-Super "start menu" key is reserved for the
-        // launcher (Grid): suppress the start menu and forward the press over the
-        // one.playtron.GameMode D-Bus interface so the launcher can toggle its
-        // overlay / minimize the game. (The controller GUIDE button already
-        // reaches Grid directly via InputPlumber; only Super comes through here.)
-        let game_mode_active = self.common.shell.read().game_mode.active;
-        if game_mode_active {
-            use shortcuts::action::System;
-            let opens_start_menu = matches!(&action, Action::System(System::StartMenu))
-                || matches!(&action, Action::Spawn(cmd)
-                    if self.common.config.system_actions.get(&System::StartMenu) == Some(cmd));
-            if opens_start_menu {
-                self.common.game_mode_bridge.notify_launcher_key();
-                return;
-            }
-        }
-
         match action {
             Action::Terminate => {
                 self.common.should_stop = true;

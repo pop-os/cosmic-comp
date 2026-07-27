@@ -2105,6 +2105,22 @@ impl State {
             voice_enabled = voice_config.enabled,
             "Voice key check - incoming key event"
         );
+        // In game mode, on the game's own output, the Super key is the LAUNCHER
+        // key: forward its raw press AND release to the launcher over the
+        // one.playtron.GameMode D-Bus interface (both edges, so the launcher can
+        // distinguish tap vs hold or change behavior later) and consume it, so it
+        // neither opens the start menu nor reaches the game. The controller GUIDE
+        // button reaches Grid directly via InputPlumber; only Super comes here.
+        if shell.game_mode.active
+            && shell.game_mode.output.as_ref() == Some(&focused_output)
+            && matches!(keysym, Keysym::Super_L | Keysym::Super_R)
+        {
+            let pressed = event.state() == KeyState::Pressed;
+            drop(shell);
+            self.common.game_mode_bridge.notify_launcher_key(pressed);
+            return FilterResult::Intercept(None);
+        }
+
         let matches = voice_config.matches_binding(keysym, modifiers);
 
         // Hard-coded F18 check: always treat F18 as voice key regardless of config
