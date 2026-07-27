@@ -79,6 +79,10 @@ pub fn update_layer_blur_state(
                 return None;
             }
 
+            // Keep a handle so the cached texture can be reclaimed once this
+            // surface dies (see reap_dead_blur_textures).
+            crate::backend::render::blur::record_layer_blur_surface(surface);
+
             Some(LayerBlurSurfaceInfo {
                 surface_id,
                 geometry,
@@ -117,6 +121,9 @@ pub fn update_layer_blur_state(
                 continue;
             }
             let loc = layer_geo.loc + (popup_offset - popup_geo.loc);
+            // Popups never reach `layer_destroyed`, so this handle is the only
+            // way their texture is ever reclaimed.
+            crate::backend::render::blur::record_layer_blur_surface(surface);
             blur_surfaces.push(LayerBlurSurfaceInfo {
                 surface_id: surface.id(),
                 geometry: Rectangle::new(loc, size),

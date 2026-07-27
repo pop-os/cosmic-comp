@@ -41,7 +41,7 @@ use smithay::{
     },
     utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -49,8 +49,9 @@ use wayland_backend::server::ObjectId;
 
 use super::element::AsGlowRenderer;
 use crate::shell::element::{CosmicMapped, CosmicMappedKey};
-// For `CosmicMappedKey::alive`, which is how a cached blur texture learns its
-// window is gone (see `reap_dead_blur_textures`).
+// For `CosmicMappedKey::alive` and `WlSurface::alive`, which is how a cached
+// blur texture learns its owner is gone (see `reap_dead_blur_textures`).
+use smithay::reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface};
 use smithay::utils::IsAlive;
 
 // =============================================================================
@@ -664,6 +665,30 @@ pub fn clear_layer_blur_texture_for_surface(surface_id: &ObjectId) {
     }
 }
 
+/// Live handles for the surfaces owning entries in [`LAYER_BLUR_TEXTURE_CACHE`].
+///
+/// That cache is keyed by `ObjectId`, which cannot answer "does this surface
+/// still exist?". Keeping the `WlSurface` beside it can. Cloning a `WlSurface`
+/// does not keep the client's object alive — it only lets us ask.
+static LAYER_BLUR_SURFACE_HANDLES: LazyLock<RwLock<HashMap<ObjectId, WlSurface>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Remember the surface behind a blurred layer entry, so its texture can be
+/// reclaimed once the surface dies.
+///
+/// Call this wherever a surface joins the blur set (see `update_layer_blur_state`).
+/// It is the only way popups become reclaimable: a layer-shell popup is blurred
+/// under its OWN surface id, but popups never reach `layer_destroyed`, so the
+/// per-surface hook there — which only ever sees the parent layer surface — can
+/// never match them.
+pub fn record_layer_blur_surface(surface: &WlSurface) {
+    if let Ok(mut handles) = LAYER_BLUR_SURFACE_HANDLES.write() {
+        handles
+            .entry(surface.id())
+            .or_insert_with(|| surface.clone());
+    }
+}
+
 /// Drop cached window blur textures whose window no longer exists.
 ///
 /// The window cache has no destroy hook to hang off — a window can go away via
@@ -697,6 +722,47 @@ pub fn reap_dead_blur_textures() {
                 "reaped blur textures for closed windows"
             );
         }
+    }
+
+    // Layer surfaces. Popups are the real churn here: every blurred menu open
+    // mints a fresh `wl_surface`, and popups never reach `layer_destroyed`, so
+    // `clear_layer_blur_texture_for_surface` cannot reclaim them — it only ever
+    // sees the parent layer surface's id. Each stranded entry pins a
+    // full-output-sized GPU texture, so this sweep is what keeps opening menus
+    // from leaking GPU memory for the life of the session.
+    let dead: HashSet<ObjectId> = match LAYER_BLUR_SURFACE_HANDLES.read() {
+        Ok(handles) => handles
+            .iter()
+            .filter(|(_, surface)| !surface.alive())
+            .map(|(id, _)| id.clone())
+            .collect(),
+        Err(_) => HashSet::new(),
+    };
+    if dead.is_empty() {
+        return;
+    }
+
+    // Only forget the handles if the textures actually went with them, so a
+    // contended `try_write` retries next tick instead of stranding the entries
+    // permanently.
+    let mut swept = false;
+    if let Ok(mut cache) = LAYER_BLUR_TEXTURE_CACHE.try_write() {
+        let before = cache.len();
+        cache.retain(|(_, id), _| !dead.contains(id));
+        swept = true;
+        let removed = before - cache.len();
+        if removed > 0 {
+            tracing::debug!(
+                removed,
+                remaining = cache.len(),
+                "reaped layer blur textures for dead surfaces"
+            );
+        }
+    }
+    if swept
+        && let Ok(mut handles) = LAYER_BLUR_SURFACE_HANDLES.write()
+    {
+        handles.retain(|id, _| !dead.contains(id));
     }
 }
 

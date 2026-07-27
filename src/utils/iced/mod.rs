@@ -363,7 +363,11 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
             .field("event_queue_len", &self.event_queue.len())
             .field("mouse_interaction", &self.mouse_interaction)
             .field("handle", &self.handle)
-            .field("scheduler", &self.scheduler)
+            // Elided like `buffers`/`renderer`/`cache` above: Scheduler's Debug
+            // walks calloop's Rc<State<T>> and borrows its RefCell, which is
+            // only sound on the loop thread. Nothing formats an element off it
+            // today, but printing it must not be the thing that breaks that.
+            .field("scheduler", &"...")
             .field("executor_token", &self.executor_token)
             .field("rx", &self.rx)
             .finish()
