@@ -1147,9 +1147,29 @@ impl State {
         let bridge = self.common.game_mode_bridge.clone();
         let overlay_active = {
             let mut shell = self.common.shell.write();
-            let active = shell.game_mode.active
-                && (overlay_window_present(&shell) || shell.game_mode.overlay_asserted);
+            let asserted = shell.game_mode.overlay_asserted;
+            let active =
+                shell.game_mode.active && (overlay_window_present(&shell) || asserted);
             shell.game_mode.overlay_active = active;
+            // Resolve the surface the OverlaySurface render path composites over
+            // the game — ONLY for the D-Bus-asserted (Wayland launcher) overlay.
+            // A real X11 STEAM_OVERLAY/GAMESCOPE_EXTERNAL_OVERLAY window composites
+            // via its own override-redirect render path, so don't stack a launcher
+            // for it (that would wrongly show Grid over the game on Shift+Tab).
+            let surface = (active && asserted)
+                .then(|| {
+                    shell
+                        .workspaces
+                        .spaces()
+                        .flat_map(|ws| ws.mapped())
+                        .flat_map(|m| m.windows().map(|(s, _)| s))
+                        .find(|w| {
+                            w.is_overlay()
+                                || LAUNCHER_APP_IDS.contains(&w.app_id().to_lowercase().as_str())
+                        })
+                })
+                .flatten();
+            shell.game_mode.overlay_surface = surface;
             active
         };
         let changed = {

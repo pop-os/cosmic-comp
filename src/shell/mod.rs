@@ -681,6 +681,13 @@ pub struct GameMode {
     /// `STEAM_INPUT_FOCUS` or `SetOverlay(blocking)`), so it can be released
     /// cleanly. Reset by `GameMode::default()` on exit.
     pub input_grab: Option<CosmicSurface>,
+    /// While an overlay is up (`SetOverlay(true)`), the surface to composite
+    /// over the game — the launcher (or a client overlay) window, resolved in
+    /// `refresh_overlay_visible`. The render path stacks it above the game with
+    /// its own per-pixel alpha (transparent except its panel), so the game shows
+    /// through. Keyboard input to a blocking overlay is handled separately by the
+    /// input grab; a non-blocking overlay just renders.
+    pub overlay_surface: Option<CosmicSurface>,
 }
 
 #[derive(Debug)]

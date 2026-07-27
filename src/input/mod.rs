@@ -2979,6 +2979,11 @@ impl State {
                         // Override redirect windows take a grab on their own via
                         // the Xwayland keyboard grab protocol. Don't focus them via click.
                     }
+                    Stage::OverlaySurface { .. } => {
+                        // Keyboard input to a blocking game-mode overlay is routed
+                        // by the input grab (SetOverlay blocking); pointer falls
+                        // through to the game.
+                    }
                     Stage::StickyPopups(layout) => {
                         if let Some(element) =
                             layout.popup_element_under(global_pos.to_local(output), seat)
@@ -3165,6 +3170,10 @@ impl State {
                                 surface_loc.as_global().to_f64(),
                             ))));
                         }
+                    }
+                    Stage::OverlaySurface { .. } => {
+                        // Keyboard input to a blocking game-mode overlay is routed
+                        // by the input grab; pointer falls through to the game.
                     }
                     Stage::StickyPopups(floating_layer) => {
                         if let Some(under) = floating_layer

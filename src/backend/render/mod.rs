@@ -2048,6 +2048,26 @@ where
                     }
                 }
             }
+            Stage::OverlaySurface { surface } => {
+                // Composite the game-mode overlay (launcher / client overlay) at
+                // the output origin, above the game. The surface carries its own
+                // per-pixel alpha; scanout is forced off so it blends over the
+                // game rather than being scanned out opaquely.
+                elements.extend(
+                    surface
+                        .render_elements::<R, WorkspaceRenderElement<R>>(
+                            renderer,
+                            Point::default(),
+                            Scale::from(scale),
+                            1.0,
+                            Some(false),
+                            scanout_node,
+                        )
+                        .into_iter()
+                        .flat_map(crop_to_output)
+                        .map(Into::into),
+                );
+            }
             Stage::OverrideRedirect { surface, location } => {
                 elements.extend(surface.wl_surface().into_iter().flat_map(|surface| {
                     render_elements_from_surface_tree::<_, WorkspaceRenderElement<_>>(

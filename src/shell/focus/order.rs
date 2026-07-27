@@ -16,8 +16,8 @@ use smithay::{
 use crate::{
     backend::render::{ElementFilter, HomeVisibilityContext},
     shell::{
-        SeatExt, Shell, Workspace, WorkspaceDelta, focus::target::KeyboardFocusTarget,
-        layout::floating::FloatingLayout,
+        CosmicSurface, SeatExt, Shell, Workspace, WorkspaceDelta,
+        focus::target::KeyboardFocusTarget, layout::floating::FloatingLayout,
     },
     utils::{
         geometry::*,
@@ -74,6 +74,12 @@ pub enum Stage<'a> {
         /// Uniform opacity for the whole workspace (1.0 except during a
         /// `WorkspaceDelta::Crossfade`, where the incoming workspace fades in).
         alpha: f32,
+    },
+    /// A game-mode overlay (the launcher / a client overlay) composited above
+    /// the game at the output origin, honoring the surface's own per-pixel alpha
+    /// so the game shows through the transparent regions.
+    OverlaySurface {
+        surface: &'a CosmicSurface,
     },
 }
 pub fn render_input_order<R: Default + 'static>(
@@ -418,6 +424,18 @@ fn render_input_order_internal<R: 'static>(
     }
 
     if should_include_windows(element_filter) {
+        // Game-mode overlay: the launcher (or a client overlay) composited ABOVE
+        // the game. Emitted first (topmost) so it stacks over the game workspace;
+        // its own per-pixel alpha lets the game show through the transparent part.
+        // Only on the game's own output (game mode is single-output).
+        if shell.game_mode.active
+            && shell.game_mode.overlay_active
+            && shell.game_mode.output.as_ref() == Some(output)
+            && let Some(surface) = shell.game_mode.overlay_surface.as_ref()
+        {
+            callback(Stage::OverlaySurface { surface })?;
+        }
+
         // workspace windows (the incoming workspace — fades in during a crossfade)
         callback(Stage::Workspace {
             workspace,
