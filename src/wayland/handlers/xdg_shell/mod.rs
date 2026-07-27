@@ -50,6 +50,7 @@ impl XdgShellHandler for State {
                 surface,
                 seat,
                 fullscreen: None,
+                minimized: false,
                 maximized: false,
                 sticky: false,
             })
