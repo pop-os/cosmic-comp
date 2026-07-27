@@ -74,8 +74,11 @@ pub struct Motion {
     pub minimize: Duration,
     /// Panel show/hide slide + width resize (was 420ms). `slower`.
     pub panel_slide: Duration,
-    /// `--ease-spring` control points (panel slide / resize).
-    pub ease_spring_cp: [f32; 4],
+    /// Panel slide / width-resize ease-out control points (design
+    /// `--ease-out-expo`). A smooth ease-out with no overshoot — NOT the theme's
+    /// `ease_spring` (which is a bounce curve; springy motion uses the physics
+    /// presets like `window_spring`).
+    pub panel_ease_cp: [f32; 4],
     /// `--ease-in-out` control points (layer open/close fade+rise).
     pub ease_in_out_cp: [f32; 4],
     /// Window/workspace spring (`spring_window`), macOS-smooth.
@@ -95,15 +98,15 @@ impl Motion {
             layer_open: ms(theme.duration_normal()),
             minimize: ms(theme.duration_slow()),
             panel_slide: ms(theme.duration_slower()),
-            ease_spring_cp: theme.ease_spring(),
+            panel_ease_cp: theme.ease_out_expo(),
             ease_in_out_cp: theme.ease_in_out(),
             window_spring: spring_params(theme.spring_window()),
         }
     }
 
-    /// Eased `--ease-spring` factor at progress `t`.
-    pub fn ease_spring(&self, t: f32) -> f32 {
-        cubic_bezier_cp(t, self.ease_spring_cp)
+    /// Eased panel slide/resize factor at progress `t` (design `--ease-out-expo`).
+    pub fn panel_ease(&self, t: f32) -> f32 {
+        cubic_bezier_cp(t, self.panel_ease_cp)
     }
 
     /// Eased `--ease-in-out` factor at progress `t`.

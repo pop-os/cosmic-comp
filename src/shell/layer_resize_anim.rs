@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Compositor-side spring resize animation for the side panel (`agentos-chat-panel`).
+//! Compositor-side resize animation for the side panel (`agentos-chat-panel`).
 //!
 //! Replaces the old live drag-resize: a programmatic width change (the
 //! maximize/restore double-click today, width presets later) animates the panel
-//! from its current width to a target width using the shared `--ease-spring`
-//! curve and `PANEL_SLIDE` timing (`crate::backend::render::animations::motion`).
-//! Each tick the eased width is forced
+//! from its current width to a target width using the shared panel ease-out
+//! (`motion.panel_ease`, design `--ease-out-expo`) and `motion.panel_slide`
+//! timing. Each tick the eased width is forced
 //! onto the surface via [`super::Shell::override_active_layer_resize`] — the same
 //! path the live drag used — so windows reflow in lockstep and the client adopts
 //! each `configure` exactly as it did during a drag.
@@ -62,7 +62,7 @@ impl LayerResizeAnim {
     pub fn factor(&self) -> f32 {
         let progress = (self.start.elapsed().as_secs_f32() / self.motion.panel_slide.as_secs_f32())
             .clamp(0.0, 1.0);
-        self.motion.ease_spring(progress)
+        self.motion.panel_ease(progress)
     }
 
     /// The current interpolated width in logical px.

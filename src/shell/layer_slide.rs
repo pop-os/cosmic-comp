@@ -65,7 +65,7 @@ impl SlideVisibility {
                 motion,
             } => {
                 let t = progress_clamped(*start, *duration);
-                let eased = motion.ease_spring(t);
+                let eased = motion.panel_ease(t);
                 from_factor + (1.0 - from_factor) * eased
             }
             Self::Hidden => 1.0,
@@ -76,7 +76,7 @@ impl SlideVisibility {
                 motion,
             } => {
                 let t = progress_clamped(*start, *duration);
-                let eased = motion.ease_spring(t);
+                let eased = motion.panel_ease(t);
                 from_factor * (1.0 - eased)
             }
         }
@@ -130,7 +130,7 @@ impl SlideVisibility {
 
     /// Begin sliding out (hiding). `motion` is the theme snapshot captured by the
     /// caller (which has the theme handle); the slide uses `motion.panel_slide`
-    /// and `motion.ease_spring`.
+    /// and `motion.panel_ease`.
     pub fn start_hide(&mut self, motion: motion::Motion) {
         match self {
             Self::Visible => {
