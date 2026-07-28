@@ -858,6 +858,39 @@ impl State {
                 .fullscreen_request(&game, output, &loop_handle);
         }
 
+        // Gamescope-style upscale: request a fill for the active game surface so a
+        // game whose buffer is smaller than the output is scaled up (via the DRM
+        // plane's hardware scaler). If the KMS thread latched a scale-reject
+        // (`game_mode_scale_rejected`), stop requesting it and letterbox instead,
+        // so a scanout-only buffer is never composited to black. The workspace
+        // computes the fit rect and clears it when the buffer isn't smaller.
+        {
+            let scale_rejected = self
+                .common
+                .shell
+                .read()
+                .game_mode_scale_rejected
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let game = {
+                let shell = self.common.shell.read();
+                shell
+                    .game_mode
+                    .active
+                    .then(|| shell.game_mode.game_surface.clone())
+                    .flatten()
+            };
+            if let Some(game) = game {
+                let mut shell = self.common.shell.write();
+                if let Some(ws) = shell
+                    .workspaces
+                    .spaces_mut()
+                    .find(|ws| ws.get_fullscreen_surfaces().any(|f| f.surface == game))
+                {
+                    ws.set_fullscreen_scale_to(&game, !scale_rejected);
+                }
+            }
+        }
+
         // Safety-net retry for a deferred enter (e.g. the game window mapped
         // since the last tick) and for a game surface retagged onto another window.
         self.try_resolve_pending_game_mode();
@@ -902,6 +935,14 @@ impl State {
                 return;
             }
         }
+
+        // A new game/app is entering — clear any prior scale-reject latch so it
+        // retries the gamescope upscale rather than inheriting the last app's.
+        self.common
+            .shell
+            .read()
+            .game_mode_scale_rejected
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         // Resolve the app's window anywhere: already fullscreen on its own
         // game-mode workspace, or a normal window on the desktop. Defer if it

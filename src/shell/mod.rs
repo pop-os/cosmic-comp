@@ -743,6 +743,13 @@ pub struct Shell {
     /// the KMS surface thread can probe (`c.supports_tearing()`); it writes this
     /// each frame for the game's output, read back for `TearingSupported`.
     pub game_mode_tearing_supported: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Latched by the KMS surface thread when a game-mode upscale (`scale_to`)
+    /// failed to land on a DRM plane and had to composite (`primary_element ==
+    /// Swapchain`) — detected only for a settled game on its own output with no
+    /// overlay up. Game mode reads it to stop requesting the scale (letterbox
+    /// instead of composited-to-black). Reset on entering game mode, so a new
+    /// game / an app switch re-tries the scale.
+    pub game_mode_scale_rejected: std::sync::Arc<std::sync::atomic::AtomicBool>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
     /// Home mode state for animation (fading in/out of home screen)
@@ -2408,6 +2415,7 @@ impl Shell {
             game_mode_tearing_supported: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
+            game_mode_scale_rejected: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             tiling_exceptions,
             // Start in home mode only if HOME_ENABLED is set
             home_mode: if home_enabled() {

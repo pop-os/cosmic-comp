@@ -216,6 +216,13 @@ pub struct FullscreenSurface {
     pub previous_geometry: Option<Rectangle<i32, Local>>,
     start_at: Option<Instant>,
     pub ended_at: Option<Instant>,
+    /// When `Some`, the surface is upscaled to this rect (gamescope-style fill of
+    /// a smaller game buffer). The wrapping `RescaleRenderElement` is scanout-
+    /// shaped so smithay hands it to the DRM plane's hardware scaler; if the
+    /// plane rejects the scale the KMS thread latches `game_mode_scale_rejected`
+    /// and game mode clears this back to `None` (letterbox) so we never composite
+    /// a scanout-only buffer to black. `None` = native/letterbox (default).
+    pub scale_to: Option<Rectangle<i32, Local>>,
 }
 
 impl PartialEq for FullscreenSurface {
@@ -869,6 +876,9 @@ impl Workspace {
         full_geo
     }
     pub fn fullscreen_geometry_for(&self, fullscreen: &FullscreenSurface) -> Rectangle<i32, Local> {
+        if let Some(rect) = fullscreen.scale_to {
+            return rect;
+        }
         self.fullscreen_geometry_for_surface(&fullscreen.surface)
     }
 
@@ -1276,6 +1286,7 @@ impl Workspace {
                     previous_geometry: previous.map(|p| p.previous_geometry),
                     start_at: None,
                     ended_at: None,
+                    scale_to: None,
                 });
                 self.dirty.store(true, Ordering::SeqCst);
                 None
@@ -1386,7 +1397,45 @@ impl Workspace {
             previous_geometry,
             start_at: Some(Instant::now()),
             ended_at: None,
+            scale_to: None,
         });
+    }
+
+    /// Set (or clear) the gamescope-style upscale target for a tracked fullscreen
+    /// surface. `scale` requests a fill: if the surface's committed buffer is
+    /// smaller than the output, `scale_to` becomes the aspect-preserving fit rect
+    /// (centered); otherwise (or when `scale` is false) it is cleared to `None`
+    /// (native/letterbox). See `FullscreenSurface::scale_to`.
+    pub fn set_fullscreen_scale_to<S>(&mut self, surface: &S, scale: bool)
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        let out = self.output.geometry().size.as_local();
+        if let Some(fs) = self
+            .fullscreen_surfaces
+            .iter_mut()
+            .find(|f| f.ended_at.is_none() && &f.surface == surface)
+        {
+            let src = fs.surface.bbox().size;
+            fs.scale_to = if scale
+                && src.w > 0
+                && src.h > 0
+                && out.w > 0
+                && out.h > 0
+                && (src.w < out.w || src.h < out.h)
+            {
+                // Aspect-preserving fit of the committed buffer into the output.
+                let ratio = f64::min(out.w as f64 / src.w as f64, out.h as f64 / src.h as f64);
+                let w = ((src.w as f64) * ratio).round() as i32;
+                let h = ((src.h as f64) * ratio).round() as i32;
+                Some(Rectangle::new(
+                    Point::from(((out.w - w) / 2, (out.h - h) / 2)),
+                    Size::from((w, h)),
+                ))
+            } else {
+                None
+            };
+        }
     }
 
 
@@ -1806,17 +1855,27 @@ impl Workspace {
                 .as_logical()
                 .to_physical_precise_round(output_scale);
 
-            // Only rescale geometry when animating (entrance/exit). A settled
-            // fullscreen game must be left UNWRAPPED so it keeps the direct-
-            // scanout fast path — wrapping it composites the buffer, which blacks
-            // out scanout-only Proton/Vulkan buffers.
+            // Wrap in a RescaleRenderElement when animating (entrance/exit), or
+            // when a `scale_to` upscale is requested (gamescope-style fill). The
+            // wrapper forwards src/kind/underlying_storage, so smithay can still
+            // hand it to a DRM plane's HARDWARE scaler (no GLES composition) —
+            // and if the plane rejects the scale, the KMS thread latches
+            // `game_mode_scale_rejected` and game mode clears `scale_to`, so a
+            // settled game with no scale request is left UNWRAPPED (direct scanout,
+            // never composited-to-black for scanout-only Proton/Vulkan buffers).
+            let scaling = fullscreen.scale_to.is_some();
             let animation_rescale = |elem| {
-                let fullscreen_geo = fullscreen.surface.0.geometry();
-                if fullscreen.is_animating() && fullscreen_geo.size.w > 0 && fullscreen_geo.size.h > 0
-                {
+                // Upscale source: the committed BUFFER (bbox) for a fill, or the
+                // window geometry for the entrance/exit animation.
+                let src = if scaling {
+                    fullscreen.surface.bbox().size
+                } else {
+                    fullscreen.surface.0.geometry().size
+                };
+                if (fullscreen.is_animating() || scaling) && src.w > 0 && src.h > 0 {
                     let scale = Scale {
-                        x: target_geo.size.w as f64 / fullscreen_geo.size.w as f64,
-                        y: target_geo.size.h as f64 / fullscreen_geo.size.h as f64,
+                        x: target_geo.size.w as f64 / src.w as f64,
+                        y: target_geo.size.h as f64 / src.h as f64,
                     };
 
                     RescaleRenderElement::from_element(elem, render_loc, scale).into()
