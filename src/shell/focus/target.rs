@@ -326,7 +326,7 @@ impl KeyboardFocusTarget {
         }
     }
 
-    fn x11_surface(&self) -> Option<X11Surface> {
+    pub fn x11_surface(&self) -> Option<X11Surface> {
         match self {
             KeyboardFocusTarget::Element(mapped) => mapped.active_window().x11_surface().cloned(),
             KeyboardFocusTarget::Fullscreen(surface) => surface.x11_surface().cloned(),
