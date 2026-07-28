@@ -880,13 +880,20 @@ impl State {
                     .flatten()
             };
             if let Some(game) = game {
+                // Only UPSCALE real games (which may render below the output). The
+                // launcher (769) is a UI that renders AT output size; if it's ever
+                // transiently/wrongly smaller it must letterbox (its own committed
+                // buffer), never be scanned-out-then-composited-to-black. Also skip
+                // when a prior scale was rejected (the letterbox fallback).
+                let want_scale =
+                    !scale_rejected && app_id_of(&game) != LAUNCHER_APP_ID;
                 let mut shell = self.common.shell.write();
                 if let Some(ws) = shell
                     .workspaces
                     .spaces_mut()
                     .find(|ws| ws.get_fullscreen_surfaces().any(|f| f.surface == game))
                 {
-                    ws.set_fullscreen_scale_to(&game, !scale_rejected);
+                    ws.set_fullscreen_scale_to(&game, want_scale);
                 }
             }
         }
@@ -926,10 +933,25 @@ impl State {
         // GameMode literal below would otherwise reset it via `..Default`).
         let prev_overlay_asserted = self.common.shell.read().game_mode.overlay_asserted;
 
-        // Already active on this app id — clear any pending marker and return.
+        // Already active on this app id AND still tracking a LIVE, correctly-tagged
+        // surface for it — clear any pending marker and return. The liveness check
+        // is essential for a relaunch: a native-Wayland launcher (Grid) has no map
+        // hook, so the old session's dead surface is only reaped on the throttled
+        // refresh tick. Without it, a relaunch's Enter(769) races that tick, sees
+        // the stale `active && app_id==769`, and returns WITHOUT fullscreening the
+        // NEW window — leaving it a small un-configured window (black). Falling
+        // through re-resolves via find_game_surface and re-fullscreens the current
+        // window with a fresh output-size configure.
         {
             let shell = self.common.shell.read();
-            if shell.game_mode.active && shell.game_mode.app_id == Some(app_id) {
+            if shell.game_mode.active
+                && shell.game_mode.app_id == Some(app_id)
+                && shell
+                    .game_mode
+                    .game_surface
+                    .as_ref()
+                    .is_some_and(|s| s.alive() && app_id_of(s) == app_id)
+            {
                 drop(shell);
                 self.common.shell.write().game_mode.pending_app_id = None;
                 return;
@@ -1120,6 +1142,12 @@ impl State {
         }
 
         let game_mode = std::mem::take(&mut shell.game_mode);
+        // The scale-reject latch lives on Shell (not the GameMode struct that
+        // mem::take just reset), so clear it here too — a fresh game must not
+        // inherit the previous one's letterbox latch.
+        shell
+            .game_mode_scale_rejected
+            .store(false, std::sync::atomic::Ordering::Relaxed);
 
         // Un-fullscreen the game so its now-empty game-mode workspace auto-reaps.
         if let Some(game) = &game_mode.game_surface {
