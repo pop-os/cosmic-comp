@@ -1006,12 +1006,16 @@ impl SurfaceThreadState {
             &self.shell.read(),
         );
 
+        // Acquiring a renderer can fail transiently when the underlying DRM
+        // device is lost (e.g. after a GPU reset).
         let mut renderer = if render_node != self.target_node {
             self.api
                 .renderer(&render_node, &self.target_node, compositor.format())
-                .unwrap()
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?
         } else {
-            self.api.single_renderer(&self.target_node).unwrap()
+            self.api
+                .single_renderer(&self.target_node)
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?
         };
 
         self.timings.start_render(&self.clock);
@@ -1267,7 +1271,10 @@ impl SurfaceThreadState {
                 })
                 .context("Failed to draw to offscreen render target")?;
 
-            renderer = self.api.single_renderer(&self.target_node).unwrap();
+            renderer = self
+                .api
+                .single_renderer(&self.target_node)
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?;
 
             elements = postprocess_elements(
                 &mut renderer,
