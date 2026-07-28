@@ -1110,6 +1110,7 @@ impl State {
                 current_level * factor
             }
             .clamp(1.0, MAX_ZOOM);
+            let new_level = if new_level < 1.01 { 1.0 } else { new_level };
             shell.trigger_zoom(
                 seat,
                 Some(&output),
