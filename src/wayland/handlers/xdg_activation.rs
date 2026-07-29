@@ -9,8 +9,9 @@ use crate::{
 };
 use cosmic_comp_config::ActivationPolicy;
 use smithay::{
+    desktop::{WindowSurfaceType, layer_map_for_output},
     input::Seat,
-    reexports::wayland_server::{backend::ClientId, protocol::wl_surface::WlSurface},
+    reexports::wayland_server::{Resource, backend::ClientId, protocol::wl_surface::WlSurface},
     wayland::xdg_activation::{
         XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
     },
@@ -175,6 +176,18 @@ impl XdgActivationHandler for State {
             return;
         };
 
+        // Layer surfaces are shell chrome, not workspace contents: there is no
+        // workspace to switch to and no element to raise, so none of the
+        // machinery below applies to them. `FocusIfActiveWorkspace` would in fact
+        // drop the request outright, since `workspace_for_surface` never matches
+        // a layer surface. Focus it directly instead — `set_focus` still refuses
+        // when a lock screen or an exclusive layer surface owns input.
+        if let Some((target, seat)) = self.layer_activation_target(&surface) {
+            debug!("activating layer surface");
+            Shell::set_focus(self, Some(&target), &seat, None, false);
+            return;
+        }
+
         match context {
             ActivationContext::UrgentOnly => {
                 // UrgentOnly tokens still attempt to focus the window.
@@ -229,6 +242,38 @@ impl XdgActivationHandler for State {
 }
 
 impl State {
+    /// The keyboard-focus target for `surface`, if it is a mapped layer surface
+    /// that can take focus.
+    ///
+    /// Any layer works, not just `Top`/`Overlay`: `focus_target_is_valid` accepts
+    /// a layer surface purely on it being mapped on the output, which is how
+    /// click-to-focus already reaches a `Bottom` surface. What layer surfaces have
+    /// lacked is a way for the client to *ask*, which is what routing
+    /// xdg-activation here provides.
+    fn layer_activation_target(
+        &self,
+        surface: &WlSurface,
+    ) -> Option<(KeyboardFocusTarget, Seat<State>)> {
+        let shell = self.common.shell.read();
+
+        let layer = shell.outputs().find_map(|output| {
+            layer_map_for_output(output)
+                .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .cloned()
+        })?;
+
+        // A surface the client asked to hide must not pull focus back, and one
+        // that opted out of keyboard input must never take it — the same test the
+        // pointer path applies before focusing a layer surface on click.
+        if shell.is_surface_hidden(&layer.wl_surface().id()) || !layer.can_receive_keyboard_focus()
+        {
+            return None;
+        }
+
+        let seat = shell.seats.last_active().clone();
+        Some((layer.into(), seat))
+    }
+
     pub fn activate_surface(
         &mut self,
         surface: &WlSurface,
