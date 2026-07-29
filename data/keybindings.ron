@@ -114,6 +114,8 @@
     (modifiers: [Super, Shift], key: "Tab"): System(WindowSwitcherPrevious),
 
     (modifiers: [], key: "Print"): System(Screenshot),
+    (modifiers: [Super], key: "F23"): System(Screenshot),
+    (modifiers: [Super, Shift], key: "F23"): System(Screenshot),
     (modifiers: [], key: "XF86AudioRaiseVolume"): System(VolumeRaise),
     (modifiers: [], key: "XF86AudioLowerVolume"): System(VolumeLower),
     (modifiers: [], key: "XF86AudioMute"): System(Mute),

@@ -76,16 +76,10 @@ impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
             primary_binding: VoiceKeyBinding {
-                key: "F23".to_string(),
-                modifiers: VoiceModifiers {
-                    logo: true,
-                    ..Default::default()
-                },
-            },
-            fallback_binding: Some(VoiceKeyBinding {
-                key: "F18".to_string(),
+                key: "Super_L".to_string(),
                 modifiers: VoiceModifiers::none(),
-            }),
+            },
+            fallback_binding: None,
             chat_app_id: "chat-ui".to_string(),
             enabled: true,
         }
@@ -295,7 +289,7 @@ impl VoiceConfig {
             "F20" => keysym == Keysym::F20,
             "F21" => keysym == Keysym::F21,
             "F22" => keysym == Keysym::F22,
-            "F23" => keysym == Keysym::F23 || keysym == Keysym::F18 || keysym.raw() == 0x1008ffb1, // Also match F18 (some laptop variants) and XF86TouchpadOff
+            "F23" => keysym == Keysym::F23,
             "F24" => keysym == Keysym::F24,
             // XF86 multimedia keys - Copilot key on some laptops reports as XF86TouchpadOff via xkbcommon
             "XF86TouchpadOff" => keysym.raw() == 0x1008ffb1, // XF86XK_TouchpadOff = 269025201
@@ -356,7 +350,7 @@ impl VoiceConfig {
             "F20" => keysym == Keysym::F20,
             "F21" => keysym == Keysym::F21,
             "F22" => keysym == Keysym::F22,
-            "F23" => keysym == Keysym::F23 || keysym == Keysym::F18 || keysym.raw() == 0x1008ffb1,
+            "F23" => keysym == Keysym::F23,
             "F24" => keysym == Keysym::F24,
             "XF86TouchpadOff" => keysym.raw() == 0x1008ffb1,
             "Super_L" => keysym == Keysym::Super_L || keysym == Keysym::Super_R,
@@ -374,14 +368,49 @@ mod tests {
     fn test_default_config() {
         let config = VoiceConfig::default();
         assert!(config.enabled);
-        assert_eq!(config.primary_binding.key, "F23");
-        assert!(!config.primary_binding.modifiers.shift);
-        assert!(config.primary_binding.modifiers.logo);
-        let fallback = config
-            .fallback_binding
-            .expect("should have fallback binding");
-        assert_eq!(fallback.key, "F18");
-        assert_eq!(fallback.modifiers, VoiceModifiers::none());
+        assert_eq!(config.primary_binding.key, "Super_L");
+        assert_eq!(config.primary_binding.modifiers, VoiceModifiers::none());
+        assert!(config.fallback_binding.is_none());
+    }
+
+    /// No default binding claims the OEM AI key, so it falls through to the
+    /// shortcut config and can reach `System(Screenshot)` — it sits in the Print
+    /// Screen position on the Humain One and used to open chat instead.
+    ///
+    /// Note the separate hard-coded bare-F18 intercept in `input::handle_key`,
+    /// which still claims F18 ahead of the shortcut config.
+    #[test]
+    fn test_oem_ai_key_is_not_a_voice_binding() {
+        let config = VoiceConfig::default();
+        let logo_held = ModifiersState {
+            logo: true,
+            ..Default::default()
+        };
+        let touchpad_off = Keysym::new(0x1008ffb1);
+
+        for keysym in [Keysym::F23, Keysym::F18, touchpad_off] {
+            assert!(!config.matches_binding(keysym, &logo_held));
+            assert!(!config.matches_binding(keysym, &ModifiersState::default()));
+            assert!(!config.matches_key_only(keysym));
+        }
+    }
+
+    /// An explicit `F23` binding must match F23 only — it used to alias F18 and
+    /// XF86TouchpadOff, which is what claimed the AI key regardless of config.
+    #[test]
+    fn test_f23_binding_does_not_alias_other_keys() {
+        let config = VoiceConfig {
+            primary_binding: VoiceKeyBinding {
+                key: "F23".to_string(),
+                modifiers: VoiceModifiers::none(),
+            },
+            ..VoiceConfig::default()
+        };
+        let no_mods = ModifiersState::default();
+
+        assert!(config.matches_binding(Keysym::F23, &no_mods));
+        assert!(!config.matches_binding(Keysym::F18, &no_mods));
+        assert!(!config.matches_binding(Keysym::new(0x1008ffb1), &no_mods));
     }
 
     #[test]
