@@ -2377,30 +2377,29 @@ impl State {
                 let pos_in_element = location + surface_offset.to_f64();
                 let window_size = geometry.size.to_f64();
 
-                let is_legal = |p: Point<f64, Logical>| {
-                    let in_window =
-                        p.x >= 0.0 && p.y >= 0.0 && p.x < window_size.w && p.y < window_size.h;
-                    if !in_window {
-                        return false;
-                    }
+                // Clamp marginal out-of-bounds hints instead of dropping them:
+                // a dropped hint desyncs the client's tracked pointer position
+                let clamped = Point::<f64, Logical>::new(
+                    pos_in_element.x.clamp(0.0, window_size.w.next_down()),
+                    pos_in_element.y.clamp(0.0, window_size.h.next_down()),
+                );
 
-                    with_pointer_constraint(surface, pointer, |constraint| {
-                        if let Some(constraint) = constraint
-                            && let Some(region) = constraint.region()
-                        {
-                            let point_in_surface = (p - surface_offset.to_f64()).to_i32_floor();
-                            return region.contains(point_in_surface);
-                        }
-                        true
-                    })
-                };
+                let region_ok = with_pointer_constraint(surface, pointer, |constraint| {
+                    if let Some(constraint) = constraint
+                        && let Some(region) = constraint.region()
+                    {
+                        let point_in_surface = (clamped - surface_offset.to_f64()).to_i32_floor();
+                        return region.contains(point_in_surface);
+                    }
+                    true
+                });
 
                 let workspace_origin = output.geometry().loc.to_f64();
                 let origin = geometry.loc.to_f64();
 
-                if is_legal(pos_in_element) {
-                    let x = workspace_origin.x + origin.x + pos_in_element.x;
-                    let y = workspace_origin.y + origin.y + pos_in_element.y;
+                if region_ok {
+                    let x = workspace_origin.x + origin.x + clamped.x;
+                    let y = workspace_origin.y + origin.y + clamped.y;
                     Some((Point::<_, Global>::new(x, y), output.clone()))
                 } else {
                     None
