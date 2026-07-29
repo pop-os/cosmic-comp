@@ -7,7 +7,7 @@
     SPDX-License-Identifier: LGPL-2.1-or-later
   ]]></copyright>
 
-  <interface name="org_kde_kwin_blur_manager" version="3">
+  <interface name="org_kde_kwin_blur_manager" version="4">
     <description summary="blur manager">
       This interface allows a client to request blur effect for a surface.
     </description>
@@ -28,7 +28,7 @@
     </request>
   </interface>
 
-  <interface name="org_kde_kwin_blur" version="3">
+  <interface name="org_kde_kwin_blur" version="4">
     <description summary="blur interface">
       This interface allows a client to specify a blur region for a surface.
     </description>
@@ -101,6 +101,37 @@
         256). For example, 0.0 is 0, 0.2 is 51.
       </description>
       <arg name="border_fixed" type="int"/>
+    </request>
+
+    <!-- Version 4 additions -->
+
+    <request name="set_region_radii" since="4">
+      <description summary="set per-rectangle corner radii for the blur region">
+        Set the corner radii of the individual rectangles of the blur region, so
+        a surface can round each backdrop to the shape it actually draws there.
+        Without this the compositor rounds every rectangle of the region with a
+        single radius, which is wrong for any surface that draws different shapes
+        in different rectangles — e.g. a fully rounded pill alongside cards with
+        a smaller radius.
+
+        The argument is an array of 32-bit unsigned integers, four per rectangle
+        — top-left, top-right, bottom-right, bottom-left, in surface-local
+        logical pixels — ordered to match the rectangles added to the wl_region
+        passed to set_region. Rectangles without a corresponding entry (a shorter
+        array) keep the compositor's single-radius behaviour, so a client may
+        supply radii for a prefix of the region. A trailing partial quadruple is
+        ignored.
+
+        A radius larger than half of the rectangle's shorter side is clamped to
+        it, so a very large value yields a fully rounded ("pill") rectangle
+        whatever its size.
+
+        The radii pair with the region committed in the same cycle: like
+        set_region, this is pending state applied on the next commit, and the two
+        requests may be sent in either order within a cycle. A commit that
+        carries a region but no radii rounds every rectangle the old way.
+      </description>
+      <arg name="radii" type="array" summary="four uint32 radii (tl, tr, br, bl) per region rectangle"/>
     </request>
   </interface>
 </protocol>

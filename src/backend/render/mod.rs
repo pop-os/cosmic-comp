@@ -494,7 +494,8 @@ impl BlurredBackdropShader {
     /// * `screen_size` - The full screen size for coordinate mapping
     /// * `scale` - Output scale factor for coordinate conversion
     /// * `transform` - Output transform for coordinate conversion
-    /// * `corner_radius` - Corner radii [top-left, top-right, bottom-right, bottom-left]
+    /// * `corner_radius` - Corner radii [top-left, top-right, bottom-right, bottom-left],
+    ///   clamped per element to half its shorter side (so a huge radius = fully rounded)
     /// * `alpha` - Overall opacity
     /// * `tint_color` - Tint overlay color
     /// * `tint_strength` - How much tint to apply (0.0 = none, 1.0 = full)
@@ -577,6 +578,13 @@ impl BlurredBackdropShader {
             Some(output_size),
             Kind::Unspecified,
         );
+
+        // A radius past half the shorter side is degenerate: the corner arcs
+        // overlap and the SDF erodes the middle of the short edges. Clamping per
+        // element lets a client ask for a fully rounded rect (a pill) with a
+        // deliberately huge radius, whatever size the rect turns out to be.
+        let half_min = element_geo.size.w.min(element_geo.size.h) as f32 / 2.0;
+        let corner_radius = corner_radius.map(|r| r.clamp(0.0, half_min.max(0.0)));
 
         // Scale corner radii to physical pixels
         let scaled_corner_radius = [
@@ -1515,16 +1523,23 @@ where
                         let output_transform = output.current_transform();
 
                         // Check for blur regions — if set, render per-region backdrops
-                        let blur_regions = get_blur_state(popup_wl_surface)
-                            .and_then(|state| state.data)
-                            .and_then(|data| data.region);
+                        let blur_data =
+                            get_blur_state(popup_wl_surface).and_then(|state| state.data);
+                        let blur_regions = blur_data.as_ref().and_then(|data| data.region.as_ref());
+                        let region_radii = blur_data
+                            .as_ref()
+                            .and_then(|data| data.region_radii.as_ref());
 
                         let has_per_region_blur = blur_regions.is_some();
-                        let blur_geos: Vec<Rectangle<i32, Local>> =
+                        // Each rect carries its own radii (protocol v4), so they must
+                        // travel WITH the rect: the clamp below can drop rects, which
+                        // would shift a separate radii list out of alignment.
+                        let blur_geos: Vec<(Rectangle<i32, Local>, Option<[f32; 4]>)> =
                             if let Some(regions) = blur_regions {
                                 regions
                                     .iter()
-                                    .filter_map(|region| {
+                                    .enumerate()
+                                    .filter_map(|(i, region)| {
                                         let geo = Rectangle::new(
                                             (
                                                 local_geo.loc.x + region.loc.x,
@@ -1534,21 +1549,24 @@ where
                                             region.size.as_local(),
                                         );
                                         // Clamp blur rect to surface bounds
-                                        geo.intersection(local_geo)
+                                        let geo = geo.intersection(local_geo)?;
+                                        Some((geo, region_radii.and_then(|r| r.get(i).copied())))
                                     })
                                     .collect()
                             } else {
-                                vec![local_geo]
+                                vec![(local_geo, None)]
                             };
 
                         const PER_REGION_CORNER_RADIUS: f32 = 8.0;
 
-                        for blur_geo in blur_geos {
-                            let blur_corner_radius = if has_per_region_blur {
+                        for (blur_geo, rect_radii) in blur_geos {
+                            // A client-supplied per-rect radius wins; otherwise fall
+                            // back to one radius for the whole surface.
+                            let blur_corner_radius = rect_radii.unwrap_or(if has_per_region_blur {
                                 [PER_REGION_CORNER_RADIUS; 4]
                             } else {
                                 corner_radius
-                            };
+                            });
 
                             let blurred_element = BlurredBackdropShader::element(
                                 renderer,
@@ -1925,6 +1943,10 @@ where
                             .as_ref()
                             .and_then(|state| state.data.as_ref())
                             .and_then(|data| data.region.as_ref());
+                        let region_radii = blur_state_debug
+                            .as_ref()
+                            .and_then(|state| state.data.as_ref())
+                            .and_then(|data| data.region_radii.as_ref());
 
                         tracing::trace!(
                             surface_id = layer.wl_surface().id().protocol_id(),
@@ -1935,6 +1957,7 @@ where
                                 .is_some(),
                             has_region = blur_regions.is_some(),
                             region_count = blur_regions.map(|r| r.len()).unwrap_or(0),
+                            radii_count = region_radii.map(|r| r.len()).unwrap_or(0),
                             "Layer blur rendering"
                         );
 
@@ -1947,11 +1970,15 @@ where
                         // already-scaled `local_geo`.
                         let region_scale_cx = (unscaled_geo.loc.x + unscaled_geo.size.w / 2) as f32;
                         let region_scale_cy = (unscaled_geo.loc.y + unscaled_geo.size.h / 2) as f32;
-                        let blur_geos: Vec<Rectangle<i32, Local>> =
+                        // Each rect carries its own radii (protocol v4), so they must
+                        // travel WITH the rect: the clamp below can drop rects, which
+                        // would shift a separate radii list out of alignment.
+                        let blur_geos: Vec<(Rectangle<i32, Local>, Option<[f32; 4]>)> =
                             if let Some(regions) = blur_regions {
                                 regions
                                     .iter()
-                                    .filter_map(|region| {
+                                    .enumerate()
+                                    .filter_map(|(i, region)| {
                                         // While scaling (open/close), place + clamp
                                         // the rect in the UNSCALED surface space, then
                                         // scale it about the surface center so it
@@ -1997,23 +2024,38 @@ where
                                             blur_alpha,
                                             "Layer blur: per-region rect"
                                         );
-                                        Some(geo)
+                                        // The rect's corners scale with the rect, so
+                                        // the backdrop keeps the client's shape (not a
+                                        // resting radius on a shrunken rect).
+                                        let radii = region_radii
+                                            .and_then(|r| r.get(i).copied())
+                                            .map(|radii| {
+                                                if scaling {
+                                                    radii.map(|r| r * anim_scale)
+                                                } else {
+                                                    radii
+                                                }
+                                            });
+                                        Some((geo, radii))
                                     })
                                     .collect()
                             } else {
-                                vec![local_geo]
+                                vec![(local_geo, None)]
                             };
 
-                        // Per-region blur falls back to a default card corner
-                        // radius since the KDE blur protocol doesn't carry radii.
-                        // If the client set its own corner radius (layer corner
-                        // radius protocol), honor it so the blur backdrop matches
-                        // the client's rounded corners, and let the client draw
-                        // its own border.
+                        // A rect that came with its own radii (blur v4
+                        // `set_region_radii`) is rounded to exactly those. Without
+                        // them one radius has to serve every rect: the client's own
+                        // surface corner radius (layer corner radius protocol) if it
+                        // set one — matching its rounded corners and letting it draw
+                        // its own border — else a default card radius.
                         const PER_REGION_CORNER_RADIUS: f32 = 8.0;
 
-                        for blur_geo in blur_geos {
-                            let (blur_corner_radius, blur_border) = if has_per_region_blur {
+                        for (blur_geo, rect_radii) in blur_geos {
+                            let (blur_corner_radius, blur_border) = if let Some(radii) = rect_radii
+                            {
+                                (radii, !has_client_corner_radius)
+                            } else if has_per_region_blur {
                                 if has_client_corner_radius {
                                     (corner_radius, false)
                                 } else {
