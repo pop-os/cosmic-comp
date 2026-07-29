@@ -3,7 +3,7 @@ authors = ["Victoria Brekenfeld"]
 edition = "2024"
 license = "GPL-3.0-only"
 name = "cosmic-comp"
-version = "1.30.1"
+version = "1.31.0"
 rust-version = "1.90"
 
 [workspace]

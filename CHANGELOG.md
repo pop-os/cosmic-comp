@@ -1,3 +1,41 @@
+# [1.31.0](https://github.com/playtron-os/cosmic-comp/compare/v1.30.1...v1.31.0) (2026-07-29)
+
+
+### Bug Fixes
+
+* **blur:** free cached blur textures when their surface goes away ([3dc5e79](https://github.com/playtron-os/cosmic-comp/commit/3dc5e79faafa5c52583633f4e9e9084fc05ee259))
+* **blur:** reclaim blur textures for destroyed layer-shell popups ([e968ec1](https://github.com/playtron-os/cosmic-comp/commit/e968ec1244330cb8f471d76df8ed618de28602e9)), closes [tmp/#NNNN](https://github.com/tmp//issues/NNNN)
+* clean up blue cache on remove output and handle storing blur group content hash only on successful pass ([9f5f337](https://github.com/playtron-os/cosmic-comp/commit/9f5f337e618ec78d7afc62a624924717ddfcbdb5))
+* defer game-mode window mutations out of source dispatch ([1239518](https://github.com/playtron-os/cosmic-comp/commit/12395180c671b9306190f7b1cd2524c046cb4ff5))
+* **game-mode:** always fill the output gamescope-style; keep game activated ([234987c](https://github.com/playtron-os/cosmic-comp/commit/234987ca9e95ae65312a919088cd156d1cb59c3c))
+* **game-mode:** clean up state on exit + relaunch so a re-launched app fullscreens ([2ff2c51](https://github.com/playtron-os/cosmic-comp/commit/2ff2c51e3d5807cc0f1978c0249e85fb0074d2ec))
+* **game-mode:** revert always-fill; keep the fullscreen game scanout-capable ([f7443db](https://github.com/playtron-os/cosmic-comp/commit/f7443db7b6e4c298e3fb62650e8f78dba0e6ac55))
+* **iced:** defer IcedElement executor-source removal off the loop thread ([919d924](https://github.com/playtron-os/cosmic-comp/commit/919d924c37222cc61d0fda0e3e02ed5ef85f6504))
+* **iced:** keep calloop's Rc state on the event-loop thread ([488aca3](https://github.com/playtron-os/cosmic-comp/commit/488aca3a018d3c209b9c20a542ba5b374116217c))
+* keep secondary-output panel blur alive and track wallpaper open animation ([d143739](https://github.com/playtron-os/cosmic-comp/commit/d14373949e1fe20541e9f287cca29aabe1d61e52))
+* keep the game-mode window fullscreen + animate launcher exit ([da21b72](https://github.com/playtron-os/cosmic-comp/commit/da21b7262baf563c92dbfea52eaf60c531eccc59))
+* **motion:** source panel slide from ease_out_expo, keep ease_spring a spring ([31b6350](https://github.com/playtron-os/cosmic-comp/commit/31b6350093c757cf69b7103751e6e1d8c5bac265))
+* remove hard coded F23 capture for voice input ([80aa149](https://github.com/playtron-os/cosmic-comp/commit/80aa149aff6f31794209aeaf129f4d5f44e41b1c))
+* report game-mode display caps from the game's output ([5d91b1f](https://github.com/playtron-os/cosmic-comp/commit/5d91b1fac24fa1aab39b600ebdc5213f6abe51e6))
+* rounded corner clipping ([ab319bd](https://github.com/playtron-os/cosmic-comp/commit/ab319bd9119ea879dd7014df3940cf5f425c63ce))
+* update smithay to fix x11 vkcube crashing compositor ([bded512](https://github.com/playtron-os/cosmic-comp/commit/bded512795eac812a5279ce9937292dbc9d29908))
+
+
+### Features
+
+* **debug:** add opt-in parking_lot deadlock detection ([5163425](https://github.com/playtron-os/cosmic-comp/commit/516342531044c57990967bf9eafae6dfa3dff40d))
+* **game-mode:** composite a Wayland launcher/overlay over the fullscreen game ([d4ed95b](https://github.com/playtron-os/cosmic-comp/commit/d4ed95bca72797f622bcd67c3893f80ec9835b11))
+* **game-mode:** cross-fade launcher<->game workspace switches ([812dddc](https://github.com/playtron-os/cosmic-comp/commit/812dddcf9ffa86b52a842c7242c63134512ef1fa))
+* **game-mode:** emit launcher key (Super) as raw down/up events ([72707e4](https://github.com/playtron-os/cosmic-comp/commit/72707e4ea6bedffb015edbc505df2bcdf811a60f))
+* **game-mode:** reroute bare-Super launcher key to Grid; add LauncherKeyPressed signal ([ea7c64f](https://github.com/playtron-os/cosmic-comp/commit/ea7c64fca07a3655fbc7e6366b4580bbc4ddf440))
+* **game-mode:** scanout-safe gamescope upscaler for sub-output games ([9f37c15](https://github.com/playtron-os/cosmic-comp/commit/9f37c15ea6f0dea8745b8043761ea5fbe1ae93c8))
+* make default output scale a bit bigger and fix workspaces appearing even when they are disabled ([9242d35](https://github.com/playtron-os/cosmic-comp/commit/9242d35b5f0a57ae32784de19d6826ecf4a81865))
+* make the launcher a game-mode target + exclusive game output ([5db7d65](https://github.com/playtron-os/cosmic-comp/commit/5db7d65e020551836ece7442b487a3ba88e03125))
+* re-resolve the game surface when STEAM_GAME is retagged ([ec7aed8](https://github.com/playtron-os/cosmic-comp/commit/ec7aed8b44e970250fb1edd3935d789e6ee97fef))
+* support activating layershell via xdg activation ([3fccbb1](https://github.com/playtron-os/cosmic-comp/commit/3fccbb106e6cd2260af9013852473a29be5ea193))
+* support per rect corner radii for blur protocol ([d3de4bc](https://github.com/playtron-os/cosmic-comp/commit/d3de4bca00c323488959c5ecc50d5d8f4e7e0c2f))
+* workspace-based game mode (dedicated clean workspace per app) ([629969c](https://github.com/playtron-os/cosmic-comp/commit/629969c44cc9d00f8de396987210de546f9cd46e))
+
 ## [1.30.1](https://github.com/playtron-os/cosmic-comp/compare/v1.30.0...v1.30.1) (2026-07-23)
 
 
