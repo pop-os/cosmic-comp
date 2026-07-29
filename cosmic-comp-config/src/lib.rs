@@ -54,6 +54,13 @@ pub struct AppearanceConfig {
     pub clip_floating_windows: bool,
     pub clip_tiled_windows: bool,
     pub shadow_tiled_windows: bool,
+    /// Draw server-side titlebars for windows that don't decorate themselves
+    #[serde(default = "default_show_titlebars")]
+    pub show_titlebars: bool,
+}
+
+fn default_show_titlebars() -> bool {
+    true
 }
 
 impl Default for AppearanceConfig {
@@ -62,6 +69,7 @@ impl Default for AppearanceConfig {
             clip_floating_windows: true,
             clip_tiled_windows: true,
             shadow_tiled_windows: false,
+            show_titlebars: default_show_titlebars(),
         }
     }
 }

@@ -942,6 +942,8 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 if new != state.common.config.cosmic_conf.appearance_settings {
                     state.common.config.cosmic_conf.appearance_settings = new;
                     state.common.update_config();
+                    // toggling titlebars changes how much space each window gets
+                    state.common.shell.write().workspaces.recalculate();
                     for output in state.common.shell.read().outputs() {
                         state.backend.schedule_render(output);
                     }
