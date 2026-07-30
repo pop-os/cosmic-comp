@@ -209,6 +209,12 @@ impl MinimizedWindow {
     }
 }
 
+/// Smallest buffer dimension (px) still treated as a game framebuffer worth
+/// upscaling to fill the output. Anything smaller is a launch artifact — a
+/// loading banner or splash a game maps before its real window — and is centered
+/// at native size instead of being stretched across the screen.
+const MIN_UPSCALE_DIM: i32 = 360;
+
 #[derive(Debug, Clone)]
 pub struct FullscreenSurface {
     pub surface: CosmicSurface,
@@ -1493,13 +1499,14 @@ impl Workspace {
             .find(|f| f.ended_at.is_none() && &f.surface == surface)
         {
             let src = fs.surface.bbox().size;
-            fs.scale_to = if scale
-                && src.w > 0
+            let undersized = src.w > 0
                 && src.h > 0
                 && out.w > 0
                 && out.h > 0
-                && (src.w < out.w || src.h < out.h)
-            {
+                && (src.w < out.w || src.h < out.h);
+            fs.scale_to = if !undersized {
+                None
+            } else if scale && src.w >= MIN_UPSCALE_DIM && src.h >= MIN_UPSCALE_DIM {
                 // Aspect-preserving fit of the committed buffer into the output.
                 let ratio = f64::min(out.w as f64 / src.w as f64, out.h as f64 / src.h as f64);
                 let w = ((src.w as f64) * ratio).round() as i32;
@@ -1509,7 +1516,16 @@ impl Workspace {
                     Size::from((w, h)),
                 ))
             } else {
-                None
+                // Either too small to be a game framebuffer — a loading banner or
+                // splash a game maps before its real window — or upscaling was
+                // rejected by the DRM plane. Present it CENTERED at native size:
+                // stretching a 300x100 banner across the output looks broken, and
+                // leaving `scale_to` unset anchors it at the fullscreen origin, so
+                // it sat in the top-left corner with the rest of the output empty.
+                Some(Rectangle::new(
+                    Point::from(((out.w - src.w) / 2, (out.h - src.h) / 2)),
+                    Size::from((src.w, src.h)),
+                ))
             };
         }
     }
