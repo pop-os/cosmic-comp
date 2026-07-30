@@ -1080,6 +1080,30 @@ impl State {
             return;
         };
 
+        // Game mode owns a display, so a game must appear THERE regardless of where
+        // its window happened to map. A window with no placement of its own lands on
+        // the seat's active output (`map_window`), i.e. wherever the cursor is — so
+        // launching a game while the cursor sits on another output would otherwise
+        // drag game mode along with it. Adopt onto the output game mode already
+        // owns, and treat the window as needing a move even if it managed to
+        // fullscreen itself on the wrong one.
+        let (output, is_fullscreen, relocate_fullscreen) = {
+            let shell = self.common.shell.read();
+            match shell.game_mode.output.clone() {
+                Some(current) if shell.game_mode.active && current != output => {
+                    info!(
+                        target: GAMING_TARGET,
+                        app_id,
+                        from = %output.name(),
+                        to = %current.name(),
+                        "app mapped on another output; moving it to the game-mode output"
+                    );
+                    (current, false, is_fullscreen)
+                }
+                _ => (output, is_fullscreen, false),
+            }
+        };
+
         let seat = self.common.shell.read().seats.last_active().clone();
         // Record the normal-desktop workspace only on the first entry into game
         // mode, so a full exit can return there; app switches keep that origin.
@@ -1121,6 +1145,13 @@ impl State {
                     .find(|ws| ws.is_empty())
                     .or_else(|| shell.workspaces.spaces_for_output(&output).last())
                     .map(|ws| ws.handle);
+                if relocate_fullscreen {
+                    // It fullscreened itself on the output we are moving it AWAY
+                    // from. A fullscreen surface is not a mapped element, so
+                    // move_window cannot relocate it — drop fullscreen first and
+                    // let the fullscreen_request below re-apply it on the target.
+                    let _ = shell.unfullscreen_request(&game, &loop_handle);
+                }
                 if let Some(target) = target {
                     info!(target: GAMING_TARGET, app_id, "moving app onto a clean game-mode workspace");
                     let _ = shell.move_window(
