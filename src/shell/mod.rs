@@ -652,11 +652,16 @@ pub struct GameMode {
     pub active: bool,
     /// The Steam app id (`STEAM_GAME`) currently in game mode.
     pub app_id: Option<u32>,
-    /// Pid of the client driving game mode (the session manager that called
-    /// `EnterGameMode`). A game it launches is a descendant of this process, which
-    /// is how a brand-new game window is recognized as belonging to game mode at
-    /// MAP time — before it has been tagged — so it can be placed on the game-mode
-    /// output immediately instead of flashing on whichever output the cursor is on.
+    /// Pid of the process that launches games (the session manager). A game it
+    /// spawns is a descendant of it, which lets a brand-new game window be
+    /// recognized as game mode's at MAP time — before it has been tagged — and
+    /// placed on the game-mode output rather than under the cursor.
+    ///
+    /// Currently always `None`: it cannot be resolved from the D-Bus caller,
+    /// because asking the bus mid-method deadlocks the interface. The session
+    /// manager has to supply it explicitly. Until then `game_mode_claims` matches
+    /// on the game's own process tree only, which covers a running game's dialogs
+    /// but not a game being launched fresh.
     pub controller_pid: Option<u32>,
     /// Base-layer priority published by the session manager on the X11 root
     /// (`GAMESCOPECTRL_BASELAYER_APPID`), highest priority FIRST.
