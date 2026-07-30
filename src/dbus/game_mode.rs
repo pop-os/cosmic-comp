@@ -967,18 +967,28 @@ impl State {
         // NEW window — leaving it a small un-configured window (black). Falling
         // through re-resolves via find_game_surface and re-fullscreens the current
         // window with a fresh output-size configure.
+        //
+        // The early return is ALSO conditional on the adopted surface still being
+        // the best candidate. A game maps a loading banner before its real window,
+        // so we can legitimately adopt the banner first; without this check the
+        // early return would pin game mode to that banner for the rest of the
+        // session (the real window maps later and would never be adopted, since the
+        // banner stays alive and correctly tagged). Falling through re-resolves and
+        // upgrades to the real window; once it IS the best, this early-returns again.
         {
             let shell = self.common.shell.read();
+            let current = shell
+                .game_mode
+                .game_surface
+                .as_ref()
+                .filter(|s| s.alive() && app_id_of(s) == app_id);
             if shell.game_mode.active
                 && shell.game_mode.app_id == Some(app_id)
-                && shell
-                    .game_mode
-                    .game_surface
-                    .as_ref()
-                    .is_some_and(|s| s.alive() && app_id_of(s) == app_id)
+                && let Some(current) = current
+                && find_game_surface(&shell, app_id).is_none_or(|(best, ..)| &best == current)
             {
                 drop(shell);
-                debug!(target: GAMING_TARGET, app_id, "enter no-op: already active on this app id with a live tagged surface");
+                debug!(target: GAMING_TARGET, app_id, "enter no-op: already active on the best-ranked surface for this app id");
                 self.common.shell.write().game_mode.pending_app_id = None;
                 return;
             }
@@ -1440,52 +1450,51 @@ fn find_game_surface(
     shell: &Shell,
     app_id: u32,
 ) -> Option<(CosmicSurface, WorkspaceHandle, Output, bool)> {
-    use smithay::desktop::space::SpaceElement as _;
     // 0 is `app_id_of`'s "unknown" sentinel (any untagged, non-launcher window),
     // never a valid game-mode target. Guard against it so an accidental
     // `enter_game(0)` can't fullscreen an arbitrary window.
     if app_id == 0 {
         return None;
     }
-    // A launching game spawns MANY transient windows all carrying its STEAM_GAME id
-    // (1x1 IME/input helpers, a splash/banner, then the real game window, which maps
-    // late). Collect every LIVE match and pick the one with the largest committed
-    // content (bbox) so we adopt the real game window rather than a helper — and
-    // skipping dead surfaces means a just-closed transient is never re-adopted.
-    // `is_fullscreen` (already on its own workspace) is only a tie-break.
-    let mut candidates: Vec<(CosmicSurface, WorkspaceHandle, Output, bool, i32)> = Vec::new();
+    // A launching game spawns MANY windows all carrying its STEAM_GAME id (1x1
+    // IME/input helpers, a loading banner/splash, then the real game window, which
+    // maps LATE). Collect every LIVE match and take the best-ranked one; skipping
+    // dead surfaces means a just-closed transient is never re-adopted.
+    let mut candidates: Vec<(CosmicSurface, WorkspaceHandle, Output, bool)> = Vec::new();
     for ws in shell.workspaces.spaces() {
         for f in ws.get_fullscreen_surfaces() {
             if f.surface.alive() && app_id_of(&f.surface) == app_id {
-                let size = f.surface.bbox().size;
-                candidates.push((
-                    f.surface.clone(),
-                    ws.handle,
-                    ws.output().clone(),
-                    true,
-                    size.w.max(0) * size.h.max(0),
-                ));
+                candidates.push((f.surface.clone(), ws.handle, ws.output().clone(), true));
             }
         }
         for mapped in ws.mapped() {
             let surface = mapped.active_window();
             if surface.alive() && app_id_of(&surface) == app_id {
-                let size = surface.bbox().size;
-                candidates.push((
-                    surface,
-                    ws.handle,
-                    ws.output().clone(),
-                    false,
-                    size.w.max(0) * size.h.max(0),
-                ));
+                candidates.push((surface, ws.handle, ws.output().clone(), false));
             }
         }
     }
-    // Ascending sort, then pop the max: largest content wins, fullscreen breaks ties.
-    candidates.sort_by_key(|(_, _, _, is_fullscreen, area)| (*area, *is_fullscreen));
-    candidates
-        .pop()
-        .map(|(surface, handle, output, is_fullscreen, _)| (surface, handle, output, is_fullscreen))
+    // Ascending sort, then pop the max = best candidate.
+    candidates.sort_by_key(|(surface, _, _, is_fullscreen)| {
+        (base_candidate_rank(surface), *is_fullscreen)
+    });
+    candidates.pop()
+}
+
+/// How suitable `surface` is to be game mode's fullscreen base, ordered so that
+/// GREATER is better: prefer a real toplevel over a menu/splash artifact, and
+/// among equals prefer the one with the most committed content.
+///
+/// This is what keeps a game's loading banner from being adopted (and then
+/// fullscreened) in place of the real game window that maps a moment later.
+fn base_candidate_rank(surface: &CosmicSurface) -> (u8, u8, i64) {
+    use smithay::desktop::space::SpaceElement as _;
+
+    let substantial = u8::from(!surface.is_useless());
+    let real_toplevel = u8::from(!surface.maybe_a_dropdown());
+    let size = surface.bbox().size;
+    let area = i64::from(size.w.max(0)) * i64::from(size.h.max(0));
+    (substantial, real_toplevel, area)
 }
 
 /// Whether any `STEAM_OVERLAY`/`GAMESCOPE_EXTERNAL_OVERLAY` window is currently

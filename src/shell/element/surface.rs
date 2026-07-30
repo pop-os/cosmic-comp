@@ -62,7 +62,10 @@ use smithay::{
             XdgToplevelSurfaceData,
         },
     },
-    xwayland::{X11Surface, xwm::X11Relatable},
+    xwayland::{
+        X11Surface,
+        xwm::{WmWindowType, X11Relatable},
+    },
 };
 use tracing::trace;
 
@@ -278,6 +281,89 @@ impl CosmicSurface {
             WindowSurface::X11(surface) => surface.steam_bigpicture().is_some_and(|v| v != 0),
             WindowSurface::Wayland(_) => false,
         }
+    }
+
+    /// PID of the client owning this surface (`_NET_WM_PID`). `None` for native
+    /// Wayland toplevels. Game mode uses this to relate a window to the adopted
+    /// game: a popup may only composite over the game when it comes from the SAME
+    /// process.
+    pub fn pid(&self) -> Option<u32> {
+        match self.0.underlying_surface() {
+            WindowSurface::X11(surface) => surface.pid(),
+            WindowSurface::Wayland(_) => None,
+        }
+    }
+
+    /// The X11 window this surface is transient for (`WM_TRANSIENT_FOR`), if any.
+    pub fn transient_for(&self) -> Option<u32> {
+        match self.0.underlying_surface() {
+            WindowSurface::X11(surface) => surface.is_transient_for(),
+            WindowSurface::Wayland(_) => None,
+        }
+    }
+
+    /// This surface's X11 window id, if it is an XWayland window.
+    pub fn x11_window_id(&self) -> Option<u32> {
+        match self.0.underlying_surface() {
+            WindowSurface::X11(surface) => Some(surface.window_id()),
+            WindowSurface::Wayland(_) => None,
+        }
+    }
+
+    /// Whether this is an X11 override-redirect window (menus, tooltips, the
+    /// Steam overlay) — it bypasses the window manager and positions itself.
+    pub fn is_override_redirect(&self) -> bool {
+        match self.0.underlying_surface() {
+            WindowSurface::X11(surface) => surface.is_override_redirect(),
+            WindowSurface::Wayland(_) => false,
+        }
+    }
+
+    /// `_NET_WM_WINDOW_TYPE`, if the client set one.
+    pub fn window_type(&self) -> Option<WmWindowType> {
+        match self.0.underlying_surface() {
+            WindowSurface::X11(surface) => surface.window_type(),
+            WindowSurface::Wayland(_) => None,
+        }
+    }
+
+    /// Whether this window is too insubstantial to ever be the game or a popup
+    /// worth compositing: a 1x1/zero-area stub. Games map 1x1 IME/input helpers and
+    /// offscreen login stubs, which must never win focus.
+    pub fn is_useless(&self) -> bool {
+        let size = self.bbox().size;
+        size.w <= 1 || size.h <= 1
+    }
+
+    /// Whether this window looks like a menu/dropdown/transient artifact rather
+    /// than a real toplevel.
+    /// Override-redirect and the popup-ish `_NET_WM_WINDOW_TYPE`s count; so does
+    /// a non-fullscreen window hidden from BOTH the taskbar and the pager (a
+    /// helper surface), which is how Wine marks many of its transient widgets.
+    pub fn maybe_a_dropdown(&self) -> bool {
+        let WindowSurface::X11(surface) = self.0.underlying_surface() else {
+            // Native Wayland popups are xdg_popups, tracked separately.
+            return false;
+        };
+        if surface.is_override_redirect() {
+            return true;
+        }
+        if matches!(
+            surface.window_type(),
+            Some(
+                WmWindowType::DropdownMenu
+                    | WmWindowType::PopupMenu
+                    | WmWindowType::Menu
+                    | WmWindowType::Tooltip
+                    | WmWindowType::Combo
+                    | WmWindowType::Splash
+                    | WmWindowType::Notification
+                    | WmWindowType::Dnd
+            )
+        ) {
+            return true;
+        }
+        surface.is_skip_taskbar() && surface.is_skip_pager() && !surface.is_fullscreen()
     }
 
     pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
