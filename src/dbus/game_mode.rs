@@ -1591,10 +1591,29 @@ fn resolve_game_children(shell: &Shell, base: &CosmicSurface, app_id: u32) -> Ve
     else {
         return Vec::new();
     };
-    ws.mapped()
+    let mut children: Vec<CosmicSurface> = ws
+        .mapped()
         .map(|mapped| mapped.active_window())
         .filter(|surface| is_game_child(base, app_id, surface))
-        .collect()
+        .collect();
+    // Apply the session manager's base-layer priority: a window whose app id
+    // appears EARLIER in the list stacks above one that appears later, which is
+    // how a custom webview is put over a still-running game without focusing it.
+    // Windows the list doesn't mention keep their existing relative order behind
+    // the ones it does (stable sort, unlisted sorts last).
+    let priority = |surface: &CosmicSurface| {
+        let id = app_id_of(surface);
+        shell
+            .game_mode
+            .baselayer_appids
+            .iter()
+            .position(|listed| *listed == id)
+            .unwrap_or(usize::MAX)
+    };
+    if !shell.game_mode.baselayer_appids.is_empty() {
+        children.sort_by_key(priority);
+    }
+    children
 }
 
 /// How suitable `surface` is to be game mode's fullscreen base, ordered so that

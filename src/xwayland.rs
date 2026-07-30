@@ -810,6 +810,22 @@ impl XwmHandler for State {
         }
     }
 
+    fn baselayer_changed(&mut self, _xwm: XwmId, appids: Vec<u32>, _window: Option<X11Window>) {
+        // The session manager publishes base-layer priority on the root window to
+        // say which app should be on top WITHOUT focusing it — that is how a custom
+        // webview is shown over a still-running game. Record the order; game mode's
+        // refresh applies it when it resolves what to render.
+        debug!(
+            target: GAMING_TARGET,
+            ?appids,
+            "base-layer priority changed"
+        );
+        let mut shell = self.common.shell.write();
+        if shell.game_mode.baselayer_appids != appids {
+            shell.game_mode.baselayer_appids = appids;
+        }
+    }
+
     fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
         // Live Steam window-role changes drive game mode. These run with no shell
         // lock held (XWM dispatch), so the handlers can take their own.

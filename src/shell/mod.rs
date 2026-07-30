@@ -652,6 +652,16 @@ pub struct GameMode {
     pub active: bool,
     /// The Steam app id (`STEAM_GAME`) currently in game mode.
     pub app_id: Option<u32>,
+    /// Base-layer priority published by the session manager on the X11 root
+    /// (`GAMESCOPECTRL_BASELAYER_APPID`), highest priority FIRST.
+    ///
+    /// This is how the session manager expresses stacking without focusing
+    /// anything: a window whose app id appears earlier in the list is stacked
+    /// above one that appears later, so e.g. a custom webview shown over a
+    /// running game sorts ahead of the game while the game keeps rendering
+    /// behind it. Empty when the property is unset, in which case adoption
+    /// order alone decides.
+    pub baselayer_appids: Vec<u32>,
     /// The game surface we fullscreened, so we can un-fullscreen it on exit.
     pub game_surface: Option<CosmicSurface>,
     /// Windows that belong WITH the adopted game and are therefore allowed to
