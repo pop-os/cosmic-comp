@@ -952,6 +952,47 @@ impl State {
             }
         }
 
+        // Focus reconciliation: nothing INVISIBLE may hold the keyboard. A window
+        // can leave the controlled set while focused — most easily by fullscreening
+        // itself, which moves it out of the workspace's mapped elements — and it
+        // then renders nothing while still receiving keystrokes, which is
+        // indistinguishable from a hung game. Hand the keyboard back to the game.
+        let restore_focus = {
+            let shell = self.common.shell.read();
+            let seat = shell.seats.last_active().clone();
+            let focused = seat
+                .get_keyboard()
+                .and_then(|kbd| kbd.current_focus())
+                .and_then(|target| target.active_window());
+            let base = shell
+                .game_mode
+                .active
+                .then(|| shell.game_mode.game_surface.clone())
+                .flatten();
+            match (base, focused) {
+                (Some(base), Some(focused))
+                    if focused != base
+                        && !shell.game_mode.children.contains(&focused)
+                        && shell.game_mode.overlay_surface.as_ref() != Some(&focused)
+                        && shell.game_mode.input_grab.as_ref() != Some(&focused)
+                        && shell.game_mode_hides(&focused) =>
+                {
+                    Some((base, seat))
+                }
+                _ => None,
+            }
+        };
+        if let Some((base, seat)) = restore_focus {
+            debug!(target: GAMING_TARGET, "focus was on a window game mode does not render; restoring it to the game");
+            Shell::set_focus(
+                self,
+                Some(&KeyboardFocusTarget::Fullscreen(base)),
+                &seat,
+                None,
+                false,
+            );
+        }
+
         // Safety net for overlay presence (an overlay window mapped/unmapped) and
         // for an input grab whose window has gone away — the low-latency paths are
         // the property/map hooks, this catches anything they miss.

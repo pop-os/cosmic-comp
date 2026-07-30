@@ -104,6 +104,39 @@ pub struct GameModeView<'a> {
     /// (topmost first) — the same order `Workspace::mapped()` yields.
     pub children: &'a [CosmicSurface],
 }
+/// Whether an override-redirect window may render while strict game-mode control
+/// is in effect for this workspace.
+///
+/// Override-redirect windows were the one un-filtered path left: they bypass the
+/// window manager, and the emission loop only checked that they intersect the
+/// output — so an unrelated app's tooltip or menu painted straight over the
+/// fullscreen game, the exact inverse of the game's own dialogs being hidden.
+///
+/// Allowed: gaming overlays (`STEAM_OVERLAY` / `GAMESCOPE_EXTERNAL_OVERLAY` — the
+/// Steam overlay, MangoHud), and windows belonging to the game itself, i.e. its
+/// own Wine/CEF dropdowns and tooltips. Only same-process windows may composite
+/// over the game, and 1x1 stubs never do.
+fn game_mode_allows_override(
+    view: Option<GameModeView<'_>>,
+    game_app_id: Option<u32>,
+    or: &X11Surface,
+) -> bool {
+    let Some(view) = view else {
+        // Not under strict control — unchanged behavior.
+        return true;
+    };
+    if or.steam_overlay().is_some_and(|v| v != 0) || or.external_overlay().is_some_and(|v| v != 0) {
+        return true;
+    }
+    let size = or.last_configure().size;
+    if size.w <= 1 || size.h <= 1 {
+        return false;
+    }
+    let base_pid = view.base.pid();
+    (base_pid.is_some() && or.pid() == base_pid)
+        || (game_app_id.is_some() && or.steam_game() == game_app_id)
+}
+
 pub fn render_input_order<R: Default + 'static>(
     shell: &Shell,
     output: &Output,
@@ -368,6 +401,9 @@ fn render_input_order_internal<R: 'static>(
                     .as_global()
                     .intersection(output.geometry())
                     .is_some()
+            })
+            .filter(|or| {
+                game_mode_allows_override(game_mode_controlled, shell.game_mode.app_id, or)
             })
             .map(|or| (or, or.last_configure().loc.as_global()))
         {
