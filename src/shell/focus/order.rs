@@ -135,15 +135,31 @@ fn render_input_order_internal<R: 'static>(
         trace!(target: GAMING_TARGET, output = %output.name(), game_mode_exclusive, "gm: exclusivity resolved");
     }
 
-    // Strict game-mode control: on the game's own output, the workspace must render
-    // ONLY the surface game mode controls (its `game_surface`). A game that raw-
-    // fullscreens itself lands in the workspace's fullscreen list and would
-    // otherwise show; gate it off until playserve tags it and game mode adopts it
-    // as the controlled surface (then it renders + fades in like any game).
+    // Strict game-mode control: the game's own workspace renders ONLY the surface
+    // game mode controls (its `game_surface`). A game that raw-fullscreens itself
+    // lands in that workspace's fullscreen list and would otherwise show; gate it
+    // off until playserve tags it and game mode adopts it as the controlled surface
+    // (then it renders + fades in like any game).
+    //
+    // Scoped to the workspace actually holding the controlled surface, NOT to the
+    // whole output: the other workspaces on the game's output are an ordinary
+    // desktop, so switching to one and launching an app there must keep working.
     let game_mode_controlled: Option<&CosmicSurface> = (shell.game_mode.active
         && shell.game_mode.output.as_ref() == Some(output))
     .then_some(shell.game_mode.game_surface.as_ref())
-    .flatten();
+    .flatten()
+    .filter(|controlled| {
+        shell
+            .workspaces
+            .sets
+            .get(output)
+            .and_then(|set| set.workspaces.iter().find(|w| w.handle == current.0))
+            .is_some_and(|w| {
+                w.fullscreen_surfaces
+                    .iter()
+                    .any(|f| &f.surface == *controlled)
+            })
+    });
 
     if shell
         .zoom_state
