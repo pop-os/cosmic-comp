@@ -652,6 +652,12 @@ pub struct GameMode {
     pub active: bool,
     /// The Steam app id (`STEAM_GAME`) currently in game mode.
     pub app_id: Option<u32>,
+    /// Pid of the client driving game mode (the session manager that called
+    /// `EnterGameMode`). A game it launches is a descendant of this process, which
+    /// is how a brand-new game window is recognized as belonging to game mode at
+    /// MAP time — before it has been tagged — so it can be placed on the game-mode
+    /// output immediately instead of flashing on whichever output the cursor is on.
+    pub controller_pid: Option<u32>,
     /// Base-layer priority published by the session manager on the X11 root
     /// (`GAMESCOPECTRL_BASELAYER_APPID`), highest priority FIRST.
     ///
@@ -2676,6 +2682,63 @@ impl Shell {
         }
 
         result
+    }
+
+    /// Whether `pid` is `ancestor`, or descends from it.
+    ///
+    /// Walks `/proc/<pid>/stat`'s parent field upward. Bounded so a malformed or
+    /// cyclic chain cannot spin.
+    fn process_descends_from(pid: u32, ancestor: u32) -> bool {
+        let mut current = pid;
+        for _ in 0..32 {
+            if current == ancestor {
+                return true;
+            }
+            if current <= 1 {
+                return false;
+            }
+            // Field 4 of /proc/<pid>/stat is the parent pid. The comm field (2) can
+            // contain spaces and parentheses, so parse after the final ')'.
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{current}/stat")) else {
+                return false;
+            };
+            let Some(rest) = stat.rsplit_once(')').map(|(_, rest)| rest) else {
+                return false;
+            };
+            let Some(ppid) = rest.split_whitespace().nth(1).and_then(|p| p.parse().ok()) else {
+                return false;
+            };
+            current = ppid;
+        }
+        false
+    }
+
+    /// Whether a window that is being mapped belongs to game mode, and should
+    /// therefore be placed on the output game mode owns rather than wherever the
+    /// cursor happens to be.
+    ///
+    /// Checked at MAP time, so it cannot rely on `STEAM_GAME` — the session manager
+    /// tags a window only after it appears. Instead a window qualifies when it is
+    /// already tagged for the active app, or when its process descends from the
+    /// game (its own dialogs) or from the client driving game mode (the game that
+    /// client just launched).
+    pub fn game_mode_claims(&self, surface: &CosmicSurface) -> bool {
+        if !self.game_mode.active {
+            return false;
+        }
+        if self.game_mode.app_id.is_some_and(|app_id| {
+            app_id != 0 && crate::dbus::game_mode::app_id_of(surface) == app_id
+        }) {
+            return true;
+        }
+        let Some(pid) = surface.pid() else {
+            return false;
+        };
+        let base_pid = self.game_mode.game_surface.as_ref().and_then(|s| s.pid());
+        [base_pid, self.game_mode.controller_pid]
+            .into_iter()
+            .flatten()
+            .any(|ancestor| Self::process_descends_from(pid, ancestor))
     }
 
     /// Whether strict game-mode control would refuse to RENDER `surface`: game
@@ -6522,8 +6585,18 @@ impl Shell {
         };
 
         let should_be_fullscreen = output.is_some();
+        // A window game mode claims belongs on the output game mode owns, decided
+        // HERE rather than after adoption: everything below places the window, so
+        // deferring would map it under the cursor, show it there for a frame, then
+        // move it. `game_mode_claims` recognizes it by process ancestry, since the
+        // session manager only tags a window after it appears.
+        let game_mode_output = self
+            .game_mode_claims(&window)
+            .then(|| self.game_mode.output.clone())
+            .flatten();
         // For embedded windows, use the parent's output; otherwise use fullscreen output or active output
-        let mut output = output
+        let mut output = game_mode_output
+            .or(output)
             .or(embed_parent_output)
             .or(transient_parent_output)
             .unwrap_or_else(|| seat.active_output());

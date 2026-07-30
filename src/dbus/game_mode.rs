@@ -187,7 +187,13 @@ impl GameModeIo {
 /// Control requests, applied on the compositor event loop.
 #[derive(Debug, Clone)]
 pub enum GameModeCommand {
-    Enter(u32),
+    /// Enter game mode for an app id, plus the pid of the client that asked —
+    /// used to recognize the windows it goes on to launch (see
+    /// `GameMode::controller_pid`).
+    Enter {
+        app_id: u32,
+        caller_pid: Option<u32>,
+    },
     Exit,
     SetFpsLimit(u32),
     SetScaling {
@@ -361,8 +367,29 @@ impl GameModeInterface {
     /// Enter exclusive game mode for `app_id`: make that app the fullscreen game
     /// (engaging the direct-scanout + VRR + tearing fast paths) and clear the
     /// rest with an animated transition.
-    async fn enter_game_mode(&self, app_id: u32) {
-        self.io.send(GameModeCommand::Enter(app_id));
+    async fn enter_game_mode(
+        &self,
+        app_id: u32,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+        #[zbus(connection)] conn: &zbus::Connection,
+    ) {
+        // Resolve who asked. Windows this client subsequently spawns (the game it
+        // launches) are recognized by process ancestry at MAP time, so they can be
+        // placed on the game-mode output straight away instead of appearing on
+        // whichever output the cursor happens to be on and then being moved.
+        let caller_pid = match header.sender() {
+            Some(sender) => zbus::fdo::DBusProxy::new(conn)
+                .await
+                .ok()
+                .and_then(|proxy| {
+                    futures_executor::block_on(
+                        proxy.get_connection_unix_process_id(sender.to_owned().into()),
+                    )
+                    .ok()
+                }),
+            None => None,
+        };
+        self.io.send(GameModeCommand::Enter { app_id, caller_pid });
     }
 
     /// Leave game mode and return to the launcher.
@@ -615,8 +642,11 @@ impl State {
     pub fn handle_game_mode_command(&mut self, cmd: GameModeCommand) {
         let bridge = self.common.game_mode_bridge.clone();
         match cmd {
-            GameModeCommand::Enter(app_id) => {
-                debug!(target: GAMING_TARGET, app_id, launcher = app_id == LAUNCHER_APP_ID, "cmd: enter game mode");
+            GameModeCommand::Enter { app_id, caller_pid } => {
+                debug!(target: GAMING_TARGET, app_id, ?caller_pid, launcher = app_id == LAUNCHER_APP_ID, "cmd: enter game mode");
+                if caller_pid.is_some() {
+                    self.common.shell.write().game_mode.controller_pid = caller_pid;
+                }
                 self.enter_game_mode(app_id);
                 self.refresh_game_mode_state();
             }
@@ -1516,7 +1546,7 @@ impl State {
 /// else the launcher id if its Wayland `app_id` is a known launcher (see
 /// [`LAUNCHER_APP_IDS`] — the launcher is native Wayland and can't carry the X11
 /// atom), else 0.
-fn app_id_of(surface: &CosmicSurface) -> u32 {
+pub fn app_id_of(surface: &CosmicSurface) -> u32 {
     if let Some(appid) = surface.steam_appid() {
         return appid;
     }
