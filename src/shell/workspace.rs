@@ -1085,6 +1085,71 @@ impl Workspace {
             .map(|(m, p)| (m, p.to_global(&self.output)))
     }
 
+    /// Keyboard/click hit-test restricted to the game-mode controlled surface.
+    ///
+    /// Under strict game-mode control this workspace renders ONLY that surface
+    /// (see `render`), so input must not reach anything else — otherwise a window
+    /// that draws zero pixels (an un-adopted game, a dialog, a login window)
+    /// could take focus and clicks while being invisible, which looks exactly
+    /// like a hung game.
+    pub fn controlled_element_under(
+        &self,
+        location: Point<f64, Global>,
+        controlled: &CosmicSurface,
+    ) -> Option<KeyboardFocusTarget> {
+        if !self.output.geometry().contains(location.to_i32_round()) {
+            return None;
+        }
+        let location = location.to_local(&self.output);
+        let fullscreen = self
+            .fullscreen_surfaces
+            .iter()
+            .find(|f| &f.surface == controlled)?;
+        let geometry = self.fullscreen_geometry_for(fullscreen);
+        fullscreen
+            .surface
+            .0
+            .surface_under(
+                (location - geometry.loc.to_f64()).as_logical(),
+                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+            )
+            .is_some()
+            .then(|| KeyboardFocusTarget::Fullscreen(fullscreen.surface.clone()))
+    }
+
+    /// Pointer hit-test restricted to the game-mode controlled surface — the
+    /// pointer counterpart of [`Workspace::controlled_element_under`].
+    pub fn controlled_surface_under(
+        &self,
+        location: Point<f64, Global>,
+        controlled: &CosmicSurface,
+    ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
+        if !self.output.geometry().contains(location.to_i32_round()) {
+            return None;
+        }
+        let location = location.to_local(&self.output);
+        let fullscreen = self
+            .fullscreen_surfaces
+            .iter()
+            .find(|f| &f.surface == controlled)?;
+        if fullscreen.is_animating() {
+            return None;
+        }
+        let geometry = self.fullscreen_geometry_for(fullscreen);
+        fullscreen
+            .surface
+            .focus_under(
+                (location - geometry.loc.to_f64()).as_logical(),
+                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+            )
+            .map(|(target, surface_offset)| {
+                (
+                    target,
+                    (geometry.loc.to_f64() + surface_offset.as_local()).to_global(&self.output),
+                )
+            })
+    }
+
     pub fn update_pointer_position(
         &mut self,
         location: Option<Point<f64, Local>>,
@@ -1399,6 +1464,17 @@ impl Workspace {
             ended_at: None,
             scale_to: None,
         });
+        // Bug 1: the entrance animation clock starts NOW, before the client has
+        // committed a fullscreen-sized buffer — until its first frame lands the
+        // surface renders empty (grey) while the switch animates in.
+        tracing::debug!(
+            target: crate::logger::GAMING_TARGET,
+            app_id = %window.app_id(),
+            output = %self.output.name(),
+            geo_w = self.output.geometry().size.w,
+            geo_h = self.output.geometry().size.h,
+            "map_fullscreen: surface promoted to fullscreen"
+        );
     }
 
     /// Set (or clear) the upscale target for a tracked fullscreen
@@ -1437,7 +1513,6 @@ impl Workspace {
             };
         }
     }
-
 
     #[must_use]
     pub fn take_fullscreen<S>(
@@ -1790,6 +1865,7 @@ impl Workspace {
         window_alpha: f32,
         attached_orb_state: Option<&VoiceOrbState>,
         scanout_node: Option<DrmNode>,
+        game_mode_only: Option<&CosmicSurface>,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: AsGlowRenderer,
@@ -1898,6 +1974,25 @@ impl Workspace {
                 .map(animation_rescale)
                 .collect::<Vec<_>>()
         };
+
+        // Strict game-mode fullscreen control: on the game-mode output this
+        // workspace renders ONLY the compositor-controlled surface. A window that
+        // raw-fullscreens itself (a Proton game before playserve tags it and game
+        // mode adopts it) is in `fullscreen_surfaces` and would otherwise become the
+        // top fullscreen and render — instead it stays completely invisible until it
+        // becomes the controlled `game_surface`, at which point it renders (and its
+        // entrance animation fades it in) like any adopted game. The game-mode
+        // overlay (QAM/launcher) is a separate stage, so it still composites on top.
+        if let Some(controlled) = game_mode_only {
+            if let Some(fs) = self
+                .fullscreen_surfaces
+                .iter()
+                .find(|f| &f.surface == controlled)
+            {
+                elements.extend(render_fullscreen(fs, renderer, output_scale));
+            }
+            return Ok(elements);
+        }
 
         let top_fullscreen = self.get_fullscreen(last_active_seat);
 

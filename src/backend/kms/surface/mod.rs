@@ -2547,6 +2547,20 @@ impl SurfaceThreadState {
             } else {
                 CLEAR_COLOR // TODO use a theme neutral color
             };
+            // Grey-frame diagnosis (bug 1): CLEAR_COLOR is the charcoal grey. During
+            // the launch entrance, if game mode is active but has_active_fullscreen is
+            // still false (fullscreen surface not settled / first buffer not committed),
+            // the output clears to grey behind few/no elements — the grey frames the
+            // user sees. clear_is_black=false + low element_count while entering = that.
+            tracing::trace!(
+                target: GAMING_TARGET,
+                output = %self.output.name(),
+                game_mode_active,
+                has_active_fullscreen,
+                clear_is_black = game_mode_active && has_active_fullscreen,
+                element_count = elements.len(),
+                "frame clear-color + content"
+            );
             compositor.render_frame(
                 &mut renderer,
                 &elements,
@@ -2630,16 +2644,18 @@ impl SurfaceThreadState {
                                         .find(|f| &f.surface == game && !f.is_animating())
                                         .and_then(|f| f.scale_to)
                                         .map(|rect| {
-                                            (game.bbox().size, rect.size, ws.output().geometry().size)
+                                            (
+                                                game.bbox().size,
+                                                rect.size,
+                                                ws.output().geometry().size,
+                                            )
                                         })
                                 })
                             })
                         })
                         .flatten();
                     if let Some((buffer, target, out_size)) = scaled
-                        && !shell
-                            .game_mode_scale_rejected
-                            .swap(true, Ordering::Relaxed)
+                        && !shell.game_mode_scale_rejected.swap(true, Ordering::Relaxed)
                     {
                         warn!(
                             target: GAMING_TARGET,
@@ -2707,6 +2723,15 @@ impl SurfaceThreadState {
                         let element_count = elements.len();
                         let top_kind = elements.first().map(|e| e.kind());
                         let cursor_present = elements.iter().any(|e| e.kind() == Kind::Cursor);
+                        // overlay_active + which app is fullscreen: BUG 2 signature is
+                        // overlay_active=true WHILE scanout=true (the game holds the
+                        // primary plane so the QAM can't composite over it); BUG 3 is
+                        // this line still firing with the game's app id after a
+                        // return-to-launcher (paused game still the scanned-out primary).
+                        let (overlay_active, game_app_id) = {
+                            let shell = self.shell.read();
+                            (shell.game_mode.overlay_active, shell.game_mode.app_id)
+                        };
                         info!(
                             target: GAMING_TARGET,
                             fps,
@@ -2716,6 +2741,8 @@ impl SurfaceThreadState {
                             tearing,
                             vrr,
                             scanout,
+                            overlay_active,
+                            game_app_id = ?game_app_id,
                             element_count,
                             ?top_kind,
                             cursor_present,

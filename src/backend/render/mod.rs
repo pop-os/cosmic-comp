@@ -2096,20 +2096,28 @@ where
                 // the output origin, above the game. The surface carries its own
                 // per-pixel alpha; scanout is forced off so it blends over the
                 // game rather than being scanned out opaquely.
-                elements.extend(
-                    surface
-                        .render_elements::<R, WorkspaceRenderElement<R>>(
-                            renderer,
-                            Point::default(),
-                            Scale::from(scale),
-                            1.0,
-                            Some(false),
-                            scanout_node,
-                        )
-                        .into_iter()
-                        .flat_map(crop_to_output)
-                        .map(Into::into),
+                let overlay_elements: Vec<_> = surface
+                    .render_elements::<R, WorkspaceRenderElement<R>>(
+                        renderer,
+                        Point::default(),
+                        Scale::from(scale),
+                        1.0,
+                        Some(false),
+                        scanout_node,
+                    )
+                    .into_iter()
+                    .flat_map(crop_to_output)
+                    .map(Into::into)
+                    .collect();
+                // Bug 2: a resolved overlay surface with no committed buffer yields
+                // ZERO elements — the QAM stage runs but nothing is drawn over the game.
+                tracing::trace!(
+                    target: crate::logger::GAMING_TARGET,
+                    overlay_app_id = %surface.app_id(),
+                    n_elements = overlay_elements.len(),
+                    "overlay stage composed"
                 );
+                elements.extend(overlay_elements);
             }
             Stage::OverrideRedirect { surface, location } => {
                 elements.extend(surface.wl_surface().into_iter().flat_map(|surface| {
@@ -2238,6 +2246,7 @@ where
                 workspace,
                 offset,
                 alpha,
+                game_mode_only,
             } => {
                 elements.extend(
                     match workspace.render(
@@ -2254,6 +2263,7 @@ where
                         voice_mode_alpha * alpha,
                         attached_orb_state.as_ref(),
                         scanout_node,
+                        game_mode_only,
                     ) {
                         Ok(elements) => {
                             elements

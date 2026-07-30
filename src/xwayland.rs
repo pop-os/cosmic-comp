@@ -56,7 +56,9 @@ use smithay::{
         xwm::{Reorder, WmWindowProperty, XwmId},
     },
 };
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
+
+use crate::logger::GAMING_TARGET;
 use xcursor::parser::Image;
 use xkbcommon::xkb::Keysym;
 
@@ -781,6 +783,12 @@ impl XwmHandler for State {
     fn new_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
     fn new_override_redirect_window(&mut self, _xwm: XwmId, _window: X11Surface) {}
     fn destroyed_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        debug!(
+            target: GAMING_TARGET,
+            window_id = window.window_id(),
+            class = %window.class(),
+            "x11 window destroyed"
+        );
         let mut shell = self.common.shell.write();
         shell
             .pending_windows
@@ -805,6 +813,15 @@ impl XwmHandler for State {
     fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
         // Live Steam window-role changes drive game mode. These run with no shell
         // lock held (XWM dispatch), so the handlers can take their own.
+        // STEAM_GAME / STEAM_OVERLAY / STEAM_INPUT_FOCUS retagging underlies every
+        // game-mode transition; logging the atom change is the first link.
+        trace!(
+            target: GAMING_TARGET,
+            window_id = window.window_id(),
+            class = %window.class(),
+            ?property,
+            "x11 property_notify"
+        );
         match property {
             // STEAM_GAME changed — a deferred game-mode enter may now resolve to it
             // (e.g. the launcher tags the game window after it maps), or the active
@@ -913,6 +930,15 @@ impl XwmHandler for State {
         // would otherwise be all-black (e.g. Zoom's OpenGL init clear).
         let geo = surface.geometry();
         let sync_supported = surface.sync_request_supported();
+        debug!(
+            target: GAMING_TARGET,
+            window_id = surface.window_id(),
+            class = %surface.class(),
+            sync_supported,
+            geo_w = geo.size.w,
+            geo_h = geo.size.h,
+            "x11 map_window_notify (forced-sync waits for first frame; otherwise maps on buffer)"
+        );
         if sync_supported {
             let _ = surface.configure_with_forced_sync(geo, None);
             // Sync pending: sync_request_acked / sync_request_timeout will map.
@@ -979,6 +1005,12 @@ impl XwmHandler for State {
 
     fn sync_request_timeout(&mut self, _xwm: XwmId, surface: X11Surface) {
         // Client didn't ack within the timeout — map it anyway so it's not stuck forever.
+        warn!(
+            target: GAMING_TARGET,
+            window_id = surface.window_id(),
+            class = %surface.class(),
+            "x11 sync_request TIMEOUT — mapping without a confirmed first frame (grey-frame risk)"
+        );
         let shell = self.common.shell.read();
         let window = shell
             .pending_windows
@@ -1010,6 +1042,14 @@ impl XwmHandler for State {
         if already_present {
             return;
         }
+        // A real Steam/external overlay (Shift+Tab, MangoHud) is an OR window; its
+        // presence gates overlay_window_present() and the game-mode overlay path (bug 2).
+        debug!(
+            target: GAMING_TARGET,
+            window_id = window.window_id(),
+            class = %window.class(),
+            "x11 override-redirect window mapped"
+        );
         shell.map_override_redirect(window.clone());
         drop(shell);
 
@@ -1019,6 +1059,13 @@ impl XwmHandler for State {
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        debug!(
+            target: GAMING_TARGET,
+            window_id = window.window_id(),
+            class = %window.class(),
+            override_redirect = window.is_override_redirect(),
+            "x11 window unmapped"
+        );
         let mut shell = self.common.shell.write();
         if window.is_override_redirect() {
             shell.override_redirect_windows.retain(|or| or != &window);

@@ -3032,6 +3032,7 @@ impl State {
                         workspace,
                         offset,
                         alpha: _,
+                        game_mode_only,
                     } => {
                         let location = global_pos + offset.as_global().to_f64();
                         let output = workspace.output();
@@ -3041,9 +3042,18 @@ impl State {
                             .is_some_and(|geometry| {
                                 geometry.contains(global_pos.to_local(output).to_i32_round())
                             })
-                            && let Some(element) = workspace.toplevel_element_under(location, seat)
                         {
-                            return ControlFlow::Break(Ok(Some(element)));
+                            // Input must match what game mode actually RENDERS: only
+                            // the controlled surface is drawn, so only it may be hit.
+                            let element = match game_mode_only {
+                                Some(controlled) => {
+                                    workspace.controlled_element_under(location, controlled)
+                                }
+                                None => workspace.toplevel_element_under(location, seat),
+                            };
+                            if let Some(element) = element {
+                                return ControlFlow::Break(Ok(Some(element)));
+                            }
                         }
                     }
                 }
@@ -3219,11 +3229,20 @@ impl State {
                         workspace,
                         offset,
                         alpha: _,
+                        game_mode_only,
                     } => {
                         let global_pos = global_pos + offset.to_f64().as_global();
-                        if let Some(under) =
-                            workspace.toplevel_surface_under(global_pos, overview.clone(), seat)
-                        {
+                        // Pointer must match what game mode actually RENDERS (see the
+                        // element_under arm above).
+                        let under = match game_mode_only {
+                            Some(controlled) => {
+                                workspace.controlled_surface_under(global_pos, controlled)
+                            }
+                            None => {
+                                workspace.toplevel_surface_under(global_pos, overview.clone(), seat)
+                            }
+                        };
+                        if let Some(under) = under {
                             return ControlFlow::Break(Ok(Some(under)));
                         }
                     }

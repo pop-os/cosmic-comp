@@ -1166,12 +1166,25 @@ impl WorkspaceSet {
             state.remove_workspace_state(&self.workspaces[old_active].handle, WState::Urgent);
             state.remove_workspace_state(&self.workspaces[idx].handle, WState::Urgent);
             state.add_workspace_state(&self.workspaces[idx].handle, WState::Active);
+            let dbg_crossfade = matches!(workspace_delta, WorkspaceDelta::Crossfade(_));
             self.previously_active = if animate {
                 Some((old_active, workspace_delta))
             } else {
                 None
             };
             self.active = idx;
+            // Grey-slide anchor (bug 1): the moment a slide/crossfade to another
+            // workspace begins. If the incoming workspace's game surface has no first
+            // frame yet, this is when the empty grey workspace starts animating in.
+            tracing::debug!(
+                target: crate::logger::GAMING_TARGET,
+                output = %self.output.name(),
+                from = old_active,
+                to = idx,
+                crossfade = dbg_crossfade,
+                animate,
+                "workspace transition start"
+            );
             Ok(true)
         } else {
             // snap to workspace, when in between workspaces due to swipe gesture
@@ -2415,7 +2428,9 @@ impl Shell {
             game_mode_tearing_supported: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
-            game_mode_scale_rejected: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            game_mode_scale_rejected: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            )),
             tiling_exceptions,
             // Start in home mode only if HOME_ENABLED is set
             home_mode: if home_enabled() {

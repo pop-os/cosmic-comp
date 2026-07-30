@@ -23,7 +23,7 @@ use smithay::backend::drm::VrrSupport;
 use smithay::output::Output;
 use smithay::utils::IsAlive;
 use smithay::xwayland::X11Surface;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 use zbus::{interface, object_server::SignalEmitter};
 
 use crate::logger::GAMING_TARGET;
@@ -539,10 +539,7 @@ impl GameModeInterface {
     /// the launcher (matching `LAUNCHER_APP_IDS`) can distinguish tap vs hold or
     /// change behavior later. The compositor takes no action itself.
     #[zbus(signal)]
-    async fn launcher_key_pressed(
-        emitter: &SignalEmitter<'_>,
-        pressed: bool,
-    ) -> zbus::Result<()>;
+    async fn launcher_key_pressed(emitter: &SignalEmitter<'_>, pressed: bool) -> zbus::Result<()>;
 }
 
 // ──────────────────────────── lifecycle / wiring ───────────────────────────
@@ -619,12 +616,12 @@ impl State {
         let bridge = self.common.game_mode_bridge.clone();
         match cmd {
             GameModeCommand::Enter(app_id) => {
-                debug!(app_id, "game-mode: enter");
+                debug!(target: GAMING_TARGET, app_id, launcher = app_id == LAUNCHER_APP_ID, "cmd: enter game mode");
                 self.enter_game_mode(app_id);
                 self.refresh_game_mode_state();
             }
             GameModeCommand::Exit => {
-                debug!("game-mode: exit");
+                debug!(target: GAMING_TARGET, "cmd: exit game mode");
                 self.exit_game_mode();
                 self.refresh_game_mode_state();
             }
@@ -689,7 +686,7 @@ impl State {
                 } else {
                     self.release_game_mode_input_grab();
                 }
-                debug!(visible, blocking, "game-mode: set overlay");
+                debug!(target: GAMING_TARGET, visible, blocking, "cmd: set overlay");
             }
         }
     }
@@ -816,12 +813,25 @@ impl State {
                 info!(target: GAMING_TARGET, "launcher window gone; leaving game mode");
                 self.exit_game_mode();
             } else if pending != Some(LAUNCHER_APP_ID) {
-                // A game died — return to the launcher (still fullscreen on its own
-                // workspace, so it comes back full-size). The pending guard avoids
-                // re-firing every tick if the launcher is also gone (deferred);
-                // try_resolve_pending_game_mode then quietly retries.
-                info!(target: GAMING_TARGET, "game window gone; returning to the launcher");
-                self.enter_game_mode(LAUNCHER_APP_ID);
+                // The game surface died. A launching game churns through many
+                // transient splash/helper windows before its real window settles;
+                // if another LIVE window still carries this app id, re-adopt it
+                // (find_game_surface picks the largest) instead of bouncing to the
+                // launcher — otherwise the launch flaps game<->launcher on every
+                // transient window death and the real game window (which maps late)
+                // never gets adopted. Only when NO live window with this app id
+                // remains do we return to the launcher; playserve also drives the
+                // return when the game process actually exits.
+                let re_adopt = app_id
+                    .filter(|&id| id != LAUNCHER_APP_ID)
+                    .filter(|&id| find_game_surface(&self.common.shell.read(), id).is_some());
+                if let Some(id) = re_adopt {
+                    info!(target: GAMING_TARGET, app_id = id, "game surface died; re-adopting another live window of the same game");
+                    self.enter_game_mode(id);
+                } else {
+                    info!(target: GAMING_TARGET, "game window gone; returning to the launcher");
+                    self.enter_game_mode(LAUNCHER_APP_ID);
+                }
             }
         }
 
@@ -885,16 +895,31 @@ impl State {
                 // transiently/wrongly smaller it must letterbox (its own committed
                 // buffer), never be scanned-out-then-composited-to-black. Also skip
                 // when a prior scale was rejected (the letterbox fallback).
-                let want_scale =
-                    !scale_rejected && app_id_of(&game) != LAUNCHER_APP_ID;
+                let game_app_id = app_id_of(&game);
+                let want_scale = !scale_rejected && game_app_id != LAUNCHER_APP_ID;
                 let mut shell = self.common.shell.write();
-                if let Some(ws) = shell
+                let matched_ws = if let Some(ws) = shell
                     .workspaces
                     .spaces_mut()
                     .find(|ws| ws.get_fullscreen_surfaces().any(|f| f.surface == game))
                 {
                     ws.set_fullscreen_scale_to(&game, want_scale);
-                }
+                    true
+                } else {
+                    false
+                };
+                drop(shell);
+                // Per-tick (~150ms) so trace-level: a wrongly-set scale_to (or a
+                // scale_rejected latch inherited across apps) letterboxes a small
+                // centred image on a grey/black field (bug 1 look-alike).
+                trace!(
+                    target: GAMING_TARGET,
+                    app_id = game_app_id,
+                    scale_rejected,
+                    want_scale,
+                    matched_ws,
+                    "upscale reconciled"
+                );
             }
         }
 
@@ -953,6 +978,7 @@ impl State {
                     .is_some_and(|s| s.alive() && app_id_of(s) == app_id)
             {
                 drop(shell);
+                debug!(target: GAMING_TARGET, app_id, "enter no-op: already active on this app id with a live tagged surface");
                 self.common.shell.write().game_mode.pending_app_id = None;
                 return;
             }
@@ -983,6 +1009,7 @@ impl State {
         // Record the normal-desktop workspace only on the first entry into game
         // mode, so a full exit can return there; app switches keep that origin.
         let first_entry = !self.common.shell.read().game_mode.active;
+        let dbg_output = output.name();
 
         let focus_target = {
             let mut shell = self.common.shell.write();
@@ -1048,6 +1075,19 @@ impl State {
 
             focus
         };
+
+        // The single state write that flips game mode on and latches which
+        // surface/output/workspace it targets — the anchor for diagnosing the grey
+        // entrance slide (bug 1) and the stuck-frame-on-return (bug 3).
+        info!(
+            target: GAMING_TARGET,
+            app_id,
+            launcher = app_id == LAUNCHER_APP_ID,
+            is_fullscreen,
+            first_entry,
+            output = %dbg_output,
+            "game mode engaged: latched game surface"
+        );
 
         // Give the game keyboard focus so it receives input immediately.
         if let Some(target) = focus_target {
@@ -1150,6 +1190,7 @@ impl State {
             .store(false, std::sync::atomic::Ordering::Relaxed);
 
         // Un-fullscreen the game so its now-empty game-mode workspace auto-reaps.
+        let dbg_game_app_id = game_mode.game_surface.as_ref().map(app_id_of);
         if let Some(game) = &game_mode.game_surface {
             let _ = shell.unfullscreen_request(game, &loop_handle);
         }
@@ -1174,15 +1215,32 @@ impl State {
             })
             .or_else(|| game_mode.output.clone().map(|output| (output, 0)));
         if let Some((output, idx)) = target {
+            let dbg_target_output = output.name();
             let _ = shell.activate(
                 &output,
                 idx,
                 WorkspaceDelta::new_shortcut(),
                 &mut self.common.workspace_state.update(),
             );
+            drop(shell);
+            // Bug 3: if the launcher/desktop doesn't take over here, the paused
+            // game's last frame stays the scanned-out primary. Correlate this with
+            // the KMS "primary-plane surface changed" trace on the same output.
+            info!(
+                target: GAMING_TARGET,
+                game_app_id = ?dbg_game_app_id,
+                target_output = %dbg_target_output,
+                target_idx = idx,
+                "exited game mode: returned to desktop/launcher workspace"
+            );
+        } else {
+            drop(shell);
+            warn!(
+                target: GAMING_TARGET,
+                game_app_id = ?dbg_game_app_id,
+                "exited game mode: NO target workspace resolved (stranded on game-mode workspace)"
+            );
         }
-        drop(shell);
-        info!(target: GAMING_TARGET, "exited game mode");
     }
 
     /// Recompute whether a gaming overlay is up over the game — a real
@@ -1192,32 +1250,41 @@ impl State {
     /// the overlay composites) and the D-Bus `OverlayVisible`/`FocusChanged`.
     pub fn refresh_overlay_visible(&mut self) {
         let bridge = self.common.game_mode_bridge.clone();
-        let overlay_active = {
+        let (overlay_active, dbg_asserted, dbg_window_present, dbg_surface_app_id) = {
             let mut shell = self.common.shell.write();
             let asserted = shell.game_mode.overlay_asserted;
-            let active =
-                shell.game_mode.active && (overlay_window_present(&shell) || asserted);
+            let window_present = overlay_window_present(&shell);
+            let active = shell.game_mode.active && (window_present || asserted);
             shell.game_mode.overlay_active = active;
             // Resolve the surface the OverlaySurface render path composites over
             // the game — ONLY for the D-Bus-asserted (Wayland launcher) overlay.
             // A real X11 STEAM_OVERLAY/GAMESCOPE_EXTERNAL_OVERLAY window composites
             // via its own override-redirect render path, so don't stack a launcher
             // for it (that would wrongly show Grid over the game on Shift+Tab).
+            let is_overlay_window = |w: &CosmicSurface| {
+                w.is_overlay() || LAUNCHER_APP_IDS.contains(&w.app_id().to_lowercase().as_str())
+            };
             let surface = (active && asserted)
                 .then(|| {
-                    shell
-                        .workspaces
-                        .spaces()
-                        .flat_map(|ws| ws.mapped())
-                        .flat_map(|m| m.windows().map(|(s, _)| s))
-                        .find(|w| {
-                            w.is_overlay()
-                                || LAUNCHER_APP_IDS.contains(&w.app_id().to_lowercase().as_str())
-                        })
+                    shell.workspaces.spaces().find_map(|ws| {
+                        // Normal mapped windows first, then fullscreen surfaces: when
+                        // game mode has latched the launcher it is FULLSCREEN, so it
+                        // lives in `fullscreen_surfaces`, not `mapped()` — scanning
+                        // only `mapped()` here is why the QAM resolved to None.
+                        ws.mapped()
+                            .flat_map(|m| m.windows().map(|(s, _)| s))
+                            .find(|w| is_overlay_window(w))
+                            .or_else(|| {
+                                ws.get_fullscreen_surfaces()
+                                    .map(|f| f.surface.clone())
+                                    .find(|w| is_overlay_window(w))
+                            })
+                    })
                 })
                 .flatten();
+            let surface_app_id = surface.as_ref().map(app_id_of);
             shell.game_mode.overlay_surface = surface;
-            active
+            (active, asserted, window_present, surface_app_id)
         };
         let changed = {
             let mut s = bridge.shared().lock().unwrap();
@@ -1226,6 +1293,19 @@ impl State {
             changed
         };
         if changed {
+            // Edge-triggered (only when overlay_active flips) so it's info-safe on
+            // release builds. BUG-2 signature: asserted=true with surface_app_id=None
+            // means the QAM was requested but no launcher/overlay window resolved to
+            // composite over the game (overlay_active gates dropping direct scanout;
+            // overlay_surface is what the OverlaySurface render stage stacks on top).
+            debug!(
+                target: GAMING_TARGET,
+                overlay_active,
+                asserted = dbg_asserted,
+                window_present = dbg_window_present,
+                surface_app_id = ?dbg_surface_app_id,
+                "overlay visibility changed"
+            );
             bridge.notify_focus_changed();
         }
     }
@@ -1360,28 +1440,52 @@ fn find_game_surface(
     shell: &Shell,
     app_id: u32,
 ) -> Option<(CosmicSurface, WorkspaceHandle, Output, bool)> {
+    use smithay::desktop::space::SpaceElement as _;
     // 0 is `app_id_of`'s "unknown" sentinel (any untagged, non-launcher window),
     // never a valid game-mode target. Guard against it so an accidental
     // `enter_game(0)` can't fullscreen an arbitrary window.
     if app_id == 0 {
         return None;
     }
-    shell.workspaces.spaces().find_map(|ws| {
-        // A window already fullscreen on a workspace is already in game mode there
-        // — return it so we just switch to that workspace instead of re-entering.
-        if let Some(fs) = ws
-            .get_fullscreen_surfaces()
-            .find(|f| app_id_of(&f.surface) == app_id)
-        {
-            return Some((fs.surface.clone(), ws.handle, ws.output().clone(), true));
+    // A launching game spawns MANY transient windows all carrying its STEAM_GAME id
+    // (1x1 IME/input helpers, a splash/banner, then the real game window, which maps
+    // late). Collect every LIVE match and pick the one with the largest committed
+    // content (bbox) so we adopt the real game window rather than a helper — and
+    // skipping dead surfaces means a just-closed transient is never re-adopted.
+    // `is_fullscreen` (already on its own workspace) is only a tie-break.
+    let mut candidates: Vec<(CosmicSurface, WorkspaceHandle, Output, bool, i32)> = Vec::new();
+    for ws in shell.workspaces.spaces() {
+        for f in ws.get_fullscreen_surfaces() {
+            if f.surface.alive() && app_id_of(&f.surface) == app_id {
+                let size = f.surface.bbox().size;
+                candidates.push((
+                    f.surface.clone(),
+                    ws.handle,
+                    ws.output().clone(),
+                    true,
+                    size.w.max(0) * size.h.max(0),
+                ));
+            }
         }
-        // Otherwise a normal (desktop) window carrying the app id.
-        let game = ws
-            .mapped()
-            .map(|mapped| mapped.active_window())
-            .find(|surface| app_id_of(surface) == app_id)?;
-        Some((game, ws.handle, ws.output().clone(), false))
-    })
+        for mapped in ws.mapped() {
+            let surface = mapped.active_window();
+            if surface.alive() && app_id_of(&surface) == app_id {
+                let size = surface.bbox().size;
+                candidates.push((
+                    surface,
+                    ws.handle,
+                    ws.output().clone(),
+                    false,
+                    size.w.max(0) * size.h.max(0),
+                ));
+            }
+        }
+    }
+    // Ascending sort, then pop the max: largest content wins, fullscreen breaks ties.
+    candidates.sort_by_key(|(_, _, _, is_fullscreen, area)| (*area, *is_fullscreen));
+    candidates
+        .pop()
+        .map(|(surface, handle, output, is_fullscreen, _)| (surface, handle, output, is_fullscreen))
 }
 
 /// Whether any `STEAM_OVERLAY`/`GAMESCOPE_EXTERNAL_OVERLAY` window is currently

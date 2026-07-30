@@ -13,8 +13,11 @@ use smithay::{
     xwayland::X11Surface,
 };
 
+use tracing::trace;
+
 use crate::{
     backend::render::{ElementFilter, HomeVisibilityContext},
+    logger::GAMING_TARGET,
     shell::{
         CosmicSurface, SeatExt, Shell, Workspace, WorkspaceDelta,
         focus::target::KeyboardFocusTarget, layout::floating::FloatingLayout,
@@ -74,6 +77,12 @@ pub enum Stage<'a> {
         /// Uniform opacity for the whole workspace (1.0 except during a
         /// `WorkspaceDelta::Crossfade`, where the incoming workspace fades in).
         alpha: f32,
+        /// Strict game-mode fullscreen control: when `Some(controlled)`, this
+        /// workspace renders ONLY that surface (the compositor-controlled game or
+        /// launcher). Any other window — e.g. a Proton game that raw-fullscreens
+        /// itself before playserve tags + game mode adopts it — stays completely
+        /// invisible. `None` renders the workspace normally.
+        game_mode_only: Option<&'a CosmicSurface>,
     },
     /// A game-mode overlay (the launcher / a client overlay) composited above
     /// the game at the output origin, honoring the surface's own per-pixel alpha
@@ -119,6 +128,22 @@ fn render_input_order_internal<R: 'static>(
             .get(output)
             .and_then(|set| set.workspaces.iter().find(|w| w.handle == current.0))
             .is_some_and(|w| w.fullscreen_surfaces.iter().any(|f| !f.is_animating()));
+    if shell.game_mode.active {
+        // Bug 1: when a game workspace's fullscreen is still is_animating() (the
+        // entrance), exclusive is false, desktop layers/background still render,
+        // and a bufferless game workspace clears to grey — the grey slide.
+        trace!(target: GAMING_TARGET, output = %output.name(), game_mode_exclusive, "gm: exclusivity resolved");
+    }
+
+    // Strict game-mode control: on the game's own output, the workspace must render
+    // ONLY the surface game mode controls (its `game_surface`). A game that raw-
+    // fullscreens itself lands in the workspace's fullscreen list and would
+    // otherwise show; gate it off until playserve tags it and game mode adopts it
+    // as the controlled surface (then it renders + fades in like any game).
+    let game_mode_controlled: Option<&CosmicSurface> = (shell.game_mode.active
+        && shell.game_mode.output.as_ref() == Some(output))
+    .then_some(shell.game_mode.game_surface.as_ref())
+    .flatten();
 
     if shell
         .zoom_state
@@ -433,7 +458,20 @@ fn render_input_order_internal<R: 'static>(
             && shell.game_mode.output.as_ref() == Some(output)
             && let Some(surface) = shell.game_mode.overlay_surface.as_ref()
         {
+            trace!(target: GAMING_TARGET, output = %output.name(), overlay_app_id = %surface.app_id(), "overlay stage: EMITTED topmost over game");
             callback(Stage::OverlaySurface { surface })?;
+        } else if shell.game_mode.active {
+            // BUG 2: the QAM was asserted but the 4-way gate dropped it — surface
+            // exactly which sub-condition failed (output mismatch, overlay_active
+            // false, or overlay_surface None). Only in game mode so it's not spam.
+            trace!(
+                target: GAMING_TARGET,
+                output = %output.name(),
+                overlay_active = shell.game_mode.overlay_active,
+                output_match = shell.game_mode.output.as_ref() == Some(output),
+                has_surface = shell.game_mode.overlay_surface.is_some(),
+                "overlay stage: GATED OUT"
+            );
         }
 
         // workspace windows (the incoming workspace — fades in during a crossfade)
@@ -441,6 +479,7 @@ fn render_input_order_internal<R: 'static>(
             workspace,
             offset: current_offset,
             alpha: current_alpha,
+            game_mode_only: game_mode_controlled,
         })?;
 
         // previous workspace windows (the outgoing workspace)
@@ -452,6 +491,7 @@ fn render_input_order_internal<R: 'static>(
                 workspace,
                 offset: *offset,
                 alpha: previous_alpha,
+                game_mode_only: None,
             })?;
         }
     }
