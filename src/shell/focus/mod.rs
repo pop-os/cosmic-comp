@@ -27,7 +27,7 @@ use self::target::{KeyboardFocusTarget, WindowGroup};
 
 use super::{SeatExt, grabs::SeatMoveGrabState, layout::floating::FloatingLayout};
 
-mod order;
+pub(crate) mod order;
 pub mod target;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

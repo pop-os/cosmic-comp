@@ -2634,8 +2634,14 @@ impl SurfaceThreadState {
                     // composite; another output compositing is unrelated. None of
                     // those mean the plane rejected the scale, so don't latch on
                     // them (that would spuriously letterbox a scalable game).
+                    // A controlled-set child (a game dialog / in-prefix login window)
+                    // composited above the game also forces composition, so a frame
+                    // with children present must never be blamed on the plane
+                    // rejecting the scale — latching there would letterbox the game
+                    // for the rest of the session over a dialog that has since closed.
                     let eligible = shell.game_mode.output.as_ref() == Some(&self.output)
-                        && !shell.game_mode.overlay_active;
+                        && !shell.game_mode.overlay_active
+                        && shell.game_mode.children.is_empty();
                     let scaled = eligible
                         .then(|| {
                             shell.game_mode.game_surface.as_ref().and_then(|game| {

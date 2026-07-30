@@ -928,6 +928,30 @@ impl State {
         self.try_resolve_pending_game_mode();
         self.refresh_active_game_surface();
 
+        // Recompute the game's controlled children (its own dialogs / login
+        // windows), which the render + input paths use to decide what may appear
+        // above the game. Cheap: one workspace scan, and only while game mode is up.
+        {
+            let mut shell = self.common.shell.write();
+            let base = shell
+                .game_mode
+                .active
+                .then(|| shell.game_mode.game_surface.clone())
+                .flatten();
+            let children = match (base, shell.game_mode.app_id) {
+                (Some(base), Some(app_id)) => resolve_game_children(&shell, &base, app_id),
+                _ => Vec::new(),
+            };
+            if shell.game_mode.children != children {
+                debug!(
+                    target: GAMING_TARGET,
+                    count = children.len(),
+                    "game-mode controlled children changed"
+                );
+                shell.game_mode.children = children;
+            }
+        }
+
         // Safety net for overlay presence (an overlay window mapped/unmapped) and
         // for an input grab whose window has gone away — the low-latency paths are
         // the property/map hooks, this catches anything they miss.
@@ -1479,6 +1503,57 @@ fn find_game_surface(
         (base_candidate_rank(surface), *is_fullscreen)
     });
     candidates.pop()
+}
+
+/// The windows that belong WITH the adopted game — its own dialogs, EULA /
+/// launcher windows and in-prefix login/browser windows — and may therefore
+/// render above it under strict control.
+///
+/// Membership is an ALLOWLIST rooted at `base`, which is what keeps strict
+/// control intact: a window unrelated to the adopted game (notably a Proton game
+/// that raw-fullscreens itself before playserve tags it) matches none of these
+/// and stays invisible.
+///
+///   * same `STEAM_GAME` id — playserve tags every window in the app's reaper pid
+///     tree, so a game's dialogs and its in-prefix CEF login window already carry
+///     the game's id;
+///   * same pid — only same-process windows may composite over the game;
+///   * `WM_TRANSIENT_FOR` pointing at the base.
+///
+/// 1x1/zero-area stubs are excluded: games map those as IME/input helpers and
+/// offscreen login stubs, and they must never be presented.
+///
+/// Whether `surface` belongs with the game adopted as `base`.
+///
+/// The single source of truth for controlled-set membership: the render path
+/// (via `resolve_game_children`) and the focus path (`Shell::game_mode_hides`)
+/// must agree, or a window renders without being focusable — or worse, takes the
+/// keyboard while invisible. Evaluated directly against `base` so it is also
+/// correct for a window that just mapped, before the refresh tick has rebuilt
+/// `GameMode::children`.
+pub fn is_game_child(base: &CosmicSurface, app_id: u32, surface: &CosmicSurface) -> bool {
+    if surface == base || !surface.alive() || surface.is_useless() {
+        return false;
+    }
+    let base_pid = base.pid();
+    let base_window_id = base.x11_window_id();
+    app_id_of(surface) == app_id
+        || (base_pid.is_some() && surface.pid() == base_pid)
+        || (base_window_id.is_some() && surface.transient_for() == base_window_id)
+}
+
+fn resolve_game_children(shell: &Shell, base: &CosmicSurface, app_id: u32) -> Vec<CosmicSurface> {
+    let Some(ws) = shell
+        .workspaces
+        .spaces()
+        .find(|ws| ws.get_fullscreen_surfaces().any(|f| &f.surface == base))
+    else {
+        return Vec::new();
+    };
+    ws.mapped()
+        .map(|mapped| mapped.active_window())
+        .filter(|surface| is_game_child(base, app_id, surface))
+        .collect()
 }
 
 /// How suitable `surface` is to be game mode's fullscreen base, ordered so that

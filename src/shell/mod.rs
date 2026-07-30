@@ -654,6 +654,15 @@ pub struct GameMode {
     pub app_id: Option<u32>,
     /// The game surface we fullscreened, so we can un-fullscreen it on exit.
     pub game_surface: Option<CosmicSurface>,
+    /// Windows that belong WITH the adopted game and are therefore allowed to
+    /// render above it under strict control: its own dialogs, launcher/EULA
+    /// windows and in-prefix login/browser windows. Membership is an allowlist
+    /// rooted at `game_surface` (same `STEAM_GAME` id, same pid, or a
+    /// direct `WM_TRANSIENT_FOR` pointing at it), so an unrelated window —
+    /// including a game that raw-fullscreens itself before being adopted — stays
+    /// hidden. FRONT-TO-BACK (topmost first), matching `Workspace::mapped()`;
+    /// recomputed by `refresh_game_mode_state`.
+    pub children: Vec<CosmicSurface>,
     /// The output the game is fullscreened on — display caps (refresh rate, VRR
     /// / tearing support, external) are reported for THIS output, not just the
     /// first one, so they're correct on multi-monitor setups.
@@ -2674,6 +2683,15 @@ impl Shell {
             return false;
         };
         if controlled == surface {
+            return false;
+        }
+        // A window belonging WITH the game (its dialog, EULA or in-prefix login
+        // window) IS rendered above it, so it must stay focusable. Evaluated
+        // against the base rather than reading `GameMode::children`, which the
+        // ~150ms refresh tick has not rebuilt yet for a window that just mapped.
+        if self.game_mode.app_id.is_some_and(|app_id| {
+            crate::dbus::game_mode::is_game_child(controlled, app_id, surface)
+        }) {
             return false;
         }
         // Only the controlled surface's own workspace is under strict control;

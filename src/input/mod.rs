@@ -3047,7 +3047,7 @@ impl State {
                             // the controlled surface is drawn, so only it may be hit.
                             let element = match game_mode_only {
                                 Some(controlled) => {
-                                    workspace.controlled_element_under(location, controlled)
+                                    workspace.controlled_element_under(location, controlled, seat)
                                 }
                                 None => workspace.toplevel_element_under(location, seat),
                             };
@@ -3252,7 +3252,7 @@ impl State {
                         // element_under arm above).
                         let under = match game_mode_only {
                             Some(controlled) => {
-                                workspace.controlled_surface_under(global_pos, controlled)
+                                workspace.controlled_surface_under(global_pos, controlled, seat)
                             }
                             None => {
                                 workspace.toplevel_surface_under(global_pos, overview.clone(), seat)

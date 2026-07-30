@@ -1,4 +1,5 @@
 use crate::shell::focus::FocusTarget;
+use crate::shell::focus::order::GameModeView;
 use crate::shell::layout::tiling::RestoreTilingState;
 use crate::wayland::handlers::xdg_activation::ActivationContext;
 use crate::{
@@ -1101,16 +1102,34 @@ impl Workspace {
     pub fn controlled_element_under(
         &self,
         location: Point<f64, Global>,
-        controlled: &CosmicSurface,
+        view: GameModeView<'_>,
+        seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
         if !self.output.geometry().contains(location.to_i32_round()) {
             return None;
+        }
+        // Children stack above the base, so they are hit-tested first (topmost =
+        // last in the set), exactly matching the order `render` emits them in.
+        for child in view.children.iter() {
+            let Some((mapped, relative)) = self.controlled_child_at(view, child, location) else {
+                continue;
+            };
+            if mapped
+                .focus_under(
+                    relative.as_logical(),
+                    WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                    seat,
+                )
+                .is_some()
+            {
+                return Some(KeyboardFocusTarget::from(mapped.clone()));
+            }
         }
         let location = location.to_local(&self.output);
         let fullscreen = self
             .fullscreen_surfaces
             .iter()
-            .find(|f| &f.surface == controlled)?;
+            .find(|f| &f.surface == view.base)?;
         let (surface_point, _) = self.controlled_surface_transform(fullscreen, location);
         fullscreen
             .surface
@@ -1121,6 +1140,34 @@ impl Workspace {
             )
             .is_some()
             .then(|| KeyboardFocusTarget::Fullscreen(fullscreen.surface.clone()))
+    }
+
+    /// Resolves a controlled-set child to its mapped element and the pointer
+    /// position RELATIVE to where that child is actually rendered.
+    ///
+    /// Uses the identical origin as the child render loop in [`Workspace::render`]
+    /// (`element_geometry().loc - mapped.geometry().loc`, the convention the
+    /// floating and tiling layers also use). `element_geometry` alone is the
+    /// window-geometry position, which differs from the surface/bbox origin by the
+    /// client's frame extents — non-zero for exactly the clients this feature
+    /// targets (XWayland CEF/Chromium login windows advertising _GTK_FRAME_EXTENTS,
+    /// and CSD shadow insets), so hit-testing against it would be offset from what
+    /// the user sees.
+    fn controlled_child_at(
+        &self,
+        _view: GameModeView<'_>,
+        child: &CosmicSurface,
+        location: Point<f64, Global>,
+    ) -> Option<(&CosmicMapped, Point<f64, Local>)> {
+        let mapped = self
+            .mapped()
+            .find(|m| m.windows().any(|(surface, _)| &surface == child))?;
+        let geometry = self.element_geometry(mapped)?;
+        let render_origin = geometry.loc - mapped.geometry().loc.as_local();
+        Some((
+            mapped,
+            location.to_local(&self.output) - render_origin.to_f64(),
+        ))
     }
 
     /// Maps a point in output-local space into the controlled surface's own
@@ -1158,16 +1205,34 @@ impl Workspace {
     pub fn controlled_surface_under(
         &self,
         location: Point<f64, Global>,
-        controlled: &CosmicSurface,
+        view: GameModeView<'_>,
+        seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
         if !self.output.geometry().contains(location.to_i32_round()) {
             return None;
+        }
+        // Children first (topmost last-in-set), mirroring `render`'s stacking.
+        for child in view.children.iter() {
+            let Some((mapped, relative)) = self.controlled_child_at(view, child, location) else {
+                continue;
+            };
+            let render_origin = location.to_local(&self.output) - relative;
+            if let Some((target, surface_offset)) = mapped.focus_under(
+                relative.as_logical(),
+                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                seat,
+            ) {
+                return Some((
+                    target,
+                    (render_origin + surface_offset.as_local()).to_global(&self.output),
+                ));
+            }
         }
         let location = location.to_local(&self.output);
         let fullscreen = self
             .fullscreen_surfaces
             .iter()
-            .find(|f| &f.surface == controlled)?;
+            .find(|f| &f.surface == view.base)?;
         if fullscreen.is_animating() {
             return None;
         }
@@ -1916,7 +1981,7 @@ impl Workspace {
         window_alpha: f32,
         attached_orb_state: Option<&VoiceOrbState>,
         scanout_node: Option<DrmNode>,
-        game_mode_only: Option<&CosmicSurface>,
+        game_mode_only: Option<GameModeView<'_>>,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: AsGlowRenderer,
@@ -2034,11 +2099,42 @@ impl Workspace {
         // becomes the controlled `game_surface`, at which point it renders (and its
         // entrance animation fades it in) like any adopted game. The game-mode
         // overlay (QAM/launcher) is a separate stage, so it still composites on top.
-        if let Some(controlled) = game_mode_only {
+        if let Some(view) = game_mode_only {
+            // The game's OWN children (dialogs, EULA/launcher windows, in-prefix
+            // login/browser windows) stack ABOVE it. Elements are front-to-back, so
+            // children are emitted first, topmost last-in-the-set first.
+            for child in view.children.iter() {
+                let Some(mapped) = self
+                    .mapped()
+                    .find(|m| m.windows().any(|(surface, _)| &surface == child))
+                else {
+                    continue;
+                };
+                let Some(geometry) = self.element_geometry(mapped) else {
+                    continue;
+                };
+                let render_location = geometry.loc - mapped.geometry().loc.as_local();
+                elements.extend(
+                    mapped
+                        .render_elements::<R, CosmicMappedRenderElement<R>>(
+                            renderer,
+                            render_location
+                                .as_logical()
+                                .to_physical_precise_round(output_scale),
+                            None,
+                            output_scale.into(),
+                            window_alpha,
+                            None,
+                            scanout_node,
+                        )
+                        .into_iter()
+                        .map(WorkspaceRenderElement::from),
+                );
+            }
             if let Some(fs) = self
                 .fullscreen_surfaces
                 .iter()
-                .find(|f| &f.surface == controlled)
+                .find(|f| &f.surface == view.base)
             {
                 elements.extend(render_fullscreen(fs, renderer, output_scale));
             }

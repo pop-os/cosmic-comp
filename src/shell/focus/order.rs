@@ -77,12 +77,12 @@ pub enum Stage<'a> {
         /// Uniform opacity for the whole workspace (1.0 except during a
         /// `WorkspaceDelta::Crossfade`, where the incoming workspace fades in).
         alpha: f32,
-        /// Strict game-mode fullscreen control: when `Some(controlled)`, this
-        /// workspace renders ONLY that surface (the compositor-controlled game or
-        /// launcher). Any other window — e.g. a Proton game that raw-fullscreens
-        /// itself before playserve tags + game mode adopts it — stays completely
-        /// invisible. `None` renders the workspace normally.
-        game_mode_only: Option<&'a CosmicSurface>,
+        /// Strict game-mode fullscreen control: when `Some`, this workspace renders
+        /// ONLY the controlled set (see [`GameModeView`]). Any other window — e.g.
+        /// a Proton game that raw-fullscreens itself before playserve tags + game
+        /// mode adopts it — stays completely invisible. `None` renders the
+        /// workspace normally.
+        game_mode_only: Option<GameModeView<'a>>,
     },
     /// A game-mode overlay (the launcher / a client overlay) composited above
     /// the game at the output origin, honoring the surface's own per-pixel alpha
@@ -90,6 +90,19 @@ pub enum Stage<'a> {
     OverlaySurface {
         surface: &'a CosmicSurface,
     },
+}
+
+/// The set of windows strict game-mode control allows on the game's workspace:
+/// the adopted `base` plus its own `children` (dialogs, EULA/launcher windows,
+/// in-prefix login/browser windows — see `resolve_game_children`). Anything not
+/// in this set renders nothing and receives no input.
+#[derive(Debug, Clone, Copy)]
+pub struct GameModeView<'a> {
+    /// The adopted game/launcher surface, presented fullscreen.
+    pub base: &'a CosmicSurface,
+    /// Windows belonging with the game, stacked above it, FRONT-TO-BACK
+    /// (topmost first) — the same order `Workspace::mapped()` yields.
+    pub children: &'a [CosmicSurface],
 }
 pub fn render_input_order<R: Default + 'static>(
     shell: &Shell,
@@ -144,7 +157,7 @@ fn render_input_order_internal<R: 'static>(
     // Scoped to the workspace actually holding the controlled surface, NOT to the
     // whole output: the other workspaces on the game's output are an ordinary
     // desktop, so switching to one and launching an app there must keep working.
-    let game_mode_controlled: Option<&CosmicSurface> = (shell.game_mode.active
+    let game_mode_controlled: Option<GameModeView<'_>> = (shell.game_mode.active
         && shell.game_mode.output.as_ref() == Some(output))
     .then_some(shell.game_mode.game_surface.as_ref())
     .flatten()
@@ -159,6 +172,10 @@ fn render_input_order_internal<R: 'static>(
                     .iter()
                     .any(|f| &f.surface == *controlled)
             })
+    })
+    .map(|base| GameModeView {
+        base,
+        children: &shell.game_mode.children,
     });
 
     if shell
