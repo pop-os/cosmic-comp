@@ -3014,7 +3014,11 @@ impl State {
                             return ControlFlow::Break(Ok(Some(element)));
                         }
                     }
-                    Stage::WorkspacePopups { workspace, offset } => {
+                    Stage::WorkspacePopups {
+                        workspace,
+                        offset,
+                        game_mode_only: _,
+                    } => {
                         let location = global_pos + offset.as_global().to_f64();
                         let output = workspace.output();
                         let output_geo = output.geometry().to_local(output);
@@ -3233,7 +3237,11 @@ impl State {
                             return ControlFlow::Break(Ok(Some(under)));
                         }
                     }
-                    Stage::WorkspacePopups { workspace, offset } => {
+                    Stage::WorkspacePopups {
+                        workspace,
+                        offset,
+                        game_mode_only: _,
+                    } => {
                         let global_pos = global_pos + offset.to_f64().as_global();
                         if let Some(under) =
                             workspace.popup_surface_under(global_pos, overview.clone(), seat)

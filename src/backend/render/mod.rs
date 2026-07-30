@@ -2214,7 +2214,11 @@ where
                         .map(Into::into),
                 )
             }
-            Stage::WorkspacePopups { workspace, offset } => {
+            Stage::WorkspacePopups {
+                workspace,
+                offset,
+                game_mode_only,
+            } => {
                 elements.extend(
                     match workspace.render_popups(
                         renderer,
@@ -2223,6 +2227,7 @@ where
                         overview.clone(),
                         &theme,
                         scanout_node,
+                        game_mode_only,
                     ) {
                         Ok(elements) => {
                             elements

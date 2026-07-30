@@ -70,6 +70,9 @@ pub enum Stage<'a> {
     WorkspacePopups {
         workspace: &'a Workspace,
         offset: Point<i32, Logical>,
+        /// Same strict game-mode control as [`Stage::Workspace`]: popups are
+        /// rendered for the controlled set only.
+        game_mode_only: Option<GameModeView<'a>>,
     },
     Workspace {
         workspace: &'a Workspace,
@@ -428,6 +431,7 @@ fn render_input_order_internal<R: 'static>(
             callback(Stage::WorkspacePopups {
                 workspace,
                 offset: *offset,
+                game_mode_only: None,
             })?;
         }
 
@@ -439,6 +443,7 @@ fn render_input_order_internal<R: 'static>(
         callback(Stage::WorkspacePopups {
             workspace,
             offset: current_offset,
+            game_mode_only: game_mode_controlled,
         })?;
     }
 

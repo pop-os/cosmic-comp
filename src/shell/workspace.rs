@@ -2278,6 +2278,7 @@ impl Workspace {
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         theme: &CompTheme,
         scanout_node: Option<DrmNode>,
+        game_mode_only: Option<GameModeView<'_>>,
     ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
     where
         R: AsGlowRenderer,
@@ -2295,9 +2296,19 @@ impl Workspace {
             layer_map.non_exclusive_zone().as_local()
         };
 
-        // Render popups for the top (most recently focused) fullscreen
+        // Render popups for the top (most recently focused) fullscreen — but under
+        // strict game-mode control, for the CONTROLLED base instead. Keying on the
+        // seat's fullscreen there is wrong in both directions: a suppressed window's
+        // popups would render over the game, and the game's own popups would vanish
+        // the moment one of its dialogs took focus.
         let focus_stack = self.focus_stack.get(last_active_seat);
-        let top_fullscreen = self.get_fullscreen(last_active_seat);
+        let top_fullscreen = match game_mode_only {
+            Some(view) => self
+                .fullscreen_surfaces
+                .iter()
+                .find(|f| &f.surface == view.base),
+            None => self.get_fullscreen(last_active_seat),
+        };
 
         if let Some(fullscreen) = top_fullscreen {
             let fullscreen_geo = self.fullscreen_geometry_for(fullscreen);
