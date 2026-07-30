@@ -11,8 +11,12 @@ libdisplay-info = { version = "0.3.0", optional = true }
 serde = { version = "1", features = ["derive"] }
 ron = { version = "0.12", optional = true }
 tracing = { version = "0.1.44", features = [
-    "max_level_debug",
-    "release_max_level_info",
+    "max_level_trace",
+    # Must match the root crate's level: Cargo unifies tracing features across the
+    # workspace, and tracing picks the LEAST verbose release_max_level_* when more
+    # than one is enabled. Leaving `release_max_level_info` here would defeat the
+    # root crate's `release_max_level_trace` and keep debug!/trace! compiled out.
+    "release_max_level_trace",
 ], optional = true }
 
 [features]

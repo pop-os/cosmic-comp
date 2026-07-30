@@ -56,15 +56,33 @@ pub fn init_logger() -> Result<()> {
         .add_directive(Directive::from_str(&format!("smithay={level}")).unwrap())
         .add_directive(Directive::from_str(&format!("cosmic_comp={level}")).unwrap());
 
-    // Gaming instrumentation is enabled in debug builds only.
-    #[cfg(debug_assertions)]
-    let filter =
-        filter.add_directive(Directive::from_str(&format!("{GAMING_TARGET}=debug")).unwrap());
+    // Game-mode / window instrumentation (target: GAMING_TARGET) is OPT-IN — in
+    // debug builds too, so normal runs never carry the noise. Enable at runtime:
+    //   COSMIC_GAME_TRACE=1     -> `gaming=debug` (state transitions + window/X11 lifecycle)
+    //   COSMIC_GAME_TRACE=trace -> `gaming=trace` (adds the per-frame render firehose)
+    // Left unset, the `gaming` target falls under the base filter (warn in release),
+    // so these callsites cost a level check and emit nothing. With it set,
+    // `grep gaming $XDG_RUNTIME_DIR/cosmic-comp.log` is the whole game-mode story.
+    let game_trace_level = match std::env::var("COSMIC_GAME_TRACE").ok().as_deref() {
+        Some("2") | Some("trace") | Some("verbose") => Some("trace"),
+        Some(v) if ["1", "true", "yes", "y"].contains(&v.to_lowercase().as_str()) => Some("debug"),
+        _ => None,
+    };
+    let filter = match game_trace_level {
+        Some(level) => {
+            filter.add_directive(Directive::from_str(&format!("{GAMING_TARGET}={level}")).unwrap())
+        }
+        None => filter,
+    };
 
     let fmt_layer = fmt::layer().compact();
 
     // On-disk log layer (best-effort — skipped if the file can't be opened).
     let log_path = log_file_path();
+    // Keep one previous generation: many game-mode repros need a compositor or
+    // game relaunch, and truncate-on-launch would wipe the log that captured the
+    // bug. Best-effort single rotation to `<log>.1` before we truncate.
+    let _ = std::fs::rename(&log_path, format!("{log_path}.1"));
     let file_layer = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -125,6 +143,10 @@ pub fn init_logger() -> Result<()> {
     info!(
         "  COSMIC_BLUR_DOWNSAMPLE={} (set =0 to disable blur downsampling)",
         std::env::var("COSMIC_BLUR_DOWNSAMPLE").unwrap_or_else(|_| "unset".into())
+    );
+    info!(
+        "  COSMIC_GAME_TRACE={} (=1 game-mode/window trace in release; =trace adds per-frame)",
+        std::env::var("COSMIC_GAME_TRACE").unwrap_or_else(|_| "unset".into())
     );
 
     Ok(())

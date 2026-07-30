@@ -66,8 +66,14 @@ thiserror = "2.0.18"
 jiff = "0.2"
 tiny-skia = "0.11"
 tracing = { version = "0.1.44", features = [
-    "max_level_debug",
-    "release_max_level_info",
+    "max_level_trace",
+    # Was `release_max_level_info`, which COMPILED OUT every debug!/trace! in
+    # release builds — making the game-mode/window instrumentation (target:
+    # GAMING_TARGET) invisible on the device even with COSMIC_GAME_TRACE set.
+    # `trace` keeps every callsite in the binary; the runtime EnvFilter (default
+    # warn for cosmic_comp/smithay, `gaming` lifted only by COSMIC_GAME_TRACE)
+    # still gates what is actually emitted, so normal runs stay quiet.
+    "release_max_level_trace",
 ] }
 tracing-journald = "0.3.2"
 tracing-subscriber = { version = "0.3.22", features = [

@@ -2605,7 +2605,7 @@ impl SurfaceThreadState {
                     PrimaryPlaneElement::Swapchain(_)
                 );
 
-                // Gamescope upscale scanout check: if this game frame requested an
+                // Upscale scanout check: if this game frame requested an
                 // upscale (`scale_to`) but did NOT scan out (composited to the
                 // swapchain), the DRM plane rejected the scale. Latch it so game
                 // mode letterboxes instead of compositing a scanout-only buffer to

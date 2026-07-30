@@ -858,7 +858,7 @@ impl State {
                 .fullscreen_request(&game, output, &loop_handle);
         }
 
-        // Gamescope-style upscale: request a fill for the active game surface so a
+        // Upscale: request a fill for the active game surface so a
         // game whose buffer is smaller than the output is scaled up (via the DRM
         // plane's hardware scaler). If the KMS thread latched a scale-reject
         // (`game_mode_scale_rejected`), stop requesting it and letterbox instead,
@@ -959,7 +959,7 @@ impl State {
         }
 
         // A new game/app is entering — clear any prior scale-reject latch so it
-        // retries the gamescope upscale rather than inheriting the last app's.
+        // retries the upscale rather than inheriting the last app's.
         self.common
             .shell
             .read()
@@ -996,7 +996,7 @@ impl State {
             let focus = if is_fullscreen {
                 // Already fullscreen on its own workspace — switch to it with a
                 // cross-fade (each game-mode workspace is a single fullscreen
-                // surface, so this dissolves launcher<->game like gamescope, no
+                // surface, so this dissolves launcher<->game, no
                 // slide).
                 info!(target: GAMING_TARGET, app_id, "cross-fading to game-mode workspace");
                 if let Some(idx) = shell.workspaces.idx_for_handle(&output, &source_ws) {

@@ -216,7 +216,7 @@ pub struct FullscreenSurface {
     pub previous_geometry: Option<Rectangle<i32, Local>>,
     start_at: Option<Instant>,
     pub ended_at: Option<Instant>,
-    /// When `Some`, the surface is upscaled to this rect (gamescope-style fill of
+    /// When `Some`, the surface is upscaled to this rect (a fill of
     /// a smaller game buffer). The wrapping `RescaleRenderElement` is scanout-
     /// shaped so smithay hands it to the DRM plane's hardware scaler; if the
     /// plane rejects the scale the KMS thread latches `game_mode_scale_rejected`
@@ -1401,7 +1401,7 @@ impl Workspace {
         });
     }
 
-    /// Set (or clear) the gamescope-style upscale target for a tracked fullscreen
+    /// Set (or clear) the upscale target for a tracked fullscreen
     /// surface. `scale` requests a fill: if the surface's committed buffer is
     /// smaller than the output, `scale_to` becomes the aspect-preserving fit rect
     /// (centered); otherwise (or when `scale` is false) it is cleared to `None`
@@ -1856,7 +1856,7 @@ impl Workspace {
                 .to_physical_precise_round(output_scale);
 
             // Wrap in a RescaleRenderElement when animating (entrance/exit), or
-            // when a `scale_to` upscale is requested (gamescope-style fill). The
+            // when a `scale_to` upscale is requested (fill). The
             // wrapper forwards src/kind/underlying_storage, so smithay can still
             // hand it to a DRM plane's HARDWARE scaler (no GLES composition) —
             // and if the plane rejects the scale, the KMS thread latches
