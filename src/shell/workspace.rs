@@ -1111,16 +1111,46 @@ impl Workspace {
             .fullscreen_surfaces
             .iter()
             .find(|f| &f.surface == controlled)?;
-        let geometry = self.fullscreen_geometry_for(fullscreen);
+        let (surface_point, _) = self.controlled_surface_transform(fullscreen, location);
         fullscreen
             .surface
             .0
             .surface_under(
-                (location - geometry.loc.to_f64()).as_logical(),
+                surface_point.as_logical(),
                 WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
             )
             .is_some()
             .then(|| KeyboardFocusTarget::Fullscreen(fullscreen.surface.clone()))
+    }
+
+    /// Maps a point in output-local space into the controlled surface's own
+    /// coordinate space, returning it alongside the (x, y) scale that was undone.
+    ///
+    /// This is the INVERSE of how `render` presents a controlled fullscreen: the
+    /// surface is drawn at `fullscreen_geometry_for(..).loc` and, when `scale_to`
+    /// is set, wrapped in a `RescaleRenderElement` scaling its buffer to that
+    /// rect. Hit-testing has to undo BOTH — undoing only the offset makes clicks
+    /// land at the wrong spot on an upscaled game (off by the scale ratio).
+    fn controlled_surface_transform(
+        &self,
+        fullscreen: &FullscreenSurface,
+        location: Point<f64, Local>,
+    ) -> (Point<f64, Local>, (f64, f64)) {
+        let geometry = self.fullscreen_geometry_for(fullscreen);
+        let src = fullscreen.surface.bbox().size;
+        let scale = if fullscreen.scale_to.is_some() && src.w > 0 && src.h > 0 {
+            (
+                geometry.size.w as f64 / src.w as f64,
+                geometry.size.h as f64 / src.h as f64,
+            )
+        } else {
+            (1.0, 1.0)
+        };
+        let relative = location - geometry.loc.to_f64();
+        (
+            Point::from((relative.x / scale.0, relative.y / scale.1)),
+            scale,
+        )
     }
 
     /// Pointer hit-test restricted to the game-mode controlled surface — the
@@ -1142,17 +1172,22 @@ impl Workspace {
             return None;
         }
         let geometry = self.fullscreen_geometry_for(fullscreen);
+        let (surface_point, scale) = self.controlled_surface_transform(fullscreen, location);
         fullscreen
             .surface
             .focus_under(
-                (location - geometry.loc.to_f64()).as_logical(),
+                surface_point.as_logical(),
                 WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
             )
             .map(|(target, surface_offset)| {
-                (
-                    target,
-                    (geometry.loc.to_f64() + surface_offset.as_local()).to_global(&self.output),
-                )
+                // Re-apply the presentation transform so the reported position is
+                // where the surface actually appears on screen.
+                let offset = surface_offset.as_local();
+                let presented = Point::<f64, Local>::from((
+                    geometry.loc.x as f64 + offset.x * scale.0,
+                    geometry.loc.y as f64 + offset.y * scale.1,
+                ));
+                (target, presented.to_global(&self.output))
             })
     }
 
