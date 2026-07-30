@@ -164,13 +164,101 @@ pub struct GameModeShared {
 pub struct GameModeIo {
     pub shared: Mutex<GameModeShared>,
     cmd: Mutex<Sender<GameModeCommand>>,
+    /// Runs the caller-authorization lookups off the interface's own task.
+    executor: Option<ThreadPool>,
+    /// Authorization verdict per unique bus name. dbus-daemon never reuses a
+    /// unique name, so a verdict stays valid for the life of that connection.
+    authorized: Mutex<std::collections::HashMap<String, bool>>,
     /// Live recent frame time (ns) of the output showing the game, written by the
     /// KMS surface thread (via [`Shell`]) and read by `AppFrametimeNs` for Auto-TDP.
     /// 0 when no game is fullscreen.
     frametime_ns: Arc<AtomicU64>,
 }
 
+/// Binaries permitted to drive game mode. Anything else on the session bus is
+/// refused, so a random app cannot fullscreen or minimize windows behind the
+/// user's back.
+///
+/// `COSMIC_GAME_MODE_ALLOW` appends `:`-separated paths for development builds
+/// running outside the installed location. Setting it requires control of the
+/// compositor's own environment, which already implies control of the session.
+fn allowed_client_binaries() -> Vec<std::path::PathBuf> {
+    let mut allowed = vec![std::path::PathBuf::from("/usr/bin/playserve")];
+    if let Ok(extra) = std::env::var("COSMIC_GAME_MODE_ALLOW") {
+        allowed.extend(extra.split(':').filter(|p| !p.is_empty()).map(Into::into));
+    }
+    allowed
+}
+
+/// Whether `pid`'s executable is one of the allowed binaries.
+///
+/// Compares the (device, inode) of `/proc/<pid>/exe` rather than its path: a
+/// path string can be pointed at an impostor via a symlink or a bind-mount in a
+/// private mount namespace, whereas the identity of the file cannot be forged
+/// without write access to the real binary.
+fn client_binary_allowed(pid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(caller) = std::fs::metadata(format!("/proc/{pid}/exe")) else {
+        return false;
+    };
+    allowed_client_binaries().iter().any(|path| {
+        std::fs::metadata(path)
+            .map(|allowed| allowed.dev() == caller.dev() && allowed.ino() == caller.ino())
+            .unwrap_or(false)
+    })
+}
+
 impl GameModeIo {
+    /// Forward a control request, but only from an authorized client.
+    ///
+    /// The caller is identified by the pid the BUS reports for its connection, so
+    /// it cannot present itself as another process. The verdict is resolved off
+    /// this task (asking the bus from inside a method handler deadlocks the
+    /// interface) and cached per unique bus name; the request is applied once the
+    /// answer arrives, or dropped if it is refused.
+    fn send_from(self: &Arc<Self>, cmd: GameModeCommand, sender: Option<String>) {
+        let Some(sender) = sender else {
+            warn!(target: GAMING_TARGET, "refusing a game-mode request with no sender");
+            return;
+        };
+        if let Some(authorized) = self.authorized.lock().unwrap().get(&sender).copied() {
+            if authorized {
+                self.send(cmd);
+            }
+            return;
+        }
+        let Some(executor) = self.executor.clone() else {
+            return;
+        };
+        let io = self.clone();
+        executor.spawn_ok(async move {
+            let pid = async {
+                let conn = zbus::Connection::session().await.ok()?;
+                let proxy = zbus::fdo::DBusProxy::new(&conn).await.ok()?;
+                let name = zbus::names::BusName::try_from(sender.clone()).ok()?;
+                proxy.get_connection_unix_process_id(name).await.ok()
+            }
+            .await;
+            let authorized = pid.is_some_and(client_binary_allowed);
+            io.authorized
+                .lock()
+                .unwrap()
+                .insert(sender.clone(), authorized);
+            if !authorized {
+                warn!(target: GAMING_TARGET, %sender, ?pid, "refused a game-mode request from an unauthorized client");
+                return;
+            }
+            // Authorized, and now we know which process it is: games it launches
+            // are its descendants, which is how their windows are recognized as
+            // game mode's the moment they map.
+            if let Some(pid) = pid {
+                io.send(GameModeCommand::SetControllerPid(pid));
+            }
+            io.send(cmd);
+        });
+    }
+
     fn send(&self, cmd: GameModeCommand) {
         if let Ok(tx) = self.cmd.lock()
             && let Err(err) = tx.send(cmd)
@@ -189,10 +277,6 @@ impl GameModeIo {
 pub enum GameModeCommand {
     Enter {
         app_id: u32,
-        /// Unique bus name of the caller, resolved to a pid off-thread (see
-        /// `GameModeBridge::resolve_controller_pid`). Captured here because reading
-        /// it is free; ASKING the bus about it from inside the method is not.
-        sender: Option<String>,
     },
     /// The bus-reported pid of the client driving game mode.
     SetControllerPid(u32),
@@ -243,34 +327,6 @@ impl GameModeBridge {
 
     fn spawn(&self, fut: impl std::future::Future<Output = ()> + Send + 'static) {
         self.executor.spawn_ok(fut);
-    }
-
-    /// Ask the bus which process owns `sender`, off-thread and on a SEPARATE
-    /// connection, then deliver it back through the command channel.
-    ///
-    /// The pid comes from the bus, not from the client, so a caller cannot claim
-    /// to be some other process — which matters because everything descending
-    /// from this pid is treated as game mode's (naming e.g. init would otherwise
-    /// capture every window on the system).
-    pub fn resolve_controller_pid(&self, sender: String) {
-        let io = self.io.clone();
-        self.spawn(async move {
-            let Ok(conn) = zbus::Connection::session().await else {
-                return;
-            };
-            let Ok(proxy) = zbus::fdo::DBusProxy::new(&conn).await else {
-                return;
-            };
-            let Ok(name) = zbus::names::BusName::try_from(sender.clone()) else {
-                return;
-            };
-            match proxy.get_connection_unix_process_id(name).await {
-                Ok(pid) => io.send(GameModeCommand::SetControllerPid(pid)),
-                Err(err) => {
-                    warn!(target: GAMING_TARGET, ?err, %sender, "could not resolve the game-mode client's pid")
-                }
-            }
-        });
     }
 
     fn with<R>(&self, f: impl FnOnce(&GameModeShared) -> R) -> R {
@@ -407,57 +463,83 @@ impl GameModeInterface {
         // task making it, which deadlocks the whole interface; the resolution is
         // done off-thread on a separate connection instead.
         let sender = header.sender().map(|name| name.to_string());
-        self.io.send(GameModeCommand::Enter { app_id, sender });
+        self.io.send_from(GameModeCommand::Enter { app_id }, sender);
     }
 
     /// Leave game mode and return to the launcher.
-    async fn exit_game_mode(&self) {
-        self.io.send(GameModeCommand::Exit);
+    async fn exit_game_mode(&self, #[zbus(header)] header: zbus::message::Header<'_>) {
+        let sender = header.sender().map(|name| name.to_string());
+        self.io.send_from(GameModeCommand::Exit, sender);
     }
 
     /// Cap the in-game frame rate (0 = uncapped).
-    async fn set_fps_limit(&self, fps: u32) {
-        self.io.send(GameModeCommand::SetFpsLimit(fps));
+    async fn set_fps_limit(&self, fps: u32, #[zbus(header)] header: zbus::message::Header<'_>) {
+        let sender = header.sender().map(|name| name.to_string());
+        self.io.send_from(GameModeCommand::SetFpsLimit(fps), sender);
     }
 
     /// Set the game's render resolution + how it scales to the output.
     /// `mode` is one of `native|integer|fsr|fit|fill|stretch`.
-    async fn set_scaling(&self, width: u32, height: u32, mode: &str) -> zbus::fdo::Result<()> {
+    async fn set_scaling(
+        &self,
+        width: u32,
+        height: u32,
+        mode: &str,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<()> {
         let mode = ScalingMode::parse(mode).ok_or_else(|| {
             zbus::fdo::Error::InvalidArgs(format!("unknown scaling mode {mode:?}"))
         })?;
-        self.io.send(GameModeCommand::SetScaling {
-            width,
-            height,
-            mode,
-        });
+        let sender = header.sender().map(|name| name.to_string());
+        self.io.send_from(
+            GameModeCommand::SetScaling {
+                width,
+                height,
+                mode,
+            },
+            sender,
+        );
         Ok(())
     }
 
     /// Allow tearing (immediate / non-vblank-latched flips) for the game.
-    async fn set_tearing(&self, enabled: bool) {
-        self.io.send(GameModeCommand::SetTearing(enabled));
+    async fn set_tearing(&self, enabled: bool, #[zbus(header)] header: zbus::message::Header<'_>) {
+        let sender = header.sender().map(|name| name.to_string());
+        self.io
+            .send_from(GameModeCommand::SetTearing(enabled), sender);
     }
 
     /// Set the VRR policy: `off|on|auto`.
-    async fn set_vrr(&self, mode: &str) -> zbus::fdo::Result<()> {
+    async fn set_vrr(
+        &self,
+        mode: &str,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) -> zbus::fdo::Result<()> {
         let mode = VrrMode::parse(mode)
             .ok_or_else(|| zbus::fdo::Error::InvalidArgs(format!("unknown vrr mode {mode:?}")))?;
-        self.io.send(GameModeCommand::SetVrr(mode));
+        let sender = header.sender().map(|name| name.to_string());
+        self.io.send_from(GameModeCommand::SetVrr(mode), sender);
         Ok(())
     }
 
     /// Enable/disable HDR output. No-op while `HdrSupported` is false (cosmic-comp
     /// has no HDR pipeline yet) — present for interface completeness.
-    async fn set_hdr(&self, enabled: bool) {
-        self.io.send(GameModeCommand::SetHdr(enabled));
+    async fn set_hdr(&self, enabled: bool, #[zbus(header)] header: zbus::message::Header<'_>) {
+        let sender = header.sender().map(|name| name.to_string());
+        self.io.send_from(GameModeCommand::SetHdr(enabled), sender);
     }
 
     /// Show/hide the launcher overlay over the game. `blocking` routes pointer
     /// input to the overlay while the game keeps rendering (the QAM behaviour).
-    async fn set_overlay(&self, visible: bool, blocking: bool) {
+    async fn set_overlay(
+        &self,
+        visible: bool,
+        blocking: bool,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) {
+        let sender = header.sender().map(|name| name.to_string());
         self.io
-            .send(GameModeCommand::SetOverlay { visible, blocking });
+            .send_from(GameModeCommand::SetOverlay { visible, blocking }, sender);
     }
 
     // ── state ──
@@ -597,6 +679,8 @@ pub fn init(handle: &LoopHandle<'static, State>, executor: &ThreadPool) -> GameM
     let io = Arc::new(GameModeIo {
         shared: Mutex::new(GameModeShared::default()),
         cmd: Mutex::new(cmd_tx),
+        executor: Some(executor.clone()),
+        authorized: Mutex::new(std::collections::HashMap::new()),
         frametime_ns: Arc::new(AtomicU64::new(0)),
     });
 
@@ -664,15 +748,8 @@ impl State {
                 debug!(target: GAMING_TARGET, pid, "cmd: controller pid resolved");
                 self.common.shell.write().game_mode.controller_pid = Some(pid);
             }
-            GameModeCommand::Enter { app_id, sender } => {
+            GameModeCommand::Enter { app_id } => {
                 debug!(target: GAMING_TARGET, app_id, launcher = app_id == LAUNCHER_APP_ID, "cmd: enter game mode");
-                // Learn who drives game mode once, so the games it launches can be
-                // recognized by ancestry the moment their windows map.
-                if self.common.shell.read().game_mode.controller_pid.is_none()
-                    && let Some(sender) = sender
-                {
-                    bridge.resolve_controller_pid(sender);
-                }
                 self.enter_game_mode(app_id);
                 self.refresh_game_mode_state();
             }
@@ -1759,6 +1836,8 @@ mod tests {
             let (tx, rx) = calloop::channel::channel::<GameModeCommand>();
             std::mem::forget(rx);
             let io = Arc::new(GameModeIo {
+                executor: None,
+                authorized: Mutex::new(std::collections::HashMap::new()),
                 shared: Mutex::new(GameModeShared {
                     active: true,
                     active_app_id: 1234,
