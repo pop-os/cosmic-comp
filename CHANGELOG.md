@@ -1,3 +1,30 @@
+# [1.32.0](https://github.com/playtron-os/cosmic-comp/compare/v1.31.0...v1.32.0) (2026-07-30)
+
+
+### Bug Fixes
+
+* **game-mode:** center launch banners instead of forcing them fullscreen ([24b7b60](https://github.com/playtron-os/cosmic-comp/commit/24b7b60d166fe11676f90159834e556ce4698ac2))
+* **game-mode:** don't focus windows game mode will not render ([32989cd](https://github.com/playtron-os/cosmic-comp/commit/32989cd581c5f3f7c3084e017d1900837eb8bc91))
+* **game-mode:** drive frame callbacks for the composited overlay ([5c0f46c](https://github.com/playtron-os/cosmic-comp/commit/5c0f46cf61f6831bcf7a2a2b71f4f8898a8a3ea2))
+* **game-mode:** filter override-redirect windows and reclaim stolen focus ([397da31](https://github.com/playtron-os/cosmic-comp/commit/397da319c1235019d6b4b4e967f564f5687d0348))
+* **game-mode:** keep the game on the output game mode owns ([3aada5b](https://github.com/playtron-os/cosmic-comp/commit/3aada5b813226baffe491855dc504fd980d72780))
+* **game-mode:** place a launched game on the game-mode output when it maps ([75f8c55](https://github.com/playtron-os/cosmic-comp/commit/75f8c55a0a3ed57ee0eabfe66d77ff94112c2409))
+* **game-mode:** render the controlled base's popups, not the seat's ([68cbc89](https://github.com/playtron-os/cosmic-comp/commit/68cbc894e81cd640195b667beb52ed299acd38c2))
+* **game-mode:** route the pointer to a blocking overlay ([496df09](https://github.com/playtron-os/cosmic-comp/commit/496df099255d2cabde5fe4d825bce93737b0dd33))
+* **game-mode:** scope strict control to the game's own workspace ([4fedc5f](https://github.com/playtron-os/cosmic-comp/commit/4fedc5f9bac2930c99694315cc4b7b476d13fb07))
+* **game-mode:** suppress popups of windows the game workspace hides ([4053102](https://github.com/playtron-os/cosmic-comp/commit/405310275fe1cfe16f12a866030dbdf7f45c18be))
+* **game-mode:** undo the presentation scale when hit-testing the game ([e72fb2f](https://github.com/playtron-os/cosmic-comp/commit/e72fb2f320fdeb4d693632bda40a20f762ef6508))
+* windows getting stuck in maximized state even while unmaximized ([23c9bfe](https://github.com/playtron-os/cosmic-comp/commit/23c9bfe29643e1afe7e2f0761e427e68824a1dca))
+
+
+### Features
+
+* **game-mode:** honor base-layer priority from the session manager ([c3d14ab](https://github.com/playtron-os/cosmic-comp/commit/c3d14ab079ea8560cbc1c6d9918a802e0cffe972))
+* **game-mode:** let the adopted game's own windows render above it ([f23fe97](https://github.com/playtron-os/cosmic-comp/commit/f23fe97cf0b13c8876175dab4beb947ce08e72ff))
+* **game-mode:** rank base candidates so a splash never displaces the game ([d2d887e](https://github.com/playtron-os/cosmic-comp/commit/d2d887e392881412ad1eb122ec681856baaaed56))
+* **game-mode:** strict fullscreen control on the game-mode output ([e194349](https://github.com/playtron-os/cosmic-comp/commit/e194349f8bf7e810ab1b58bfee02f4002739368f))
+* **logging:** opt-in game-mode trace via COSMIC_GAME_TRACE ([9b102f6](https://github.com/playtron-os/cosmic-comp/commit/9b102f61d2090107c337c46015155f379230462c))
+
 # [1.31.0](https://github.com/playtron-os/cosmic-comp/compare/v1.30.1...v1.31.0) (2026-07-29)
 
 
