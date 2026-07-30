@@ -3197,9 +3197,25 @@ impl State {
                             ))));
                         }
                     }
-                    Stage::OverlaySurface { .. } => {
-                        // Keyboard input to a blocking game-mode overlay is routed
-                        // by the input grab; pointer falls through to the game.
+                    Stage::OverlaySurface { surface } => {
+                        // A BLOCKING game-mode overlay (the QAM / launcher asserting
+                        // SetOverlay{blocking}) is composited over the game at the
+                        // output origin. Route the pointer to it so it is actually
+                        // clickable — the input grab only redirects the keyboard, so
+                        // without this the overlay renders but swallows no pointer
+                        // events and clicks fall through to the game behind it.
+                        // A non-blocking overlay is passive and keeps falling through.
+                        if shell.game_mode.input_grab.is_some()
+                            && let Some((target, surface_offset)) = surface.focus_under(
+                                global_pos.to_local(output).as_logical(),
+                                WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+                            )
+                        {
+                            return ControlFlow::Break(Ok(Some((
+                                target,
+                                surface_offset.as_local().to_global(output),
+                            ))));
+                        }
                     }
                     Stage::StickyPopups(floating_layer) => {
                         if let Some(under) = floating_layer
