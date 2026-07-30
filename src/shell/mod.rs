@@ -8575,7 +8575,11 @@ impl Shell {
         seat: &Seat<State>,
         loop_handle: &LoopHandle<'static, State>,
     ) {
-        if window.is_maximized(true) {
+        // Dispatch on `maximized_state`, not the toplevel's protocol flag: both
+        // branches below act on `maximized_state`, so keying off the flag makes a
+        // desync unrecoverable (unmaximize finds no state and no-ops, and the flag
+        // stays set, so maximize is never reached again).
+        if window.maximized_state.lock().unwrap().is_some() {
             self.unmaximize_request_with_options(window);
         } else {
             if window.is_fullscreen(true) {

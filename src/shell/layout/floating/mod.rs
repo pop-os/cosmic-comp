@@ -952,6 +952,25 @@ impl FloatingLayout {
         );
     }
 
+    /// Apply the state a pipelined resize would have applied when it completed.
+    ///
+    /// `ClientPipelinedResize` defers `set_maximized`/`set_tiled` to the frame the
+    /// animation finalizes. Dropping the animation before then strands the toplevel's
+    /// maximized flag out of sync with `maximized_state` — and since `maximize_toggle`
+    /// dispatches on the flag while both request paths act on `maximized_state`, a
+    /// desync wedges the window: maximize and unmaximize then both no-op forever.
+    fn settle_pipelined_state(mapped: &CosmicMapped, anim: &Animation) {
+        if let Animation::ClientPipelinedResize {
+            is_maximize: Some(maximize),
+            finalized: false,
+            ..
+        } = anim
+        {
+            mapped.set_maximized(*maximize);
+            mapped.set_tiled(*maximize);
+        }
+    }
+
     /// Update an existing animation's target or insert a new animation.
     /// If geometries are the same (window mapped directly to final size), use fade-in.
     /// Otherwise use a Tiled animation for geometry transition.
@@ -1241,6 +1260,11 @@ impl FloatingLayout {
             });
 
         mapped.set_tiled(false);
+        // Mapping as an ordinary floating window must not leave a stale protocol
+        // `maximized` flag behind; `maximized_state` is the source of truth.
+        if mapped.maximized_state.lock().unwrap().is_none() {
+            mapped.set_maximized(false);
+        }
         let zone = output_geometry.as_local();
 
         // Keep newly-placed windows fully on-screen. The branches above clamp only the
@@ -1338,7 +1362,11 @@ impl FloatingLayout {
         to: Option<Rectangle<i32, Local>>,
     ) -> Option<Rectangle<i32, Local>> {
         let mut mapped_geometry = self.space.element_geometry(window).map(RectExt::as_local)?;
-        let _ = self.animations.remove(window);
+        // Settle before the `is_maximized` checks below — an unmaximize dropped here
+        // would otherwise leave the flag set and skip the `last_geometry` save.
+        if let Some(anim) = self.animations.remove(window) {
+            Self::settle_pipelined_state(window, &anim);
+        }
 
         if let Some(to) = to {
             self.animations.insert(
@@ -2150,6 +2178,7 @@ impl FloatingLayout {
                     .map(RectExt::as_local)
                     .unwrap();
                 let start_rectangle = if let Some(anim) = self.animations.remove(element) {
+                    Self::settle_pipelined_state(element, &anim);
                     anim.geometry(
                         output_geometry,
                         current_geometry,
@@ -2774,7 +2803,9 @@ impl FloatingLayout {
     }
 
     pub fn remove_animation(&mut self, mapped: &CosmicMapped) {
-        let _ = self.animations.remove(mapped);
+        if let Some(anim) = self.animations.remove(mapped) {
+            Self::settle_pipelined_state(mapped, &anim);
+        }
     }
 
     pub fn animations_going(&self) -> bool {
