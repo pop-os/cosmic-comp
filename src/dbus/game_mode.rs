@@ -189,7 +189,13 @@ impl GameModeIo {
 pub enum GameModeCommand {
     Enter {
         app_id: u32,
+        /// Unique bus name of the caller, resolved to a pid off-thread (see
+        /// `GameModeBridge::resolve_controller_pid`). Captured here because reading
+        /// it is free; ASKING the bus about it from inside the method is not.
+        sender: Option<String>,
     },
+    /// The bus-reported pid of the client driving game mode.
+    SetControllerPid(u32),
     Exit,
     SetFpsLimit(u32),
     SetScaling {
@@ -237,6 +243,34 @@ impl GameModeBridge {
 
     fn spawn(&self, fut: impl std::future::Future<Output = ()> + Send + 'static) {
         self.executor.spawn_ok(fut);
+    }
+
+    /// Ask the bus which process owns `sender`, off-thread and on a SEPARATE
+    /// connection, then deliver it back through the command channel.
+    ///
+    /// The pid comes from the bus, not from the client, so a caller cannot claim
+    /// to be some other process — which matters because everything descending
+    /// from this pid is treated as game mode's (naming e.g. init would otherwise
+    /// capture every window on the system).
+    pub fn resolve_controller_pid(&self, sender: String) {
+        let io = self.io.clone();
+        self.spawn(async move {
+            let Ok(conn) = zbus::Connection::session().await else {
+                return;
+            };
+            let Ok(proxy) = zbus::fdo::DBusProxy::new(&conn).await else {
+                return;
+            };
+            let Ok(name) = zbus::names::BusName::try_from(sender.clone()) else {
+                return;
+            };
+            match proxy.get_connection_unix_process_id(name).await {
+                Ok(pid) => io.send(GameModeCommand::SetControllerPid(pid)),
+                Err(err) => {
+                    warn!(target: GAMING_TARGET, ?err, %sender, "could not resolve the game-mode client's pid")
+                }
+            }
+        });
     }
 
     fn with<R>(&self, f: impl FnOnce(&GameModeShared) -> R) -> R {
@@ -363,8 +397,17 @@ impl GameModeInterface {
     /// Enter exclusive game mode for `app_id`: make that app the fullscreen game
     /// (engaging the direct-scanout + VRR + tearing fast paths) and clear the
     /// rest with an animated transition.
-    async fn enter_game_mode(&self, app_id: u32) {
-        self.io.send(GameModeCommand::Enter { app_id });
+    async fn enter_game_mode(
+        &self,
+        app_id: u32,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) {
+        // Only READ the sender name here. Asking the bus to resolve it would be a
+        // round-trip on THIS connection whose reply could only be processed by the
+        // task making it, which deadlocks the whole interface; the resolution is
+        // done off-thread on a separate connection instead.
+        let sender = header.sender().map(|name| name.to_string());
+        self.io.send(GameModeCommand::Enter { app_id, sender });
     }
 
     /// Leave game mode and return to the launcher.
@@ -617,8 +660,19 @@ impl State {
     pub fn handle_game_mode_command(&mut self, cmd: GameModeCommand) {
         let bridge = self.common.game_mode_bridge.clone();
         match cmd {
-            GameModeCommand::Enter { app_id } => {
+            GameModeCommand::SetControllerPid(pid) => {
+                debug!(target: GAMING_TARGET, pid, "cmd: controller pid resolved");
+                self.common.shell.write().game_mode.controller_pid = Some(pid);
+            }
+            GameModeCommand::Enter { app_id, sender } => {
                 debug!(target: GAMING_TARGET, app_id, launcher = app_id == LAUNCHER_APP_ID, "cmd: enter game mode");
+                // Learn who drives game mode once, so the games it launches can be
+                // recognized by ancestry the moment their windows map.
+                if self.common.shell.read().game_mode.controller_pid.is_none()
+                    && let Some(sender) = sender
+                {
+                    bridge.resolve_controller_pid(sender);
+                }
                 self.enter_game_mode(app_id);
                 self.refresh_game_mode_state();
             }
