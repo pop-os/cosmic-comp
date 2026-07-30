@@ -2401,27 +2401,61 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             };
 
-            elements.extend(
-                self.floating_layer
-                    .render_popups::<R>(renderer, alpha, scanout_node)
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
-            );
+            if let Some(view) = game_mode_only {
+                // Under strict control the layers must NOT be asked for every
+                // element's popups: that would render popups belonging to windows
+                // this workspace deliberately hides, painting a suppressed window's
+                // menu over the game. Emit popups for the controlled children only,
+                // using the same origin the child itself is rendered at.
+                for child in view.children.iter() {
+                    let Some(mapped) = self
+                        .mapped()
+                        .find(|m| m.windows().any(|(surface, _)| &surface == child))
+                    else {
+                        continue;
+                    };
+                    let Some(geometry) = self.element_geometry(mapped) else {
+                        continue;
+                    };
+                    let render_location = geometry.loc - mapped.geometry().loc.as_local();
+                    elements.extend(
+                        mapped
+                            .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
+                                renderer,
+                                render_location
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
+                                output_scale.into(),
+                                alpha,
+                                scanout_node,
+                            )
+                            .into_iter()
+                            .map(WorkspaceRenderElement::from),
+                    );
+                }
+            } else {
+                elements.extend(
+                    self.floating_layer
+                        .render_popups::<R>(renderer, alpha, scanout_node)
+                        .into_iter()
+                        .map(WorkspaceRenderElement::from),
+                );
 
-            //tiling surfaces
-            elements.extend(
-                self.tiling_layer
-                    .render_popups::<R>(
-                        renderer,
-                        render_focus.then_some(last_active_seat),
-                        zone,
-                        overview,
-                        theme,
-                        scanout_node,
-                    )?
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
-            );
+                //tiling surfaces
+                elements.extend(
+                    self.tiling_layer
+                        .render_popups::<R>(
+                            renderer,
+                            render_focus.then_some(last_active_seat),
+                            zone,
+                            overview,
+                            theme,
+                            scanout_node,
+                        )?
+                        .into_iter()
+                        .map(WorkspaceRenderElement::from),
+                );
+            }
         }
 
         Ok(elements)
