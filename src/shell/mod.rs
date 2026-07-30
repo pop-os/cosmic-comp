@@ -2659,6 +2659,33 @@ impl Shell {
         result
     }
 
+    /// Whether strict game-mode control would refuse to RENDER `surface`: game
+    /// mode is active and the surface shares the controlled surface's workspace
+    /// without being the controlled surface itself.
+    ///
+    /// Such a window draws nothing, so it must not be granted focus either — the
+    /// render path and the input path have to agree, otherwise the compositor
+    /// hands the keyboard to a window the user cannot see.
+    pub fn game_mode_hides(&self, surface: &CosmicSurface) -> bool {
+        if !self.game_mode.active {
+            return false;
+        }
+        let Some(controlled) = self.game_mode.game_surface.as_ref() else {
+            return false;
+        };
+        if controlled == surface {
+            return false;
+        }
+        // Only the controlled surface's own workspace is under strict control;
+        // other workspaces (even on the game's output) are a normal desktop.
+        self.workspaces.spaces().any(|ws| {
+            ws.get_fullscreen_surfaces()
+                .any(|f| &f.surface == controlled)
+                && (ws.get_fullscreen_surfaces().any(|f| &f.surface == surface)
+                    || ws.mapped().any(|m| &m.active_window() == surface))
+        })
+    }
+
     pub fn active_space(&self, output: &Output) -> Option<&Workspace> {
         self.workspaces.active(output).map(|(_, active)| active)
     }
@@ -6655,8 +6682,17 @@ impl Shell {
             window.force_configure();
         }
 
-        let new_target = if (workspace_output == seat.active_output()
-            && active_handle == workspace_handle)
+        let new_target = if self.game_mode_hides(&window) {
+            // Game mode renders ONLY its controlled surface on that workspace, so a
+            // window it will not draw must not take the keyboard either: focusing an
+            // invisible window looks exactly like a hung game (keystrokes vanish
+            // into a black screen). Park it on the focus stack and mark the
+            // workspace urgent instead, the same treatment as focus-stealing
+            // prevention below.
+            self.append_focus_stack(mapped, &seat);
+            workspace_state.add_workspace_state(&workspace_handle, WState::Urgent);
+            None
+        } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)
             || should_be_sticky
         {
             // Focus stealing prevention: only grant immediate focus if the window
