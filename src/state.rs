@@ -1534,6 +1534,17 @@ impl Common {
                 }
             });
 
+        // The game-mode overlay (the QAM / launcher composited over the game) lives
+        // on its OWN workspace, not the active one, so the walk below never reaches
+        // it — it would composite over the game frozen, with no scrolling and no
+        // caret. Drive it explicitly while it is being shown.
+        if shell.game_mode.overlay_active
+            && shell.game_mode.output.as_ref() == Some(output)
+            && let Some(overlay) = shell.game_mode.overlay_surface.as_ref()
+        {
+            overlay.send_frame(output, time, throttle(overlay), should_send);
+        }
+
         if let Some(active) = shell.active_space(output) {
             if let Some(fs) = active.get_fullscreen(shell.seats.last_active()) {
                 fs.surface
