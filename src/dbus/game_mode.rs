@@ -20,8 +20,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use calloop::{LoopHandle, channel::Sender};
 use futures_executor::ThreadPool;
 use smithay::backend::drm::VrrSupport;
+use smithay::desktop::space::SpaceElement as _;
 use smithay::output::Output;
-use smithay::utils::IsAlive;
+use smithay::utils::{IsAlive, Rectangle, Size};
 use smithay::xwayland::X11Surface;
 use tracing::{debug, info, trace, warn};
 use zbus::{interface, object_server::SignalEmitter};
@@ -798,7 +799,7 @@ impl State {
                     s.scale_height = height;
                     s.scale_mode = mode;
                 }
-                // TODO(gaming, PLAN.md Phase 3): resolution spoof + upscaler.
+                self.common.shell.write().game_mode_scaling = (width, height, mode);
                 debug!(
                     width,
                     height,
@@ -1031,12 +1032,44 @@ impl State {
                 let game_app_id = app_id_of(&game);
                 let want_scale = !scale_rejected && game_app_id != LAUNCHER_APP_ID;
                 let mut shell = self.common.shell.write();
+                let (spoof_w, spoof_h, mode) = shell.game_mode_scaling;
+
+                // Resolution spoof: tell the game to render at the requested size
+                // instead of the output's, and let the presentation rect scale the
+                // result up. Re-asserted here rather than at map time so it also
+                // applies to an already-running game and self-heals if something
+                // reconfigures the surface — but only when the size actually
+                // differs, since this runs every refresh tick and a configure storm
+                // would wedge the client.
+                if spoof_w > 0 && spoof_h > 0 && want_scale {
+                    let wanted = Size::from((spoof_w as i32, spoof_h as i32));
+                    if game.geometry().size != wanted {
+                        let loc = shell
+                            .game_mode
+                            .output
+                            .as_ref()
+                            .map(|o| o.geometry().loc)
+                            .unwrap_or_default();
+                        info!(
+                            target: GAMING_TARGET,
+                            width = spoof_w,
+                            height = spoof_h,
+                            mode = mode.as_str(),
+                            "configuring the game to render at the requested resolution"
+                        );
+                        game.set_geometry(
+                            Rectangle::new(loc, Size::from((spoof_w as i32, spoof_h as i32))),
+                            0,
+                        );
+                        game.send_configure();
+                    }
+                }
                 let matched_ws = if let Some(ws) = shell
                     .workspaces
                     .spaces_mut()
                     .find(|ws| ws.get_fullscreen_surfaces().any(|f| f.surface == game))
                 {
-                    ws.set_fullscreen_scale_to(&game, want_scale);
+                    ws.set_fullscreen_scale_to(&game, want_scale, mode);
                     true
                 } else {
                     false

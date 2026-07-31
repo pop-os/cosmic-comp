@@ -1588,8 +1588,78 @@ impl Workspace {
     /// smaller than the output, `scale_to` becomes the aspect-preserving fit rect
     /// (centered); otherwise (or when `scale` is false) it is cleared to `None`
     /// (native/letterbox). See `FullscreenSurface::scale_to`.
-    pub fn set_fullscreen_scale_to<S>(&mut self, surface: &S, scale: bool)
-    where
+    /// Where a fullscreen surface should be presented on the output, for the
+    /// requested scaling `mode`.
+    ///
+    /// `src` is what the game actually renders (its committed buffer, or the
+    /// spoofed resolution it was configured with) and `out` the output. Returns
+    /// `None` to present 1:1 with no wrapper, which is what keeps a native-size
+    /// game on the direct-scanout path.
+    fn scaling_rect(
+        src: Size<i32, Logical>,
+        out: Size<i32, Local>,
+        mode: crate::dbus::game_mode::ScalingMode,
+    ) -> Option<Rectangle<i32, Local>> {
+        use crate::dbus::game_mode::ScalingMode;
+
+        if src.w <= 0 || src.h <= 0 || out.w <= 0 || out.h <= 0 {
+            return None;
+        }
+        let (sw, sh, ow, oh) = (src.w as f64, src.h as f64, out.w as f64, out.h as f64);
+        let centered = |w: i32, h: i32| {
+            Some(Rectangle::new(
+                Point::from(((out.w - w) / 2, (out.h - h) / 2)),
+                Size::from((w, h)),
+            ))
+        };
+        match mode {
+            // Present at its own size, centered. Nothing to do when it already
+            // fills the output — and returning None there matters, because an
+            // unwrapped element is the one that can take a DRM plane directly.
+            ScalingMode::Native => {
+                if src.w == out.w && src.h == out.h {
+                    None
+                } else {
+                    centered(src.w, src.h)
+                }
+            }
+            // Whole-pixel multiples only: no resampling, so the image stays sharp.
+            ScalingMode::Integer => {
+                let factor = f64::min(ow / sw, oh / sh).floor().max(1.0);
+                centered((sw * factor) as i32, (sh * factor) as i32)
+            }
+            // Letterbox: fit entirely, preserving aspect.
+            // FSR is the same geometry until the sharpening pass exists.
+            ScalingMode::Fit | ScalingMode::Fsr => {
+                let ratio = f64::min(ow / sw, oh / sh);
+                centered((sw * ratio).round() as i32, (sh * ratio).round() as i32)
+            }
+            // Cover the output, preserving aspect; the overflow is cropped by the
+            // render path's crop-to-output.
+            ScalingMode::Fill => {
+                let ratio = f64::max(ow / sw, oh / sh);
+                centered((sw * ratio).round() as i32, (sh * ratio).round() as i32)
+            }
+            // Fill exactly, aspect be damned (the element scale is non-uniform).
+            ScalingMode::Stretch => Some(Rectangle::new(
+                Point::from((0, 0)),
+                Size::from((out.w, out.h)),
+            )),
+        }
+    }
+
+    /// Set (or clear) the presentation target for a tracked fullscreen surface.
+    ///
+    /// `mode` is the requested scaling mode; `scale` is false when scaling must be
+    /// suppressed entirely (the launcher, or a DRM plane that rejected the scale),
+    /// in which case an undersized surface is centered at native size rather than
+    /// stretched or corner-anchored.
+    pub fn set_fullscreen_scale_to<S>(
+        &mut self,
+        surface: &S,
+        scale: bool,
+        mode: crate::dbus::game_mode::ScalingMode,
+    ) where
         CosmicSurface: PartialEq<S>,
     {
         let out = self.output.geometry().size.as_local();
@@ -1599,34 +1669,16 @@ impl Workspace {
             .find(|f| f.ended_at.is_none() && &f.surface == surface)
         {
             let src = fs.surface.bbox().size;
-            let undersized = src.w > 0
-                && src.h > 0
-                && out.w > 0
-                && out.h > 0
-                && (src.w < out.w || src.h < out.h);
-            fs.scale_to = if !undersized {
-                None
-            } else if scale && src.w >= MIN_UPSCALE_DIM && src.h >= MIN_UPSCALE_DIM {
-                // Aspect-preserving fit of the committed buffer into the output.
-                let ratio = f64::min(out.w as f64 / src.w as f64, out.h as f64 / src.h as f64);
-                let w = ((src.w as f64) * ratio).round() as i32;
-                let h = ((src.h as f64) * ratio).round() as i32;
-                Some(Rectangle::new(
-                    Point::from(((out.w - w) / 2, (out.h - h) / 2)),
-                    Size::from((w, h)),
-                ))
+            // Too small to be a game framebuffer — a loading banner or splash a
+            // game maps before its real window — or scaling was refused: centre it
+            // at native size instead of stretching it across the output.
+            let scalable = scale && src.w >= MIN_UPSCALE_DIM && src.h >= MIN_UPSCALE_DIM;
+            let mode = if scalable {
+                mode
             } else {
-                // Either too small to be a game framebuffer — a loading banner or
-                // splash a game maps before its real window — or upscaling was
-                // rejected by the DRM plane. Present it CENTERED at native size:
-                // stretching a 300x100 banner across the output looks broken, and
-                // leaving `scale_to` unset anchors it at the fullscreen origin, so
-                // it sat in the top-left corner with the rest of the output empty.
-                Some(Rectangle::new(
-                    Point::from(((out.w - src.w) / 2, (out.h - src.h) / 2)),
-                    Size::from((src.w, src.h)),
-                ))
+                crate::dbus::game_mode::ScalingMode::Native
             };
+            fs.scale_to = Self::scaling_rect(src, out, mode);
         }
     }
 

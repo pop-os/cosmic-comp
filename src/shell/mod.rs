@@ -780,6 +780,13 @@ pub struct Shell {
     /// instead of composited-to-black). Reset on entering game mode, so a new
     /// game / an app switch re-tries the scale.
     pub game_mode_scale_rejected: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Render resolution + scaling mode requested for the game (`SetScaling`).
+    ///
+    /// A non-zero size is a RESOLUTION SPOOF: the game is configured to render at
+    /// that size rather than the output's, and the result is scaled up to the
+    /// output using `mode`. Zero size keeps the game at output resolution and only
+    /// the mode applies (to a game that renders smaller by itself).
+    pub game_mode_scaling: (u32, u32, crate::dbus::game_mode::ScalingMode),
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
     /// Home mode state for animation (fading in/out of home screen)
@@ -2458,6 +2465,7 @@ impl Shell {
             game_mode_tearing_supported: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
+            game_mode_scaling: (0, 0, crate::dbus::game_mode::ScalingMode::Native),
             game_mode_scale_rejected: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),
