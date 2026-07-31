@@ -114,6 +114,12 @@ run-debug:
 
 # Deploy to a remote device for testing.
 # Usage: make deploy HOST=user@hostname
+#
+# The device's sudo password is read interactively, or taken from SUDO_PASS when
+# set -- which is required when stdin is not a terminal (an IDE task runner, CI),
+# since the interactive read would otherwise get EOF and send an empty password:
+#   SUDO_PASS=... make deploy HOST=user@hostname
+# Better still, give the device passwordless sudo for this and skip it entirely.
 REMOTE_BIN = /usr/bin/$(BINARY)
 HOST ?=
 
@@ -121,7 +127,13 @@ deploy:
 ifndef HOST
 	$(error HOST is required. Usage: make deploy HOST=user@hostname)
 endif
-	@read -s -p "Enter sudo password for $(HOST): " SUDO_PASS && echo && \
+	@if [ -z "$$SUDO_PASS" ]; then \
+	  read -s -p "Enter sudo password for $(HOST): " SUDO_PASS || true; echo; \
+	fi; \
+	if [ -z "$$SUDO_PASS" ]; then \
+	  echo "no sudo password: pass SUDO_PASS=... (needed when stdin is not a terminal)" >&2; \
+	  exit 1; \
+	fi && \
 	cargo build && \
 	echo "Stripping debug symbols..." && \
 	strip -o "$(CARGO_TARGET_DIR)/debug/$(BINARY).stripped" "$(CARGO_TARGET_DIR)/debug/$(BINARY)" && \
@@ -137,7 +149,13 @@ deploy-profile:
 ifndef HOST
 	$(error HOST is required. Usage: make deploy-profile HOST=user@hostname)
 endif
-	@read -s -p "Enter sudo password for $(HOST): " SUDO_PASS && echo && \
+	@if [ -z "$$SUDO_PASS" ]; then \
+	  read -s -p "Enter sudo password for $(HOST): " SUDO_PASS || true; echo; \
+	fi; \
+	if [ -z "$$SUDO_PASS" ]; then \
+	  echo "no sudo password: pass SUDO_PASS=... (needed when stdin is not a terminal)" >&2; \
+	  exit 1; \
+	fi && \
 	cargo build --profile fastdebug && \
 	echo "Deploying $(BINARY) (fastdebug) to $(HOST):$(REMOTE_BIN)..." && \
 	scp -C "$(CARGO_TARGET_DIR)/fastdebug/$(BINARY)" "$(HOST):/tmp/$(BINARY)" && \
@@ -150,7 +168,13 @@ deploy-release:
 ifndef HOST
 	$(error HOST is required. Usage: make deploy-release HOST=user@hostname)
 endif
-	@read -s -p "Enter sudo password for $(HOST): " SUDO_PASS && echo && \
+	@if [ -z "$$SUDO_PASS" ]; then \
+	  read -s -p "Enter sudo password for $(HOST): " SUDO_PASS || true; echo; \
+	fi; \
+	if [ -z "$$SUDO_PASS" ]; then \
+	  echo "no sudo password: pass SUDO_PASS=... (needed when stdin is not a terminal)" >&2; \
+	  exit 1; \
+	fi && \
 	cargo build --release && \
 	echo "Stripping debug symbols..." && \
 	strip -o "$(CARGO_TARGET_DIR)/release/$(BINARY).stripped" "$(CARGO_TARGET_DIR)/release/$(BINARY)" && \
