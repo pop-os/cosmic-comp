@@ -68,8 +68,8 @@ use smithay::{
                 },
             },
             gles::{
-                GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
-                UniformName, UniformType,
+                GlesComputeProgram, GlesError, GlesPixelProgram, GlesRenderer, GlesTexProgram,
+                GlesTexture, Uniform, UniformName, UniformType,
                 element::{PixelShaderElement, TextureShaderElement},
             },
             glow::GlowRenderer,
@@ -146,6 +146,10 @@ pub static POSTPROCESS_SHADER: &str = include_str!("./shaders/offscreen.frag");
 pub static DUAL_KAWASE_DOWNSAMPLE_SHADER: &str =
     include_str!("./shaders/dual_kawase_downsample.frag");
 pub static DUAL_KAWASE_UPSAMPLE_SHADER: &str = include_str!("./shaders/dual_kawase_upsample.frag");
+pub static DUAL_KAWASE_DOWNSAMPLE_COMPUTE_SHADER: &str =
+    include_str!("./shaders/dual_kawase_downsample.comp");
+pub static DUAL_KAWASE_UPSAMPLE_COMPUTE_SHADER: &str =
+    include_str!("./shaders/dual_kawase_upsample.comp");
 pub static BLURRED_BACKDROP_SHADER: &str = include_str!("./shaders/blurred_backdrop.frag");
 pub mod nis_coefficients;
 
@@ -158,9 +162,9 @@ pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
 pub use blur::{
     BLUR_BORDER_STRENGTH, BLUR_DOWNSAMPLE_FACTOR, BLUR_FALLBACK_ALPHA, BLUR_FALLBACK_COLOR,
     BLUR_TINT_COLOR, BLUR_TINT_STRENGTH, BlurCaptureContext, BlurRenderState, BlurredTextureInfo,
-    CachedLayerSurface, HasBlur, LayerBlurSurfaceInfo, apply_dual_kawase_blur,
-    blur_downsample_enabled, cache_blur_texture_for_layer, cache_blur_texture_for_window,
-    clear_blur_textures_for_output, clear_cached_layer_surfaces,
+    CachedLayerSurface, ComputeMipPool, HasBlur, LayerBlurSurfaceInfo, apply_dual_kawase_blur,
+    apply_dual_kawase_blur_compute, blur_downsample_enabled, cache_blur_texture_for_layer,
+    cache_blur_texture_for_window, clear_blur_textures_for_output, clear_cached_layer_surfaces,
     clear_layer_blur_textures_for_output, compute_element_content_hash,
     copy_blur_texture_for_cache, downsample_texture, get_blur_group_content_hash,
     get_cached_blur_texture_for_layer, get_cached_blur_texture_for_window,
@@ -175,6 +179,16 @@ pub struct DualKawaseDownsampleShader(pub GlesTexProgram);
 
 /// Dual Kawase upsample shader (blur + double resolution)
 pub struct DualKawaseUpsampleShader(pub GlesTexProgram);
+
+/// Compute variants of the Dual Kawase pair, present only on GLES 3.1+ contexts.
+///
+/// Absence is the signal to use the fragment shaders above: on a 2.0 context
+/// these cannot be compiled at all, so callers must treat this as optional
+/// rather than assuming it was initialized.
+pub struct DualKawaseComputeShaders {
+    pub downsample: GlesComputeProgram,
+    pub upsample: GlesComputeProgram,
+}
 
 /// Shader for rendering blurred backdrop (samples from pre-blurred texture)
 pub struct BlurredBackdropShader(pub GlesTexProgram);
@@ -486,6 +500,20 @@ impl DualKawaseDownsampleShader {
     }
 }
 
+impl DualKawaseComputeShaders {
+    /// Returns the compute programs, or `None` when the context is pre-3.1 and
+    /// the caller must fall back to the fragment path.
+    pub fn get<R: AsGlowRenderer>(
+        renderer: &R,
+    ) -> Option<(GlesComputeProgram, GlesComputeProgram)> {
+        Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
+            .egl_context()
+            .user_data()
+            .get::<DualKawaseComputeShaders>()
+            .map(|s| (s.downsample, s.upsample))
+    }
+}
+
 impl DualKawaseUpsampleShader {
     pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesTexProgram {
         Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
@@ -771,7 +799,43 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
         ],
     )?;
 
+    // Compute blur is an optimization, not a requirement: a driver that only
+    // grants GLES 2.0, or that has a broken compute compiler, must still get a
+    // blurred desktop. So a failure here is logged and dropped, leaving the
+    // fragment path in place, rather than failing renderer init.
+    let kawase_compute = if renderer.supports_compute() {
+        match (
+            renderer.compile_compute_program(DUAL_KAWASE_DOWNSAMPLE_COMPUTE_SHADER),
+            renderer.compile_compute_program(DUAL_KAWASE_UPSAMPLE_COMPUTE_SHADER),
+        ) {
+            (Ok(downsample), Ok(upsample)) => {
+                tracing::info!("Dual Kawase blur using compute shaders");
+                Some(DualKawaseComputeShaders {
+                    downsample,
+                    upsample,
+                })
+            }
+            (down, up) => {
+                let err = down.err().or(up.err());
+                tracing::warn!(
+                    ?err,
+                    "Compute blur shaders failed to compile, using fragment blur"
+                );
+                None
+            }
+        }
+    } else {
+        tracing::info!("Context is pre-GLES 3.1, using fragment blur");
+        None
+    };
+
     let egl_context = renderer.egl_context();
+    if let Some(shaders) = kawase_compute {
+        egl_context.user_data().insert_if_missing(|| shaders);
+        egl_context
+            .user_data()
+            .insert_if_missing(ComputeMipPool::default);
+    }
     egl_context
         .user_data()
         .insert_if_missing(|| IndicatorShader(outline_shader));
@@ -3088,6 +3152,10 @@ where
                                     scale,
                                     background_state_hash: content_hash,
                                     capture_size: (geometry.size.w, geometry.size.h),
+                                    // Only the KMS window path decides occlusion, and it measures
+                                    // this per capture. The others record false so no skip is
+                                    // ever taken on an unmeasured guess.
+                                    capture_was_opaque: false,
                                 },
                             );
                             tracing::trace!(
@@ -3465,6 +3533,10 @@ where
                                     scale,
                                     background_state_hash: content_hash,
                                     capture_size: (geo.size.w, geo.size.h),
+                                    // Only the KMS window path decides occlusion, and it measures
+                                    // this per capture. The others record false so no skip is
+                                    // ever taken on an unmeasured guess.
+                                    capture_was_opaque: false,
                                 },
                             );
                             tracing::trace!(

@@ -392,6 +392,13 @@ pub struct BlurWindowGroup {
     pub capture_z_threshold: usize,
     /// Windows in this group: (key, geometry, alpha, z_index)
     pub windows: Vec<(CosmicMappedKey, Rectangle<i32, Local>, f32, usize)>,
+    /// Whether every window here paints its backdrop over its full geometry with
+    /// no rounded corners and no transparency of its own.
+    ///
+    /// Necessary but not sufficient for the window to occlude what is below it --
+    /// the captured scene must also have been opaque, which is only known after
+    /// the capture and is tracked separately on the cached texture.
+    pub paints_full_geometry: bool,
 }
 
 impl FloatingLayout {
@@ -3095,7 +3102,7 @@ impl FloatingLayout {
         // Collect all windows with their blur status and z-index
         // We need to track non-blur windows to detect gaps between blur windows
         let all_windows: Vec<(
-            Option<(CosmicMappedKey, Rectangle<i32, Local>, f32)>,
+            Option<(CosmicMappedKey, Rectangle<i32, Local>, f32, bool)>,
             usize,
             bool,
         )> = self
@@ -3120,7 +3127,19 @@ impl FloatingLayout {
                         let geo = self.space.element_geometry(elem)?;
                         (geo.as_local(), alpha)
                     };
-                    Some((Some((elem.key(), geometry, elem_alpha)), global_z_idx, true))
+                    // A settled, square-cornered, fully-opaque window covers every
+                    // pixel of its geometry. Animating windows are excluded via
+                    // elem_alpha, which is scaled by the animation.
+                    let square_corners = elem
+                        .blur_corner_radius(geometry.size.as_logical(), 0)
+                        .iter()
+                        .all(|r| *r == 0.0);
+                    let paints_full = square_corners && elem_alpha >= 1.0;
+                    Some((
+                        Some((elem.key(), geometry, elem_alpha, paints_full)),
+                        global_z_idx,
+                        true,
+                    ))
                 } else {
                     // Non-blur window - we just need to track its position
                     Some((None, global_z_idx, false))
@@ -3140,7 +3159,7 @@ impl FloatingLayout {
 
         for (window_data, z_idx, is_blur) in sorted_windows {
             if is_blur {
-                if let Some((key, geometry, elem_alpha)) = window_data {
+                if let Some((key, geometry, elem_alpha, paints_full)) = window_data {
                     // Check if this blur window is consecutive with the previous
                     let is_consecutive = last_z_idx.map(|last| z_idx == last + 1).unwrap_or(true);
 
@@ -3159,10 +3178,12 @@ impl FloatingLayout {
                         // Add to current group or start new one
                         if let Some(ref mut group) = current_group {
                             group.windows.push((key, geometry, elem_alpha, z_idx));
+                            group.paints_full_geometry &= paints_full;
                         } else {
                             current_group = Some(BlurWindowGroup {
                                 capture_z_threshold: z_idx,
                                 windows: vec![(key, geometry, elem_alpha, z_idx)],
+                                paints_full_geometry: paints_full,
                             });
                         }
                     } else {
@@ -3173,6 +3194,7 @@ impl FloatingLayout {
                         current_group = Some(BlurWindowGroup {
                             capture_z_threshold: z_idx,
                             windows: vec![(key, geometry, elem_alpha, z_idx)],
+                            paints_full_geometry: paints_full,
                         });
                     }
                 }

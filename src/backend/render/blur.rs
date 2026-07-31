@@ -35,12 +35,14 @@ use smithay::{
                 texture::{TextureRenderBuffer, TextureRenderElement},
             },
             gles::{
-                GlesError, GlesTexProgram, GlesTexture, Uniform, element::TextureShaderElement,
+                GlesComputeProgram, GlesError, GlesRenderer, GlesTexProgram, GlesTexture, Uniform,
+                element::TextureShaderElement, ffi,
             },
         },
     },
     utils::{Logical, Physical, Point, Rectangle, Scale, Size, Transform},
 };
+use std::borrow::{Borrow, BorrowMut};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{LazyLock, Mutex, RwLock};
@@ -533,6 +535,17 @@ pub struct BlurredTextureInfo {
     /// (otherwise the stale, smaller texture is stretched over the new area,
     /// flashing the unblurred desktop for a frame).
     pub capture_size: (i32, i32),
+    /// Whether the captured scene covered the whole output with opaque content.
+    ///
+    /// A blur backdrop paints `blurred.a * blur_opacity * mask`, so when the
+    /// capture was fully opaque a settled, square-cornered, alpha-1.0 window
+    /// paints alpha 1 over its whole geometry -- it occludes everything below it
+    /// even though it declares no opaque region to the damage tracker.
+    ///
+    /// Measured rather than assumed: a desktop with no opaque base (no wallpaper,
+    /// or one with alpha) leaves this false everywhere and the blur work below
+    /// such a window goes on being done.
+    pub capture_was_opaque: bool,
 }
 
 /// Cache key combining output name and the window's identity key.
@@ -759,9 +772,7 @@ pub fn reap_dead_blur_textures() {
             );
         }
     }
-    if swept
-        && let Ok(mut handles) = LAYER_BLUR_SURFACE_HANDLES.write()
-    {
+    if swept && let Ok(mut handles) = LAYER_BLUR_SURFACE_HANDLES.write() {
         handles.retain(|id, _| !dead.contains(id));
     }
 }
@@ -1319,6 +1330,35 @@ where
     R: Renderer + Bind<Dmabuf> + Offscreen<GlesTexture> + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
 {
+    // Compute does the same work without binding a framebuffer or clearing once
+    // per pass, so prefer it and keep this function as the fallback. Deciding
+    // here rather than at the call sites means a caller cannot accidentally end
+    // up with no blur at all on a pre-3.1 context.
+    if compute_blur_allowed() && !COMPUTE_BLUR_DISABLED.load(Ordering::Relaxed) {
+        match apply_dual_kawase_blur_compute(
+            renderer,
+            src_texture,
+            pong_texture,
+            src_size,
+            levels,
+            offset,
+        ) {
+            Ok(true) => {
+                COMPUTE_BLUR_USED.store(true, Ordering::Relaxed);
+                return Ok(());
+            }
+            // No compute support on this context: nothing to report, this is the
+            // path that is meant to run.
+            Ok(false) => {}
+            Err(err) => {
+                // A driver that fails a dispatch once will keep failing, so stop
+                // trying instead of logging every frame.
+                COMPUTE_BLUR_DISABLED.store(true, Ordering::Relaxed);
+                tracing::warn!(?err, "Compute blur failed, falling back to fragment blur");
+            }
+        }
+    }
+
     let _span = tracing::info_span!(
         "dual_kawase_blur",
         levels = levels,
@@ -1980,4 +2020,302 @@ mod tests {
             );
         }
     }
+}
+
+// =============================================================================
+// Compute blur
+// =============================================================================
+
+/// Set when a compute dispatch has failed, to stop retrying it every frame.
+static COMPUTE_BLUR_DISABLED: AtomicBool = AtomicBool::new(false);
+
+/// Whether compute blur may be used at all.
+///
+/// `COSMIC_BLUR_COMPUTE=0` forces the fragment path on a machine that supports
+/// compute. That makes the two paths comparable on one binary, and gives users
+/// an escape hatch if a driver miscompiles the compute shaders in a way that
+/// still reports success.
+fn compute_blur_allowed() -> bool {
+    static ALLOWED: LazyLock<bool> = LazyLock::new(|| {
+        !matches!(
+            std::env::var("COSMIC_BLUR_COMPUTE").as_deref(),
+            Ok("0") | Ok("false")
+        )
+    });
+    *ALLOWED
+}
+
+/// Records that a compute blur actually ran, so the profiler can report which
+/// path its timings came from rather than which one was merely available.
+static COMPUTE_BLUR_USED: AtomicBool = AtomicBool::new(false);
+
+/// Describes the blur path in use, for the performance report.
+pub fn active_blur_path() -> &'static str {
+    // Order matters: a run that used compute and then hit a dispatch error is
+    // now on the fragment path, and the report has to say so rather than stay
+    // latched on the first path that ever ran.
+    if COMPUTE_BLUR_DISABLED.load(Ordering::Relaxed) {
+        "fragment (compute failed)"
+    } else if !compute_blur_allowed() {
+        "fragment (COSMIC_BLUR_COMPUTE=0)"
+    } else if COMPUTE_BLUR_USED.load(Ordering::Relaxed) {
+        "compute"
+    } else {
+        "fragment"
+    }
+}
+
+/// Workgroup size in both compute Kawase shaders. Dispatch counts must round up
+/// to a multiple of this, which is why the shaders bounds-check.
+const KAWASE_WORKGROUP: i32 = 8;
+
+/// Reusable mip chain for the blur passes, keyed by the chain it serves.
+///
+/// The fragment path allocates its intermediate textures on every call and frees
+/// them again at the end -- `levels` allocations per blurred window per frame.
+/// The compute path cannot do that even if it wanted to, because its textures
+/// need immutable storage, so the chain is created once and kept. Sizes repeat
+/// frame to frame, so the cache hits essentially always after the first frame.
+///
+/// Held in the renderer's EGL user data rather than a global, so the textures
+/// cannot outlive the context that made them or be handed to a second GPU's
+/// renderer.
+#[derive(Debug, Default)]
+pub struct ComputeMipPool(Mutex<HashMap<(i32, i32, u32), Vec<TextureRenderBuffer<GlesTexture>>>>);
+
+impl ComputeMipPool {
+    /// Returns the chain for `src_size`/`levels`, creating it on first use.
+    ///
+    /// Entries are cloned out rather than borrowed because the caller needs the
+    /// renderer mutably to dispatch; the clone is of handles, not pixels.
+    fn get_or_create<R>(
+        renderer: &mut R,
+        src_size: Size<i32, Physical>,
+        levels: u32,
+        mip_sizes: &[Size<i32, Physical>],
+    ) -> Option<Vec<TextureRenderBuffer<GlesTexture>>>
+    where
+        R: AsGlowRenderer,
+    {
+        let key = (src_size.w, src_size.h, levels);
+
+        {
+            let glow = renderer.glow_renderer();
+            let gles: &GlesRenderer = Borrow::borrow(glow);
+            if let Some(pool) = gles.egl_context().user_data().get::<ComputeMipPool>() {
+                if let Some(chain) = pool.0.lock().unwrap().get(&key) {
+                    return Some(chain.clone());
+                }
+            } else {
+                return None;
+            }
+        }
+
+        // Bound the pool. Keys vary with output size and blur intensity, so the
+        // set is small in practice, but a run that cycles through many
+        // resolutions would otherwise hold every chain it ever built. Dropping
+        // the map only releases this cache's handles; chains still in use are
+        // kept alive by the caller's clone.
+        const MAX_CHAINS: usize = 8;
+
+        let mut chain = Vec::with_capacity(levels as usize);
+        for mip_size in mip_sizes.iter().take(levels as usize + 1).skip(1) {
+            let buffer_size = mip_size.to_logical(1).to_buffer(1, Transform::Normal);
+            let gles: &mut GlesRenderer = BorrowMut::borrow_mut(renderer.glow_renderer_mut());
+            let tex = gles.create_compute_buffer(buffer_size).ok()?;
+            chain.push(TextureRenderBuffer::from_texture(
+                renderer.glow_renderer(),
+                tex,
+                1,
+                Transform::Normal,
+                None,
+            ));
+        }
+
+        let glow = renderer.glow_renderer();
+        let gles: &GlesRenderer = Borrow::borrow(glow);
+        let pool = gles.egl_context().user_data().get::<ComputeMipPool>()?;
+        let mut chains = pool.0.lock().unwrap();
+        if chains.len() >= MAX_CHAINS {
+            chains.clear();
+        }
+        chains.insert(key, chain.clone());
+        Some(chain)
+    }
+}
+
+/// Runs one compute Kawase pass, sampling `src` and writing `dst` via imageStore.
+///
+/// Unlike the fragment equivalent this binds no framebuffer and clears nothing:
+/// every destination texel is written by exactly one invocation, so a clear
+/// would only be redundant bandwidth.
+fn dispatch_kawase_pass<R>(
+    renderer: &mut R,
+    program: GlesComputeProgram,
+    src: &GlesTexture,
+    dst: &GlesTexture,
+    half_texel: [f32; 2],
+    offset: f32,
+    dst_size: Size<i32, Physical>,
+) -> Result<(), GlesError>
+where
+    R: AsGlowRenderer,
+{
+    let src_id = src.tex_id();
+    let dst_id = dst.tex_id();
+    let gles: &mut GlesRenderer = BorrowMut::borrow_mut(renderer.glow_renderer_mut());
+
+    // Round the group count up so the last partial block is still covered; the
+    // shaders discard invocations that land outside the image.
+    let groups = (
+        ((dst_size.w + KAWASE_WORKGROUP - 1) / KAWASE_WORKGROUP).max(1) as u32,
+        ((dst_size.h + KAWASE_WORKGROUP - 1) / KAWASE_WORKGROUP).max(1) as u32,
+        1,
+    );
+
+    unsafe {
+        gles.dispatch_compute(&program, groups, |gl, prog| {
+            let name = |s: &[u8]| gl.GetUniformLocation(prog, s.as_ptr() as *const _);
+
+            gl.ActiveTexture(ffi::TEXTURE0);
+            gl.BindTexture(ffi::TEXTURE_2D, src_id);
+
+            // Set the sampler state explicitly. The fragment path gets this for
+            // free because smithay's render_texture sets it on every draw, but a
+            // compute dispatch samples the texture as it finds it. That matters
+            // most for the chain's first input, which comes from the caller as a
+            // plain offscreen buffer: GL's default minification filter expects
+            // mipmaps, the buffer has only level 0, and sampling a
+            // mipmap-incomplete texture returns solid black rather than failing.
+            // CLAMP_TO_EDGE also keeps the edge taps matching the fragment path.
+            gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+            gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+            gl.TexParameteri(
+                ffi::TEXTURE_2D,
+                ffi::TEXTURE_WRAP_S,
+                ffi::CLAMP_TO_EDGE as i32,
+            );
+            gl.TexParameteri(
+                ffi::TEXTURE_2D,
+                ffi::TEXTURE_WRAP_T,
+                ffi::CLAMP_TO_EDGE as i32,
+            );
+
+            gl.Uniform1i(name(b"tex\0"), 0);
+
+            // The shader declares `binding = 0` for the image, so unit 0 here.
+            gl.BindImageTexture(0, dst_id, 0, ffi::FALSE, 0, ffi::WRITE_ONLY, ffi::RGBA8);
+
+            gl.Uniform2f(name(b"half_texel\0"), half_texel[0], half_texel[1]);
+            gl.Uniform1f(name(b"offset\0"), offset);
+            gl.Uniform2i(name(b"dst_size\0"), dst_size.w, dst_size.h);
+        })
+    }
+}
+
+/// Dual Kawase blur using compute shaders, with the same result as
+/// [`apply_dual_kawase_blur`].
+///
+/// Returns `false` when this context cannot run it -- no compute support, or no
+/// cached chain -- and the caller must use the fragment path instead.
+///
+/// The final upsample is deliberately still a fragment pass. `pong_texture`
+/// belongs to the caller and has mutable storage, so imageStore cannot target
+/// it; doing that last step by drawing writes the result where the caller
+/// expects it without an extra copy.
+pub fn apply_dual_kawase_blur_compute<R>(
+    renderer: &mut R,
+    src_texture: &TextureRenderBuffer<GlesTexture>,
+    pong_texture: &mut TextureRenderBuffer<GlesTexture>,
+    src_size: Size<i32, Physical>,
+    levels: u32,
+    offset: f32,
+) -> Result<bool, GlesError>
+where
+    R: Renderer + Bind<Dmabuf> + Offscreen<GlesTexture> + AsGlowRenderer,
+    R::TextureId: Send + Clone + 'static,
+{
+    let Some((downsample, upsample)) = super::DualKawaseComputeShaders::get(renderer) else {
+        return Ok(false);
+    };
+
+    let _span = tracing::info_span!(
+        "dual_kawase_blur_compute",
+        levels = levels,
+        offset = offset,
+        src_w = src_size.w,
+        src_h = src_size.h,
+    )
+    .entered();
+
+    let levels = levels.clamp(1, 8);
+
+    let mut mip_sizes: Vec<Size<i32, Physical>> = Vec::with_capacity(levels as usize + 1);
+    mip_sizes.push(src_size);
+    for i in 1..=levels {
+        let prev = mip_sizes[i as usize - 1];
+        mip_sizes.push(Size::from(((prev.w / 2).max(1), (prev.h / 2).max(1))));
+    }
+
+    let Some(mips) = ComputeMipPool::get_or_create(renderer, src_size, levels, &mip_sizes) else {
+        return Ok(false);
+    };
+
+    // === DOWNSAMPLE CHAIN === src -> mips[0] -> ... -> mips[levels-1]
+    for i in 0..levels as usize {
+        let input_size = mip_sizes[i];
+        let half_texel = [0.5 / input_size.w as f32, 0.5 / input_size.h as f32];
+        let src = if i == 0 {
+            src_texture.texture().clone()
+        } else {
+            mips[i - 1].texture().clone()
+        };
+        dispatch_kawase_pass(
+            renderer,
+            downsample,
+            &src,
+            &mips[i].texture().clone(),
+            half_texel,
+            offset,
+            mip_sizes[i + 1],
+        )?;
+    }
+
+    // === UPSAMPLE CHAIN === mips[levels-1] -> ... -> mips[0], then a fragment
+    // pass for the last level so the result lands in the caller's texture.
+    for i in (1..levels as usize).rev() {
+        let input_size = mip_sizes[i + 1];
+        let half_texel = [0.5 / input_size.w as f32, 0.5 / input_size.h as f32];
+        let src = mips[i].texture().clone();
+        dispatch_kawase_pass(
+            renderer,
+            upsample,
+            &src,
+            &mips[i - 1].texture().clone(),
+            half_texel,
+            offset,
+            mip_sizes[i],
+        )?;
+    }
+
+    let input_size = mip_sizes[1];
+    let half_texel = [0.5 / input_size.w as f32, 0.5 / input_size.h as f32];
+    apply_dual_kawase_pass(
+        renderer,
+        &mips[0],
+        pong_texture,
+        &super::DualKawaseUpsampleShader::get(renderer),
+        half_texel,
+        offset,
+        input_size,
+        mip_sizes[0],
+    )?;
+
+    tracing::trace!(
+        levels = levels,
+        dispatches = levels * 2 - 1,
+        "Dual Kawase compute blur complete"
+    );
+
+    Ok(true)
 }
