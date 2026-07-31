@@ -127,7 +127,7 @@ endif
 	strip -o "$(CARGO_TARGET_DIR)/debug/$(BINARY).stripped" "$(CARGO_TARGET_DIR)/debug/$(BINARY)" && \
 	echo "Deploying $(BINARY) to $(HOST):$(REMOTE_BIN)..." && \
 	scp -C "$(CARGO_TARGET_DIR)/debug/$(BINARY).stripped" "$(HOST):/tmp/$(BINARY)" && \
-	ssh $(HOST) "echo $$SUDO_PASS | sudo -S mv /tmp/$(BINARY) $(REMOTE_BIN) && echo $$SUDO_PASS | sudo -S chmod 0755 $(REMOTE_BIN) && echo $$SUDO_PASS | sudo -S pkill $(BINARY)" && \
+	printf '%s\n' "$$SUDO_PASS" | ssh $(HOST) "sudo -S sh -c 'install -m0755 /tmp/$(BINARY) $(REMOTE_BIN) && { command -v restorecon >/dev/null 2>&1 && restorecon -v $(REMOTE_BIN) || true; } && { pkill -x $(BINARY) || true; }'" && \
 	echo "Done. Compositor restarted on $(HOST)."
 
 # Deploy a profiling build (release optimizations + debug symbols).
@@ -141,7 +141,7 @@ endif
 	cargo build --profile fastdebug && \
 	echo "Deploying $(BINARY) (fastdebug) to $(HOST):$(REMOTE_BIN)..." && \
 	scp -C "$(CARGO_TARGET_DIR)/fastdebug/$(BINARY)" "$(HOST):/tmp/$(BINARY)" && \
-	ssh $(HOST) "echo $$SUDO_PASS | sudo -S mv /tmp/$(BINARY) $(REMOTE_BIN) && echo $$SUDO_PASS | sudo -S chmod 0755 $(REMOTE_BIN) && echo $$SUDO_PASS | sudo -S pkill $(BINARY)" && \
+	printf '%s\n' "$$SUDO_PASS" | ssh $(HOST) "sudo -S sh -c 'install -m0755 /tmp/$(BINARY) $(REMOTE_BIN) && { command -v restorecon >/dev/null 2>&1 && restorecon -v $(REMOTE_BIN) || true; } && { pkill -x $(BINARY) || true; }'" && \
 	echo "Done. Compositor restarted on $(HOST) (fastdebug profile)."
 
 # Deploy a release build (fully optimized, stripped).
@@ -156,5 +156,5 @@ endif
 	strip -o "$(CARGO_TARGET_DIR)/release/$(BINARY).stripped" "$(CARGO_TARGET_DIR)/release/$(BINARY)" && \
 	echo "Deploying $(BINARY) (release) to $(HOST):$(REMOTE_BIN)..." && \
 	scp -C "$(CARGO_TARGET_DIR)/release/$(BINARY).stripped" "$(HOST):/tmp/$(BINARY)" && \
-	ssh $(HOST) "echo $$SUDO_PASS | sudo -S mv /tmp/$(BINARY) $(REMOTE_BIN) && echo $$SUDO_PASS | sudo -S chmod 0755 $(REMOTE_BIN) && echo $$SUDO_PASS | sudo -S pkill $(BINARY)" && \
+	printf '%s\n' "$$SUDO_PASS" | ssh $(HOST) "sudo -S sh -c 'install -m0755 /tmp/$(BINARY) $(REMOTE_BIN) && { command -v restorecon >/dev/null 2>&1 && restorecon -v $(REMOTE_BIN) || true; } && { pkill -x $(BINARY) || true; }'" && \
 	echo "Done. Compositor restarted on $(HOST) (release profile)."
