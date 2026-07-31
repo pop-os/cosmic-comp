@@ -481,6 +481,6 @@ fn hide_cursor(state: &mut State, seat: &Seat<State>) {
     }
     let outputs: Vec<_> = state.common.shell.read().outputs().cloned().collect();
     for output in outputs {
-        state.backend.schedule_render(&output);
+        state.backend.schedule_render(&output, false);
     }
 }

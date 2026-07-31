@@ -38,7 +38,7 @@ impl SessionLockHandler for State {
         });
 
         for output in shell.outputs() {
-            self.backend.schedule_render(output);
+            self.backend.schedule_render(output, false);
         }
     }
 
@@ -47,7 +47,7 @@ impl SessionLockHandler for State {
         shell.session_lock = None;
 
         for output in shell.outputs() {
-            self.backend.schedule_render(output);
+            self.backend.schedule_render(output, false);
         }
     }
 

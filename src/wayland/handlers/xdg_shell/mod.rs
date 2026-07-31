@@ -385,7 +385,7 @@ impl XdgShellHandler for State {
         }
 
         if let Some(output) = output.as_ref() {
-            self.backend.schedule_render(output);
+            self.backend.schedule_render(output, false);
         }
     }
 
