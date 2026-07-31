@@ -388,12 +388,16 @@ impl BackendData {
     }
 
     pub fn schedule_render(&mut self, output: &Output) {
+        self.schedule_render_fullscreen(output, false);
+    }
+
+    pub fn schedule_render_fullscreen(&mut self, output: &Output, is_fullscreen: bool) {
         match self {
             BackendData::Winit(_) => {} // We cannot do this on the winit backend.
             // Winit has a very strict render-loop and skipping frames breaks atleast the wayland winit-backend.
             // Swapping with damage (which should be empty on these frames) is likely good enough anyway.
             BackendData::X11(state) => state.schedule_render(output),
-            BackendData::Kms(state) => state.schedule_render(output),
+            BackendData::Kms(state) => state.schedule_render_fullscreen(output, is_fullscreen),
             _ => unreachable!("No backend was initialized"),
         }
     }
