@@ -147,6 +147,8 @@ pub static DUAL_KAWASE_DOWNSAMPLE_SHADER: &str =
     include_str!("./shaders/dual_kawase_downsample.frag");
 pub static DUAL_KAWASE_UPSAMPLE_SHADER: &str = include_str!("./shaders/dual_kawase_upsample.frag");
 pub static BLURRED_BACKDROP_SHADER: &str = include_str!("./shaders/blurred_backdrop.frag");
+pub mod nis_coefficients;
+
 pub static FSR_EASU_SHADER: &str = include_str!("./shaders/fsr_easu.frag");
 pub static FSR_RCAS_SHADER: &str = include_str!("./shaders/fsr_rcas.frag");
 pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
