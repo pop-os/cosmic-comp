@@ -3,12 +3,16 @@
 pub mod a11y;
 pub mod animated_resize;
 pub mod backdrop_color;
-pub mod blur;
+pub mod background_effect;
+// MERGE: fork-only client-facing KDE blur protocol (org_kde_kwin_blur). Kept because it is
+// self-contained plumbing, but upstream's ext background-effect now drives rendering — review
+// whether our layer-shell clients should migrate and this module be dropped.
 pub mod corner_radius;
 pub mod drm;
 pub mod exclusive_mode;
 pub mod home_visibility;
 pub mod image_capture_source;
+pub mod keyboard_layout;
 pub mod layer_auto_hide;
 pub mod layer_corner_radius;
 pub mod layer_edge_resize;

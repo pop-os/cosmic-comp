@@ -35,6 +35,9 @@ const CLOSE_BREAKPOINT: f32 = 125.0;
 const TEXT_BREAKPOINT: f32 = 44.0;
 
 /// Style configuration for a tab, pre-computed from theme tokens.
+// MERGE: upstream's blur PR added frosted-window alpha to its libcosmic
+// `TabRuleTheme`/`TabBackgroundTheme` styles. Not ported: this fork draws tabs manually
+// from `CompTheme` and no longer has those cosmic theme wrappers.
 #[derive(Clone, Copy)]
 pub(super) struct TabStyle {
     pub background: Option<Color>,

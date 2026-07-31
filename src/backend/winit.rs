@@ -6,6 +6,7 @@ use crate::{
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
+    wayland::protocols::drm::WlDrmState,
 };
 use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::output::comp::{OutputConfig, TransformDef};
@@ -34,7 +35,7 @@ use smithay::{
 use std::{borrow::BorrowMut, cell::RefCell, time::Duration};
 use tracing::{error, info, warn};
 
-use super::render::{BlurRenderState, CursorMode, ScreenFilterStorage, init_shaders};
+use super::render::{CursorMode, ScreenFilterStorage, init_shaders};
 
 #[derive(Debug)]
 pub struct WinitState {
@@ -43,7 +44,6 @@ pub struct WinitState {
     output: Output,
     damage_tracker: OutputDamageTracker,
     screen_filter_state: ScreenFilterStorage,
-    blur_state: BlurRenderState,
 }
 
 impl WinitState {
@@ -66,7 +66,6 @@ impl WinitState {
             CursorMode::NotDefault,
             &mut self.screen_filter_state,
             &state.event_loop_handle,
-            &mut self.blur_state,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 std::mem::drop(fb);
@@ -221,7 +220,6 @@ pub fn init_backend(
         output: output.clone(),
         damage_tracker: OutputDamageTracker::from_output(&output),
         screen_filter_state: ScreenFilterStorage::default(),
-        blur_state: BlurRenderState::default(),
     });
 
     state
@@ -276,7 +274,7 @@ fn init_egl_client_side(
                 .create_global_with_default_feedback::<State>(dh, &feedback);
 
             let render_node = render_node.unwrap().unwrap();
-            let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
+            state.common.wl_drm_state = Some(WlDrmState::new::<State>(
                 dh,
                 render_node
                     .dev_path_with_type(NodeType::Render)
@@ -287,7 +285,7 @@ fn init_egl_client_side(
                     ))?,
                 dmabuf_formats,
                 &dmabuf_global,
-            );
+            ));
 
             info!("EGL hardware-acceleration enabled.");
         }

@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="ext_background_effect_v1">
+
+  <copyright>
+    Copyright © 2024 Xaver Hugl
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="background effects for surfaces">
+    This protocol lets a client ask the compositor to apply an effect to
+    whatever is behind a surface, most commonly a blur, so that a translucent
+    surface reads as frosted glass rather than as a plain alpha blend.
+
+    Version 1 of this protocol is the upstream staging protocol unchanged: a
+    client marks a region and the compositor decides everything else.
+
+    Version 2 is a local extension. Version 1 deliberately leaves the blur
+    algorithm entirely to compositor policy, which is the right default but
+    gives a client no way to distinguish a lightly frosted panel from a heavily
+    obscured modal backdrop, and no way to have the blurred backdrop follow the
+    rounded corners the surface is drawn with. Version 2 adds that control as
+    hints the compositor is still free to clamp or ignore, and adds a way to
+    say "the whole surface" without the client having to resend a region on
+    every resize.
+
+    WARNING: version 2 is not part of the upstream protocol. A client must
+    check the version of the bound global before using any version 2 request,
+    and must be prepared for a compositor to only implement version 1.
+  </description>
+
+  <interface name="ext_background_effect_manager_v1" version="2">
+    <description summary="background effect factory">
+      This object is a factory for background effect objects.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the background effect manager">
+        Informs the server that the client will no longer be using this
+        protocol object. Existing objects created by this object are not
+        affected.
+      </description>
+    </request>
+
+    <enum name="error">
+      <entry name="background_effect_exists" value="0"
+             summary="the surface already has a background effect object"/>
+    </enum>
+
+    <enum name="capability" bitfield="true">
+      <entry name="blur" value="1" summary="the compositor supports blurring the background"/>
+    </enum>
+
+    <event name="capabilities">
+      <description summary="capabilities of the compositor">
+        This event advertises the effects the compositor supports. It is sent
+        once when the global is bound, before any other event.
+      </description>
+      <arg name="flags" type="uint" enum="capability" summary="supported capabilities"/>
+    </event>
+
+    <request name="get_background_effect">
+      <description summary="get a background effects object">
+        Instantiate an interface extension for the given wl_surface to add
+        background effects to it.
+
+        If the given wl_surface already has a background effect object
+        associated, the background_effect_exists protocol error is raised.
+      </description>
+      <arg name="id" type="new_id" interface="ext_background_effect_surface_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"
+           summary="the surface to add effects to"/>
+    </request>
+  </interface>
+
+  <interface name="ext_background_effect_surface_v1" version="2">
+    <description summary="background effects for a surface">
+      This interface allows a client to apply effects to the background of a
+      surface.
+
+      All state set through this interface is double-buffered and applies on
+      the next wl_surface.commit, so a client can change the blurred area, its
+      strength and its corner rounding together with the frame that needs them
+      and never show a mismatched intermediate state.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="release the blur object">
+        Informs the server that the client will no longer be using this
+        protocol object. The effect is removed from the surface.
+      </description>
+    </request>
+
+    <enum name="error">
+      <entry name="surface_destroyed" value="0"
+             summary="the associated surface has been destroyed"/>
+    </enum>
+
+    <request name="set_blur_region">
+      <description summary="set blur region">
+        This request sets the region of the surface that will have its
+        background blurred.
+
+        The blur region is specified in the surface-local coordinates, and
+        clipped by the compositor to the surface size.
+
+        The initial value for the blur region is empty. Setting the pending
+        blur region has copy semantics, and the wl_region object can be
+        destroyed immediately. A NULL wl_region removes the effect.
+
+        This supersedes any area previously set with blur_whole_surface.
+
+        The blur region is double-buffered state, and will be applied on
+        the next wl_surface.commit.
+
+        The blur algorithm is subject to compositor policies.
+
+        If the associated surface has been destroyed, the surface_destroyed
+        error will be raised.
+      </description>
+      <arg name="region" type="object" interface="wl_region" allow-null="true"
+           summary="blur region of the surface"/>
+    </request>
+
+    <request name="blur_whole_surface" since="2">
+      <description summary="blur the entire surface">
+        Blur the background of the whole surface, whatever size it currently
+        is.
+
+        This is equivalent to setting a blur region covering the surface,
+        except that the compositor keeps it matched to the surface as the
+        surface resizes. A client that wants its whole background blurred
+        would otherwise have to compute and resend a region on every resize,
+        and would show an unblurred or clipped frame whenever it got the
+        ordering wrong.
+
+        This supersedes any region previously set with set_blur_region. Call
+        set_blur_region with a NULL region to remove the effect again.
+
+        This state is double-buffered and applies on the next
+        wl_surface.commit.
+
+        If the associated surface has been destroyed, the surface_destroyed
+        error will be raised.
+      </description>
+    </request>
+
+    <request name="set_blur_radius" since="2">
+      <description summary="set blur strength">
+        Set how strongly the background should be blurred, as a radius in
+        surface-local coordinates.
+
+        This is a hint. The compositor is free to clamp it to a range it can
+        render efficiently, to quantise it, or to ignore it entirely; a client
+        must not assume the result matches the value it asked for, and must
+        not use this to convey anything but a visual preference.
+
+        A radius of 0 means the compositor should apply its own default
+        strength, which is also the initial value. It does not mean "no blur"
+        -- use set_blur_region with a NULL region for that.
+
+        This state is double-buffered and applies on the next
+        wl_surface.commit.
+
+        If the associated surface has been destroyed, the surface_destroyed
+        error will be raised.
+      </description>
+      <arg name="radius" type="uint" summary="blur radius in surface-local coordinates, 0 for the compositor default"/>
+    </request>
+
+    <request name="set_corner_radius" since="2">
+      <description summary="round the corners of the blurred area">
+        Round the corners of the blurred area, so the backdrop follows the
+        shape the surface actually draws.
+
+        Without this, a client drawing a rounded card over a rectangular
+        blurred area shows blurred pixels poking out past its own corners.
+        The client cannot fix that itself, because the blur is composited
+        underneath it.
+
+        The radii are in surface-local coordinates and apply to the blurred
+        area, which is the region set by set_blur_region or the whole surface
+        after blur_whole_surface. A compositor should clamp each radius so
+        that adjacent corners cannot overlap.
+
+        All radii are initially 0, meaning square corners.
+
+        This state is double-buffered and applies on the next
+        wl_surface.commit.
+
+        If the associated surface has been destroyed, the surface_destroyed
+        error will be raised.
+      </description>
+      <arg name="top_left" type="uint" summary="top-left radius in surface-local coordinates"/>
+      <arg name="top_right" type="uint" summary="top-right radius in surface-local coordinates"/>
+      <arg name="bottom_right" type="uint" summary="bottom-right radius in surface-local coordinates"/>
+      <arg name="bottom_left" type="uint" summary="bottom-left radius in surface-local coordinates"/>
+    </request>
+
+  </interface>
+</protocol>

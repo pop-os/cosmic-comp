@@ -64,7 +64,7 @@ use std::{
     time::Duration,
 };
 
-use super::{drm_helpers, socket::Socket, surface::Surface};
+use super::{drm_helpers, surface::Surface};
 
 #[derive(Debug)]
 pub struct EGLInternals {
@@ -103,14 +103,12 @@ pub struct Device {
 
     pub texture_formats: FormatSet,
     event_token: Option<RegistrationToken>,
-    pub socket: Option<Socket>,
 }
 
 #[derive(Debug)]
 struct ReusableDevice {
     leasing_global: Option<DrmLeaseState>,
     active_clients: HashSet<ClientId>,
-    socket: Option<Socket>,
 }
 
 #[derive(Debug)]
@@ -598,7 +596,7 @@ impl State {
         }
     }
 
-    pub fn device_removed(&mut self, dev: dev_t, dh: &DisplayHandle) -> Result<()> {
+    pub fn device_removed(&mut self, dev: dev_t, _dh: &DisplayHandle) -> Result<()> {
         let backend = self.backend.kms();
         // we can't use DrmNode::from_node_id, because that assumes the node is still on sysfs
         let drm_node = backend
@@ -620,13 +618,6 @@ impl State {
             }
             if let Some(token) = device.event_token.take() {
                 self.common.event_loop_handle.remove(token);
-            }
-            if let Some(socket) = device.socket.take() {
-                self.common.event_loop_handle.remove(socket.token);
-                self.common
-                    .dmabuf_state
-                    .destroy_global::<State>(dh, socket.dmabuf_global);
-                dh.remove_global::<State>(socket.drm_global);
             }
             backend.api.as_mut().remove_node(&device.inner.render_node);
             backend
@@ -760,23 +751,7 @@ impl Device {
         let ReusableDevice {
             leasing_global,
             active_clients,
-            socket,
         } = reuse.unwrap_or_else(|| {
-            let socket = match (!is_software)
-                .then(|| common.create_socket(dh, render_node, texture_formats.clone()))
-                .transpose()
-            {
-                Ok(socket) => socket,
-                Err(err) => {
-                    warn!(
-                        ?err,
-                        "Failed to initialize hardware-acceleration for clients on {}.",
-                        render_node,
-                    );
-                    None
-                }
-            };
-
             let leasing_global = match (!is_software)
                 .then(|| DrmLeaseState::new::<State>(dh, &dev_node))
                 .transpose()
@@ -795,7 +770,6 @@ impl Device {
             ReusableDevice {
                 leasing_global,
                 active_clients: HashSet::new(),
-                socket,
             }
         });
 
@@ -836,7 +810,6 @@ impl Device {
 
             texture_formats,
             event_token: Some(token),
-            socket,
         })
     }
 
@@ -897,7 +870,6 @@ impl Device {
         let device = ReusableDevice {
             leasing_global: self.inner.leasing_global,
             active_clients: self.inner.active_clients,
-            socket: self.socket,
         };
 
         let state = OldDeviceState {

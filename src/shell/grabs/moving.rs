@@ -2,19 +2,14 @@
 
 use crate::{
     backend::render::{
-        BLUR_BORDER_STRENGTH, BLUR_FALLBACK_ALPHA, BLUR_FALLBACK_COLOR, BLUR_TINT_COLOR,
-        BLUR_TINT_STRENGTH, BackdropShader, BlurredBackdropShader, IndicatorShader, Key, Usage,
+        BackdropShader, IndicatorShader, Key, Usage,
         cursor::CursorState,
         element::AsGlowRenderer,
-        get_cached_blur_texture_for_window,
         voice_orb::{VoiceOrbShader, VoiceOrbState},
     },
     shell::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
-        element::{
-            CosmicMappedRenderElement,
-            stack_hover::{StackHover, stack_hover},
-        },
+        element::{CosmicMappedRenderElement, stack_hover::StackHover},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         layout::floating::TiledCorners,
     },
@@ -26,7 +21,6 @@ use crate::{
         },
         protocols::{
             backdrop_color::get_surface_backdrop_color,
-            blur::{get_blur_border, get_blur_saturation, get_blur_tint},
             toplevel_info::{toplevel_enter_output, toplevel_enter_workspace},
         },
     },
@@ -34,13 +28,14 @@ use crate::{
 
 use crate::comp_theme::CompTheme;
 use calloop::LoopHandle;
+use smallvec::SmallVec;
 use smithay::{
     backend::{
         drm::DrmNode,
         input::ButtonState,
         renderer::{
-            ImportAll, ImportMem, Renderer,
-            element::{AsRenderElements, RenderElement, utils::RescaleRenderElement},
+            ImportAll, ImportMem,
+            element::{RenderElement, utils::RescaleRenderElement},
         },
     },
     desktop::{WindowSurfaceType, layer_map_for_output, space::SpaceElement},
@@ -94,7 +89,7 @@ pub struct MoveGrabState {
 
 impl MoveGrabState {
     #[profiling::function]
-    pub fn render<I, R>(
+    pub fn render<R>(
         &self,
         renderer: &mut R,
         output: &Output,
@@ -102,12 +97,11 @@ impl MoveGrabState {
         embedded_children: &[(CosmicMapped, EmbedRenderInfo)],
         attached_orb_state: Option<&VoiceOrbState>,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<I>
-    where
-        R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
+        R: AsGlowRenderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
-        I: From<CosmicMappedRenderElement<R>>,
     {
         let scale = if self.previous == ManagedLayer::Tiling {
             0.6 + ((1.0
@@ -132,7 +126,7 @@ impl MoveGrabState {
             .intersection(window_geo)
             .is_none()
         {
-            return Vec::new();
+            return;
         }
 
         let output_scale: Scale<f64> = output.current_scale().fractional_scale().into();
@@ -142,13 +136,87 @@ impl MoveGrabState {
             + self.window_offset
             - scaling_offset;
 
+        // Embedded children render at the very front (on top of the dragged parent)
+        // and follow the parent's drag position.
+        let parent_geo_size = self.window.geometry().size;
+        for (embedded_elem, embed_info) in embedded_children.iter() {
+            // Calculate actual geometry using anchor config or stored geometry
+            let actual_geometry = if let Some(ref anchor_config) = embed_info.anchor_config {
+                anchor_config.calculate_geometry(parent_geo_size.w, parent_geo_size.h)
+            } else {
+                embed_info.geometry
+            };
+
+            // Embedded window position = parent render location + embed offset
+            let embed_render_location = render_location + actual_geometry.loc;
+
+            let mut lower_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
+            embedded_elem.push_render_elements(
+                renderer,
+                (embed_render_location - embedded_elem.geometry().loc)
+                    .to_physical_precise_round(output_scale),
+                None,
+                output_scale,
+                alpha,
+                None,
+                None,
+                push,
+                &mut |elem| lower_elements.push(elem),
+            );
+            for elem in lower_elements.into_iter() {
+                push(elem);
+            }
+        }
+
+        for (indicator, location) in self.stacking_indicator.iter() {
+            indicator.push_render_elements(
+                renderer,
+                location.to_physical_precise_round(output_scale),
+                output_scale,
+                1.0,
+                &mut |elem| push(elem.into()),
+                None,
+            );
+        }
+
+        // X11 transient children render at fixed offsets from the parent.
+        for (child, offset) in self.transient_children.iter() {
+            let child_render_location = render_location + *offset;
+
+            let mut lower_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
+            child.push_render_elements(
+                renderer,
+                (child_render_location - child.geometry().loc)
+                    .to_physical_precise_round(output_scale),
+                None,
+                output_scale,
+                alpha,
+                Some(false),
+                None,
+                push,
+                &mut |elem| lower_elements.push(elem),
+            );
+            for elem in lower_elements.into_iter() {
+                push(elem);
+            }
+        }
+
+        self.window.push_popup_render_elements::<R>(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            output_scale,
+            alpha,
+            scanout_node,
+            push,
+        );
+
         let active_window_hint = theme.active_window_hint();
         let radius = self
             .element()
             .corner_radius(window_geo.size, self.indicator_thickness);
 
-        let focus_element = if self.indicator_thickness > 0 {
-            Some(CosmicMappedRenderElement::from(
+        if self.indicator_thickness > 0 {
+            push(
                 IndicatorShader::focus_element(
                     renderer,
                     Key::Window(Usage::MoveGrabIndicator, self.window.key()),
@@ -171,11 +239,151 @@ impl MoveGrabState {
                         active_window_hint.green,
                         active_window_hint.blue,
                     ],
-                ),
-            ))
-        } else {
-            None
+                )
+                .into(),
+            )
+        }
+
+        let map_window_element = |elem| match elem {
+            CosmicMappedRenderElement::Stack(stack) => {
+                CosmicMappedRenderElement::GrabbedStack(RescaleRenderElement::from_element(
+                    stack,
+                    render_location
+                        .to_physical_precise_round(output.current_scale().fractional_scale()),
+                    scale,
+                ))
+            }
+            CosmicMappedRenderElement::Window(window) => {
+                CosmicMappedRenderElement::GrabbedWindow(RescaleRenderElement::from_element(
+                    window,
+                    render_location
+                        .to_physical_precise_round(output.current_scale().fractional_scale()),
+                    scale,
+                ))
+            }
+            x => x,
         };
+
+        let mut lower_elements = SmallVec::<[CosmicMappedRenderElement<R>; 4]>::new_const();
+        self.window.push_render_elements(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
+            output_scale,
+            alpha,
+            Some(false),
+            scanout_node,
+            &mut |elem| push(map_window_element(elem)),
+            &mut |elem| lower_elements.push(map_window_element(elem)),
+        );
+        if let Some(shadow_element) = self.window.shadow_render_element(
+            renderer,
+            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
+            None,
+            output_scale,
+            scale,
+            alpha,
+        ) {
+            push(shadow_element);
+        }
+        for elem in lower_elements.into_iter() {
+            push(elem);
+        }
+
+        // Voice orb, if it is attached to the window being dragged.
+        if let Some(orb_state) = attached_orb_state
+            && let Some(attached_surface_id) = orb_state.attached_surface_id_for_render()
+        {
+            let window_surface_id = self
+                .window
+                .active_window()
+                .wl_surface()
+                .map(|s| s.id().to_string());
+
+            if window_surface_id.as_deref() == Some(attached_surface_id) {
+                let output_geo = output.geometry().as_logical();
+
+                // Current (scaled) geometry of the grabbed window
+                let current_window_geo = Rectangle::new(
+                    render_location,
+                    self.window
+                        .geometry()
+                        .size
+                        .to_f64()
+                        .upscale(scale)
+                        .to_i32_round(),
+                );
+
+                // Compute window corner radius from theme: radius_s + 4 for values >= 4
+                let radius_s = theme.radius_s()[0];
+                let window_border_radius = if radius_s < 4.0 {
+                    radius_s
+                } else {
+                    radius_s + 4.0
+                };
+
+                if let Some(orb_element) = VoiceOrbShader::element_with_window_override(
+                    renderer,
+                    orb_state,
+                    output_geo,
+                    Some(current_window_geo),
+                    Some(window_border_radius),
+                ) {
+                    push(orb_element.into());
+                }
+            }
+        }
+
+        // Backdrop color for windows using the backdrop_color protocol.
+        // MERGE: dropped our KDE-blur backdrop (BlurredBackdropShader / cached per-window
+        // blur textures) and the SSD-header blur backdrop here — upstream's frosted-glass
+        // pipeline replaces them. The `!has_blur()` guard went away with them, so the
+        // backdrop color is now applied unconditionally.
+        if let Some(wl_surface) = self.window.active_window().wl_surface()
+            && let Some(color) = get_surface_backdrop_color(&wl_surface)
+        {
+            // Compute window corner radius from theme: radius_s + 4 for values >= 4
+            let radius_s = theme.radius_s()[0];
+            let window_radius = (if radius_s < 4.0 {
+                radius_s
+            } else {
+                radius_s + 4.0
+            })
+            .round() as u8;
+            // MERGE: `CosmicMapped::blur_corner_radius` went away with our blur pipeline;
+            // reorder `corner_radius` (br, tr, bl, tl) into shader order inline instead.
+            let corner_radius = if self.window.is_maximized(false) {
+                [0.0f32; 4]
+            } else {
+                let r = self.window.corner_radius(window_geo.size, window_radius);
+                [
+                    r[3] as f32, // top_left
+                    r[1] as f32, // top_right
+                    r[0] as f32, // bottom_right
+                    r[2] as f32, // bottom_left
+                ]
+            };
+            let scaled_size = self
+                .window
+                .geometry()
+                .size
+                .to_f64()
+                .upscale(scale)
+                .to_i32_round();
+            let backdrop_geometry = Rectangle::new(render_location, scaled_size).as_local();
+
+            push(
+                BackdropShader::element(
+                    renderer,
+                    Key::Window(Usage::Overlay, self.window.key()),
+                    backdrop_geometry,
+                    corner_radius,
+                    alpha * color.alpha_f32(),
+                    color.to_rgb_f32(),
+                )
+                .into(),
+            );
+        }
 
         let non_exclusive_geometry = {
             let layers = layer_map_for_output(output);
@@ -185,416 +393,46 @@ impl MoveGrabState {
         let gaps = (theme.gaps.0 as i32, theme.gaps.1 as i32);
         let thickness = self.indicator_thickness.max(1);
 
-        let snapping_indicator = match &self.snapping_zone {
-            Some(t) if &self.cursor_output == output => {
-                let base_color = theme.neutral_color();
-                let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
-                vec![
-                    CosmicMappedRenderElement::from(IndicatorShader::element(
-                        renderer,
-                        Key::Window(Usage::SnappingIndicator, self.window.key()),
-                        overlay_geometry,
-                        thickness,
-                        [
-                            theme.radius_s()[0] as u8,
-                            theme.radius_s()[1] as u8,
-                            theme.radius_s()[2] as u8,
-                            theme.radius_s()[3] as u8,
-                        ],
-                        1.0,
-                        output_scale.x,
-                        [
-                            active_window_hint.red,
-                            active_window_hint.green,
-                            active_window_hint.blue,
-                        ],
-                    )),
-                    CosmicMappedRenderElement::from(BackdropShader::element(
-                        renderer,
-                        Key::Window(Usage::SnappingIndicator, self.window.key()),
-                        t.overlay_geometry(non_exclusive_geometry, gaps),
-                        theme.radius_s(),
-                        0.4,
-                        [base_color.red, base_color.green, base_color.blue],
-                    )),
-                ]
-            }
-            _ => vec![],
-        };
+        if let Some(t) = &self.snapping_zone
+            && &self.cursor_output == output
+        {
+            let base_color = theme.neutral_color();
+            let overlay_geometry = t.overlay_geometry(non_exclusive_geometry, gaps);
 
-        // Render blur backdrop if the window has blur enabled
-        let blur_backdrop_element: Vec<CosmicMappedRenderElement<R>> = if self.window.has_blur() {
-            let window_geo = self.window.geometry();
-            // Compute window corner radius from theme: radius_s + 4 for values >= 4
-            let radius_s = theme.radius_s()[0];
-            let window_radius = (if radius_s < 4.0 {
-                radius_s
-            } else {
-                radius_s + 4.0
-            })
-            .round() as u8;
-            let corner_radius = self
-                .window
-                .blur_corner_radius(window_geo.size.as_logical(), window_radius);
-
-            let output_name = output.name();
-            let window_key = self.window.key();
-            let output_transform = output.current_transform();
-            let output_scale_f = output.current_scale().fractional_scale();
-
-            // Calculate scaled geometry for the blur backdrop
-            let scaled_size = window_geo.size.to_f64().upscale(scale).to_i32_round();
-            let backdrop_geometry = Rectangle::new(render_location, scaled_size).as_local();
-
-            // Get per-window blur texture
-            let blur_info = get_cached_blur_texture_for_window(&output_name, &window_key);
-
-            if let Some(blur_info) = blur_info {
-                let active = self.window.active_window();
-                let blur_saturation = active
-                    .wl_surface()
-                    .and_then(|s| get_blur_saturation(&s))
-                    .unwrap_or(1.0);
-                let blur_tint = active
-                    .wl_surface()
-                    .and_then(|s| get_blur_tint(&s))
-                    .unwrap_or(BLUR_TINT_STRENGTH);
-                let blur_border = active
-                    .wl_surface()
-                    .and_then(|s| get_blur_border(&s))
-                    .unwrap_or(BLUR_BORDER_STRENGTH);
-                let blur_elem = CosmicMappedRenderElement::from(BlurredBackdropShader::element(
+            push(
+                IndicatorShader::element(
                     renderer,
-                    &blur_info.texture,
-                    backdrop_geometry,
-                    blur_info.size,
-                    blur_info.screen_size,
-                    output_scale_f,
-                    output_transform,
-                    corner_radius,
-                    alpha,
-                    BLUR_TINT_COLOR,
-                    blur_tint,
-                    false, // No blur border for moving windows
-                    blur_saturation,
-                    blur_border,
-                ));
-                vec![blur_elem]
-            } else {
-                // Fallback when no blur texture is cached
-                vec![CosmicMappedRenderElement::from(BackdropShader::element(
-                    renderer,
-                    Key::Window(Usage::Overlay, self.window.key()),
-                    backdrop_geometry,
-                    corner_radius,
-                    alpha * BLUR_FALLBACK_ALPHA,
-                    BLUR_FALLBACK_COLOR,
-                ))]
-            }
-        } else {
-            vec![]
-        };
-
-        // Render backdrop color for windows using the backdrop_color protocol
-        // (only when blur is not already providing a backdrop)
-        let backdrop_color_element: Vec<CosmicMappedRenderElement<R>> = if !self.window.has_blur() {
-            if let Some(wl_surface) = self.window.active_window().wl_surface() {
-                if let Some(color) = get_surface_backdrop_color(&wl_surface) {
-                    let window_geo = self.window.geometry();
-                    let radius_s = theme.radius_s()[0];
-                    let window_radius = (if radius_s < 4.0 {
-                        radius_s
-                    } else {
-                        radius_s + 4.0
-                    })
-                    .round() as u8;
-                    let corner_radius = self
-                        .window
-                        .blur_corner_radius(window_geo.size.as_logical(), window_radius);
-                    let scaled_size = window_geo.size.to_f64().upscale(scale).to_i32_round();
-                    let backdrop_geometry = Rectangle::new(render_location, scaled_size).as_local();
-                    vec![CosmicMappedRenderElement::from(BackdropShader::element(
-                        renderer,
-                        Key::Window(Usage::Overlay, self.window.key()),
-                        backdrop_geometry,
-                        corner_radius,
-                        alpha * color.alpha_f32(),
-                        color.to_rgb_f32(),
-                    ))]
-                } else {
-                    vec![]
-                }
-            } else {
-                vec![]
-            }
-        } else {
-            vec![]
-        };
-
-        // Render blur backdrop for SSD header on windows without full-window blur
-        let ssd_header_blur_element: Vec<CosmicMappedRenderElement<R>> =
-            if !self.window.has_blur() && self.window.has_ssd() && theme.header_backdrop_blur() {
-                let window_geo = self.window.geometry();
-                let header_height = self.window.ssd_height(false).unwrap_or(0);
-                let scaled_size = window_geo.size.to_f64().upscale(scale).to_i32_round();
-                let header_geo = Rectangle::new(
-                    render_location,
-                    Size::from((scaled_size.w, (header_height as f64 * scale) as i32)),
+                    Key::Window(Usage::SnappingIndicator, self.window.key()),
+                    overlay_geometry,
+                    thickness,
+                    [
+                        theme.radius_s()[0] as u8,
+                        theme.radius_s()[1] as u8,
+                        theme.radius_s()[2] as u8,
+                        theme.radius_s()[3] as u8,
+                    ],
+                    1.0,
+                    output_scale.x,
+                    [
+                        active_window_hint.red,
+                        active_window_hint.green,
+                        active_window_hint.blue,
+                    ],
                 )
-                .as_local();
-
-                let radius_s = theme.radius_s()[0];
-                let window_radius = (if radius_s < 4.0 {
-                    radius_s
-                } else {
-                    radius_s + 4.0
-                })
-                .round() as u8;
-                let full_radius = self
-                    .window
-                    .blur_corner_radius(window_geo.size.as_logical(), window_radius);
-                // Shader's rounded_box SDF uses y-up but screen is y-down:
-                // tr uniform (index 1) maps to screen bottom-right,
-                // br uniform (index 2) maps to screen top-right.
-                let ssd_corner_radius = [full_radius[0], 0.0, full_radius[1], 0.0];
-
-                let output_name = output.name();
-                let window_key = self.window.key();
-                let output_transform = output.current_transform();
-                let output_scale_f = output.current_scale().fractional_scale();
-
-                let blur_info = get_cached_blur_texture_for_window(&output_name, &window_key);
-                if let Some(blur_info) = blur_info {
-                    let active = self.window.active_window();
-                    let blur_saturation = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_saturation(&s))
-                        .unwrap_or(1.0);
-                    let blur_tint = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_tint(&s))
-                        .unwrap_or(BLUR_TINT_STRENGTH);
-                    let blur_border = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_border(&s))
-                        .unwrap_or(BLUR_BORDER_STRENGTH);
-                    vec![CosmicMappedRenderElement::from(
-                        BlurredBackdropShader::element(
-                            renderer,
-                            &blur_info.texture,
-                            header_geo,
-                            blur_info.size,
-                            blur_info.screen_size,
-                            output_scale_f,
-                            output_transform,
-                            ssd_corner_radius,
-                            alpha,
-                            BLUR_TINT_COLOR,
-                            blur_tint,
-                            false,
-                            blur_saturation,
-                            blur_border,
-                        ),
-                    )]
-                } else {
-                    vec![CosmicMappedRenderElement::from(BackdropShader::element(
-                        renderer,
-                        Key::Window(Usage::Overlay, self.window.key()),
-                        header_geo,
-                        ssd_corner_radius,
-                        alpha * BLUR_FALLBACK_ALPHA,
-                        BLUR_FALLBACK_COLOR,
-                    ))]
-                }
-            } else {
-                vec![]
-            };
-
-        let w_elements = self
-            .window
-            .render_elements::<R, CosmicMappedRenderElement<R>>(
-                renderer,
-                (render_location - self.window.geometry().loc)
-                    .to_physical_precise_round(output_scale),
-                None,
-                output_scale,
-                alpha,
-                Some(false),
-                scanout_node,
+                .into(),
             );
-        let p_elements = self
-            .window
-            .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
-                renderer,
-                (render_location - self.window.geometry().loc)
-                    .to_physical_precise_round(output_scale),
-                output_scale,
-                alpha,
-                scanout_node,
-            );
-        let shadow_element = self.window.shadow_render_element(
-            renderer,
-            (render_location - self.window.geometry().loc).to_physical_precise_round(output_scale),
-            None,
-            output_scale,
-            scale,
-            alpha,
-        );
-
-        // Render embedded children on top of the parent window
-        // They should follow the dragged parent position
-        let parent_geo_size = self.window.geometry().size;
-        let embedded_elements: Vec<CosmicMappedRenderElement<R>> = embedded_children
-            .iter()
-            .flat_map(|(embedded_elem, embed_info)| {
-                // Calculate actual geometry using anchor config or stored geometry
-                let actual_geometry = if let Some(ref anchor_config) = embed_info.anchor_config {
-                    anchor_config.calculate_geometry(parent_geo_size.w, parent_geo_size.h)
-                } else {
-                    embed_info.geometry
-                };
-
-                // Embedded window position = parent render location + embed offset
-                let embed_render_location = render_location + actual_geometry.loc;
-
-                embedded_elem.render_elements::<R, CosmicMappedRenderElement<R>>(
+            push(
+                BackdropShader::element(
                     renderer,
-                    (embed_render_location - embedded_elem.geometry().loc)
-                        .to_physical_precise_round(output_scale),
-                    None,
-                    output_scale,
-                    alpha,
-                    None,
-                    None,
+                    Key::Window(Usage::SnappingIndicator, self.window.key()),
+                    t.overlay_geometry(non_exclusive_geometry, gaps),
+                    theme.radius_s(),
+                    0.4,
+                    [base_color.red, base_color.green, base_color.blue],
                 )
-            })
-            .collect();
-
-        // Render voice orb if attached to this window
-        let orb_element: Option<CosmicMappedRenderElement<R>> =
-            attached_orb_state.and_then(|orb_state| {
-                // Check if orb is attached to this window
-                if let Some(attached_surface_id) = orb_state.attached_surface_id_for_render() {
-                    let window_surface_id = self
-                        .window
-                        .active_window()
-                        .wl_surface()
-                        .map(|s| s.id().to_string());
-
-                    if window_surface_id.as_deref() == Some(attached_surface_id) {
-                        // Get output geometry for orb rendering
-                        let output_geo = output.geometry().as_logical();
-
-                        // Calculate the current window geometry for the grabbed window
-                        let current_window_geo = Rectangle::new(
-                            render_location,
-                            self.window
-                                .geometry()
-                                .size
-                                .to_f64()
-                                .upscale(scale)
-                                .to_i32_round(),
-                        );
-
-                        // Compute window corner radius from theme: radius_s + 4 for values >= 4
-                        let radius_s = theme.radius_s()[0];
-                        let window_border_radius = if radius_s < 4.0 {
-                            radius_s
-                        } else {
-                            radius_s + 4.0
-                        };
-
-                        // Create the voice orb element with current window geometry
-                        VoiceOrbShader::element_with_window_override(
-                            renderer,
-                            orb_state,
-                            output_geo,
-                            Some(current_window_geo),
-                            Some(window_border_radius),
-                        )
-                        .map(CosmicMappedRenderElement::from)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            });
-
-        // Render X11 transient children at fixed offsets from parent
-        let transient_child_elements: Vec<CosmicMappedRenderElement<R>> = self
-            .transient_children
-            .iter()
-            .flat_map(|(child, offset)| {
-                let child_render_location = render_location + *offset;
-                child.render_elements::<R, CosmicMappedRenderElement<R>>(
-                    renderer,
-                    (child_render_location - child.geometry().loc)
-                        .to_physical_precise_round(output_scale),
-                    None,
-                    output_scale,
-                    alpha,
-                    Some(false),
-                    None,
-                )
-            })
-            .collect();
-
-        // Embedded windows at the front (top z-order), then rest of the elements
-        embedded_elements
-            .into_iter()
-            .chain(
-                self.stacking_indicator
-                    .iter()
-                    .flat_map(|(indicator, location)| {
-                        indicator.render_elements(
-                            renderer,
-                            location.to_physical_precise_round(output_scale),
-                            output_scale,
-                            1.0,
-                        )
-                    })
-                    .chain(transient_child_elements)
-                    .chain(p_elements)
-                    .chain(focus_element)
-                    .chain(
-                        w_elements
-                            .into_iter()
-                            .chain(shadow_element)
-                            .map(|elem| match elem {
-                                CosmicMappedRenderElement::Stack(stack) => {
-                                    CosmicMappedRenderElement::GrabbedStack(
-                                        RescaleRenderElement::from_element(
-                                            stack,
-                                            render_location.to_physical_precise_round(
-                                                output.current_scale().fractional_scale(),
-                                            ),
-                                            scale,
-                                        ),
-                                    )
-                                }
-                                CosmicMappedRenderElement::Window(window) => {
-                                    CosmicMappedRenderElement::GrabbedWindow(
-                                        RescaleRenderElement::from_element(
-                                            window,
-                                            render_location.to_physical_precise_round(
-                                                output.current_scale().fractional_scale(),
-                                            ),
-                                            scale,
-                                        ),
-                                    )
-                                }
-                                x => x,
-                            }),
-                    )
-                    .chain(orb_element)
-                    .chain(blur_backdrop_element.into_iter())
-                    .chain(ssd_header_blur_element.into_iter())
-                    .chain(backdrop_color_element.into_iter())
-                    .chain(snapping_indicator),
+                .into(),
             )
-            .map(I::from)
-            .collect()
+        }
     }
 
     pub fn element(&self) -> CosmicMapped {
@@ -776,7 +614,7 @@ impl MoveGrab {
                         if let Some(indicator) =
                             grab_state.stacking_indicator.as_ref().map(|x| &x.0)
                         {
-                            indicator.output_enter(output, overlap);
+                            indicator.output_enter(output);
                         }
                     }
                 } else if self.window_outputs.remove(output) {
@@ -790,16 +628,14 @@ impl MoveGrab {
             let indicator_location = shell.stacking_indicator(&current_output, self.previous);
             if indicator_location.is_some() != grab_state.stacking_indicator.is_some() {
                 grab_state.stacking_indicator = indicator_location.map(|geo| {
-                    let element = stack_hover(
+                    let size = geo.size.as_logical();
+                    let element = StackHover::new(
                         state.common.event_loop_handle.clone(),
-                        geo.size.as_logical(),
+                        size,
                         state.common.theme.clone(),
                     );
                     for output in &self.window_outputs {
-                        element.output_enter(
-                            output,
-                            Rectangle::from_size(output.geometry().size.as_logical()),
-                        );
+                        element.output_enter(output);
                     }
                     (element, geo.loc.as_logical())
                 });

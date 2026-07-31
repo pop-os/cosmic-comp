@@ -17,6 +17,9 @@ struct AddIndicator<Lower> {
     lower: Lower,
 }
 
+// MERGE: dropped upstream's `Circle` canvas demo + blanket `Decorations` impl. The fork's
+// `Decorations` trait takes `&CompTheme` and returns `CompElement`, and this example is built on
+// `iced_widget` rather than `cosmic::widget`, so upstream's version cannot apply here.
 impl Decorations<CosmicWindowInternal, WindowMessage> for AddIndicator<DefaultWindowDecorations> {
     fn view<'a>(
         &'a self,

@@ -7,6 +7,10 @@ use std::{
 };
 
 use calloop::LoopHandle;
+// MERGE: upstream's import churn here is all libcosmic (`cosmic::widget::…`, `theme::…`,
+// `menu::menu_column::MenuColumn`). This fork does not depend on the libcosmic widget crate —
+// the menu is built from raw iced widgets styled with icetron design tokens — so the icetron
+// imports stay.
 use iced_core::{Alignment, Length, Rectangle as IcedRectangle, alignment::Horizontal};
 use iced_runtime::Task;
 use iced_widget::{self, Column, Row, Space, button, container, svg::Svg};
@@ -18,10 +22,7 @@ use icetron_p::prelude::styled_text;
 use smithay::{
     backend::{
         input::{ButtonState, TouchSlot},
-        renderer::{
-            ImportMem, Renderer,
-            element::{AsRenderElements, memory::MemoryRenderBufferRenderElement},
-        },
+        renderer::ImportMem,
     },
     desktop::space::SpaceElement,
     input::{
@@ -43,13 +44,14 @@ use smithay::{
 };
 
 use crate::{
+    backend::render::element::AsGlowRenderer,
     comp_theme::CompTheme,
     shell::{SeatExt, focus::target::PointerFocusTarget},
     state::State,
     utils::{
         apply::Apply,
         iced::CompElement,
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
     },
 };
@@ -68,29 +70,32 @@ pub struct MenuGrabState {
 pub type SeatMenuGrabState = Mutex<Option<MenuGrabState>>;
 
 impl MenuGrabState {
-    pub fn render<I, R>(&self, renderer: &mut R, output: &Output) -> Vec<I>
-    where
-        R: Renderer + ImportMem,
+    pub fn render<R>(
+        &self,
+        renderer: &mut R,
+        output: &Output,
+        push: &mut dyn FnMut(IcedRenderElement<R>),
+    ) where
+        R: AsGlowRenderer + ImportMem,
         R::TextureId: Send + Clone + 'static,
-        I: From<MemoryRenderBufferRenderElement<R>>,
     {
         let scale = output.current_scale().fractional_scale();
-        self.elements
-            .lock()
-            .unwrap()
-            .iter()
-            .flat_map(|elem| {
-                elem.iced.render_elements(
-                    renderer,
-                    elem.position
-                        .to_local(output)
-                        .as_logical()
-                        .to_physical_precise_round(scale),
-                    scale.into(),
-                    1.0,
-                )
-            })
-            .collect()
+        for elem in self.elements.lock().unwrap().iter() {
+            elem.iced.push_render_elements(
+                renderer,
+                elem.position
+                    .to_local(output)
+                    .as_logical()
+                    .to_physical_precise_round(scale),
+                scale.into(),
+                1.0,
+                elem.iced
+                    .with_theme(|theme| theme.radius_s())
+                    .map(|x| x.round() as u8),
+                push,
+                None,
+            )
+        }
     }
 
     pub fn is_in_screen_space(&self) -> bool {
@@ -283,6 +288,11 @@ impl Program for ContextMenu {
                             let mut elements = grab_state.elements.lock().unwrap();
 
                             let position = elements.last().unwrap().position;
+                            // MERGE: upstream sets `theme.transparent =
+                            // theme.cosmic().frosted_system_interface` here to opt the submenu into
+                            // its frosted-glass backdrop. `CompTheme` has no `transparent` flag —
+                            // the fork's menu surface token is opaque by design — so the theme is
+                            // handed over unchanged.
                             let element = IcedElement::new(
                                 ContextMenu::new(items),
                                 Size::default(),
@@ -303,7 +313,7 @@ impl Program for ContextMenu {
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            bounds.width.ceil() as i32,
+                                            bounds.width.floor() as i32,
                                             bounds.y.ceil() as i32,
                                         )),
                                     min_size.as_global(),
@@ -312,7 +322,7 @@ impl Program for ContextMenu {
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            bounds.width.ceil() as i32,
+                                            bounds.width.floor() as i32,
                                             bounds.y.ceil() as i32 + bounds.height.ceil() as i32
                                                 - min_size.h,
                                         )),
@@ -320,14 +330,15 @@ impl Program for ContextMenu {
                                 ),
                                 // to the left -> down
                                 Rectangle::new(
-                                    position + Point::from((-min_size.w, bounds.y.ceil() as i32)),
+                                    position
+                                        + Point::from((-min_size.w + 1, bounds.y.ceil() as i32)),
                                     min_size.as_global(),
                                 ),
                                 // to the left -> up
                                 Rectangle::new(
                                     position
                                         + Point::from((
-                                            -min_size.w,
+                                            -min_size.w + 1,
                                             bounds.y.ceil() as i32 + bounds.height.ceil() as i32
                                                 - min_size.h,
                                         )),
@@ -417,6 +428,10 @@ impl Program for ContextMenu {
         let padding_outer_v = theme.spacing_1();
         let gap_between_items = theme.ui_gap_3xs();
 
+        // MERGE: upstream switched this to libcosmic's `MenuColumn` + `divider::horizontal::light()`
+        // so its frosted-glass menu background paints behind the items. This fork has no libcosmic
+        // widgets and paints an opaque token-styled surface, so the icetron `Column` + custom
+        // divider are kept.
         Column::with_children(self.items.iter().enumerate().map(|(idx, item)| {
             match item {
                 Item::Separator => {
@@ -492,6 +507,9 @@ impl Program for ContextMenu {
                         } else {
                             Space::new().width(16.0).height(Length::Shrink).into()
                         },
+                        // MERGE: upstream dims the disabled label by halving the alpha of the
+                        // cosmic component palette; the fork bakes that into `content_color`
+                        // (`text_quaternary` when disabled) above.
                         styled_text(title.as_str(), text_style, content_color)
                             .width(mode)
                             .into(),
@@ -499,6 +517,8 @@ impl Program for ContextMenu {
                     ];
                     if let Some(shortcut) = shortcut.as_ref() {
                         components.push(
+                            // MERGE: upstream tints the shortcut with a 0.75-alpha cosmic
+                            // component color; the fork uses the `text_tertiary` token instead.
                             styled_text(shortcut.as_str(), text_style, text_tertiary)
                                 .align_x(Horizontal::Right)
                                 .width(Length::Shrink)
@@ -539,6 +559,9 @@ impl Program for ContextMenu {
         }))
         .spacing(gap_between_items)
         .width(Length::Shrink)
+        // MERGE: upstream repainted this container from the frosted cosmic component palette
+        // (`cosmic.background(frosted_windows)`). The fork keeps its opaque token-styled surface —
+        // `CompTheme` has no frosted/alpha-map concept.
         .apply(container)
         .padding(iced_core::Padding {
             top: padding_outer_v,
@@ -609,7 +632,7 @@ impl PointerGrab<State> for MenuGrab {
                 let mut bbox = elem.iced.bbox();
                 bbox.loc = elem.position.as_logical();
 
-                bbox.contains(event_location.to_i32_round())
+                bbox.contains(event_location.to_i32_floor())
             }) {
                 let element = &mut elements[i];
 
@@ -625,8 +648,11 @@ impl PointerGrab<State> for MenuGrab {
                     PointerTarget::motion(&element.iced, &self.seat, state, &new_event);
                 }
             } else {
-                elements.iter_mut().for_each(|element| {
-                    if element.pointer_entered {
+                elements
+                    .iter_mut()
+                    .filter(|element| element.pointer_entered)
+                    .skip(1)
+                    .for_each(|element| {
                         PointerTarget::leave(
                             &element.iced,
                             &self.seat,
@@ -635,8 +661,7 @@ impl PointerGrab<State> for MenuGrab {
                             event.time,
                         );
                         element.pointer_entered = false;
-                    }
-                })
+                    })
             }
         }
         handle.motion(state, None, event);
@@ -812,7 +837,7 @@ impl TouchGrab<State> for MenuGrab {
                 let mut bbox = elem.iced.bbox();
                 bbox.loc = elem.position.as_logical();
 
-                bbox.contains(event_location.to_i32_round())
+                bbox.contains(event_location.to_i32_floor())
             }) {
                 let element = &mut elements[i];
 

@@ -4,11 +4,8 @@ use super::{
 };
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage,
-        clipped_surface::ClippedSurfaceRenderElement,
-        cursor::CursorState,
-        element::{AsGlowRenderer, FromGlesError},
-        shadow::ShadowShader,
+        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
+        shadow::ShadowShader, wayland::SurfaceRenderElement,
     },
     hooks::{Decorations, HOOKS},
     shell::{
@@ -19,7 +16,7 @@ use crate::{
     },
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
     },
     wayland::handlers::surface_embed::is_surface_embedded,
@@ -43,11 +40,7 @@ use smithay::{
         input::KeyState,
         renderer::{
             ImportAll, ImportMem, Renderer,
-            element::{
-                AsRenderElements, Element, Id as RendererId, Kind, RenderElement,
-                UnderlyingStorage, memory::MemoryRenderBufferRenderElement,
-                surface::WaylandSurfaceRenderElement,
-            },
+            element::{Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage},
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
             utils::{CommitCounter, DamageSet, OpaqueRegions},
@@ -95,6 +88,13 @@ use self::{
 };
 
 static SCROLLABLE_ID: LazyLock<Id> = LazyLock::new(|| Id::new("scrollable"));
+
+/// Blur strength handed to upstream's frosted-glass pipeline for stacked windows.
+///
+/// MERGE: upstream derives this from `cosmic::Theme` (`frosted_windows` + `frosted`).
+/// `CompTheme` carries no such setting, so stacks render unfrosted (matching upstream's
+/// behaviour with `frosted_windows == false`) until a token/config lands for it.
+const FROSTED_BLUR_STRENGTH: usize = 0;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CosmicStack(pub(super) IcedElement<CosmicStackInternal>);
@@ -562,7 +562,7 @@ impl CosmicStack {
             let geo = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry();
 
             if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                let point_i32 = relative_pos.to_i32_round::<i32>();
+                let point_i32 = relative_pos.to_i32_floor::<i32>();
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
@@ -678,35 +678,32 @@ impl CosmicStack {
         self.0.loop_handle()
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push: &mut dyn FnMut(CosmicStackRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicStackRenderElement<R>>,
     {
         let window_loc = location + Point::from((0, (self.tab_height() as f64 * scale.y) as i32));
         self.0.with_program(|p| {
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
 
-            windows[active]
-                .popup_render_elements::<R, CosmicStackRenderElement<R>>(
-                    renderer,
-                    window_loc,
-                    scale,
-                    alpha,
-                    scanout_node,
-                )
-                .into_iter()
-                .map(C::from)
-                .collect()
+            windows[active].push_popup_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_node,
+                FROSTED_BLUR_STRENGTH,
+                &mut |elem| push(elem.into()),
+            )
         })
     }
 
@@ -800,7 +797,7 @@ impl CosmicStack {
         })
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
@@ -809,17 +806,17 @@ impl CosmicStack {
         alpha: f32,
         scanout_override: Option<bool>,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push_above: &mut dyn FnMut(CosmicStackRenderElement<R>),
+        push_below: &mut dyn FnMut(CosmicStackRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicStackRenderElement<R>>,
     {
         if !self
             .0
             .with_program(|p| p.override_alive.load(Ordering::Acquire))
         {
-            return Vec::new();
+            return;
         }
 
         let geometry = self
@@ -828,22 +825,23 @@ impl CosmicStack {
             .to_physical_precise_round(scale);
         let stack_loc = location + geometry.loc;
         let window_loc = location + Point::from((0, (self.tab_height() as f64 * scale.y) as i32));
+        let radii = self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let active = p.active.load(Ordering::SeqCst);
+            let appearance = p.appearance_conf.lock().unwrap();
+            let theme = p.theme.lock().unwrap();
+            let tiled = p.tiled.load(Ordering::Acquire);
+            let maximized = windows[active].is_maximized(false);
+            let round = (appearance.clip_tiled_windows || !tiled) && !maximized;
+            round.then(|| theme.radius_window().map(|x| x.round() as u8))
+        });
 
-        let mut elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
-            &self.0, renderer, stack_loc, scale, alpha,
-        );
-
-        elements.extend(self.0.with_program(|p| {
+        self.0.with_program(|p| {
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
             let theme = p.theme.lock().unwrap();
-            let appearance = p.appearance_conf.lock().unwrap();
-            let tiled = p.tiled.load(Ordering::Acquire);
             let maximized = windows[active].is_maximized(false);
             let is_embedded = is_surface_embedded(&windows[active]);
-
-            let round = (appearance.clip_tiled_windows || !tiled) && !maximized;
-            let radii = round.then(|| theme.radius_window().map(|x| x.round() as u8));
 
             let mut geo = SpaceElement::geometry(&windows[active]).to_f64();
             geo.loc += location.to_f64().to_logical(scale);
@@ -855,54 +853,47 @@ impl CosmicStack {
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.0.0)));
 
-            let border = (!maximized && !is_embedded && !windows[active].has_blur()).then(|| {
+            if !maximized && !is_embedded {
                 let c = theme.window_border_color();
-                let border_color = [c.r, c.g, c.b];
-                let border_thickness = theme.window_border_width() as u8;
-                let border_alpha = c.a;
-                CosmicStackRenderElement::Border(IndicatorShader::focus_element(
-                    renderer,
-                    Key::Window(Usage::Border, window_key.clone()),
-                    geo.to_i32_round().as_local(),
-                    border_thickness,
-                    radii.unwrap_or([0, 0, 0, 0]),
-                    border_alpha * alpha,
-                    scale.x,
-                    border_color,
-                ))
-            });
-
-            border.into_iter().chain(
-                windows[active]
-                    .render_elements::<R, WaylandSurfaceRenderElement<R>>(
+                push_above(CosmicStackRenderElement::Border(
+                    IndicatorShader::focus_element(
                         renderer,
-                        window_loc,
-                        scale,
-                        alpha,
-                        scanout_override,
-                        scanout_node,
-                    )
-                    .into_iter()
-                    .map(move |elem| {
-                        let radii = radii.map(|[a, _, c, _]| [a, 0, c, 0]);
-                        if radii.is_some_and(|radii| {
-                            ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radii)
-                        }) {
-                            CosmicStackRenderElement::Clipped(ClippedSurfaceRenderElement::new(
-                                renderer,
-                                elem,
-                                scale,
-                                geo,
-                                radii.unwrap(),
-                            ))
-                        } else {
-                            CosmicStackRenderElement::Window(elem)
-                        }
-                    }),
-            )
-        }));
+                        Key::Window(Usage::Border, window_key.clone()),
+                        geo.to_i32_round().as_local(),
+                        theme.window_border_width() as u8,
+                        radii.unwrap_or([0; 4]),
+                        c.a * alpha,
+                        scale.x,
+                        [c.r, c.g, c.b],
+                    ),
+                ));
+            };
 
-        elements.into_iter().map(C::from).collect()
+            let radii = radii.map(|[a, _, c, _]| [a, 0, c, 0]);
+            windows[active].push_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_override,
+                scanout_node,
+                radii.is_some(),
+                radii.unwrap_or([0; 4]),
+                FROSTED_BLUR_STRENGTH,
+                &mut |elem| push_above(elem.into()),
+                Some(&mut |elem| push_below(elem.into())),
+            );
+        });
+
+        self.0.push_render_elements(
+            renderer,
+            stack_loc,
+            scale,
+            alpha,
+            radii.map(|[_, b, _, d]| [0, b, 0, d]).unwrap_or([0; 4]),
+            &mut |elem| push_above(elem.into()),
+            Some(&mut |elem| push_below(elem.into())),
+        );
     }
 
     pub(crate) fn set_theme(&self, theme: CompTheme) {
@@ -1066,14 +1057,6 @@ impl CosmicStack {
 
                 corners
             }
-        })
-    }
-
-    /// Check if the active surface in this stack has KDE blur enabled
-    pub fn has_blur(&self) -> bool {
-        self.0.with_program(|p| {
-            let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
-            active_window.has_blur()
         })
     }
 }
@@ -2054,40 +2037,32 @@ impl TouchTarget<State> for CosmicStack {
 }
 
 pub enum CosmicStackRenderElement<R: Renderer + ImportAll + ImportMem> {
-    Header(MemoryRenderBufferRenderElement<R>),
+    Header(IcedRenderElement<R>),
     Shadow(PixelShaderElement),
     Border(PixelShaderElement),
-    Window(WaylandSurfaceRenderElement<R>),
-    Clipped(ClippedSurfaceRenderElement<R>),
+    Window(SurfaceRenderElement<R>),
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R>>
+impl<R: Renderer + ImportAll + ImportMem> From<IcedRenderElement<R>>
     for CosmicStackRenderElement<R>
 {
-    fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
+    fn from(value: IcedRenderElement<R>) -> Self {
         Self::Header(value)
     }
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<WaylandSurfaceRenderElement<R>>
+impl<R: Renderer + ImportAll + ImportMem> From<SurfaceRenderElement<R>>
     for CosmicStackRenderElement<R>
 {
-    fn from(value: WaylandSurfaceRenderElement<R>) -> Self {
+    fn from(value: SurfaceRenderElement<R>) -> Self {
         Self::Window(value)
-    }
-}
-
-impl<R: Renderer + ImportAll + ImportMem> From<ClippedSurfaceRenderElement<R>>
-    for CosmicStackRenderElement<R>
-{
-    fn from(value: ClippedSurfaceRenderElement<R>) -> Self {
-        Self::Clipped(value)
     }
 }
 
 impl<R> Element for CosmicStackRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &RendererId {
         match self {
@@ -2095,7 +2070,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.id(),
             CosmicStackRenderElement::Border(elem) => elem.id(),
             CosmicStackRenderElement::Window(elem) => elem.id(),
-            CosmicStackRenderElement::Clipped(elem) => elem.id(),
         }
     }
 
@@ -2105,7 +2079,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.current_commit(),
             CosmicStackRenderElement::Border(elem) => elem.current_commit(),
             CosmicStackRenderElement::Window(elem) => elem.current_commit(),
-            CosmicStackRenderElement::Clipped(elem) => elem.current_commit(),
         }
     }
 
@@ -2115,7 +2088,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.src(),
             CosmicStackRenderElement::Border(elem) => elem.src(),
             CosmicStackRenderElement::Window(elem) => elem.src(),
-            CosmicStackRenderElement::Clipped(elem) => elem.src(),
         }
     }
 
@@ -2125,7 +2097,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Border(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Window(elem) => elem.geometry(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.geometry(scale),
         }
     }
 
@@ -2135,7 +2106,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.location(scale),
             CosmicStackRenderElement::Border(elem) => elem.location(scale),
             CosmicStackRenderElement::Window(elem) => elem.location(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.location(scale),
         }
     }
 
@@ -2145,7 +2115,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.transform(),
             CosmicStackRenderElement::Border(elem) => elem.transform(),
             CosmicStackRenderElement::Window(elem) => elem.transform(),
-            CosmicStackRenderElement::Clipped(elem) => elem.transform(),
         }
     }
 
@@ -2159,7 +2128,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Border(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Window(elem) => elem.damage_since(scale, commit),
-            CosmicStackRenderElement::Clipped(elem) => elem.damage_since(scale, commit),
         }
     }
 
@@ -2169,7 +2137,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Border(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Window(elem) => elem.opaque_regions(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.opaque_regions(scale),
         }
     }
 
@@ -2179,7 +2146,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.alpha(),
             CosmicStackRenderElement::Border(elem) => elem.alpha(),
             CosmicStackRenderElement::Window(elem) => elem.alpha(),
-            CosmicStackRenderElement::Clipped(elem) => elem.alpha(),
         }
     }
 
@@ -2189,7 +2155,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.kind(),
             CosmicStackRenderElement::Border(elem) => elem.kind(),
             CosmicStackRenderElement::Window(elem) => elem.kind(),
-            CosmicStackRenderElement::Clipped(elem) => elem.kind(),
         }
     }
 
@@ -2199,7 +2164,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Border(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Window(elem) => elem.is_framebuffer_effect(),
-            CosmicStackRenderElement::Clipped(elem) => elem.is_framebuffer_effect(),
         }
     }
 }
@@ -2207,12 +2171,11 @@ where
 impl<R> RenderElement<R> for CosmicStackRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
-    R::Error: FromGlesError,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,
-        frame: &mut <R>::Frame<'_, '_>,
+        frame: &mut R::Frame<'_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -2233,12 +2196,9 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicStackRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions, cache)
-            }
-            CosmicStackRenderElement::Clipped(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
         }
@@ -2251,7 +2211,6 @@ where
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
             CosmicStackRenderElement::Window(elem) => elem.underlying_storage(renderer),
-            CosmicStackRenderElement::Clipped(elem) => elem.underlying_storage(renderer),
         }
     }
 
@@ -2274,12 +2233,9 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicStackRenderElement::Window(elem) => {
-                elem.capture_framebuffer(frame, src, dst, cache)
-            }
-            CosmicStackRenderElement::Clipped(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
         }

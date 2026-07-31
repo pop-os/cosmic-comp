@@ -49,9 +49,9 @@ use smithay::{
         allocator::Fourcc,
         input::{ButtonState, KeyState},
         renderer::{
-            ImportMem, Renderer,
+            ImportMem,
             element::{
-                AsRenderElements, Kind,
+                Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             },
         },
@@ -73,14 +73,31 @@ use smithay::{
     },
     output::Output,
     reexports::calloop::{self, LoopHandle, RegistrationToken, futures::Scheduler},
+    render_elements,
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
         Transform,
     },
 };
 
+// MERGE: upstream also imports `utils::iced::state::State`; the fork replaced that module
+// with `UserInterface` + `Cache` driven directly (iced 0.15, no libcosmic), so it is dropped.
+use crate::backend::render::{
+    element::AsGlowRenderer,
+    wayland::blur_effect::{BlurElement, BlurState},
+};
+
 // --- Theme ---
 pub use crate::comp_theme::CompTheme;
+
+/// Blur strength for the frosted backdrop drawn behind iced-rendered chrome
+/// (SSD headers, stack tabs, indicators, menus).
+///
+/// MERGE: upstream reads this off `cosmic::Theme` — `transparent` gates the pass and
+/// `frosted` picks 1 vs 2. `CompTheme` has neither flag, so the fork gates on the
+/// `header_backdrop_blur()` design token and uses the strong pass, matching
+/// `shell::element::window::WINDOW_BLUR_STRENGTH`.
+const CHROME_BLUR_STRENGTH: usize = 2;
 
 /// Type alias for iced elements rendered in the compositor.
 /// Uses `iced_core::Theme` so standard iced widgets and icetron components
@@ -99,7 +116,7 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElement<P> {
 }
 
 // SAFETY: `IcedElementInternal` is force-`Send` so window decorations can be
-// cached by KMS surface render threads (see `AsRenderElements`). Two of its
+// cached by KMS surface render threads (see `push_render_elements`). Two of its
 // fields are bound to the main event loop and are *not* thread-safe:
 // calloop's `LoopHandle` and `Scheduler` are both `Rc`-based, with `RefCell`
 // interiors, so dereferencing or dropping them off the loop thread races the
@@ -145,7 +162,7 @@ static PENDING_PROGRAM_IDLES: Mutex<Vec<Box<dyn FnOnce(&mut crate::state::State)
 /// [`Program`]s.
 ///
 /// A `Program`'s `update()` runs on the main loop *and* on KMS surface render
-/// threads, because [`IcedElement::render_elements`] drives animation frames
+/// threads, because [`IcedElement::push_render_elements`] drives animation frames
 /// from wherever the surface is being composited. calloop's `LoopHandle` is
 /// `Rc`/`RefCell`-based, so calling `insert_idle` on it from a render thread
 /// borrows a `RefCell` the main loop also borrows while dispatching — the
@@ -266,6 +283,7 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
     pending_realloc: bool,
+    blur: BlurState,
 
     // state
     size: Size<i32, Logical>,
@@ -319,6 +337,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
             pending_realloc: self.pending_realloc,
+            blur: BlurState::default(),
             size: self.size,
             last_seat: self.last_seat.clone(),
             cursor_pos: self.cursor_pos,
@@ -497,6 +516,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             outputs: HashSet::new(),
             buffers: HashMap::new(),
             pending_realloc: false,
+            blur: BlurState::default(),
             size,
             cursor_pos: None,
             last_seat,
@@ -587,6 +607,13 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         self.0.lock().unwrap().update(UpdateSource::Forced);
     }
 
+    /// Read the element's theme. Ported from upstream (which hands out a `cosmic::Theme`)
+    /// onto the fork's [`CompTheme`].
+    pub fn with_theme<R: 'static>(&self, f: impl FnOnce(&CompTheme) -> R) -> R {
+        let guard = self.0.lock().unwrap();
+        f(&guard.theme)
+    }
+
     pub fn set_theme(&self, theme: CompTheme) {
         let mut guard = self.0.lock().unwrap();
         guard.iced_theme = theme.to_iced_theme();
@@ -645,7 +672,7 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
             // `Scheduler::schedule` borrows `active_tasks`, a `RefCell` shared
             // with the executor source running on the event loop — sound only on
             // that thread. `update()` also runs on KMS surface render threads
-            // (see `render_elements`), so refuse rather than race.
+            // (see `push_render_elements`), so refuse rather than race.
             //
             // Unreachable today: every `Program::update` returns `Task::none()`,
             // so `into_stream` yields `None`. This exists so that stops being a
@@ -1312,22 +1339,24 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
 }
 
 // --- Render elements (rasterization via iced_tiny_skia) ---
+//
+// MERGE: upstream replaced the `AsRenderElements` impl with this push-based API so the
+// frosted-glass backdrop can be ordered below the rasterized UI buffer.
 
-impl<P, R> AsRenderElements<R> for IcedElement<P>
-where
-    P: Program + Send + 'static,
-    R: Renderer + ImportMem,
-    R::TextureId: Send + Clone + 'static,
-{
-    type RenderElement = MemoryRenderBufferRenderElement<R>;
-
-    fn render_elements<C: From<Self::RenderElement>>(
+impl<P: Program + Send + 'static> IcedElement<P> {
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         mut scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<C> {
+        mut radii: [u8; 4],
+        push_above: &mut dyn FnMut(IcedRenderElement<R>),
+        push_below: Option<&mut dyn FnMut(IcedRenderElement<R>)>,
+    ) where
+        R: AsGlowRenderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
         let mut internal = self.0.lock().unwrap();
         let internal_ref = &mut *internal;
 
@@ -1498,11 +1527,54 @@ where
                 Kind::Unspecified,
             ) {
                 Ok(buffer) => {
-                    return vec![C::from(buffer)];
+                    push_above(buffer.into());
                 }
                 Err(err) => tracing::warn!("What? {:?}", err),
             }
+
+            // MERGE: upstream gates this on `cosmic::Theme::transparent`, which callers set from
+            // `frosted_windows`/`frosted_system_interface`. `CompTheme` has no such flag, so the
+            // fork gates on the `header_backdrop_blur()` design token instead.
+            if internal_ref.theme.header_backdrop_blur() {
+                for radius in radii.iter_mut() {
+                    *radius = ((*radius as f64) * internal_ref.additional_scale).round() as u8;
+                }
+
+                match BlurElement::from_state(
+                    renderer,
+                    &mut internal_ref.blur,
+                    Rectangle::new(
+                        location
+                            .to_f64()
+                            .to_logical(scale)
+                            .upscale(internal_ref.additional_scale),
+                        internal_ref
+                            .size
+                            .to_f64()
+                            .upscale(internal_ref.additional_scale)
+                            .to_i32_round(),
+                    ),
+                    scale.x,
+                    radii,
+                    CHROME_BLUR_STRENGTH,
+                ) {
+                    Ok(Some(elem)) => {
+                        if let Some(push_below) = push_below {
+                            push_below(elem.into())
+                        } else {
+                            push_above(elem.into())
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => tracing::warn!("Blur elem error: {:?}", err),
+                }
+            }
         }
-        Vec::new()
     }
+}
+
+render_elements! {
+    pub IcedRenderElement<R> where R: ImportMem + AsGlowRenderer, R::TextureId: Send;
+    UI=MemoryRenderBufferRenderElement<R>,
+    Blur=BlurElement,
 }

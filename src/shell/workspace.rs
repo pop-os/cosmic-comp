@@ -1,17 +1,14 @@
+use crate::backend::render::wayland::SurfaceRenderElement;
 use crate::shell::focus::FocusTarget;
 use crate::shell::focus::order::GameModeView;
 use crate::shell::layout::tiling::RestoreTilingState;
 use crate::wayland::handlers::xdg_activation::ActivationContext;
 use crate::{
-    backend::render::{
-        BackdropShader, ElementFilter,
-        element::{AsGlowRenderer, FromGlesError},
-        voice_orb::VoiceOrbState,
-    },
+    backend::render::{BackdropShader, element::AsGlowRenderer, voice_orb::VoiceOrbState},
     shell::{
         OverviewMode, SeatMoveGrabState,
         layout::{
-            floating::{BlurWindowGroup, FloatingLayout, TiledCorners},
+            floating::{FloatingLayout, TiledCorners},
             tiling::TilingLayout,
         },
     },
@@ -33,15 +30,15 @@ use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::Tiling
 use id_tree::Tree;
 use indexmap::IndexSet;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smallvec::SmallVec;
 use smithay::backend::drm::DrmNode;
-use smithay::backend::renderer::element::Kind;
+use smithay::backend::renderer::element::{Kind, NamespacedElement};
 use smithay::output::WeakOutput;
 use smithay::utils::user_data::UserDataMap;
 use smithay::{
     backend::renderer::{
         element::{
-            Element, Id, RenderElement, surface::WaylandSurfaceRenderElement,
-            texture::TextureRenderElement, utils::RescaleRenderElement,
+            Element, Id, RenderElement, texture::TextureRenderElement, utils::RescaleRenderElement,
         },
         gles::GlesTexture,
         glow::GlowRenderer,
@@ -267,14 +264,20 @@ pub enum FullscreenRestoreState {
     Tiling {
         workspace: WorkspaceHandle,
         state: TilingRestoreData,
+        was_stack: bool,
     },
     Floating {
         workspace: WorkspaceHandle,
         state: FloatingRestoreData,
+        was_stack: bool,
     },
     Sticky {
         output: WeakOutput,
         state: FloatingRestoreData,
+        was_stack: bool,
+    },
+    Stack {
+        state: StackRestoreData,
     },
 }
 
@@ -284,6 +287,18 @@ impl FullscreenRestoreState {
             FullscreenRestoreState::Floating { state, .. }
             | FullscreenRestoreState::Sticky { state, .. } => state.was_maximized,
             FullscreenRestoreState::Tiling { state, .. } => state.was_maximized,
+            FullscreenRestoreState::Stack { .. } => false,
+        }
+    }
+
+    // Surface was previously a single-window stack
+    pub fn was_stack(&self) -> bool {
+        match self {
+            FullscreenRestoreState::Floating { was_stack, .. }
+            | FullscreenRestoreState::Sticky { was_stack, .. } => *was_stack,
+            FullscreenRestoreState::Tiling { was_stack, .. } => *was_stack,
+            // Stack wasn't removed; surface was removed from the stack
+            FullscreenRestoreState::Stack { .. } => false,
         }
     }
 }
@@ -291,18 +306,9 @@ impl FullscreenRestoreState {
 #[derive(Debug, Clone)]
 pub enum WorkspaceRestoreData {
     Fullscreen(Option<FullscreenRestoreData>),
-    Tiling(Option<TilingRestoreData>),
-    Floating(Option<FloatingRestoreData>),
-}
-
-impl From<ManagedLayer> for WorkspaceRestoreData {
-    fn from(value: ManagedLayer) -> Self {
-        match value {
-            ManagedLayer::Floating | ManagedLayer::Sticky => WorkspaceRestoreData::Floating(None),
-            ManagedLayer::Tiling => WorkspaceRestoreData::Tiling(None),
-            ManagedLayer::Fullscreen => WorkspaceRestoreData::Fullscreen(None),
-        }
-    }
+    Tiling(TilingRestoreData),
+    Floating(FloatingRestoreData),
+    Stack(StackRestoreData),
 }
 
 #[derive(Debug, Clone)]
@@ -332,6 +338,12 @@ impl FloatingRestoreData {
 pub struct TilingRestoreData {
     pub state: Option<RestoreTilingState>,
     pub was_maximized: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackRestoreData {
+    pub stack: CosmicMappedKey,
+    pub idx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -478,119 +490,6 @@ impl Workspace {
 
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
-    }
-
-    /// Check if this workspace has any windows with blur enabled
-    pub fn has_blur_windows(&self, ssd_blur: bool) -> bool {
-        let floating_has_blur = self.floating_layer.has_blur_windows();
-        let floating_has_ssd = ssd_blur && self.floating_layer.has_ssd_windows();
-        let tiling_has_blur = self.tiling_layer.mapped().any(|(m, _)| m.has_blur());
-        let tiling_has_ssd = ssd_blur && self.tiling_layer.mapped().any(|(m, _)| m.has_ssd());
-        let result = floating_has_blur || tiling_has_blur || floating_has_ssd || tiling_has_ssd;
-
-        if result {
-            tracing::trace!(
-                floating_has_blur,
-                tiling_has_blur,
-                floating_has_ssd,
-                tiling_has_ssd,
-                "Workspace has blur windows"
-            );
-        }
-
-        result
-    }
-
-    /// SSD-only subset of [`Self::has_blur_windows`]: server-side-decorated windows
-    /// with header-bar blur but no client blur, whose header backdrop lives in the
-    /// primary FB and so must be kept off overlay planes.
-    pub fn has_ssd_blur_windows(&self, ssd_blur: bool) -> bool {
-        ssd_blur
-            && (self.floating_layer.has_ssd_windows()
-                || self
-                    .tiling_layer
-                    .mapped()
-                    .any(|(m, _)| m.has_ssd() && !m.has_blur()))
-    }
-
-    /// Get blur windows in Z-order (bottom to top) with their keys
-    /// Returns (window_key, geometry, alpha, global_z_index) tuples
-    /// global_z_index is the position among ALL windows (not just blur windows)
-    /// Tiled windows are below floating windows in Z-order
-    pub fn blur_windows_ordered(
-        &self,
-        alpha: f32,
-    ) -> Vec<(CosmicMappedKey, Rectangle<i32, Local>, f32, usize)> {
-        let mut result = Vec::new();
-        let tiled_count = self.tiling_layer.mapped().count();
-
-        // Tiled windows come first (below floating windows)
-        for (idx, (mapped, geo)) in self.tiling_layer.mapped().enumerate() {
-            if mapped.has_blur() || mapped.has_ssd() {
-                result.push((mapped.key(), geo, alpha, idx));
-            }
-        }
-
-        // Floating windows on top - their z-index is offset by tiled window count
-        for (key, geo, elem_alpha, local_z) in self.floating_layer.blur_windows_ordered(alpha) {
-            result.push((key, geo, elem_alpha, tiled_count + local_z));
-        }
-
-        result
-    }
-
-    /// Get blur windows grouped by shared capture requirements.
-    /// Consecutive blur windows (no non-blur windows between them) share a capture.
-    /// This optimizes rendering by reducing the number of scene captures needed.
-    ///
-    /// For now, this only returns floating layer groups since tiling layer
-    /// windows are typically all below floating windows. This can be extended
-    /// to merge groups across layers if needed.
-    pub fn blur_windows_grouped(&self, alpha: f32) -> Vec<BlurWindowGroup> {
-        let tiled_count = self.tiling_layer.mapped().count();
-
-        // Get floating layer groups and offset their z-indices
-        let mut groups = self.floating_layer.blur_windows_grouped(alpha);
-
-        // Offset all z-indices by tiled window count
-        for group in &mut groups {
-            group.capture_z_threshold += tiled_count;
-            for (_, _, _, z_idx) in &mut group.windows {
-                *z_idx += tiled_count;
-            }
-        }
-
-        // If there are tiled blur windows, we'd need to handle them here
-        // For now, assume tiled windows don't have blur or are at the bottom
-        // and floating windows form their own groups
-
-        groups
-    }
-
-    /// Get blur window geometries from this workspace
-    /// Returns (geometry, alpha) tuples for all blur windows
-    pub fn blur_window_geometries(
-        &self,
-        alpha: f32,
-        ssd_blur: bool,
-    ) -> Vec<(Rectangle<i32, Local>, f32)> {
-        let mut geometries = self.floating_layer.blur_window_geometries(alpha, ssd_blur);
-
-        // Add tiling layer blur windows
-        for (mapped, geo) in self.tiling_layer.mapped() {
-            if mapped.has_blur() {
-                geometries.push((geo, alpha));
-            } else if ssd_blur && mapped.has_ssd() {
-                // Add SSD header blur for tiled windows without full-window blur
-                let header_geo = Rectangle::new(
-                    geo.loc,
-                    Size::from((geo.size.w, mapped.ssd_height(false).unwrap_or(0))),
-                );
-                geometries.push((header_geo, alpha));
-            }
-        }
-
-        geometries
     }
 
     fn has_activation_token(&self, xdg_activation_state: &XdgActivationState) -> bool {
@@ -768,32 +667,30 @@ impl Workspace {
             mapped.set_minimized(false);
             return Some(match state {
                 MinimizedWindow::Floating { previous, .. } => {
-                    WorkspaceRestoreData::Floating(Some(previous))
+                    WorkspaceRestoreData::Floating(previous)
                 }
-                MinimizedWindow::Tiling { previous, .. } => {
-                    WorkspaceRestoreData::Tiling(Some(previous))
-                }
+                MinimizedWindow::Tiling { previous, .. } => WorkspaceRestoreData::Tiling(previous),
                 MinimizedWindow::Fullscreen { .. } => unreachable!(),
             });
         }
 
         if let Ok(state) = self.tiling_layer.unmap(mapped, None) {
-            return Some(WorkspaceRestoreData::Tiling(Some(TilingRestoreData {
+            return Some(WorkspaceRestoreData::Tiling(TilingRestoreData {
                 state,
                 was_maximized: was_maximized.is_some(),
-            })));
+            }));
         }
 
         let was_snapped = *mapped.floating_tiled.lock().unwrap();
         // unmaximize_request might have triggered a `floating_layer.refresh()`,
         // which may have already removed a non-alive surface.
         if let Some(floating_geometry) = self.floating_layer.unmap(mapped, None).or(was_maximized) {
-            return Some(WorkspaceRestoreData::Floating(Some(FloatingRestoreData {
+            return Some(WorkspaceRestoreData::Floating(FloatingRestoreData {
                 geometry: floating_geometry,
                 output_size: self.output.geometry().size.as_logical(),
                 was_maximized: was_maximized.is_some(),
                 was_snapped,
-            })));
+            }));
         };
 
         None
@@ -839,19 +736,17 @@ impl Workspace {
         }
 
         let mapped = self.element_for_surface(surface)?;
-        let maybe_stack = mapped.stack_ref().filter(|s| s.len() > 1);
-        if let Some(stack) = maybe_stack
+        if let Some(stack) = mapped.stack_ref()
             && stack.len() > 1
         {
-            let idx = stack.surfaces().position(|s| &s == surface);
-            let layer = if self.is_tiled(surface) {
-                ManagedLayer::Tiling
-            } else {
-                ManagedLayer::Floating
-            };
-            return idx
-                .and_then(|idx| stack.remove_idx(idx))
-                .map(|s| (s, layer.into()));
+            let idx = stack.surfaces().position(|s| &s == surface)?;
+            return Some((
+                stack.remove_idx(idx)?,
+                WorkspaceRestoreData::Stack(StackRestoreData {
+                    stack: mapped.key(),
+                    idx,
+                }),
+            ));
         }
 
         // we know mapped is no stack with more than one element now,
@@ -905,7 +800,7 @@ impl Workspace {
         location: Point<f64, Global>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        if !self.output.geometry().contains(location.to_i32_round()) {
+        if !self.output.geometry().contains(location.to_i32_floor()) {
             return None;
         }
         let location = location.to_local(&self.output);
@@ -954,7 +849,7 @@ impl Workspace {
         location: Point<f64, Global>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        if !self.output.geometry().contains(location.to_i32_round()) {
+        if !self.output.geometry().contains(location.to_i32_floor()) {
             return None;
         }
         let location = location.to_local(&self.output);
@@ -1004,7 +899,7 @@ impl Workspace {
         overview: OverviewMode,
         seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
-        if !self.output.geometry().contains(location.to_i32_round()) {
+        if !self.output.geometry().contains(location.to_i32_floor()) {
             return None;
         }
         let location = location.to_local(&self.output);
@@ -1054,7 +949,7 @@ impl Workspace {
         overview: OverviewMode,
         seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
-        if !self.output.geometry().contains(location.to_i32_round()) {
+        if !self.output.geometry().contains(location.to_i32_floor()) {
             return None;
         }
         let location = location.to_local(&self.output);
@@ -2029,13 +1924,12 @@ impl Workspace {
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         theme: &CompTheme,
-        element_filter: ElementFilter,
         window_alpha: f32,
         attached_orb_state: Option<&VoiceOrbState>,
         scanout_node: Option<DrmNode>,
         game_mode_only: Option<GameModeView<'_>>,
-    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
-    where
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -2043,118 +1937,149 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = Vec::default();
-
         let output_scale = self.output.current_scale().fractional_scale();
         let zone = {
             let layer_map = layer_map_for_output(&self.output);
             layer_map.non_exclusive_zone().as_local()
         };
         let focused = self.focus_stack.get(last_active_seat).last().cloned();
+        let fullscreen_focused = matches!(focused, Some(FocusTarget::Fullscreen(_)));
 
-        let render_fullscreen = |fullscreen: &FullscreenSurface,
-                                 renderer: &mut R,
-                                 output_scale: f64|
-         -> Vec<WorkspaceRenderElement<R>> {
-            let fullscreen_geo = self.fullscreen_geometry_for(fullscreen);
-            let previous_geo = fullscreen
-                .previous_geometry
-                .as_ref()
-                .unwrap_or(&fullscreen_geo);
+        // MERGE: upstream's `render_fullscreen` pushes straight through `push` when the
+        // fullscreen is focused and only buffers otherwise. We always buffer, because the
+        // strict game-mode path below has to emit the game *underneath* its own children
+        // before returning early; the buffer is flushed at the equivalent points.
+        let mut fullscreen_elements = SmallVec::<[WorkspaceRenderElement<R>; 2]>::new_const();
+        {
+            let mut render_fullscreen =
+                |fullscreen: &FullscreenSurface, renderer: &mut R, output_scale: f64| {
+                    let fullscreen_geo = self.fullscreen_geometry_for(fullscreen);
+                    let previous_geo = fullscreen
+                        .previous_geometry
+                        .as_ref()
+                        .unwrap_or(&fullscreen_geo);
 
-            let (target_geo, fullscreen_alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
-                (Some(started), _) => {
-                    let duration = Instant::now().duration_since(started).as_secs_f64()
-                        / self.tiling_layer.theme.motion.fullscreen.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(*previous_geo),
-                            EaseRectangle(fullscreen_geo),
-                            duration,
-                        )
-                        .0,
-                        ease(EaseInOutCubic, 0.0, 1.0, duration) * window_alpha,
-                    )
-                }
-                (_, Some(ended)) => {
-                    let duration = Instant::now().duration_since(ended).as_secs_f64()
-                        / self.tiling_layer.theme.motion.fullscreen.as_secs_f64();
-                    (
-                        ease(
-                            EaseInOutCubic,
-                            EaseRectangle(fullscreen_geo),
-                            EaseRectangle(*previous_geo),
-                            duration,
-                        )
-                        .0,
-                        ease(EaseInOutCubic, 1.0, 0.0, duration) * window_alpha,
-                    )
-                }
-                (None, None) => (fullscreen_geo, 1.0 * window_alpha),
-            };
+                    let (target_geo, fullscreen_alpha) =
+                        match (fullscreen.start_at, fullscreen.ended_at) {
+                            (Some(started), _) => {
+                                let duration = Instant::now().duration_since(started).as_secs_f64()
+                                    / self.tiling_layer.theme.motion.fullscreen.as_secs_f64();
+                                (
+                                    ease(
+                                        EaseInOutCubic,
+                                        EaseRectangle(*previous_geo),
+                                        EaseRectangle(fullscreen_geo),
+                                        duration,
+                                    )
+                                    .0,
+                                    ease(EaseInOutCubic, 0.0, 1.0, duration) * window_alpha,
+                                )
+                            }
+                            (_, Some(ended)) => {
+                                let duration = Instant::now().duration_since(ended).as_secs_f64()
+                                    / self.tiling_layer.theme.motion.fullscreen.as_secs_f64();
+                                (
+                                    ease(
+                                        EaseInOutCubic,
+                                        EaseRectangle(fullscreen_geo),
+                                        EaseRectangle(*previous_geo),
+                                        duration,
+                                    )
+                                    .0,
+                                    ease(EaseInOutCubic, 1.0, 0.0, duration) * window_alpha,
+                                )
+                            }
+                            (None, None) => (fullscreen_geo, 1.0 * window_alpha),
+                        };
 
-            let render_loc = target_geo
-                .loc
-                .as_logical()
-                .to_physical_precise_round(output_scale);
+                    let render_loc = target_geo
+                        .loc
+                        .as_logical()
+                        .to_physical_precise_round(output_scale);
 
-            // Wrap in a RescaleRenderElement when animating (entrance/exit), or
-            // when a `scale_to` upscale is requested (fill). The
-            // wrapper forwards src/kind/underlying_storage, so smithay can still
-            // hand it to a DRM plane's HARDWARE scaler (no GLES composition) —
-            // and if the plane rejects the scale, the KMS thread latches
-            // `game_mode_scale_rejected` and game mode clears `scale_to`, so a
-            // settled game with no scale request is left UNWRAPPED (direct scanout,
-            // never composited-to-black for scanout-only Proton/Vulkan buffers).
-            let scaling = fullscreen.scale_to.is_some();
-            let animation_rescale = |elem| {
-                // Upscale source: the committed BUFFER (bbox) for a fill, or the
-                // window geometry for the entrance/exit animation.
-                let src = if scaling {
-                    fullscreen.surface.bbox().size
-                } else {
-                    fullscreen.surface.0.geometry().size
-                };
-                if (fullscreen.is_animating() || scaling) && src.w > 0 && src.h > 0 {
-                    let scale = Scale {
-                        x: target_geo.size.w as f64 / src.w as f64,
-                        y: target_geo.size.h as f64 / src.h as f64,
+                    // Wrap in a RescaleRenderElement when animating (entrance/exit), or
+                    // when a `scale_to` upscale is requested (fill). The
+                    // wrapper forwards src/kind/underlying_storage, so smithay can still
+                    // hand it to a DRM plane's HARDWARE scaler (no GLES composition) —
+                    // and if the plane rejects the scale, the KMS thread latches
+                    // `game_mode_scale_rejected` and game mode clears `scale_to`, so a
+                    // settled game with no scale request is left UNWRAPPED (direct scanout,
+                    // never composited-to-black for scanout-only Proton/Vulkan buffers).
+                    let scaling = fullscreen.scale_to.is_some();
+                    let animation_rescale = |elem| {
+                        // Upscale source: the committed BUFFER (bbox) for a fill, or the
+                        // window geometry for the entrance/exit animation.
+                        let src = if scaling {
+                            fullscreen.surface.bbox().size
+                        } else {
+                            fullscreen.surface.0.geometry().size
+                        };
+                        if (fullscreen.is_animating() || scaling) && src.w > 0 && src.h > 0 {
+                            let scale = Scale {
+                                x: target_geo.size.w as f64 / src.w as f64,
+                                y: target_geo.size.h as f64 / src.h as f64,
+                            };
+
+                            RescaleRenderElement::from_element(elem, render_loc, scale).into()
+                        } else {
+                            Into::<WorkspaceRenderElement<_>>::into(elem)
+                        }
                     };
 
-                    RescaleRenderElement::from_element(elem, render_loc, scale).into()
-                } else {
-                    Into::<WorkspaceRenderElement<_>>::into(elem)
+                    let mut fullscreen_push = |elem: SurfaceRenderElement<R>| {
+                        fullscreen_elements.push(animation_rescale(elem.into()))
+                    };
+                    fullscreen.surface.push_render_elements(
+                        renderer,
+                        render_loc,
+                        output_scale.into(),
+                        fullscreen_alpha,
+                        Some(true),
+                        scanout_node,
+                        false,
+                        [0, 0, 0, 0],
+                        0,
+                        &mut fullscreen_push,
+                        None,
+                    );
+                };
+
+            // Strict game-mode fullscreen control: on the game-mode output this
+            // workspace renders ONLY the compositor-controlled surface. A window that
+            // raw-fullscreens itself (a Proton game before playserve tags it and game
+            // mode adopts it) is in `fullscreen_surfaces` and would otherwise become the
+            // top fullscreen and render — instead it stays completely invisible until it
+            // becomes the controlled `game_surface`, at which point it renders (and its
+            // entrance animation fades it in) like any adopted game. The game-mode
+            // overlay (QAM/launcher) is a separate stage, so it still composites on top.
+            if let Some(view) = game_mode_only {
+                if let Some(fs) = self
+                    .fullscreen_surfaces
+                    .iter()
+                    .find(|f| &f.surface == view.base)
+                {
+                    render_fullscreen(fs, renderer, output_scale);
                 }
-            };
+            } else {
+                let top_fullscreen = self.get_fullscreen(last_active_seat);
 
-            fullscreen
-                .surface
-                .render_elements::<R, CosmicWindowRenderElement<R>>(
-                    renderer,
-                    render_loc,
-                    output_scale.into(),
-                    fullscreen_alpha,
-                    Some(true),
-                    scanout_node,
-                )
-                .into_iter()
-                .map(animation_rescale)
-                .collect::<Vec<_>>()
-        };
+                if let Some(fs) = top_fullscreen {
+                    render_fullscreen(fs, renderer, output_scale)
+                }
+                // Also render any animating (entering/exiting) fullscreens
+                for fs in self.fullscreen_surfaces.iter().filter(|f| f.is_animating()) {
+                    if top_fullscreen.is_none_or(|top| top.surface != fs.surface) {
+                        render_fullscreen(fs, renderer, output_scale);
+                    };
+                }
+            }
+        }
 
-        // Strict game-mode fullscreen control: on the game-mode output this
-        // workspace renders ONLY the compositor-controlled surface. A window that
-        // raw-fullscreens itself (a Proton game before playserve tags it and game
-        // mode adopts it) is in `fullscreen_surfaces` and would otherwise become the
-        // top fullscreen and render — instead it stays completely invisible until it
-        // becomes the controlled `game_surface`, at which point it renders (and its
-        // entrance animation fades it in) like any adopted game. The game-mode
-        // overlay (QAM/launcher) is a separate stage, so it still composites on top.
         if let Some(view) = game_mode_only {
             // The game's OWN children (dialogs, EULA/launcher windows, in-prefix
             // login/browser windows) stack ABOVE it. Elements are front-to-back, so
             // children are emitted first, topmost last-in-the-set first.
+            let mut lower_elements = Vec::new();
             for child in view.children.iter() {
                 let Some(mapped) = self
                     .mapped()
@@ -2166,55 +2091,42 @@ impl Workspace {
                     continue;
                 };
                 let render_location = geometry.loc - mapped.geometry().loc.as_local();
-                elements.extend(
-                    mapped
-                        .render_elements::<R, CosmicMappedRenderElement<R>>(
-                            renderer,
-                            render_location
-                                .as_logical()
-                                .to_physical_precise_round(output_scale),
-                            None,
-                            output_scale.into(),
-                            window_alpha,
-                            None,
-                            scanout_node,
-                        )
-                        .into_iter()
-                        .map(WorkspaceRenderElement::from),
+                mapped.push_render_elements(
+                    renderer,
+                    render_location
+                        .as_logical()
+                        .to_physical_precise_round(output_scale),
+                    None,
+                    output_scale.into(),
+                    window_alpha,
+                    None,
+                    scanout_node,
+                    &mut |elem| push(WorkspaceRenderElement::from(elem)),
+                    &mut |elem| lower_elements.push(WorkspaceRenderElement::from(elem)),
                 );
+                for elem in lower_elements.drain(..) {
+                    push(elem);
+                }
             }
-            if let Some(fs) = self
-                .fullscreen_surfaces
-                .iter()
-                .find(|f| &f.surface == view.base)
-            {
-                elements.extend(render_fullscreen(fs, renderer, output_scale));
+
+            // ...and the controlled game itself goes underneath them.
+            for elem in fullscreen_elements {
+                push(elem);
             }
-            return Ok(elements);
+            return;
         }
 
-        let top_fullscreen = self.get_fullscreen(last_active_seat);
-
-        let mut fullscreen_elements: Vec<WorkspaceRenderElement<R>> = Vec::new();
-        if let Some(fs) = top_fullscreen {
-            fullscreen_elements.extend(render_fullscreen(fs, renderer, output_scale));
-        }
-        // Also render any animating (entering/exiting) fullscreens
-        for fs in self.fullscreen_surfaces.iter().filter(|f| f.is_animating()) {
-            if top_fullscreen.is_none_or(|top| top.surface != fs.surface) {
-                fullscreen_elements.extend(render_fullscreen(fs, renderer, output_scale));
-            };
-        }
-
-        if matches!(focused, Some(FocusTarget::Fullscreen(_))) {
-            elements.append(&mut fullscreen_elements);
+        if fullscreen_focused {
+            for elem in fullscreen_elements.drain(..) {
+                push(elem);
+            }
         }
 
         let any_fullscreen_animating = self
             .fullscreen_surfaces
             .iter()
             .any(|f| f.start_at.is_some() || f.ended_at.is_some());
-        if !matches!(focused, Some(FocusTarget::Fullscreen(_)))
+        if !fullscreen_focused
             || any_fullscreen_animating
             || self
                 .fullscreen_surfaces
@@ -2242,31 +2154,25 @@ impl Workspace {
                 OverviewMode::None => 1.0,
             } * window_alpha;
 
-            elements.extend(
-                self.floating_layer
-                    .render::<R>(
-                        renderer,
-                        render_focus
-                            .then(|| {
-                                focused.as_ref().and_then(|target| {
-                                    if let FocusTarget::Window(mapped) = target {
-                                        Some(mapped)
-                                    } else {
-                                        None
-                                    }
-                                })
-                            })
-                            .flatten(),
-                        resize_indicator.clone(),
-                        indicator_thickness,
-                        floating_alpha,
-                        theme,
-                        element_filter.clone(),
-                        attached_orb_state,
-                        scanout_node,
-                    )
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+            // MERGE: dropped our `element_filter` argument — every remaining consumer of it
+            // in the floating layer was blur capture, which upstream's frosted-glass
+            // implementation replaces.
+            self.floating_layer.render(
+                renderer,
+                focused.as_ref().and_then(|target| {
+                    if let FocusTarget::Window(mapped) = target {
+                        Some(mapped)
+                    } else {
+                        None
+                    }
+                }),
+                resize_indicator.clone(),
+                indicator_thickness,
+                floating_alpha,
+                theme,
+                attached_orb_state,
+                scanout_node,
+                &mut |elem| push(elem.into()),
             );
 
             let alpha = match &overview.0 {
@@ -2283,24 +2189,31 @@ impl Workspace {
             };
 
             //tiling surfaces
-            elements.extend(
-                self.tiling_layer
-                    .render::<R>(
-                        renderer,
-                        render_focus.then_some(last_active_seat),
-                        zone,
-                        overview,
-                        resize_indicator,
-                        indicator_thickness,
-                        theme,
-                        scanout_node,
-                    )?
-                    .into_iter()
-                    .map(WorkspaceRenderElement::from),
+            self.tiling_layer.render(
+                renderer,
+                render_focus.then_some(last_active_seat),
+                render_focus
+                    .then(|| {
+                        focused.as_ref().and_then(|target| {
+                            if let FocusTarget::Window(mapped) = target {
+                                Some(mapped)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .flatten(),
+                zone,
+                overview,
+                resize_indicator,
+                indicator_thickness,
+                theme,
+                scanout_node,
+                &mut |elem| push(elem.into()),
             );
 
             if let Some(alpha) = alpha {
-                elements.push(
+                push(
                     Into::<CosmicMappedRenderElement<R>>::into(BackdropShader::element(
                         renderer,
                         self.backdrop_id.clone(),
@@ -2314,11 +2227,9 @@ impl Workspace {
             }
         }
 
-        if !matches!(focused, Some(FocusTarget::Fullscreen(_))) {
-            elements.extend(fullscreen_elements.into_iter());
+        for elem in fullscreen_elements {
+            push(elem);
         }
-
-        Ok(elements)
     }
 
     #[profiling::function]
@@ -2331,8 +2242,8 @@ impl Workspace {
         theme: &CompTheme,
         scanout_node: Option<DrmNode>,
         game_mode_only: Option<GameModeView<'_>>,
-    ) -> Result<Vec<WorkspaceRenderElement<R>>, OutputNotMapped>
-    where
+        push: &mut dyn FnMut(WorkspaceRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -2340,8 +2251,6 @@ impl Workspace {
         CosmicStackRenderElement<R>: RenderElement<R>,
         WorkspaceRenderElement<R>: RenderElement<R>,
     {
-        let mut elements = Vec::default();
-
         let output_scale = self.output.current_scale().fractional_scale();
         let zone = {
             let layer_map = layer_map_for_output(&self.output);
@@ -2406,18 +2315,14 @@ impl Workspace {
                 .as_logical()
                 .to_physical_precise_round(output_scale);
 
-            elements.extend(
-                fullscreen
-                    .surface
-                    .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
-                        renderer,
-                        render_loc,
-                        output_scale.into(),
-                        alpha,
-                        scanout_node,
-                    )
-                    .into_iter()
-                    .map(Into::into),
+            fullscreen.surface.push_popup_render_elements(
+                renderer,
+                render_loc,
+                output_scale.into(),
+                alpha,
+                scanout_node,
+                0,
+                &mut |elem| push(WorkspaceRenderElement::FullscreenPopup(elem.into())),
             );
         }
 
@@ -2470,47 +2375,33 @@ impl Workspace {
                         continue;
                     };
                     let render_location = geometry.loc - mapped.geometry().loc.as_local();
-                    elements.extend(
-                        mapped
-                            .popup_render_elements::<R, CosmicMappedRenderElement<R>>(
-                                renderer,
-                                render_location
-                                    .as_logical()
-                                    .to_physical_precise_round(output_scale),
-                                output_scale.into(),
-                                alpha,
-                                scanout_node,
-                            )
-                            .into_iter()
-                            .map(WorkspaceRenderElement::from),
+                    mapped.push_popup_render_elements(
+                        renderer,
+                        render_location
+                            .as_logical()
+                            .to_physical_precise_round(output_scale),
+                        output_scale.into(),
+                        alpha,
+                        scanout_node,
+                        &mut |elem| push(WorkspaceRenderElement::from(elem)),
                     );
                 }
             } else {
-                elements.extend(
-                    self.floating_layer
-                        .render_popups::<R>(renderer, alpha, scanout_node)
-                        .into_iter()
-                        .map(WorkspaceRenderElement::from),
-                );
+                self.floating_layer
+                    .render_popups(renderer, alpha, scanout_node, &mut |elem| push(elem.into()));
 
                 //tiling surfaces
-                elements.extend(
-                    self.tiling_layer
-                        .render_popups::<R>(
-                            renderer,
-                            render_focus.then_some(last_active_seat),
-                            zone,
-                            overview,
-                            theme,
-                            scanout_node,
-                        )?
-                        .into_iter()
-                        .map(WorkspaceRenderElement::from),
+                self.tiling_layer.render_popups(
+                    renderer,
+                    render_focus.then_some(last_active_seat),
+                    zone,
+                    overview,
+                    theme,
+                    scanout_node,
+                    &mut |elem| push(elem.into()),
                 );
             }
         }
-
-        Ok(elements)
     }
 }
 
@@ -2529,9 +2420,10 @@ pub struct OutputNotMapped;
 pub enum WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
-    OverrideRedirect(WaylandSurfaceRenderElement<R>),
+    OverrideRedirect(SurfaceRenderElement<R>),
+    LowerLayerShell(NamespacedElement<SurfaceRenderElement<R>>),
     Fullscreen(RescaleRenderElement<CosmicWindowRenderElement<R>>),
     FullscreenPopup(CosmicWindowRenderElement<R>),
     Window(CosmicMappedRenderElement<R>),
@@ -2541,11 +2433,12 @@ where
 impl<R> Element for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &smithay::backend::renderer::element::Id {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.id(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.id(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.id(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.id(),
             WorkspaceRenderElement::Window(elem) => elem.id(),
@@ -2556,6 +2449,7 @@ where
     fn current_commit(&self) -> smithay::backend::renderer::utils::CommitCounter {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.current_commit(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.current_commit(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.current_commit(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.current_commit(),
             WorkspaceRenderElement::Window(elem) => elem.current_commit(),
@@ -2566,6 +2460,7 @@ where
     fn src(&self) -> Rectangle<f64, smithay::utils::Buffer> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.src(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.src(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.src(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.src(),
             WorkspaceRenderElement::Window(elem) => elem.src(),
@@ -2576,6 +2471,7 @@ where
     fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.geometry(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.geometry(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Window(elem) => elem.geometry(scale),
@@ -2586,6 +2482,7 @@ where
     fn location(&self, scale: Scale<f64>) -> Point<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.location(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.location(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.location(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.location(scale),
             WorkspaceRenderElement::Window(elem) => elem.location(scale),
@@ -2596,6 +2493,7 @@ where
     fn transform(&self) -> smithay::utils::Transform {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.transform(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.transform(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.transform(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.transform(),
             WorkspaceRenderElement::Window(elem) => elem.transform(),
@@ -2610,6 +2508,7 @@ where
     ) -> DamageSet<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.damage_since(scale, commit),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Fullscreen(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Window(elem) => elem.damage_since(scale, commit),
@@ -2620,6 +2519,7 @@ where
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, smithay::utils::Physical> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.opaque_regions(scale),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Fullscreen(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Window(elem) => elem.opaque_regions(scale),
@@ -2630,6 +2530,7 @@ where
     fn alpha(&self) -> f32 {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.alpha(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.alpha(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.alpha(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.alpha(),
             WorkspaceRenderElement::Window(elem) => elem.alpha(),
@@ -2640,6 +2541,7 @@ where
     fn kind(&self) -> Kind {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.kind(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.kind(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.kind(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.kind(),
             WorkspaceRenderElement::Window(elem) => elem.kind(),
@@ -2650,6 +2552,7 @@ where
     fn is_framebuffer_effect(&self) -> bool {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::Fullscreen(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::Window(elem) => elem.is_framebuffer_effect(),
@@ -2661,8 +2564,7 @@ where
 impl<R> RenderElement<R> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
-    R::Error: FromGlesError,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,
@@ -2675,6 +2577,9 @@ where
     ) -> Result<(), R::Error> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
+            }
+            WorkspaceRenderElement::LowerLayerShell(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
             WorkspaceRenderElement::Fullscreen(elem) => {
@@ -2695,7 +2600,7 @@ where
                 opaque_regions,
                 cache,
             )
-            .map_err(FromGlesError::from_gles_error),
+            .map_err(R::from_gles_error),
         }
     }
 
@@ -2705,6 +2610,7 @@ where
     ) -> Option<smithay::backend::renderer::element::UnderlyingStorage<'_>> {
         match self {
             WorkspaceRenderElement::OverrideRedirect(elem) => elem.underlying_storage(renderer),
+            WorkspaceRenderElement::LowerLayerShell(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Fullscreen(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
@@ -2725,6 +2631,9 @@ where
             WorkspaceRenderElement::OverrideRedirect(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
+            WorkspaceRenderElement::LowerLayerShell(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
             WorkspaceRenderElement::Fullscreen(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
@@ -2742,7 +2651,7 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
         }
     }
@@ -2751,7 +2660,7 @@ where
 impl<R> From<RescaleRenderElement<CosmicWindowRenderElement<R>>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: RescaleRenderElement<CosmicWindowRenderElement<R>>) -> Self {
@@ -2762,7 +2671,7 @@ where
 impl<R> From<CosmicWindowRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicWindowRenderElement<R>) -> Self {
@@ -2770,21 +2679,32 @@ where
     }
 }
 
-impl<R> From<WaylandSurfaceRenderElement<R>> for WorkspaceRenderElement<R>
+impl<R> From<SurfaceRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
-    fn from(elem: WaylandSurfaceRenderElement<R>) -> Self {
+    fn from(elem: SurfaceRenderElement<R>) -> Self {
         WorkspaceRenderElement::OverrideRedirect(elem)
+    }
+}
+
+impl<R> From<NamespacedElement<SurfaceRenderElement<R>>> for WorkspaceRenderElement<R>
+where
+    R: AsGlowRenderer,
+    R::TextureId: Send + 'static,
+    CosmicMappedRenderElement<R>: RenderElement<R>,
+{
+    fn from(elem: NamespacedElement<SurfaceRenderElement<R>>) -> Self {
+        WorkspaceRenderElement::LowerLayerShell(elem)
     }
 }
 
 impl<R> From<CosmicMappedRenderElement<R>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: CosmicMappedRenderElement<R>) -> Self {
@@ -2795,7 +2715,7 @@ where
 impl<R> From<TextureRenderElement<GlesTexture>> for WorkspaceRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
+    R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {

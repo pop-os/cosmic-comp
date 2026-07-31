@@ -1,10 +1,7 @@
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage,
-        clipped_surface::ClippedSurfaceRenderElement,
-        cursor::CursorState,
-        element::{AsGlowRenderer, FromGlesError},
-        shadow::ShadowShader,
+        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
+        shadow::ShadowShader, wayland::SurfaceRenderElement,
     },
     hooks::{Decorations, HOOKS},
     shell::{
@@ -14,7 +11,7 @@ use crate::{
     },
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
     },
     wayland::handlers::surface_embed::{get_embed_render_info, is_surface_embedded},
@@ -29,11 +26,7 @@ use smithay::{
         input::KeyState,
         renderer::{
             ImportAll, ImportMem, Renderer,
-            element::{
-                AsRenderElements, Element, Id as RendererId, Kind, RenderElement,
-                UnderlyingStorage, memory::MemoryRenderBufferRenderElement,
-                surface::WaylandSurfaceRenderElement,
-            },
+            element::{Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage},
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
             utils::{CommitCounter, DamageSet, OpaqueRegions},
@@ -76,6 +69,14 @@ use wayland_backend::server::ObjectId;
 use super::CosmicSurface;
 
 pub const RESIZE_BORDER: i32 = 10;
+
+/// Blur strength handed to upstream's background-effect blur for window (and popup) surfaces.
+///
+/// MERGE: upstream derives this from cosmic's `frosted_windows`/`frosted` theme settings
+/// (`0` = off, `1` = light, `2` = strong). `CompTheme` has no such toggle, so the fork uses a
+/// fixed strength — surfaces that never publish a blur region are unaffected, since
+/// `BlurElement::from_surface` returns `None` for them.
+pub const WINDOW_BLUR_STRENGTH: usize = 2;
 
 /// Tracks which CosmicWindow currently has pointer_over_window=true.
 /// Updated by focus_under() on each pointer motion event.
@@ -172,7 +173,7 @@ impl Focus {
         location: Point<f64, Logical>,
     ) -> Option<Focus> {
         let geo = surface.geometry();
-        let loc = location.to_i32_round::<i32>() - geo.loc;
+        let loc = location.to_i32_floor::<i32>() - geo.loc;
         if loc.y < 0 && loc.x < 0 {
             Some(Focus::ResizeTopLeft)
         } else if loc.y < 0 && loc.x >= geo.size.w {
@@ -637,6 +638,9 @@ impl CosmicWindow {
             .and_then(|o| o.forced_icon.as_deref())
             .unwrap_or(&app_id)
             .to_string();
+        // MERGE: upstream sets `theme.transparent = theme.cosmic().frosted_windows` here.
+        // `CompTheme` has no `transparent`/`frosted_windows` equivalent, so it is dropped;
+        // window frosting is driven by `WINDOW_BLUR_STRENGTH` below instead.
 
         // Note: We intentionally do NOT set_tiled based on clip_floating_windows.
         // The tiled protocol state should only reflect actual tiling status,
@@ -757,7 +761,7 @@ impl CosmicWindow {
             {
                 let geo = p.window.geometry();
 
-                let point_i32 = relative_pos.to_i32_round::<i32>();
+                let point_i32 = relative_pos.to_i32_floor::<i32>();
                 let ssd_height = if has_ssd { p.ssd_height() } else { 0 };
 
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
@@ -842,18 +846,17 @@ impl CosmicWindow {
         self.0.loop_handle()
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
-        R: Renderer + ImportAll + ImportMem,
+        push: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+    ) where
+        R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicWindowRenderElement<R>>,
     {
         let has_ssd = self.0.with_program(|p| p.has_ssd(false));
 
@@ -864,17 +867,15 @@ impl CosmicWindow {
         };
 
         self.0.with_program(|p| {
-            p.window
-                .popup_render_elements::<R, CosmicWindowRenderElement<R>>(
-                    renderer,
-                    window_loc,
-                    scale,
-                    alpha,
-                    scanout_node,
-                )
-                .into_iter()
-                .map(C::from)
-                .collect()
+            p.window.push_popup_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_node,
+                WINDOW_BLUR_STRENGTH,
+                &mut |elem| push(elem.into()),
+            )
         })
     }
 
@@ -987,7 +988,7 @@ impl CosmicWindow {
         })
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
@@ -996,11 +997,11 @@ impl CosmicWindow {
         alpha: f32,
         scanout_override: Option<bool>,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<C>
-    where
+        push_above: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+        push_below: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicWindowRenderElement<R>>,
     {
         let embed_render_info = self.0.with_program(|p| get_embed_render_info(&p.window));
         let is_embedded = embed_render_info.is_some();
@@ -1039,8 +1040,8 @@ impl CosmicWindow {
             location
         };
 
-        let mut elements = Vec::new();
-
+        // MERGE: upstream also reads `bg_divider` here for its border color; the fork takes the
+        // border color from `CompTheme::window_border_color()` below instead.
         let mut geo = self
             .0
             .with_program(|p| SpaceElement::geometry(&p.window).to_f64());
@@ -1078,58 +1079,52 @@ impl CosmicWindow {
                 scale.x,
                 border_color,
             ));
-            elements.push(elem);
+            push_above(elem);
         }
 
-        let window_elements = self.0.with_program(|p| {
-            p.window
-                .render_elements::<R, WaylandSurfaceRenderElement<R>>(
-                    renderer,
-                    window_loc,
-                    scale,
-                    alpha,
-                    scanout_override,
-                    scanout_node,
-                )
-        });
-        if window_elements.is_empty() {
-            return Vec::new();
-        }
-
-        elements.extend(window_elements.into_iter().map(|elem| {
+        // MERGE: clipping/rounding of the toplevel surface now happens inside
+        // `CosmicSurface::push_render_elements` (upstream folded ClippedSurfaceRenderElement into
+        // SurfaceRenderElement), so the fork only forwards `clip` + `radii`.
+        self.0.with_program(|p| {
+            let mut radii = radii;
             if has_ssd && !is_embedded {
+                // top corners are covered by the SSD header
                 radii[1] = 0;
                 radii[3] = 0;
             }
-            let any_nonzero = radii.iter().any(|x| *x != 0);
-            let will_clip_result = if any_nonzero && clip {
-                ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radii)
-            } else {
-                false
-            };
-
-            if any_nonzero && clip && will_clip_result {
-                CosmicWindowRenderElement::Clipped(ClippedSurfaceRenderElement::new(
-                    renderer, elem, scale, geo, radii,
-                ))
-            } else {
-                CosmicWindowRenderElement::Window(elem)
-            }
-        }));
+            p.window.push_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_override,
+                scanout_node,
+                clip,
+                radii,
+                WINDOW_BLUR_STRENGTH,
+                &mut |elem| push_above(elem.into()),
+                Some(&mut |elem| push_below(elem.into())),
+            );
+        });
 
         if has_ssd && !is_embedded {
+            // bottom corners belong to the surface, not the header
+            radii[0] = 0;
+            radii[2] = 0;
             let ssd_loc = location
                 + self
                     .0
-                    .with_program(|p| p.window.geometry().loc)
-                    .to_physical_precise_round(scale);
-            let ssd_elements = AsRenderElements::<R>::render_elements::<CosmicWindowRenderElement<R>>(
-                &self.0, renderer, ssd_loc, scale, alpha,
+                    .with_program(|p| p.window.geometry().loc.to_physical_precise_round(scale));
+            self.0.push_render_elements(
+                renderer,
+                ssd_loc,
+                scale,
+                alpha,
+                radii,
+                &mut |elem| push_above(elem.into()),
+                Some(&mut |elem| push_below(elem.into())),
             );
-            elements.extend(ssd_elements);
         }
-
-        elements.into_iter().map(C::from).collect()
     }
 
     pub(crate) fn set_theme(&self, theme: crate::comp_theme::CompTheme) {
@@ -1341,6 +1336,9 @@ impl Program for CosmicWindowInternal {
         Task::none()
     }
 
+    // MERGE: upstream paints the header background opaque when maximized
+    // (`theme.cosmic().background(frosted_windows).base`). The fork keeps the header fully
+    // transparent so the themed header bar (and any client blur behind it) shows through.
     fn background_color(&self, _theme: &crate::comp_theme::CompTheme) -> Color {
         Color::TRANSPARENT
     }
@@ -1884,41 +1882,33 @@ impl WaylandFocus for CosmicWindow {
     }
 }
 
-pub enum CosmicWindowRenderElement<R: Renderer + ImportAll + ImportMem> {
-    Header(MemoryRenderBufferRenderElement<R>),
+pub enum CosmicWindowRenderElement<R: AsGlowRenderer + ImportAll + ImportMem> {
+    Header(IcedRenderElement<R>),
     Shadow(PixelShaderElement),
     Border(PixelShaderElement),
-    Window(WaylandSurfaceRenderElement<R>),
-    Clipped(ClippedSurfaceRenderElement<R>),
+    Window(SurfaceRenderElement<R>),
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R>>
+impl<R: AsGlowRenderer + ImportAll + ImportMem> From<IcedRenderElement<R>>
     for CosmicWindowRenderElement<R>
 {
-    fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
+    fn from(value: IcedRenderElement<R>) -> Self {
         Self::Header(value)
     }
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<WaylandSurfaceRenderElement<R>>
+impl<R: AsGlowRenderer + ImportAll + ImportMem> From<SurfaceRenderElement<R>>
     for CosmicWindowRenderElement<R>
 {
-    fn from(value: WaylandSurfaceRenderElement<R>) -> Self {
+    fn from(value: SurfaceRenderElement<R>) -> Self {
         Self::Window(value)
-    }
-}
-
-impl<R: Renderer + ImportAll + ImportMem> From<ClippedSurfaceRenderElement<R>>
-    for CosmicWindowRenderElement<R>
-{
-    fn from(value: ClippedSurfaceRenderElement<R>) -> Self {
-        Self::Clipped(value)
     }
 }
 
 impl<R> Element for CosmicWindowRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &RendererId {
         match self {
@@ -1926,7 +1916,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.id(),
             CosmicWindowRenderElement::Border(elem) => elem.id(),
             CosmicWindowRenderElement::Window(elem) => elem.id(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.id(),
         }
     }
 
@@ -1936,7 +1925,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.current_commit(),
             CosmicWindowRenderElement::Border(elem) => elem.current_commit(),
             CosmicWindowRenderElement::Window(elem) => elem.current_commit(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.current_commit(),
         }
     }
 
@@ -1946,7 +1934,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.src(),
             CosmicWindowRenderElement::Border(elem) => elem.src(),
             CosmicWindowRenderElement::Window(elem) => elem.src(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.src(),
         }
     }
 
@@ -1956,7 +1943,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.geometry(scale),
             CosmicWindowRenderElement::Border(elem) => elem.geometry(scale),
             CosmicWindowRenderElement::Window(elem) => elem.geometry(scale),
-            CosmicWindowRenderElement::Clipped(elem) => elem.geometry(scale),
         }
     }
 
@@ -1966,7 +1952,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.location(scale),
             CosmicWindowRenderElement::Border(elem) => elem.location(scale),
             CosmicWindowRenderElement::Window(elem) => elem.location(scale),
-            CosmicWindowRenderElement::Clipped(elem) => elem.location(scale),
         }
     }
 
@@ -1976,7 +1961,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.transform(),
             CosmicWindowRenderElement::Border(elem) => elem.transform(),
             CosmicWindowRenderElement::Window(elem) => elem.transform(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.transform(),
         }
     }
 
@@ -1990,7 +1974,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.damage_since(scale, commit),
             CosmicWindowRenderElement::Border(elem) => elem.damage_since(scale, commit),
             CosmicWindowRenderElement::Window(elem) => elem.damage_since(scale, commit),
-            CosmicWindowRenderElement::Clipped(elem) => elem.damage_since(scale, commit),
         }
     }
 
@@ -2000,7 +1983,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.opaque_regions(scale),
             CosmicWindowRenderElement::Border(elem) => elem.opaque_regions(scale),
             CosmicWindowRenderElement::Window(elem) => elem.opaque_regions(scale),
-            CosmicWindowRenderElement::Clipped(elem) => elem.opaque_regions(scale),
         }
     }
 
@@ -2010,7 +1992,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.alpha(),
             CosmicWindowRenderElement::Border(elem) => elem.alpha(),
             CosmicWindowRenderElement::Window(elem) => elem.alpha(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.alpha(),
         }
     }
 
@@ -2020,7 +2001,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.kind(),
             CosmicWindowRenderElement::Border(elem) => elem.kind(),
             CosmicWindowRenderElement::Window(elem) => elem.kind(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.kind(),
         }
     }
 
@@ -2030,7 +2010,6 @@ where
             CosmicWindowRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
             CosmicWindowRenderElement::Border(elem) => elem.is_framebuffer_effect(),
             CosmicWindowRenderElement::Window(elem) => elem.is_framebuffer_effect(),
-            CosmicWindowRenderElement::Clipped(elem) => elem.is_framebuffer_effect(),
         }
     }
 }
@@ -2038,8 +2017,7 @@ where
 impl<R> RenderElement<R> for CosmicWindowRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
-    R::Error: FromGlesError,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,
@@ -2064,12 +2042,9 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicWindowRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions, cache)
-            }
-            CosmicWindowRenderElement::Clipped(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
         }
@@ -2082,7 +2057,6 @@ where
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
             CosmicWindowRenderElement::Window(elem) => elem.underlying_storage(renderer),
-            CosmicWindowRenderElement::Clipped(elem) => elem.underlying_storage(renderer),
         }
     }
 
@@ -2105,12 +2079,9 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicWindowRenderElement::Window(elem) => {
-                elem.capture_framebuffer(frame, src, dst, cache)
-            }
-            CosmicWindowRenderElement::Clipped(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
         }

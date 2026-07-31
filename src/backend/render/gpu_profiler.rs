@@ -514,35 +514,8 @@ impl FrameProfiler {
             "│ Load:    elements={:.0}  blur_windows={:.1}  blur_layers={:.1}  damage_rects={:.0}",
             avg_elements, avg_blur_wins, avg_blur_layers, avg_damage,
         );
-        // Groups, not windows, drive blur cost: each one is a separate
-        // full-resolution capture of the scene beneath it, and overlapping
-        // windows cannot share. reblur is how many actually did that work rather
-        // than reusing a cached texture.
         let n = window_size as f64;
         let avg = |f: fn(&FrameProfile) -> f64| self.profiles.iter().map(f).sum::<f64>() / n;
-        let ms = |f: fn(&FrameProfile) -> Duration| {
-            self.profiles
-                .iter()
-                .map(|p| f(p).as_secs_f64() * 1000.0)
-                .sum::<f64>()
-                / n
-        };
-        warn!(
-            "│ Blur:    path={}  groups={:.1}  reblur={:.1}  occluded={:.1}  (content={:.1} uncached={:.1})",
-            super::blur::active_blur_path(),
-            avg(|p| p.blur.groups as f64),
-            avg(|p| p.blur.groups_reblurred as f64),
-            avg(|p| p.blur.groups_occluded as f64),
-            avg(|p| p.blur.reblur_content as f64),
-            avg(|p| p.blur.reblur_uncached as f64),
-        );
-        warn!(
-            "│ Blur ms: capture={:.2}  bg_render={:.2}  passes={:.2}  copy={:.2}",
-            ms(|p| p.blur.capture_duration),
-            ms(|p| p.blur.bg_render_duration),
-            ms(|p| p.blur.passes_duration),
-            ms(|p| p.blur.copy_duration),
-        );
         // Overdraw is the headline: at 1.0x the compositor painted each output
         // pixel once, at 10x it painted the screen ten times over.
         let overdraw = {
@@ -605,18 +578,6 @@ pub fn set_gpu_info(info: GpuInfo) {
 /// Get the current GPU info, if detected.
 pub fn get_gpu_info() -> Option<GpuInfo> {
     GPU_INFO.read().ok().and_then(|g| g.clone())
-}
-
-/// Get the effective blur downsample factor.
-pub fn effective_blur_downsample_factor() -> i32 {
-    // Allow env override
-    if let Some(val) = std::env::var("COSMIC_BLUR_DOWNSAMPLE_FACTOR")
-        .ok()
-        .and_then(|v| v.parse::<i32>().ok())
-    {
-        return val;
-    }
-    super::BLUR_DOWNSAMPLE_FACTOR
 }
 
 // =============================================================================

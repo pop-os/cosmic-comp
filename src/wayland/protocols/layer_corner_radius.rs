@@ -273,10 +273,10 @@ impl LayerCornerRadiusInternal {
         bottom_left: u32,
     ) {
         let corners = Corners {
-            top_left: top_left.clamp(u8::MIN as u32, u8::MAX as u32) as u8,
-            top_right: top_right.clamp(u8::MIN as u32, u8::MAX as u32) as u8,
-            bottom_right: bottom_right.clamp(u8::MIN as u32, u8::MAX as u32) as u8,
-            bottom_left: bottom_left.clamp(u8::MIN as u32, u8::MAX as u32) as u8,
+            top_left: top_left,
+            top_right: top_right,
+            bottom_right: bottom_right,
+            bottom_left: bottom_left,
         };
         self.corners = Some(corners);
     }

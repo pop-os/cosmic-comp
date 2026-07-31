@@ -1,0 +1,109 @@
+use smithay::{
+    reexports::wayland_server::{DisplayHandle, protocol::wl_surface::WlSurface},
+    utils::{Logical, Rectangle},
+    wayland::compositor::{Cacheable, RectangleKind, RegionAttributes, with_states},
+};
+
+use crate::{
+    state::State,
+    wayland::protocols::background_effect::{
+        BackgroundEffectHandler, ext_background_effect_manager_v1::Capability,
+    },
+};
+
+#[derive(Debug, Clone, Default)]
+pub struct ComputedBlurRegionCachedState {
+    /// Region of the surface that will have its background blurred.
+    ///
+    /// `None` means no blur. When `whole_surface` is set this is left `None`
+    /// and the area is taken from the surface geometry at render time instead,
+    /// so it stays correct across resizes without the client resending it.
+    pub blur_region: Option<Vec<Rectangle<i32, Logical>>>,
+    /// Blur the entire surface, tracking its size (protocol version 2).
+    pub whole_surface: bool,
+    /// Requested blur strength in surface-local coordinates, or `None` for the
+    /// compositor default (protocol version 2).
+    ///
+    /// A hint: the compositor clamps this to what it can render.
+    pub blur_radius: Option<u32>,
+    /// Corner radii of the blurred area, clockwise from top-left, so the
+    /// backdrop can follow the shape the client actually draws (protocol
+    /// version 2).
+    pub corner_radius: [u32; 4],
+}
+
+impl Cacheable for ComputedBlurRegionCachedState {
+    fn commit(&mut self, _dh: &DisplayHandle) -> Self {
+        self.clone()
+    }
+
+    fn merge_into(self, into: &mut Self, _dh: &DisplayHandle) {
+        *into = self;
+    }
+}
+
+impl BackgroundEffectHandler for State {
+    fn capabilities(&self) -> Capability {
+        Capability::Blur
+    }
+
+    fn set_blur_region(&mut self, surface: WlSurface, region: RegionAttributes) {
+        with_states(&surface, |states| {
+            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+
+            blur_state.pending().whole_surface = false;
+            blur_state.pending().blur_region = Some({
+                let (added, subtracted) = region
+                    .rects
+                    .iter()
+                    .cloned()
+                    .partition::<Vec<_>, _>(|(op, _)| matches!(op, RectangleKind::Add));
+                let added = added.into_iter().map(|(_, rect)| rect).collect::<Vec<_>>();
+                Rectangle::subtract_rects_many_in_place(
+                    added,
+                    subtracted.into_iter().map(|(_, rect)| rect),
+                )
+            })
+        })
+    }
+
+    fn unset_blur_region(&mut self, surface: WlSurface) {
+        with_states(&surface, |states| {
+            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+            let pending = blur_state.pending();
+
+            // A NULL region removes the effect outright, so the whole-surface
+            // mode has to go with it or the blur would survive its own removal.
+            pending.blur_region.take();
+            pending.whole_surface = false;
+        })
+    }
+
+    fn set_blur_whole_surface(&mut self, surface: WlSurface) {
+        with_states(&surface, |states| {
+            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+            let pending = blur_state.pending();
+
+            // The area is resolved from the surface at render time, so any
+            // explicit region is dropped rather than left to compete with it.
+            pending.whole_surface = true;
+            pending.blur_region.take();
+        })
+    }
+
+    fn set_blur_radius(&mut self, surface: WlSurface, radius: Option<u32>) {
+        with_states(&surface, |states| {
+            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+            blur_state.pending().blur_radius = radius;
+        })
+    }
+
+    fn set_corner_radius(&mut self, surface: WlSurface, radii: [u32; 4]) {
+        with_states(&surface, |states| {
+            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+            blur_state.pending().corner_radius = radii;
+        })
+    }
+}
+
+crate::delegate_background_effect!(State);

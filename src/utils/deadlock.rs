@@ -71,7 +71,9 @@ pub fn spawn_watchdog() {
             });
 
         match spawned {
-            Ok(_) => tracing::info!("Deadlock detection enabled (checking every {CHECK_INTERVAL:?})"),
+            Ok(_) => {
+                tracing::info!("Deadlock detection enabled (checking every {CHECK_INTERVAL:?})")
+            }
             Err(err) => tracing::warn!(?err, "Failed to spawn deadlock detector"),
         }
     }

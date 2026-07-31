@@ -1,3 +1,6 @@
+// MERGE: upstream's import churn here (cosmic::iced_core -> cosmic::iced::core, and the
+// cosmic container Catalog/draw_background imports) does not apply — this widget was
+// rewritten on iced_core/iced_tiny_skia/icetron_p and never touches cosmic.
 use super::tab::{MIN_ACTIVE_TAB_WIDTH, Tab, TabMessage};
 use iced_core::{
     Alignment, Element, Length, Point, Rectangle, Renderer as _, Shell, Size, Vector, event,
@@ -432,6 +435,10 @@ where
         let num_elements = self.elements.len();
 
         let mut bounds = layout.bounds();
+        // MERGE: upstream now paints the tab-strip background as Color::TRANSPARENT so the
+        // frosted-glass blur behind the stack shows through. Our tab strip never painted a
+        // background at all, so that is already the effective behaviour — the cosmic
+        // Catalog::style/draw_background call is dropped rather than ported.
         let content_bounds =
             layout
                 .children()

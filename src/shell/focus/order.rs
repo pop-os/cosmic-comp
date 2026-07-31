@@ -30,20 +30,9 @@ use crate::{
     wayland::protocols::workspace::WorkspaceHandle,
 };
 
-/// Check if windows/workspaces should be included for the given element filter.
-/// Returns false for LayerShellOnly and for LayerBlurCapture when capturing for
-/// layers below windows (Bottom, Background).
-fn should_include_windows(element_filter: &ElementFilter) -> bool {
-    match element_filter {
-        ElementFilter::LayerShellOnly => false,
-        ElementFilter::LayerBlurCapture(layer, _) => {
-            // Only include windows for layers above windows (Top, Overlay)
-            // Bottom and Background are below windows, so skip windows when capturing for them
-            matches!(layer, Layer::Top | Layer::Overlay)
-        }
-        _ => true,
-    }
-}
+// MERGE: dropped `should_include_windows` — it only existed to special-case our
+// blur-capture element filters, which upstream's frosted-glass implementation
+// replaces. Windows are now gated on `!= ElementFilter::LayerShellOnly` again.
 
 pub enum Stage<'a> {
     ZoomUI,
@@ -52,14 +41,14 @@ pub enum Stage<'a> {
         layer: LayerSurface,
         popup: &'a PopupKind,
         location: Point<i32, Global>,
+        workspace_idx: usize,
     },
     LayerSurface {
         layer: LayerSurface,
         location: Point<i32, Global>,
         /// Alpha/opacity for the surface (0.0-1.0), used for home visibility animation
         alpha: f32,
-        /// Alpha for blur backdrop (may differ from surface alpha during fade-in)
-        blur_alpha: f32,
+        workspace_idx: usize,
     },
     OverrideRedirect {
         surface: &'a X11Surface,
@@ -145,7 +134,7 @@ pub fn render_input_order<R: Default + 'static>(
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
-    element_filter: &ElementFilter,
+    element_filter: ElementFilter,
     callback: impl FnMut(Stage) -> ControlFlow<Result<R, OutputNoMode>, ()>,
 ) -> Result<R, OutputNoMode> {
     match render_input_order_internal(shell, output, previous, current, element_filter, callback) {
@@ -159,7 +148,7 @@ fn render_input_order_internal<R: 'static>(
     output: &Output,
     previous: Option<(WorkspaceHandle, usize, WorkspaceDelta)>,
     current: (WorkspaceHandle, usize),
-    element_filter: &ElementFilter,
+    element_filter: ElementFilter,
     mut callback: impl FnMut(Stage) -> ControlFlow<Result<R, OutputNoMode>, ()>,
 ) -> ControlFlow<Result<R, OutputNoMode>, ()> {
     // Create home visibility context once for all layer surface filtering
@@ -237,16 +226,17 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location,
+                workspace_idx: current.1,
             })?;
         }
-        for (layer, location, alpha, blur_alpha) in
+        for (layer, location, alpha) in
             layer_surfaces(output, Layer::Overlay, element_filter, &home_visibility)
         {
             callback(Stage::LayerSurface {
                 layer,
                 location,
                 alpha,
-                blur_alpha,
+                workspace_idx: current.1,
             })?;
         }
     }
@@ -313,7 +303,7 @@ fn render_input_order_internal<R: 'static>(
                 // Both stacked at offset 0; outgoing opaque (drawn under),
                 // incoming fades in (drawn over, emitted first == topmost).
                 (
-                    Some((previous, has_fullscreen, Point::default())),
+                    Some((previous, previous_idx, has_fullscreen, Point::default())),
                     Point::default(),
                     1.0f32,
                     t,
@@ -362,7 +352,7 @@ fn render_input_order_internal<R: 'static>(
                 });
 
                 (
-                    Some((previous, has_fullscreen, offset)),
+                    Some((previous, previous_idx, has_fullscreen, offset)),
                     Point::<i32, Logical>::from(match (layout, forward) {
                         (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
                         (WorkspaceLayout::Vertical, false) => (0, -(output_size.h - offset.y)),
@@ -386,11 +376,12 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location,
+                workspace_idx: current.1,
             })?;
         }
     }
 
-    if should_include_windows(element_filter) {
+    if element_filter != ElementFilter::LayerShellOnly {
         // overlay redirect windows
         // they need to be over sticky windows, because they could be popups of sticky windows,
         // and we can't differenciate that.
@@ -421,9 +412,9 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if should_include_windows(element_filter) {
+    if element_filter != ElementFilter::LayerShellOnly {
         // previous workspace popups
-        if let Some((previous_handle, _, offset)) = previous.as_ref() {
+        if let Some((previous_handle, _, _, offset)) = previous.as_ref() {
             let Some(workspace) = shell.workspaces.space_for_handle(previous_handle) else {
                 return ControlFlow::Break(Err(OutputNoMode));
             };
@@ -456,11 +447,12 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location,
+                workspace_idx: current.1,
             })?;
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+    if let Some((_, idx, has_fullscreen, offset)) = previous.as_ref()
         && !has_fullscreen
     {
         // previous bottom layer popups
@@ -471,6 +463,7 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location: location + offset.as_global(),
+                workspace_idx: **idx,
             })?;
         }
     }
@@ -484,11 +477,12 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location,
+                workspace_idx: current.1,
             })?;
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+    if let Some((_, idx, has_fullscreen, offset)) = previous.as_ref()
         && !has_fullscreen
     {
         // previous background layer popups
@@ -499,30 +493,31 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location: location + offset.as_global(),
+                workspace_idx: **idx,
             })?;
         }
     }
 
     if !has_focused_fullscreen {
         // top-layer shell
-        for (layer, location, alpha, blur_alpha) in
+        for (layer, location, alpha) in
             layer_surfaces(output, Layer::Top, element_filter, &home_visibility)
         {
             callback(Stage::LayerSurface {
                 layer,
                 location,
                 alpha,
-                blur_alpha,
+                workspace_idx: current.1,
             })?;
         }
     }
 
     // sticky windows — suppressed under an exclusive game (see sticky popups above)
-    if should_include_windows(element_filter) && !game_mode_exclusive {
+    if element_filter != ElementFilter::LayerShellOnly && !game_mode_exclusive {
         callback(Stage::Sticky(&set.sticky_layer))?;
     }
 
-    if should_include_windows(element_filter) {
+    if element_filter != ElementFilter::LayerShellOnly {
         // Game-mode overlay: the launcher (or a client overlay) composited ABOVE
         // the game. Emitted first (topmost) so it stacks over the game workspace;
         // its own per-pixel alpha lets the game show through the transparent part.
@@ -557,7 +552,7 @@ fn render_input_order_internal<R: 'static>(
         })?;
 
         // previous workspace windows (the outgoing workspace)
-        if let Some((previous_handle, _, offset)) = previous.as_ref() {
+        if let Some((previous_handle, _, _, offset)) = previous.as_ref() {
             let Some(workspace) = shell.workspaces.space_for_handle(previous_handle) else {
                 return ControlFlow::Break(Err(OutputNoMode));
             };
@@ -572,7 +567,7 @@ fn render_input_order_internal<R: 'static>(
 
     if !has_focused_fullscreen {
         // bottom layer
-        for (layer, mut location, alpha, blur_alpha) in
+        for (layer, mut location, alpha) in
             layer_surfaces(output, Layer::Bottom, element_filter, &home_visibility)
         {
             location += current_offset.as_global();
@@ -580,16 +575,16 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 location,
                 alpha,
-                blur_alpha,
+                workspace_idx: current.1,
             })?;
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+    if let Some((_, idx, has_fullscreen, offset)) = previous.as_ref()
         && !has_fullscreen
     {
         // previous bottom layer
-        for (layer, mut location, alpha, blur_alpha) in
+        for (layer, mut location, alpha) in
             layer_surfaces(output, Layer::Bottom, element_filter, &home_visibility)
         {
             location += offset.as_global();
@@ -597,14 +592,14 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 location,
                 alpha,
-                blur_alpha,
+                workspace_idx: **idx,
             })?;
         }
     }
 
     if !has_fullscreen {
         // background layer
-        for (layer, mut location, alpha, blur_alpha) in
+        for (layer, mut location, alpha) in
             layer_surfaces(output, Layer::Background, element_filter, &home_visibility)
         {
             location += current_offset.as_global();
@@ -612,16 +607,16 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 location,
                 alpha,
-                blur_alpha,
+                workspace_idx: current.1,
             })?;
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+    if let Some((_, idx, has_fullscreen, offset)) = previous.as_ref()
         && !has_fullscreen
     {
         // previous background layer
-        for (layer, mut location, alpha, blur_alpha) in
+        for (layer, mut location, alpha) in
             layer_surfaces(output, Layer::Background, element_filter, &home_visibility)
         {
             location += offset.as_global();
@@ -629,7 +624,7 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 location,
                 alpha,
-                blur_alpha,
+                workspace_idx: **idx,
             })?;
         }
     }
@@ -640,12 +635,12 @@ fn render_input_order_internal<R: 'static>(
 fn layer_popups<'a>(
     output: &'a Output,
     layer: Layer,
-    element_filter: &'a ElementFilter,
+    element_filter: ElementFilter,
     home_visibility: &'a HomeVisibilityContext,
 ) -> impl Iterator<Item = (LayerSurface, PopupKind, Point<i32, Global>, f32)> + 'a {
     let output_geo = output.geometry();
     layer_surfaces(output, layer, element_filter, home_visibility).flat_map(
-        move |(surface, location, alpha, _home_only)| {
+        move |(surface, location, alpha)| {
             let location_clone = location;
             let surface_clone = surface.clone();
             PopupManager::popups_for_surface(surface.wl_surface()).map(
@@ -708,55 +703,17 @@ fn layer_popups<'a>(
     )
 }
 
-/// Get the z-order level of a layer (higher = closer to viewer)
-/// Background=0, Bottom=1, Top=2, Overlay=3
-fn layer_z_level(layer: Layer) -> u8 {
-    match layer {
-        Layer::Background => 0,
-        Layer::Bottom => 1,
-        Layer::Top => 2,
-        Layer::Overlay => 3,
-    }
-}
-
+// MERGE: `layer_z_level` and the cached/skipped layer paths went away with our
+// blur implementation (they only existed to feed BlurCapture/LayerBlurCapture);
+// upstream's frosted glass blits from the live framebuffer instead.
 fn layer_surfaces<'a>(
     output: &'a Output,
     layer: Layer,
-    element_filter: &'a ElementFilter,
+    element_filter: ElementFilter,
     home_visibility: &'a HomeVisibilityContext,
-) -> impl Iterator<Item = (LayerSurface, Point<i32, Global>, f32, f32)> + 'a {
-    // For BlurCapture and LayerBlurCapture modes, use cached layer surfaces to prevent deadlocks
-    let use_cache = matches!(
-        element_filter,
-        ElementFilter::BlurCapture(_) | ElementFilter::LayerBlurCapture(_, _)
-    );
-
-    // Skip layers based on blur capture mode:
-    // - BlurCapture (window blur): Always skip Top and Overlay layers (they render above windows)
-    // - LayerBlurCapture: Skip layers at or above the requesting layer's z-level
-    let skip_layer = match element_filter {
-        ElementFilter::BlurCapture(_) => {
-            // Window blur should only capture Background and Bottom layers
-            // Top and Overlay are above windows and should never appear in window blur
-            matches!(layer, Layer::Top | Layer::Overlay)
-        }
-        ElementFilter::LayerBlurCapture(requesting_layer, _) => {
-            layer_z_level(layer) >= layer_z_level(*requesting_layer)
-        }
-        _ => false,
-    };
-
+) -> impl Iterator<Item = (LayerSurface, Point<i32, Global>, f32)> + 'a {
     // we want to avoid deadlocks on the layer-map in callbacks, so we need to clone the layer surfaces
-    let layers = if skip_layer {
-        // Skip this entire layer for layer blur capture
-        Vec::new()
-    } else if use_cache {
-        // Use cached layer surfaces (populated by main thread)
-        crate::backend::render::get_cached_layer_surfaces(&output.name(), layer)
-            .into_iter()
-            .map(|cached| (cached.surface, cached.location))
-            .collect::<Vec<_>>()
-    } else {
+    let layers = {
         let layer_map = layer_map_for_output(output);
         layer_map
             .layers_on(layer)
@@ -767,7 +724,7 @@ fn layer_surfaces<'a>(
 
     layers.into_iter().filter_map(move |(s, loc)| {
         // Filter out workspace overview namespace
-        if *element_filter == ElementFilter::ExcludeWorkspaceOverview
+        if element_filter == ElementFilter::ExcludeWorkspaceOverview
             && s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE
         {
             return None;
@@ -780,59 +737,32 @@ fn layer_surfaces<'a>(
             home_visibility.surface_visibility(&surface_id, Some(layer), Some(namespace));
 
         // Apply layer fade-in alpha if this surface is still fading in
-        let is_fading_in =
-            if let Some(&fade_alpha) = home_visibility.layer_fade_in_alphas.get(&surface_id) {
-                tracing::trace!(
-                    surface_protocol_id = s.wl_surface().id().protocol_id(),
-                    fade_alpha = format!("{:.3}", fade_alpha),
-                    original_alpha = format!("{:.3}", alpha),
-                    "layer_surfaces: applying fade-IN alpha"
-                );
-                alpha *= fade_alpha;
-                true
-            } else {
-                false
-            };
+        if let Some(&fade_alpha) = home_visibility.layer_fade_in_alphas.get(&surface_id) {
+            tracing::trace!(
+                surface_protocol_id = s.wl_surface().id().protocol_id(),
+                fade_alpha = format!("{:.3}", fade_alpha),
+                original_alpha = format!("{:.3}", alpha),
+                "layer_surfaces: applying fade-IN alpha"
+            );
+            alpha *= fade_alpha;
+        }
 
         // Apply layer fade-out alpha if this surface is fading out.
         // During fade-out the surface is still visible (not yet in hidden_surfaces)
         // but with decreasing alpha.
-        let is_fading_out =
-            if let Some(&fade_alpha) = home_visibility.layer_fade_out_alphas.get(&surface_id) {
-                tracing::trace!(
-                    surface_protocol_id = s.wl_surface().id().protocol_id(),
-                    fade_alpha = format!("{:.3}", fade_alpha),
-                    "layer_surfaces: applying fade-OUT alpha"
-                );
-                visible = true;
-                alpha = fade_alpha;
-                true
-            } else {
-                false
-            };
-
-        // Compute blur alpha: same as surface alpha for fade-in/out (both fade together),
-        // but squared during home visibility animation for a softer blur transition
-        let blur_alpha = if is_fading_in || is_fading_out {
-            let result = alpha;
+        if let Some(&fade_alpha) = home_visibility.layer_fade_out_alphas.get(&surface_id) {
             tracing::trace!(
                 surface_protocol_id = s.wl_surface().id().protocol_id(),
-                blur_alpha = format!("{:.3}", result),
-                is_fading_in,
-                is_fading_out,
-                "layer_surfaces: blur_alpha during fade"
+                fade_alpha = format!("{:.3}", fade_alpha),
+                "layer_surfaces: applying fade-OUT alpha"
             );
-            result
-        } else {
-            let is_animating = alpha < 1.0;
-            let has_home_visibility = home_visibility.home_only_surfaces.contains(&surface_id)
-                || home_visibility.hide_on_home_surfaces.contains(&surface_id);
-            if has_home_visibility && is_animating {
-                alpha * alpha
-            } else {
-                alpha
-            }
-        };
+            visible = true;
+            alpha = fade_alpha;
+        }
+
+        // MERGE: the separate `blur_alpha` (surface alpha squared during a home
+        // visibility animation, for a softer backdrop fade) fed our blur backdrop
+        // and went away with it — upstream drives blur from the live framebuffer.
 
         // Filter out completely invisible surfaces
         if !visible {
@@ -840,7 +770,6 @@ fn layer_surfaces<'a>(
         }
 
         // Use the surface-specific alpha (which considers home_alpha for home-only surfaces)
-        // blur_alpha may be more aggressively reduced during home visibility animations
-        Some((s, loc.as_local().to_global(output), alpha, blur_alpha))
+        Some((s, loc.as_local().to_global(output), alpha))
     })
 }

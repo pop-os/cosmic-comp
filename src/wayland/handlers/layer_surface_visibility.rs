@@ -81,10 +81,6 @@ impl LayerSurfaceVisibilityHandler for State {
                     }
                     // Update old output's blur cache (surface is gone from its map,
                     // so the general block below won't find it there).
-                    crate::wayland::handlers::layer_shell::update_layer_blur_state(
-                        old_output,
-                        shell.hidden_surfaces(),
-                    );
                     shell.workspaces.recalculate();
                     self.backend.schedule_render(old_output);
                     self.backend.schedule_render(&cursor_output);
@@ -104,12 +100,7 @@ impl LayerSurfaceVisibilityHandler for State {
                 })
                 .cloned()
                 .collect();
-            for output in &outputs_with_surface {
-                crate::wayland::handlers::layer_shell::update_layer_blur_state(
-                    output,
-                    shell.hidden_surfaces(),
-                );
-            }
+            for _output in &outputs_with_surface {}
         }
 
         if hidden {

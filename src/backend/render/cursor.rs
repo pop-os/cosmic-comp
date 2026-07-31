@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{utils::prelude::*, wayland::handlers::compositor::FRAME_TIME_FILTER};
+use crate::{
+    backend::render::{
+        element::AsGlowRenderer,
+        wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
+    },
+    utils::prelude::*,
+    wayland::handlers::compositor::FRAME_TIME_FILTER,
+};
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -9,10 +16,10 @@ use smithay::{
             element::{
                 Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
-                surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
             },
         },
     },
+    desktop::utils::bbox_from_surface_tree,
     input::{
         Seat,
         pointer::{CursorIcon, CursorImageAttributes, CursorImageStatus},
@@ -114,24 +121,63 @@ enum Error {
     NoDefaultCursor,
     #[error("Error opening xcursor file: {0}")]
     File(#[from] std::io::Error),
-    #[error("Failed to parse XCursor file")]
-    Parse,
+}
+
+fn cursor_aliases(name: &str) -> &[&str] {
+    match name {
+        "default" => &["default", "left_ptr", "arrow"],
+        "pointer" => &["pointer", "hand2", "hand"],
+        "text" => &["text", "xterm"],
+        "wait" => &["wait", "watch"],
+        "progress" => &["progress", "left_ptr_watch"],
+
+        "ew-resize" => &["ew-resize", "h_double_arrow", "sb_h_double_arrow"],
+        "ns-resize" => &["ns-resize", "v_double_arrow", "sb_v_double_arrow"],
+        "nw-resize" => &["nw-resize", "top_left_corner"],
+        "ne-resize" => &["ne-resize", "top_right_corner"],
+        "sw-resize" => &["sw-resize", "bottom_left_corner"],
+        "se-resize" => &["se-resize", "bottom_right_corner"],
+
+        "w-resize" => &["w-resize", "left_side"],
+        "e-resize" => &["e-resize", "right_side"],
+        "n-resize" => &["n-resize", "top_side"],
+        "s-resize" => &["s-resize", "bottom_side"],
+
+        "move" => &["move", "fleur"],
+        "not-allowed" => &["not-allowed", "crossed_circle"],
+        "crosshair" => &["crosshair", "cross"],
+        "help" => &["help", "question_arrow", "left_ptr_help"],
+
+        _ => &[],
+    }
 }
 
 fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error> {
-    let icon_path = theme
-        .load_icon(&shape.to_string())
-        .ok_or(Error::NoDefaultCursor)?;
-    let mut cursor_file = std::fs::File::open(&icon_path)?;
-    let mut cursor_data = Vec::new();
-    cursor_file.read_to_end(&mut cursor_data)?;
-    parse_xcursor(&cursor_data).ok_or(Error::Parse)
+    let shape_name = shape.to_string();
+
+    for name in cursor_aliases(&shape_name)
+        .iter()
+        .copied()
+        .chain(std::iter::once(shape_name.as_str()))
+    {
+        if let Some(icon_path) = theme.load_icon(name) {
+            let mut cursor_file = std::fs::File::open(&icon_path)?;
+            let mut cursor_data = Vec::new();
+            cursor_file.read_to_end(&mut cursor_data)?;
+
+            if let Some(images) = parse_xcursor(&cursor_data) {
+                return Ok(images);
+            }
+        }
+    }
+
+    Err(Error::NoDefaultCursor)
 }
 
 render_elements! {
-    pub CursorRenderElement<R> where R: ImportAll + ImportMem;
+    pub CursorRenderElement<R> where R: ImportAll + ImportMem + AsGlowRenderer, R::TextureId: Send;
     Static=MemoryRenderBufferRenderElement<R>,
-    Surface=WaylandSurfaceRenderElement<R>,
+    Surface=SurfaceRenderElement<R>,
 }
 
 pub fn draw_surface_cursor<R>(
@@ -139,9 +185,10 @@ pub fn draw_surface_cursor<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
-where
-    R: Renderer + ImportAll,
+    blur_strength: usize,
+    push: &mut dyn FnMut(CursorRenderElement<R>, Point<i32, Physical>),
+) where
+    R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
     let scale = scale.into();
@@ -156,17 +203,21 @@ where
             .to_physical_precise_round(scale)
     });
 
-    render_elements_from_surface_tree(
+    push_render_elements_from_surface_tree(
         renderer,
         surface,
         location.to_physical(scale).to_i32_round(),
+        bbox_from_surface_tree(surface, location.to_i32_round()).to_f64(),
         scale,
         1.0,
+        false,
+        [0; 4],
+        None,
+        blur_strength,
         Kind::Cursor,
-    )
-    .into_iter()
-    .map(|elem| (elem, h))
-    .collect()
+        &mut |elem| push(elem.into(), h),
+        None,
+    );
 }
 
 #[profiling::function]
@@ -175,9 +226,10 @@ pub fn draw_dnd_icon<R>(
     surface: &wl_surface::WlSurface,
     location: Point<f64, Logical>,
     scale: impl Into<Scale<f64>>,
-) -> Vec<WaylandSurfaceRenderElement<R>>
-where
-    R: Renderer + ImportAll,
+    blur_strength: usize,
+    push: &mut dyn FnMut(SurfaceRenderElement<R>),
+) where
+    R: Renderer + ImportAll + AsGlowRenderer,
     R::TextureId: Clone + 'static,
 {
     if get_role(surface) != Some("dnd_icon") {
@@ -187,14 +239,21 @@ where
         );
     }
     let scale = scale.into();
-    render_elements_from_surface_tree(
+    push_render_elements_from_surface_tree(
         renderer,
         surface,
         location.to_physical(scale).to_i32_round(),
+        bbox_from_surface_tree(surface, location.to_i32_round()).to_f64(),
         scale,
         1.0,
+        false,
+        [0; 4],
+        None,
+        blur_strength,
         FRAME_TIME_FILTER,
-    )
+        push,
+        None,
+    );
 }
 
 pub type CursorState = Mutex<CursorStateInner>;
@@ -277,10 +336,11 @@ pub fn draw_cursor<R>(
     scale: Scale<f64>,
     buffer_scale: f64,
     time: Time<Monotonic>,
+    blur_strength: usize,
     draw_default: bool,
-) -> Vec<(CursorRenderElement<R>, Point<i32, Physical>)>
-where
-    R: Renderer + ImportMem + ImportAll,
+    push: &mut dyn FnMut(CursorRenderElement<R>, Point<i32, Physical>),
+) where
+    R: Renderer + ImportMem + ImportAll + AsGlowRenderer,
     R::TextureId: Send + Clone + 'static,
 {
     // draw the cursor as relevant
@@ -291,7 +351,7 @@ where
     let state = &mut *state_ref;
 
     if state.hidden {
-        return Vec::new();
+        return;
     }
 
     let named_cursor = state.current_cursor.or(match cursor_status {
@@ -300,7 +360,7 @@ where
     });
     if let Some(current_cursor) = named_cursor {
         if !draw_default && current_cursor == CursorIcon::Default {
-            return Vec::new();
+            return;
         }
 
         let integer_scale = (scale.x.max(scale.y) * buffer_scale).ceil() as u32;
@@ -337,7 +397,7 @@ where
             );
         state.current_image = Some(frame);
 
-        return vec![(
+        push(
             CursorRenderElement::Static(
                 MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
@@ -351,11 +411,9 @@ where
                 .expect("Failed to import cursor bitmap"),
             ),
             hotspot.to_physical_precise_round(scale),
-        )];
+        );
     } else if let CursorImageStatus::Surface(ref wl_surface) = cursor_status {
-        return draw_surface_cursor(renderer, wl_surface, location, scale);
-    } else {
-        Vec::new()
+        draw_surface_cursor(renderer, wl_surface, location, scale, blur_strength, push);
     }
 }
 

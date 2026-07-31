@@ -162,13 +162,10 @@ pub fn recursive_frame_time_estimation(
 
 /// True when this surface requests client blur (`org_kde_kwin_blur`).
 fn surface_is_blur_backed(states: &SurfaceData) -> bool {
-    use crate::wayland::protocols::blur::CacheableBlurState;
-    states.cached_state.has::<CacheableBlurState>()
-        && states
-            .cached_state
-            .get::<CacheableBlurState>()
-            .current()
-            .enabled
+    // Upstream tracks this per surface through the background-effect protocol.
+    states
+        .cached_state
+        .has::<crate::wayland::handlers::background_effect::ComputedBlurRegionCachedState>()
 }
 
 pub fn frame_time_filter_fn(states: &SurfaceData) -> Kind {
@@ -351,8 +348,7 @@ impl CompositorHandler for State {
                         .then(|| state.element())
                 });
             if let Some(window) = moved_window {
-                if window.is_stack() {
-                    let stack = window.stack_ref().unwrap();
+                if let Some(stack) = window.stack_ref() {
                     if let Some(i) = stack.surfaces().position(|s| {
                         s.wl_surface()
                             .as_deref()
@@ -447,10 +443,6 @@ impl CompositorHandler for State {
 
             // Update layer blur cache when layer surfaces are committed
             // (blur protocol state may have changed)
-            crate::wayland::handlers::layer_shell::update_layer_blur_state(
-                output,
-                shell.hidden_surfaces(),
-            );
         }
 
         // Re-evaluate keyboard focus for layer surfaces whose
@@ -659,12 +651,7 @@ impl State {
                         .is_some()
                 })
                 .cloned();
-            if let Some(output) = map_output {
-                crate::wayland::handlers::layer_shell::update_layer_blur_state(
-                    &output,
-                    shell.hidden_surfaces(),
-                );
-            }
+            if let Some(_output) = map_output {}
 
             if let Some(target) = target {
                 let seat = shell.seats.last_active().clone();

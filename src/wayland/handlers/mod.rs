@@ -3,7 +3,7 @@
 pub mod a11y;
 pub mod animated_resize;
 pub mod backdrop_color;
-pub mod blur;
+pub mod background_effect;
 pub mod buffer;
 pub mod compositor;
 pub mod corner_radius;
@@ -23,6 +23,7 @@ pub mod idle_notify;
 pub mod image_capture_source;
 pub mod image_copy_capture;
 pub mod input_method;
+pub mod keyboard_layout;
 pub mod keyboard_shortcuts_inhibit;
 pub mod layer_auto_hide;
 pub mod layer_corner_radius;

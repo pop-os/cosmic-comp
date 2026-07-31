@@ -4,7 +4,7 @@ edition = "2024"
 license = "GPL-3.0-only"
 name = "cosmic-comp"
 version = "1.31.0"
-rust-version = "1.90"
+rust-version = "1.93"
 
 [workspace]
 members = ["cosmic-comp-config"]
@@ -28,7 +28,7 @@ cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daem
 cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
     "greeter",
 ] }
-cosmic-text = { git = "https://github.com/pop-os/cosmic-text.git", features = [
+cosmic-text = { version = "0.19", features = [
     "shape-run-cache",
 ] }
 dirs = "6"
@@ -98,7 +98,8 @@ parking_lot = "0.12.5"
 logind-zbus = { version = "5.3.2", optional = true }
 futures-executor = { version = "0.3.32" }
 futures-util = "0.3.32"
-cgmath = "0.18.0"
+glam = { version = "0.33", default-features = false, features = ["std"] }
+smallvec = "1.15.2"
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
@@ -159,7 +160,9 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-cosmic-protocols = { git = "https://github.com/playtron-os//cosmic-protocols", rev = "badeb0e" }
+# MERGE(upstream-blur): local rebase of our force_close commit onto pop-os main,
+# which upstream cosmic-comp requires for the newer corner-radius API.
+cosmic-protocols = { path = "../cosmic-protocols" }
 [patch."https://github.com/pop-os/libcosmic/"]
 cosmic-config = { git = "https://github.com/playtron-os/libcosmic.git" }
 cosmic-config-derive = { git = "https://github.com/playtron-os/libcosmic.git" }

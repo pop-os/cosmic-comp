@@ -4,11 +4,11 @@ use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use cgmath::{Matrix3, Vector2};
+use glam::{Affine2, Mat3, Vec2};
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::{
     backend::renderer::{
-        ImportAll, ImportMem, Renderer,
+        ImportAll, Renderer,
         element::{
             Element, Id, Kind, RenderElement, UnderlyingStorage,
             surface::WaylandSurfaceRenderElement,
@@ -26,7 +26,7 @@ thread_local! {
     static LAST_RADIUS: RefCell<HashMap<Id, [u8; 4]>> = RefCell::new(HashMap::new());
 }
 
-pub static CLIPPING_SHADER: &str = include_str!("./shaders/clipped_surface.frag");
+pub static CLIPPING_SHADER: &str = include_str!("../shaders/clipped_surface.frag");
 pub struct ClippingShader(pub GlesTexProgram);
 
 impl ClippingShader {
@@ -42,10 +42,7 @@ impl ClippingShader {
 }
 
 #[derive(Debug)]
-pub struct ClippedSurfaceRenderElement<R>
-where
-    R: Renderer + ImportAll + ImportMem,
-{
+pub struct ClippedSurfaceRenderElement<R: Renderer> {
     inner: WaylandSurfaceRenderElement<R>,
     program: GlesTexProgram,
     radius: [u8; 4],
@@ -55,7 +52,7 @@ where
 
 impl<R> ClippedSurfaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll,
 {
     pub fn new(
         renderer: &mut R,
@@ -73,18 +70,25 @@ where
         let view = elem.view();
 
         let transform = elem.transform();
-        let transform_matrix = Matrix3::<f32>::from_translation(Vector2::new(0.5, 0.5))
-            * transform.matrix()
-            * Matrix3::<f32>::from_translation(-Vector2::new(0.5, 0.5));
+        // transform.matrix() is a cgmath Matrix3; upstream moved this file to glam,
+        // so take the 2x3 affine part across explicitly.
+        let m = transform.matrix();
+        let transform_matrix = Affine2::from_translation(Vec2::new(0.5, 0.5))
+            * Affine2::from_cols(
+                Vec2::new(m.x.x, m.x.y),
+                Vec2::new(m.y.x, m.y.y),
+                Vec2::new(m.z.x, m.z.y),
+            )
+            * Affine2::from_translation(-Vec2::new(0.5, 0.5));
 
         let geo_scale = {
             let Scale { x, y } = elem_geo.size.to_f64() / geo.size.to_f64();
-            Matrix3::from_nonuniform_scale(x as f32, y as f32)
+            Affine2::from_scale(Vec2::new(x as f32, y as f32))
         };
 
         let geo_translation = {
             let offset = (elem_geo.loc - geo.loc).to_f64();
-            Matrix3::from_translation(Vector2::new(
+            Affine2::from_translation(Vec2::new(
                 (offset.x / elem_geo.size.w as f64) as f32,
                 (offset.y / elem_geo.size.h as f64) as f32,
             ))
@@ -92,16 +96,17 @@ where
 
         let buf_scale = {
             let Scale { x, y } = buf_size.to_f64() / view.src.size.to_f64();
-            Matrix3::from_nonuniform_scale(x as f32, y as f32)
+            Affine2::from_scale(Vec2::new(x as f32, y as f32))
         };
 
-        let buf_translation = Matrix3::from_translation(Vector2::new(
+        let buf_translation = Affine2::from_translation(Vec2::new(
             (view.src.loc.x / buf_size.w as f64) as f32,
             (view.src.loc.y / buf_size.h as f64) as f32,
         ));
 
-        let input_to_geo =
-            transform_matrix * geo_scale * geo_translation * buf_scale * buf_translation;
+        let input_to_geo = Mat3::from(
+            transform_matrix * geo_scale * geo_translation * buf_scale * buf_translation,
+        );
 
         let uniforms = vec![
             Uniform::new("geo_size", (geometry.size.w as f32, geometry.size.h as f32)),
@@ -121,7 +126,14 @@ where
                     transpose: false,
                 },
             ),
-            Uniform::new("scale", scale.x as f32),
+            // MERGE: dropped our `scale` uniform (which narrowed the corner-antialiasing band to
+            // half a *physical* pixel at fractional scales) in favour of upstream's `noise`
+            // uniform from the frosted-glass work. The uniform list here must stay a subset of the
+            // `UniformName`s registered for CLIPPING_SHADER in `backend::render::init_shaders`, or
+            // every draw fails with `GlesError::UnknownUniform`. If the merged
+            // `shaders/clipped_surface.frag` keeps `uniform float scale`, re-add
+            // `Uniform::new("scale", scale.x as f32)` here *and* its `UniformName` there.
+            Uniform::new("noise", UniformValue::_1f(0.0)),
         ];
 
         Self {
@@ -182,7 +194,8 @@ where
 
 impl<R> Element for ClippedSurfaceRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + AsGlowRenderer,
+    R::TextureId: 'static,
 {
     fn id(&self) -> &Id {
         self.inner.id()
@@ -280,7 +293,7 @@ where
 
 impl<R> RenderElement<R> for ClippedSurfaceRenderElement<R>
 where
-    R: AsGlowRenderer + Renderer + ImportAll + ImportMem,
+    R: AsGlowRenderer + Renderer + ImportAll,
     R::TextureId: 'static,
 {
     fn draw(

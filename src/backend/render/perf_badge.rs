@@ -14,11 +14,13 @@ use iced_core::{Alignment, Background, Border, Color, Length, Shadow, Vector};
 use iced_widget::{Space, container, row};
 use icetron_p::prelude::styled_text;
 use smithay::{
-    backend::renderer::{ImportMem, Renderer, element::AsRenderElements},
+    backend::renderer::ImportMem,
     output::Output,
     utils::{Logical, Point, Size},
 };
 
+use crate::backend::render::AsGlowRenderer;
+use crate::utils::iced::IcedRenderElement;
 use crate::{
     comp_theme::CompTheme,
     state::State,
@@ -122,10 +124,13 @@ pub fn badge(evlh: LoopHandle<'static, State>, theme: CompTheme) -> PerfBadge {
 
 /// Render the badge for `output`, positioned top-left (clearing a top panel).
 /// `C` is the compositor element type the buffer element converts into.
-pub fn render<R, C>(badge: &PerfBadge, renderer: &mut R, output: &Output) -> Vec<C>
-where
-    C: From<<PerfBadge as AsRenderElements<R>>::RenderElement>,
-    R: Renderer + ImportMem,
+pub fn render<R>(
+    badge: &PerfBadge,
+    renderer: &mut R,
+    output: &Output,
+    push: &mut dyn FnMut(IcedRenderElement<R>),
+) where
+    R: AsGlowRenderer + ImportMem,
     R::TextureId: Send + Clone + 'static,
 {
     let scale = output.current_scale().fractional_scale();
@@ -134,5 +139,7 @@ where
     let location = Point::<f64, Logical>::from((4.0, 40.0))
         .to_physical(scale)
         .to_i32_round();
-    badge.render_elements(renderer, location, scale.into(), 1.0)
+    // The badge is an overlay: everything it draws goes above, and it has no
+    // drop shadow to order underneath.
+    badge.push_render_elements(renderer, location, scale.into(), 1.0, [0; 4], push, None)
 }

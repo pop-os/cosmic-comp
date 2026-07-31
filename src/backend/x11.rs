@@ -6,6 +6,7 @@ use crate::{
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
+    wayland::protocols::drm::WlDrmState,
 };
 use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::output::comp::OutputConfig;
@@ -149,7 +150,6 @@ impl X11State {
             dirty: false,
             pending: true,
             screen_filter_state: ScreenFilterStorage::default(),
-            blur_state: render::BlurRenderState::default(),
         });
 
         // schedule first render
@@ -211,7 +211,6 @@ pub struct Surface {
     dirty: bool,
     pending: bool,
     screen_filter_state: ScreenFilterStorage,
-    blur_state: render::BlurRenderState,
 }
 
 impl Surface {
@@ -235,7 +234,6 @@ impl Surface {
             render::CursorMode::NotDefault,
             &mut self.screen_filter_state,
             &state.event_loop_handle,
-            &mut self.blur_state,
         ) {
             Ok(RenderOutputResult { damage, states, .. }) => {
                 self.surface
@@ -500,7 +498,7 @@ where
         .common
         .dmabuf_state
         .create_global_with_default_feedback::<State>(dh, &default_feedback);
-    let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
+    state.common.wl_drm_state = Some(WlDrmState::new::<State>(
         dh,
         render_node
             .dev_path_with_type(NodeType::Render)
@@ -511,7 +509,7 @@ where
             ))?,
         renderer.dmabuf_formats(),
         &dmabuf_global,
-    );
+    ));
 
     info!("EGL hardware-acceleration enabled.");
 

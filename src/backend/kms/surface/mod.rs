@@ -2,20 +2,13 @@
 
 use crate::{
     backend::render::{
-        BLUR_CAPTURE_CLEAR_COLOR, BlurCaptureContext, BlurRenderState, BlurredTextureInfo,
-        CLEAR_COLOR, CursorMode, ElementFilter, GlMultiError, GlMultiRenderer,
-        PostprocessOutputConfig, PostprocessShader, PostprocessState, apply_dual_kawase_blur,
-        blur_downsample_enabled, cache_blur_texture_for_layer, cache_blur_texture_for_window,
-        compute_element_content_hash, copy_blur_texture_for_cache, downsample_texture,
+        CLEAR_COLOR, CursorMode, GlMultiError, GlMultiRenderer, PostprocessOutputConfig,
+        PostprocessShader, PostprocessState,
         element::{CosmicElement, DamageElement},
-        get_blur_group_content_hash, get_cached_blur_texture_for_layer,
-        get_cached_blur_texture_for_window, get_layer_blur_content_hash, get_layer_blur_surfaces,
-        init_shaders, output_elements, set_blur_texture_opaque, should_throttle_blur,
-        should_throttle_layer_blur, store_blur_group_content_hash, store_blur_group_last_update,
-        store_layer_blur_content_hash, store_layer_blur_last_update, workspace_elements,
+        init_shaders, output_elements,
     },
     config::ScreenFilter,
-    shell::{Shell, grabs::SeatMoveGrabState},
+    shell::Shell,
     state::SurfaceDmabufFeedback,
     utils::prelude::*,
     wayland::handlers::{
@@ -50,7 +43,7 @@ use smithay::{
         renderer::{
             Bind, Blit, BufferType, Frame, ImportDma, Offscreen, Renderer, RendererSuper, Texture,
             TextureFilter, buffer_dimensions, buffer_type,
-            damage::{Error as RenderError, OutputDamageTracker},
+            damage::Error as RenderError,
             element::{
                 Element, Kind, RenderElementStates,
                 texture::TextureRenderElement,
@@ -84,7 +77,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
-    utils::{Clock, Logical, Monotonic, Physical, Point, Rectangle, Scale, Transform},
+    utils::{Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
         dmabuf::{DmabufFeedbackBuilder, get_dmabuf},
         image_copy_capture::{
@@ -98,7 +91,6 @@ use smithay::{
 use tracing::{error, info, trace, warn};
 
 use crate::logger::GAMING_TARGET;
-use wayland_backend::server::ObjectId;
 
 use std::{
     borrow::{Borrow, BorrowMut},
@@ -162,7 +154,6 @@ pub struct SurfaceThreadState {
     mirroring: Option<Output>,
     screen_filter: ScreenFilter,
     postprocess_textures: HashMap<DrmNode, PostprocessState>,
-    blur_state: BlurRenderState,
 
     shell: Arc<parking_lot::RwLock<Shell>>,
 
@@ -599,7 +590,6 @@ fn surface_thread(
         mirroring: None,
         screen_filter,
         postprocess_textures: HashMap::new(),
-        blur_state: BlurRenderState::default(),
 
         shell,
         loop_handle: event_loop.handle(),
@@ -728,1068 +718,6 @@ fn surface_thread(
     event_loop.run(None, &mut state, |_| {}).map_err(Into::into)
 }
 
-/// Process blur for all windows that request it.
-///
-/// This captures background content for each blur window group, applies
-/// Kawase blur passes, and caches the result for compositing.
-#[profiling::function]
-fn process_blur(
-    renderer: &mut GlMultiRenderer,
-    blur_state: &mut BlurRenderState,
-    shell: &Arc<parking_lot::RwLock<Shell>>,
-    clock: &Clock<Monotonic>,
-    output_ref: &Output,
-    render_node: &DrmNode,
-    format: Fourcc,
-) -> crate::backend::render::gpu_profiler::BlurStats {
-    use crate::backend::render::output_has_layer_blur;
-    use crate::shell::layout::floating::BlurWindowGroup;
-
-    let mut stats = crate::backend::render::gpu_profiler::BlurStats::default();
-    let output_name = output_ref.name();
-
-    // Skip all blur processing if disabled in config
-    if !crate::backend::render::blur::blur_config_enabled() {
-        return stats;
-    }
-
-    // Check workspace windows for blur
-    let has_workspace_blur = {
-        let shell_ref = shell.read();
-        let ssd_blur = shell_ref.theme().header_backdrop_blur();
-        shell_ref
-            .workspaces
-            .active(output_ref)
-            .is_some_and(|(_, workspace)| workspace.has_blur_windows(ssd_blur))
-    };
-
-    // Check layer surfaces for blur using non-blocking cache
-    // (updated from main thread when layer surfaces change)
-    let has_layer_blur = output_has_layer_blur(&output_name);
-
-    if has_layer_blur {
-        tracing::trace!(
-            output = %output_name,
-            "[BLUR-TIMING] KMS process_blur() sees has_layer_blur=true"
-        );
-    }
-
-    let has_blur = has_workspace_blur || has_layer_blur;
-
-    if !has_blur {
-        return stats;
-    }
-
-    let blur_start = std::time::Instant::now();
-
-    let blur_groups: Vec<BlurWindowGroup> = {
-        let shell_ref = shell.read();
-        if let Some((_, workspace_ref)) = shell_ref.workspaces.active(output_ref) {
-            workspace_ref.blur_windows_grouped(1.0)
-        } else {
-            Vec::new()
-        }
-    };
-
-    // If no workspace blur groups and no layer blur, nothing to process
-    if blur_groups.is_empty() && !has_layer_blur {
-        return stats;
-    }
-    // Mode size is already in physical pixels - use it directly for blur textures
-    let output_size = output_ref
-        .current_mode()
-        .map(|m| m.size)
-        .unwrap_or_default();
-    let scale = Scale::from(output_ref.current_scale().fractional_scale());
-
-    // Ensure blur textures are allocated
-    match blur_state.ensure_textures(renderer, format, output_size, scale) {
-        Ok(true) => {}             // Textures ready, continue
-        Ok(false) => return stats, // Allocation was disabled, skip blur
-        Err(err) => {
-            // Check if this is a pixel format error (permanent failure)
-            let err_str = format!("{:?}", err);
-            if err_str.contains("UnsupportedPixelFormat") {
-                // Mark as permanently failed to avoid retry spam
-                if !blur_state.allocation_failed {
-                    tracing::warn!(
-                        ?err,
-                        "Failed to allocate blur textures - disabling blur for this output"
-                    );
-                    blur_state.allocation_failed = true;
-                }
-            } else if !blur_state.allocation_failed {
-                // Only log other errors once
-                tracing::warn!(?err, "Failed to allocate blur textures");
-            }
-            return stats;
-        }
-    }
-
-    let total_windows: usize = blur_groups.iter().map(|g| g.windows.len()).sum();
-    stats.groups = blur_groups.len();
-    stats.windows = total_windows;
-    let _blur_span = tracing::info_span!(
-        "kms_blur_processing",
-        output = %output_name,
-        blur_groups = blur_groups.len(),
-        blur_windows = total_windows,
-        output_w = output_size.w,
-        output_h = output_size.h,
-    )
-    .entered();
-
-    // Get grabbed window key to exclude from blur capture
-    let grabbed_window_key = {
-        let shell_ref = shell.read();
-        let last_active_seat = shell_ref.seats.last_active();
-        last_active_seat
-            .user_data()
-            .get::<SeatMoveGrabState>()
-            .and_then(|state| state.lock().ok())
-            .and_then(|guard| guard.as_ref().map(|s| s.element().key()))
-    };
-
-    let zoom_state = shell.read().zoom_state().cloned();
-
-    // Get workspace info
-    let workspace_info = {
-        let shell_ref = shell.read();
-        shell_ref.workspaces.active(output_ref).map(|(prev, curr)| {
-            let (previous_idx, idx) = shell_ref.workspaces.active_num(output_ref);
-            let previous = prev
-                .zip(previous_idx)
-                .map(|((w, start), idx)| (w.handle, idx, start));
-            let current = (curr.handle, idx);
-            (previous, current)
-        })
-    };
-
-    let Some((previous_workspace, workspace)) = workspace_info else {
-        return stats;
-    };
-
-    // Process each blur group
-    // Groups whose result cannot be seen, because a group above paints an opaque
-    // backdrop over everything they cover.
-    //
-    // Blur windows declare no opaque region, so the damage tracker cannot know
-    // this, and it could not help anyway -- it runs long after the blur work is
-    // done. Deciding here is what makes a stack of maximized windows cost one
-    // capture instead of one per window.
-    //
-    // Three conditions, all required: the group above paints its full geometry
-    // (square corners, no transparency of its own -- decided at grouping time),
-    // the scene it captured was itself opaque (measured on the capture, carried
-    // on the cached texture), and its windows geometrically cover the ones below.
-    // Groups are ordered bottom-to-top, so a single downward sweep from the top
-    // finds them.
-    let occluded_below = blur_groups
-        .iter()
-        .enumerate()
-        .rev()
-        .find(|(_, group)| {
-            group.paints_full_geometry
-                && group.windows.iter().all(|(key, geo, alpha, _)| {
-                    *alpha >= 1.0
-                        && get_cached_blur_texture_for_window(&output_name, key).is_some_and(
-                            |info| {
-                                // A texture captured for a different size is about
-                                // to be re-blurred anyway, so it proves nothing
-                                // about what is on screen now.
-                                info.capture_was_opaque
-                                    && info.capture_size == (geo.size.w, geo.size.h)
-                            },
-                        )
-                })
-        })
-        .map(|(idx, group)| {
-            let covered: Vec<_> = group.windows.iter().map(|(_, geo, _, _)| *geo).collect();
-            (idx, covered)
-        });
-
-    // OPTIMIZATION: Skip re-blurring if background hasn't changed
-    let mut any_blur_applied = false;
-    let window_blur_start = std::time::Instant::now();
-    for (group_idx, group) in blur_groups.iter().enumerate() {
-        // Tell the renderer whether this group's backdrop is opaque, so its
-        // occlusion cull can drop whatever is underneath. Re-evaluated every
-        // frame rather than only on re-blur: a window that starts fading or gains
-        // rounded corners stops covering what is below it immediately, and a
-        // stale claim would leave holes rather than a stale image.
-        for (window_key, _, alpha, _) in &group.windows {
-            let opaque = group.paints_full_geometry
-                && *alpha >= 1.0
-                && get_cached_blur_texture_for_window(&output_name, window_key)
-                    .is_some_and(|info| info.capture_was_opaque);
-            set_blur_texture_opaque(&output_name, window_key, opaque);
-        }
-
-        if let Some((occluder_idx, covered)) = occluded_below.as_ref()
-            && group_idx < *occluder_idx
-            && group
-                .windows
-                .iter()
-                .all(|(_, geo, _, _)| covered.iter().any(|c| c.intersection(*geo) == Some(*geo)))
-        {
-            stats.groups_occluded += 1;
-            any_blur_applied = true;
-            continue;
-        }
-        let group_start = std::time::Instant::now();
-        let _group_span = tracing::info_span!(
-            "blur_group",
-            group = group_idx,
-            windows = group.windows.len(),
-            z_threshold = group.capture_z_threshold,
-        )
-        .entered();
-
-        // Create blur capture context for this group
-        let blur_ctx =
-            BlurCaptureContext::new(group.capture_z_threshold, grabbed_window_key.clone());
-        let capture_filter = ElementFilter::BlurCapture(blur_ctx);
-
-        // Capture scene elements for the group (no cursor for blur capture)
-        let capture_start = std::time::Instant::now();
-        let capture_elements: Result<Vec<CosmicElement<GlMultiRenderer>>, _> = {
-            let _capture_span = tracing::info_span!(
-                "blur_capture_elements",
-                z_threshold = group.capture_z_threshold,
-            )
-            .entered();
-
-            workspace_elements(
-                Some(render_node),
-                renderer,
-                shell,
-                zoom_state.as_ref(),
-                clock.now(),
-                output_ref,
-                previous_workspace,
-                workspace,
-                CursorMode::None,
-                &capture_filter,
-                None,
-            )
-        };
-        let capture_elapsed = capture_start.elapsed();
-        stats.capture_duration += capture_elapsed;
-
-        let capture_elements = match capture_elements {
-            Ok(elems) => elems,
-            Err(err) => {
-                tracing::warn!(?err, "Failed to capture elements for blur");
-                continue;
-            }
-        };
-
-        // Same reasoning as the layer branch below: an empty capture would clear the
-        // background texture to the opaque `CLEAR_COLOR` and cache flat charcoal.
-        if capture_elements.is_empty() {
-            tracing::warn!(
-                output = %output_name,
-                group = group_idx,
-                "Empty window blur capture; keeping cached texture"
-            );
-            any_blur_applied = true;
-            continue;
-        }
-
-        // Does this capture cover the output with opaque content? If so a settled
-        // square-cornered window drawing this backdrop is an opaque occluder, and
-        // groups below it need no blur at all. Uses the same opaque_regions data
-        // the damage tracker uses, over elements already built here.
-        let capture_was_opaque = {
-            let mut opaque: Vec<Rectangle<i32, Physical>> = Vec::new();
-            for elem in &capture_elements {
-                let loc = elem.geometry(scale).loc;
-                opaque.extend(elem.opaque_regions(scale).into_iter().map(|mut r| {
-                    r.loc += loc;
-                    r
-                }));
-            }
-            Rectangle::subtract_rects_many([Rectangle::from_size(output_size)], opaque).is_empty()
-        };
-
-        // Compute content hash for cache invalidation
-        // This includes commit counters (which change on content updates) and geometry
-        let stored_hash = get_blur_group_content_hash(&output_name, group.capture_z_threshold);
-        let hash_start = std::time::Instant::now();
-        let content_hash =
-            compute_element_content_hash(group.capture_z_threshold, &capture_elements, scale);
-        stats.capture_duration += hash_start.elapsed();
-
-        // Check if content has changed since last blur
-        let content_changed = stored_hash.is_none() || stored_hash != Some(content_hash);
-
-        // Also verify all windows have cached textures
-        let all_cached = group.windows.iter().all(|(window_key, _, _, _)| {
-            get_cached_blur_texture_for_window(&output_name, window_key).is_some()
-        });
-
-        // Throttle blur updates: if content changed but we have cached textures
-        // and it's been less than BLUR_THROTTLE_INTERVAL, use the cache
-        // IMPORTANT: Don't throttle when a window is being dragged - the blur needs to update
-        // every frame to reflect the moving window's new position
-        let is_dragging = grabbed_window_key.is_some();
-        let throttled = content_changed
-            && all_cached
-            && !is_dragging
-            && should_throttle_blur(&output_name, group.capture_z_threshold);
-
-        let can_reuse_cache = (!content_changed && all_cached) || throttled;
-
-        // A group re-blurs for one of two quite different reasons, and the single
-        // "re-blurred" count cannot tell them apart: either its content really
-        // changed, or it has no cached texture to reuse -- and the latter ignores
-        // both the content hash and the throttle, so it repeats every frame.
-        if !can_reuse_cache {
-            if !all_cached {
-                stats.reblur_uncached += 1;
-            } else {
-                stats.reblur_content += 1;
-            }
-
-            // Resolve surface ids to something a human can act on. The ids in the
-            // diff below identify a surface but not who owns it, and the answer
-            // decides where the fix goes -- a client repainting needlessly is a
-            // different problem from the compositor rebuilding an element.
-            {
-                static LAST_INVENTORY: std::sync::Mutex<Option<std::time::Instant>> =
-                    std::sync::Mutex::new(None);
-                let mut last = LAST_INVENTORY.lock().unwrap();
-                if last.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(10)) {
-                    *last = Some(std::time::Instant::now());
-                    drop(last);
-
-                    use smithay::reexports::wayland_server::Resource as _;
-                    let shell_ref = shell.read();
-                    if let Some((_, ws)) = shell_ref.workspaces.active(output_ref) {
-                        for mapped in ws.mapped() {
-                            for window in mapped.windows().map(|(w, _)| w) {
-                                if let Some(surface) = window.wl_surface() {
-                                    tracing::debug!(
-                                        surface = ?surface.id(),
-                                        app_id = %window.app_id(),
-                                        title = %window.title(),
-                                        "blur inventory: window"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    drop(shell_ref);
-
-                    for layer in smithay::desktop::layer_map_for_output(output_ref).layers() {
-                        tracing::debug!(
-                            surface = ?layer.wl_surface().id(),
-                            namespace = %layer.namespace(),
-                            layer = ?layer.layer(),
-                            "blur inventory: layer"
-                        );
-                    }
-                }
-            }
-
-            // Name the surfaces responsible. The content hash says something
-            // changed but never what, which is not enough to act on.
-            if crate::backend::render::gpu_profiler::perf_logging_enabled() {
-                let (changed, added, removed) =
-                    crate::backend::render::blur::diff_blur_group_elements(
-                        &output_name,
-                        group.capture_z_threshold,
-                        &capture_elements,
-                        scale,
-                    );
-                if !changed.is_empty() || !added.is_empty() || !removed.is_empty() {
-                    tracing::debug!(
-                        group = group_idx,
-                        all_cached = all_cached,
-                        changed = ?changed.iter().take(4).collect::<Vec<_>>(),
-                        changed_total = changed.len(),
-                        added = ?added.iter().take(4).collect::<Vec<_>>(),
-                        removed = ?removed.iter().take(4).collect::<Vec<_>>(),
-                        "blur invalidated by"
-                    );
-                }
-            }
-        }
-
-        if can_reuse_cache {
-            let group_elapsed = group_start.elapsed();
-            tracing::trace!(
-                group = group_idx,
-                windows = group.windows.len(),
-                capture_us = capture_elapsed.as_micros(),
-                total_us = group_elapsed.as_micros(),
-                throttled = throttled,
-                "Skipping blur - cache valid"
-            );
-            any_blur_applied = true;
-            continue;
-        }
-
-        tracing::trace!(
-            group = group_idx,
-            content_changed = content_changed,
-            all_cached = all_cached,
-            capture_us = capture_elapsed.as_micros(),
-            "Re-blurring group"
-        );
-        stats.groups_reblurred += 1;
-
-        // Bump the throttle timestamp now, but store the content hash only once the
-        // pass succeeds (mirrors the layer branch): pairing the new hash with the old
-        // texture on a failed render would freeze the group on stale content.
-        store_blur_group_last_update(&output_name, group.capture_z_threshold);
-
-        // Render captured elements to background texture
-        let bg_render_start = std::time::Instant::now();
-        let bg_render_ok = {
-            let _bg_render_span = tracing::info_span!(
-                "blur_bg_render",
-                elements = capture_elements.len(),
-                width = output_size.w,
-                height = output_size.h,
-            )
-            .entered();
-
-            if let Some(bg_texture) = blur_state.background_texture.as_mut() {
-                let mut blur_dt = OutputDamageTracker::new(output_size, scale, Transform::Normal);
-
-                let render_result = {
-                    let mut gles_frame = bg_texture.render();
-                    gles_frame.draw::<_, RenderError<GlMultiError>>(|tex| {
-                        let bound = renderer.bind(tex).map_err(RenderError::Rendering)?;
-                        let mut bound_target = bound;
-                        let res = blur_dt.render_output(
-                            renderer,
-                            &mut bound_target,
-                            0, // Full redraw
-                            &capture_elements,
-                            // Transparent, not CLEAR_COLOR: an empty/partial window
-                            // blur capture must blend away, not cache opaque charcoal.
-                            BLUR_CAPTURE_CLEAR_COLOR,
-                        );
-                        match res {
-                            Ok(_) => Ok(Vec::new()),
-                            Err(e) => Err(e),
-                        }
-                    })
-                };
-
-                render_result.is_ok()
-            } else {
-                false
-            }
-        };
-        let bg_render_elapsed = bg_render_start.elapsed();
-        stats.bg_render_duration += bg_render_elapsed;
-
-        // Downsample background to smaller texture for blur passes (if enabled)
-        let downsample_start = std::time::Instant::now();
-        let downsample_enabled = blur_downsample_enabled();
-        let downsample_ok = if downsample_enabled && bg_render_ok {
-            if let (Some(bg), Some(ds)) = (
-                blur_state.background_texture.as_ref().cloned(),
-                blur_state.downsampled_texture.as_mut(),
-            ) {
-                let blur_size = blur_state.texture_size;
-                downsample_texture(renderer, &bg, ds, output_size, blur_size).is_ok()
-            } else {
-                false
-            }
-        } else {
-            !downsample_enabled && bg_render_ok // Skip downsample step when disabled
-        };
-        let downsample_elapsed = downsample_start.elapsed();
-        stats.passes_duration += downsample_elapsed;
-
-        // Apply blur passes (on downsampled or full-size textures)
-        let blur_passes_start = std::time::Instant::now();
-        let mut group_copy_duration = std::time::Duration::ZERO;
-        if downsample_ok && blur_state.is_ready() {
-            let blur_size = blur_state.texture_size;
-            // Source texture: downsampled if enabled, background if disabled
-            let blur_source = if downsample_enabled {
-                blur_state.downsampled_texture.as_ref().cloned()
-            } else {
-                blur_state.background_texture.as_ref().cloned()
-            };
-
-            if let (Some(src), Some(ping), Some(pong)) = (
-                blur_source,
-                blur_state.texture_a.as_mut(),
-                blur_state.texture_b.as_mut(),
-            ) {
-                // Toplevel windows carry no per-surface blur radius (only layer
-                // surfaces do), so window blur always uses the global config intensity.
-                let blur_result = apply_dual_kawase_blur(
-                    renderer,
-                    &src,
-                    ping,
-                    pong,
-                    blur_size,
-                    crate::backend::render::blur::effective_blur_levels(),
-                    crate::backend::render::blur::effective_blur_offset(),
-                );
-
-                if blur_result.is_ok() {
-                    // Make a copy of the blurred texture so it doesn't get overwritten
-                    // when processing the next blur group (the ping/pong buffers are reused)
-                    let copy_start = std::time::Instant::now();
-                    let cached_texture =
-                        match copy_blur_texture_for_cache(renderer, pong, blur_size) {
-                            Ok(tex) => tex,
-                            Err(e) => {
-                                tracing::warn!(
-                                    output = %output_name,
-                                    group = group_idx,
-                                    error = ?e,
-                                    "Failed to copy blur texture for cache, using original"
-                                );
-                                // Fall back to the original texture (may cause blur-on-blur artifacts)
-                                pong.clone()
-                            }
-                        };
-                    group_copy_duration += copy_start.elapsed();
-
-                    // Pass succeeded: this hash now describes the texture we cache.
-                    store_blur_group_content_hash(
-                        &output_name,
-                        group.capture_z_threshold,
-                        content_hash,
-                    );
-
-                    // Cache the same blurred texture for all windows in this group
-                    for (window_key, window_geo, _alpha, z_idx) in &group.windows {
-                        tracing::trace!(
-                            output = %output_name,
-                            global_z_idx = z_idx,
-                            window_geo = ?window_geo,
-                            blur_w = blur_size.w,
-                            blur_h = blur_size.h,
-                            downsampled = downsample_enabled,
-                            "KMS: Caching blur texture for window"
-                        );
-                        cache_blur_texture_for_window(
-                            &output_name,
-                            window_key,
-                            BlurredTextureInfo {
-                                texture: cached_texture.clone(),
-                                size: blur_size,
-                                screen_size: output_size,
-                                scale,
-                                background_state_hash: content_hash,
-                                capture_size: (window_geo.size.w, window_geo.size.h),
-                                capture_was_opaque,
-                                declared_opaque: false,
-                            },
-                        );
-                    }
-                    any_blur_applied = true;
-                }
-            }
-        }
-        let blur_passes_elapsed = blur_passes_start.elapsed();
-        // The cache copy happens inside the pass region, so subtract it to keep the
-        // two numbers disjoint in the report.
-        stats.passes_duration += blur_passes_elapsed.saturating_sub(group_copy_duration);
-        stats.copy_duration += group_copy_duration;
-        let group_elapsed = group_start.elapsed();
-
-        tracing::trace!(
-            group = group_idx,
-            windows = group.windows.len(),
-            capture_us = capture_elapsed.as_micros(),
-            bg_render_us = bg_render_elapsed.as_micros(),
-            downsample_us = downsample_elapsed.as_micros(),
-            blur_passes_us = blur_passes_elapsed.as_micros(),
-            total_us = group_elapsed.as_micros(),
-            "KMS window blur group complete"
-        );
-    }
-
-    let window_blur_elapsed = window_blur_start.elapsed();
-    if !blur_groups.is_empty() {
-        tracing::trace!(
-            output = %output_name,
-            window_blur_groups = blur_groups.len(),
-            window_blur_us = window_blur_elapsed.as_micros(),
-            "KMS window blur processing complete"
-        );
-    }
-
-    // Process layer shell blur surfaces - GROUP BY LAYER TYPE for efficiency
-    // All surfaces at the same layer level see the same background, so they share one blur texture
-    if has_layer_blur {
-        use smithay::wayland::shell::wlr_layer::Layer;
-        use std::collections::HashMap as StdHashMap;
-
-        let layer_blur_start = std::time::Instant::now();
-        let layer_blur_surfaces = get_layer_blur_surfaces(&output_name);
-
-        // While a layer surface below the panel/cards is playing its open (scale +
-        // fade-in) or fade-out animation, the captured backdrop changes every frame
-        // but the content hash can't see it (it hashes commit counters + geometry,
-        // not the compositor-applied alpha/scale). Force a re-capture each frame in
-        // that window — like `geometry_changed` below — so the blur tracks the
-        // animation and lands on the settled frame instead of freezing at frame 1.
-        let content_animating = shell.read().has_layer_open_or_fade_animations();
-
-        // Group surfaces by (layer type, blur radius) for proper capture.
-        // Surfaces with different radii need separate blur passes.
-        let layer_to_key = |l: Layer| -> u8 {
-            match l {
-                Layer::Background => 0,
-                Layer::Bottom => 1,
-                Layer::Top => 2,
-                Layer::Overlay => 3,
-            }
-        };
-        let key_to_layer = |k: u8| -> Layer {
-            match k {
-                0 => Layer::Background,
-                1 => Layer::Bottom,
-                2 => Layer::Top,
-                _ => Layer::Overlay,
-            }
-        };
-
-        // Group by (layer, radius bucket): surfaces with different radii need
-        // separate blur passes. None/non-finite radius ⇒ u32::MAX ⇒ global intensity.
-        let radius_bucket = |r: Option<f32>| -> u32 {
-            use crate::backend::render::blur::{BLUR_RADIUS_MAX_PX, BLUR_RADIUS_MIN_PX};
-            match r {
-                Some(px) if px.is_finite() => {
-                    px.clamp(BLUR_RADIUS_MIN_PX, BLUR_RADIUS_MAX_PX).round() as u32
-                }
-                _ => u32::MAX,
-            }
-        };
-        let mut surfaces_by_group: StdHashMap<(u8, u32), Vec<(ObjectId, Rectangle<i32, Logical>)>> =
-            StdHashMap::new();
-        for layer_info in &layer_blur_surfaces {
-            let key = (
-                layer_to_key(layer_info.layer),
-                radius_bucket(layer_info.blur_radius),
-            );
-            surfaces_by_group
-                .entry(key)
-                .or_default()
-                .push((layer_info.surface_id.clone(), layer_info.geometry));
-        }
-
-        tracing::trace!(
-            output = %output_name,
-            total_layer_surfaces = layer_blur_surfaces.len(),
-            layer_groups = surfaces_by_group.len(),
-            "[BLUR-TIMING] KMS layer blur processing starting"
-        );
-
-        // Process each group (by layer + radius bucket) that has blur surfaces
-        for ((group_key, bucket), surfaces) in surfaces_by_group {
-            let layer_type = key_to_layer(group_key);
-            // Reconstruct the group's blur radius (None ⇒ global config intensity).
-            let group_radius = if bucket == u32::MAX {
-                None
-            } else {
-                Some(bucket as f32)
-            };
-            let layer_group_start = std::time::Instant::now();
-
-            let _layer_span = tracing::debug_span!(
-                "layer_blur_group",
-                layer = ?layer_type,
-                surfaces = surfaces.len(),
-            )
-            .entered();
-
-            // Check which surfaces don't have cached blur textures yet
-            // so we can reset their fade-in timers after first cache
-            let uncached_surfaces: Vec<ObjectId> = surfaces
-                .iter()
-                .filter(|(surface_id, _)| {
-                    get_cached_blur_texture_for_layer(&output_name, surface_id).is_none()
-                })
-                .map(|(surface_id, _)| surface_id.clone())
-                .collect();
-            let all_cached = uncached_surfaces.is_empty();
-
-            // Did any surface change size since its texture was captured? The
-            // content hash below only tracks what's BEHIND the surface, so a resize
-            // wouldn't otherwise invalidate the cache — the stale, smaller texture
-            // would be stretched over the newly-exposed area, flashing the
-            // unblurred desktop. Force an immediate re-blur (no throttle) so the
-            // backdrop grows in lockstep with the surface.
-            let geometry_changed = surfaces.iter().any(|(surface_id, geo)| {
-                get_cached_blur_texture_for_layer(&output_name, surface_id)
-                    .is_some_and(|info| info.capture_size != (geo.size.w, geo.size.h))
-            });
-
-            // EARLY THROTTLE CHECK: Skip the expensive capture + hash + blur entirely
-            // if we already have cached textures and the last blur was recent enough.
-            // This avoids the workspace_elements() call (~100-900us) on throttled frames.
-            // Keyed per (output, layer, radius bucket) so distinct buckets in the same
-            // layer don't share throttle/content-hash state.
-            let hash_key = format!("{}_{:?}_{}", output_name, layer_type, bucket);
-            if all_cached
-                && !geometry_changed
-                && !content_animating
-                && should_throttle_layer_blur(&hash_key)
-            {
-                tracing::trace!(
-                    layer = ?layer_type,
-                    surfaces = surfaces.len(),
-                    "Skipping layer blur - throttled (all cached, recent update)"
-                );
-                any_blur_applied = true;
-                continue;
-            }
-
-            // Layer blur capture: capture all elements below this layer
-            let capture_filter =
-                ElementFilter::LayerBlurCapture(layer_type, grabbed_window_key.clone());
-
-            // Capture scene elements for the layer (no cursor for blur capture)
-            let capture_start = std::time::Instant::now();
-            let capture_elements: Result<Vec<CosmicElement<GlMultiRenderer>>, _> = {
-                workspace_elements(
-                    Some(render_node),
-                    renderer,
-                    shell,
-                    zoom_state.as_ref(),
-                    clock.now(),
-                    output_ref,
-                    previous_workspace,
-                    workspace,
-                    CursorMode::None,
-                    &capture_filter,
-                    None,
-                )
-            };
-            let capture_elapsed = capture_start.elapsed();
-
-            let capture_elements = match capture_elements {
-                Ok(elems) => elems,
-                Err(err) => {
-                    tracing::warn!(?err, layer = ?layer_type, "Failed to capture elements for layer blur");
-                    continue;
-                }
-            };
-
-            // Empty capture handling. We only fast-path (keep the existing texture)
-            // when EVERY surface in the group already has one — that's the transient
-            // case (e.g. the wallpaper's Background cache momentarily emptied) where
-            // overwriting the good blurred texture with an empty scene would flash a
-            // grey/black card. When some surface is UNCACHED (a fresh/secondary output
-            // at startup, before anything mapped below it), do NOT skip: fall through
-            // and render the empty capture. The blur SOURCE clears to TRANSPARENT (see
-            // below), so we cache a benign invisible backdrop rather than nothing —
-            // and the moment a wallpaper/window maps below, its commit re-blurs into a
-            // real backdrop. (Skipping here instead left the panel with no cached
-            // texture at all → no backdrop element → glass over the opaque frame-clear
-            // = the black panel reported on a fresh HP output after restart.)
-            if capture_elements.is_empty() && all_cached {
-                tracing::warn!(
-                    output = %output_name,
-                    layer = ?layer_type,
-                    surfaces = surfaces.len(),
-                    "Empty layer blur capture; keeping cached texture"
-                );
-                // Bump the throttle so a *sustained* empty capture retries at the
-                // throttle rate (~10/s) instead of re-running the capture + warning
-                // every frame. The last-good texture stays cached and keeps showing,
-                // so deferring the retry costs nothing visually.
-                store_layer_blur_last_update(&hash_key);
-                any_blur_applied = true;
-                continue;
-            }
-
-            // Compute content hash for cache invalidation
-            let layer_z = group_key as usize;
-            let content_hash =
-                compute_element_content_hash(layer_z + 1000, &capture_elements, scale);
-
-            // Check if content has changed since last blur
-            let stored_hash = get_layer_blur_content_hash(&hash_key);
-            let content_changed = stored_hash.is_none() || stored_hash != Some(content_hash);
-
-            // If content unchanged and all cached, skip (unless a below-surface is
-            // mid open/fade animation — then the backdrop is changing invisibly to
-            // the hash and we must re-capture).
-            if !content_changed && !geometry_changed && !content_animating && all_cached {
-                tracing::trace!(
-                    layer = ?layer_type,
-                    surfaces = surfaces.len(),
-                    capture_us = capture_elapsed.as_micros(),
-                    "Skipping layer blur - cache valid (content unchanged)"
-                );
-                any_blur_applied = true;
-                continue;
-            }
-
-            // Content changed: apply throttle if we have cached textures
-            // (don't throttle when textures are missing - need first render immediately).
-            // A geometry change is never throttled — the backdrop must track the
-            // surface size exactly on the frame it resizes.
-            let is_dragging = grabbed_window_key.is_some();
-            let throttled = content_changed
-                && !geometry_changed
-                && !content_animating
-                && all_cached
-                && !is_dragging
-                && should_throttle_layer_blur(&hash_key);
-
-            if throttled {
-                tracing::trace!(
-                    layer = ?layer_type,
-                    surfaces = surfaces.len(),
-                    capture_us = capture_elapsed.as_micros(),
-                    "Skipping layer blur - throttled (content changed but too recent)"
-                );
-                any_blur_applied = true;
-                continue;
-            }
-
-            tracing::trace!(
-                layer = ?layer_type,
-                surfaces = surfaces.len(),
-                capture_elements = capture_elements.len(),
-                content_changed = content_changed,
-                all_cached = all_cached,
-                capture_us = capture_elapsed.as_micros(),
-                "Re-blurring layer group"
-            );
-
-            // Update the throttle timestamp now (so a persistently failing group retries
-            // once per throttle interval rather than every frame), but DON'T record the
-            // content hash yet — see the success gate below. Recording it here against a
-            // pass that then fails leaves the NEW hash paired with the OLD texture, so the
-            // `!content_changed && !geometry_changed && all_cached` skip above freezes the
-            // group: the desktop behind it is static, so `content_changed` never flips back.
-            store_layer_blur_last_update(&hash_key);
-
-            // Render captured elements to background texture
-            let bg_render_start = std::time::Instant::now();
-            let bg_render_ok = {
-                if let Some(bg_texture) = blur_state.background_texture.as_mut() {
-                    let mut blur_dt =
-                        OutputDamageTracker::new(output_size, scale, Transform::Normal);
-
-                    let render_result = {
-                        let mut gles_frame = bg_texture.render();
-                        gles_frame.draw::<_, RenderError<GlMultiError>>(|tex| {
-                            let bound = renderer.bind(tex).map_err(RenderError::Rendering)?;
-                            let mut bound_target = bound;
-                            let res = blur_dt.render_output(
-                                renderer,
-                                &mut bound_target,
-                                0, // Full redraw
-                                &capture_elements,
-                                // Transparent, not CLEAR_COLOR: an empty/partial layer
-                                // blur capture must blend away (final_alpha=0) so the
-                                // client glass shows the real content behind it, rather
-                                // than caching opaque charcoal that reads as grey/black.
-                                BLUR_CAPTURE_CLEAR_COLOR,
-                            );
-                            match res {
-                                Ok(_) => Ok(Vec::new()),
-                                Err(e) => Err(e),
-                            }
-                        })
-                    };
-
-                    render_result.is_ok()
-                } else {
-                    false
-                }
-            };
-            let bg_render_elapsed = bg_render_start.elapsed();
-            stats.bg_render_duration += bg_render_elapsed;
-
-            if !bg_render_ok {
-                tracing::warn!(
-                    output = %output_name,
-                    layer = ?layer_type,
-                    "Failed to render background for layer blur"
-                );
-            }
-
-            // Downsample background to smaller texture for blur passes (if enabled)
-            let downsample_start = std::time::Instant::now();
-            let downsample_enabled = blur_downsample_enabled();
-            let downsample_ok = if downsample_enabled && bg_render_ok {
-                if let (Some(bg), Some(ds)) = (
-                    blur_state.background_texture.as_ref().cloned(),
-                    blur_state.downsampled_texture.as_mut(),
-                ) {
-                    let blur_size = blur_state.texture_size;
-                    downsample_texture(renderer, &bg, ds, output_size, blur_size).is_ok()
-                } else {
-                    false
-                }
-            } else {
-                !downsample_enabled && bg_render_ok
-            };
-            let downsample_elapsed = downsample_start.elapsed();
-            stats.passes_duration += downsample_elapsed;
-
-            if bg_render_ok && !downsample_ok {
-                tracing::warn!(
-                    output = %output_name,
-                    layer = ?layer_type,
-                    "Failed to downsample for layer blur"
-                );
-            }
-
-            // Apply blur passes using LAYER-SPECIFIC textures to avoid cache pollution
-            // with window blur (which uses texture_a/texture_b)
-            let blur_passes_start = std::time::Instant::now();
-            let mut layer_copy_duration = std::time::Duration::ZERO;
-            if downsample_ok && blur_state.is_ready() {
-                let blur_size = blur_state.texture_size;
-                let blur_source = if downsample_enabled {
-                    blur_state.downsampled_texture.as_ref().cloned()
-                } else {
-                    blur_state.background_texture.as_ref().cloned()
-                };
-
-                if let (Some(src), Some(ping), Some(pong)) = (
-                    blur_source,
-                    blur_state.layer_texture_a.as_mut(),
-                    blur_state.layer_texture_b.as_mut(),
-                ) {
-                    // Per-surface radius drives intensity; None ⇒ global config.
-                    let (blur_levels, blur_offset) =
-                        crate::backend::render::blur::resolve_blur_params(group_radius);
-                    let blur_result = apply_dual_kawase_blur(
-                        renderer,
-                        &src,
-                        ping,
-                        pong,
-                        blur_size,
-                        blur_levels,
-                        blur_offset,
-                    );
-
-                    if blur_result.is_ok() {
-                        // Make a copy of the blurred texture so it doesn't get overwritten
-                        // when processing the next blur group (the ping/pong buffers are reused)
-                        let layer_copy_start = std::time::Instant::now();
-                        let cached_texture = match copy_blur_texture_for_cache(
-                            renderer, pong, blur_size,
-                        ) {
-                            Ok(tex) => tex,
-                            Err(e) => {
-                                tracing::warn!(
-                                    output = %output_name,
-                                    layer = ?layer_type,
-                                    error = ?e,
-                                    "Failed to copy layer blur texture for cache, using original"
-                                );
-                                // Fall back to the original texture (may cause blur-on-blur artifacts)
-                                pong.clone()
-                            }
-                        };
-                        layer_copy_duration += layer_copy_start.elapsed();
-
-                        // The pass succeeded, so this content hash now genuinely describes
-                        // the texture we're about to cache. Recording it any earlier is
-                        // what lets a failed pass latch a stale (possibly grey) backdrop.
-                        store_layer_blur_content_hash(&hash_key, content_hash);
-
-                        // Cache the SAME blurred texture for ALL surfaces in this layer
-                        for (surface_id, geo) in &surfaces {
-                            cache_blur_texture_for_layer(
-                                &output_name,
-                                surface_id.clone(),
-                                BlurredTextureInfo {
-                                    texture: cached_texture.clone(),
-                                    size: blur_size,
-                                    screen_size: output_size,
-                                    scale,
-                                    background_state_hash: content_hash,
-                                    capture_size: (geo.size.w, geo.size.h),
-                                    // Only the KMS window path decides occlusion, and it measures
-                                    // this per capture. The others record false so no skip is
-                                    // ever taken on an unmeasured guess.
-                                    capture_was_opaque: false,
-                                    declared_opaque: false,
-                                },
-                            );
-                        }
-
-                        // Reset fade-in for surfaces that just got their first
-                        // blur texture so the animation starts from alpha=0
-                        // instead of wherever the timer has drifted to.
-                        if !uncached_surfaces.is_empty() {
-                            tracing::trace!(
-                                output = %output_name,
-                                layer = ?layer_type,
-                                uncached_count = uncached_surfaces.len(),
-                                blur_total_us = blur_start.elapsed().as_micros(),
-                                layer_group_us = layer_group_start.elapsed().as_micros(),
-                                "First blur texture cached — calling restart_layer_fade_in for uncached surfaces"
-                            );
-                            let mut shell_guard = shell.write();
-                            for surface_id in &uncached_surfaces {
-                                shell_guard.restart_layer_fade_in(surface_id.clone());
-                            }
-                        }
-
-                        any_blur_applied = true;
-                    } else {
-                        tracing::warn!(
-                            output = %output_name,
-                            layer = ?layer_type,
-                            "Layer blur passes failed"
-                        );
-                    }
-                }
-            }
-            let blur_passes_elapsed = blur_passes_start.elapsed();
-            stats.passes_duration += blur_passes_elapsed.saturating_sub(layer_copy_duration);
-            stats.copy_duration += layer_copy_duration;
-            let layer_group_elapsed = layer_group_start.elapsed();
-
-            tracing::trace!(
-                layer = ?layer_type,
-                surfaces = surfaces.len(),
-                capture_us = capture_elapsed.as_micros(),
-                bg_render_us = bg_render_elapsed.as_micros(),
-                downsample_us = downsample_elapsed.as_micros(),
-                blur_passes_us = blur_passes_elapsed.as_micros(),
-                total_us = layer_group_elapsed.as_micros(),
-                "KMS layer blur group complete"
-            );
-        }
-
-        let layer_blur_elapsed = layer_blur_start.elapsed();
-        tracing::trace!(
-            output = %output_name,
-            total_layer_surfaces = layer_blur_surfaces.len(),
-            layer_blur_us = layer_blur_elapsed.as_micros(),
-            "KMS layer blur processing complete"
-        );
-    }
-
-    blur_state.blur_applied = any_blur_applied;
-
-    let blur_elapsed = blur_start.elapsed();
-    tracing::trace!(
-        output = %output_name,
-        blur_groups = blur_groups.len(),
-        blur_applied = any_blur_applied,
-        elapsed_us = blur_elapsed.as_micros(),
-        elapsed_ms = ?blur_elapsed.as_millis(),
-        "KMS blur processing complete"
-    );
-
-    stats
-}
-
 impl SurfaceThreadState {
     fn suspend(&mut self, tx: SyncSender<()>) {
         self.active.store(false, Ordering::SeqCst);
@@ -1885,8 +813,7 @@ impl SurfaceThreadState {
         // force enumeration
         let _ = self.api.devices();
         // Drop GL handles tied to the removed renderer so they reallocate on the
-        // new context after resume (ensure_textures skips same-size recreation).
-        self.blur_state = BlurRenderState::default();
+        // new context after resume.
         self.postprocess_textures.clear();
     }
 
@@ -2294,7 +1221,6 @@ impl SurfaceThreadState {
             game_mode_fps_limit,
             game_mode_active,
             game_mode_vrr,
-            has_ssd_blur_windows,
         ) = {
             let shell = self.shell.read();
             let animations_going = shell.animations_going();
@@ -2309,12 +1235,8 @@ impl SurfaceThreadState {
             let game_mode_active = shell.game_mode.active;
             let game_mode_vrr = shell.game_mode_vrr;
             let output = self.mirroring.as_ref().unwrap_or(&self.output);
-            // SSD header blur isn't visible to frame_time_filter_fn; detect it here
-            // for the frame-flags gate below.
-            let ssd_blur = shell.theme().header_backdrop_blur();
             if let Some((_, workspace)) = shell.workspaces.active(output) {
                 let seat = shell.seats.last_active();
-                let has_ssd_blur_windows = workspace.has_ssd_blur_windows(ssd_blur);
                 if let Some(fullscreen_surface) = workspace.get_fullscreen(seat) {
                     const _30_FPS: Duration = Duration::from_nanos(1_000_000_000 / 30);
                     (
@@ -2331,7 +1253,6 @@ impl SurfaceThreadState {
                         fps_limit,
                         game_mode_active,
                         game_mode_vrr,
-                        has_ssd_blur_windows,
                     )
                 } else {
                     (
@@ -2342,7 +1263,6 @@ impl SurfaceThreadState {
                         fps_limit,
                         game_mode_active,
                         game_mode_vrr,
-                        has_ssd_blur_windows,
                     )
                 }
             } else {
@@ -2354,7 +1274,6 @@ impl SurfaceThreadState {
                     fps_limit,
                     game_mode_active,
                     game_mode_vrr,
-                    false,
                 )
             }
         };
@@ -2378,12 +1297,6 @@ impl SurfaceThreadState {
 
         if has_active_fullscreen || animations_going {
             // skip overlay plane assign if we have a fullscreen surface or dynamic contents to save on tests
-            remove_frame_flags |= FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
-        }
-
-        if has_ssd_blur_windows {
-            // Frame-level counterpart of the per-surface blur gate, for SSD header
-            // blur (no client flag for frame_time_filter_fn to see).
             remove_frame_flags |= FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
         }
 
@@ -2415,31 +1328,12 @@ impl SurfaceThreadState {
             );
         }
 
-        // Process blur for windows that request it
-        let output_ref = self.mirroring.as_ref().unwrap_or(&self.output);
-        let blur_format = compositor.format();
-        let blur_phase_start = std::time::Instant::now();
-        let mut blur_stats = process_blur(
-            &mut renderer,
-            &mut self.blur_state,
-            &self.shell,
-            &self.clock,
-            output_ref,
-            &render_node,
-            blur_format,
-        );
-        profile.blur_duration = blur_phase_start.elapsed();
-
-        // Counts come back from the blur pass itself. They used to be re-derived
-        // here by walking the space a second time, on every frame whether or not
-        // anyone was profiling -- and that walk redoes the same overlap grouping
-        // the pass has already done.
-        blur_stats.layers =
-            crate::backend::render::get_layer_blur_surfaces(&output_ref.name()).len();
-        profile.blur_window_count = blur_stats.windows;
-        profile.blur_layer_count = blur_stats.layers;
-        profile.blur = blur_stats;
-
+        // MERGE: our fork's dual-Kawase blur pass (process_blur + BlurRenderState +
+        // ElementFilter::{BlurCapture,LayerBlurCapture} capture) was removed here in
+        // favour of upstream's frosted-glass implementation, which blits the region
+        // under an element straight out of the live framebuffer during element
+        // collection. The gpu_profiler `blur_*` FrameProfile fields consequently stay
+        // at their defaults (no separate blur phase to time on this thread any more).
         let elements_phase_start = std::time::Instant::now();
         let mut elements = output_elements(
             Some(&render_node),
@@ -2691,7 +1585,10 @@ impl SurfaceThreadState {
                 })
                 .context("Failed to draw to offscreen render target")?;
 
-            renderer = self.api.single_renderer(&self.target_node).unwrap();
+            renderer = self
+                .api
+                .single_renderer(&self.target_node)
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?;
 
             elements = postprocess_elements(
                 &mut renderer,
@@ -3209,7 +2106,7 @@ fn get_surface_dmabuf_feedback(
     render_node: DrmNode,
     target_node: DrmNode,
     render_formats: FormatSet,
-    _target_formats: FormatSet,
+    target_formats: FormatSet,
     primary_plane_formats: FormatSet,
     overlay_plane_formats: Option<FormatSet>,
 ) -> SurfaceDmabufFeedback {
@@ -3227,60 +2124,37 @@ fn get_surface_dmabuf_feedback(
             .cloned()
             .collect::<FormatSet>()
     });
-    let builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
 
-    /*
-    // Sadly no implementation would pick this up as a preferred render tranche,
-    // where the combined formats would increase our chances of doing a dmabuf copy.
-    // .. So we should probably not advertise this on the off-chance it actually triggers bugs.
-    //
+    let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats.clone());
 
-    let combined_formats = render_formats.intersection(&target_formats).cloned().collect::<FormatSet>();
-    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
-        builder = builder.add_preference_tranche(
-            render_node.dev_id(),
-            None,
-            combined_formats,
-        );
-    };
-
-    // We also can't advertise scan out tranches for the actual display device,
-    // as e.g. the nvidia driver might then send us dmabufs, that makes e.g. the iris hangs on import...
-    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
+    if target_node != render_node {
         builder = builder.add_preference_tranche(
             target_node.dev_id(),
-            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-            combined_formats,
+            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Sampling),
+            target_formats,
         );
     };
-
-    // So no fun combinations, we gotta wait for dmabuf-v6
-    */
-
     let render_feedback = builder.clone().build().unwrap();
-    let primary_scanout_feedback = (target_node == render_node).then(|| {
+
+    let primary_scanout_feedback = builder
+        .clone()
+        .add_preference_tranche(
+            target_node.dev_id(),
+            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
+            primary_plane_formats,
+        )
+        .build()
+        .unwrap();
+    let overlay_scanout_feedback = overlay_plane_formats.map(|formats| {
         builder
-            .clone()
             .add_preference_tranche(
-                render_node.dev_id(),
+                target_node.dev_id(),
                 Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                primary_plane_formats,
+                formats,
             )
             .build()
             .unwrap()
     });
-    let overlay_scanout_feedback = overlay_plane_formats
-        .filter(|_| target_node == render_node)
-        .map(|formats| {
-            builder
-                .add_preference_tranche(
-                    render_node.dev_id(),
-                    Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                    formats,
-                )
-                .build()
-                .unwrap()
-        });
 
     SurfaceDmabufFeedback {
         render_feedback,
@@ -3361,7 +2235,7 @@ fn send_screencopy_result<'a>(
     pre_postprocess_data: &mut PrePostprocessData,
     tx: &std::sync::mpsc::Sender<PendingImageCopyData>,
     frame_result: &RenderFrameResult<GbmBuffer, GbmFramebuffer, CosmicElement<GlMultiRenderer<'a>>>,
-    elements: &[CosmicElement<GlMultiRenderer>],
+    elements: &[CosmicElement<GlMultiRenderer<'a>>],
     (session, frame, res): (
         &ScreencopySessionRef,
         ScreencopyFrame,
@@ -3542,6 +2416,8 @@ fn send_screencopy_result<'a>(
         transform,
         damage.as_deref(),
         sync,
+        // Don't reference `Buffer`s since we blit from framebuffer/postprocess buffer
+        vec![],
     )? {
         if frame_result.is_empty {
             data.frame

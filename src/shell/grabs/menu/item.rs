@@ -1,3 +1,6 @@
+// MERGE: this widget was ported off libcosmic in the fork (iced_core + iced_tiny_skia +
+// CompTheme). Upstream's changes here were libcosmic-only (button::Catalog styling and the
+// `theme.list_item_position` menu-item radius fixup) and have no equivalent; dropped.
 use crate::comp_theme::CompTheme;
 use crate::utils::iced::CompElement;
 use iced_core::{

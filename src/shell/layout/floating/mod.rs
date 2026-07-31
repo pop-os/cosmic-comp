@@ -12,6 +12,7 @@ use std::{
 use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smallvec::SmallVec;
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -19,7 +20,7 @@ use smithay::{
         renderer::{
             Bind, Color32F, ImportAll, ImportMem, Offscreen, Renderer,
             element::{
-                AsRenderElements, Kind, RenderElement,
+                Kind, RenderElement,
                 texture::{TextureRenderBuffer, TextureRenderElement},
                 utils::{Relocate, RelocateRenderElement, RescaleRenderElement},
             },
@@ -37,17 +38,14 @@ use smithay::{
 
 use crate::{
     backend::render::{
-        BLUR_BORDER_STRENGTH, BLUR_FALLBACK_ALPHA, BLUR_FALLBACK_COLOR, BLUR_TINT_COLOR,
-        BLUR_TINT_STRENGTH, BackdropShader, BlurredBackdropShader, ElementFilter, IndicatorShader,
-        Key, Usage,
+        BackdropShader, IndicatorShader, Key, Usage,
         element::AsGlowRenderer,
-        get_cached_blur_texture_for_window,
         voice_orb::{VoiceOrbShader, VoiceOrbState},
     },
     shell::{
         CosmicSurface, Direction, ManagedLayer, MoveResult, ResizeMode,
         element::{
-            CosmicMapped, CosmicMappedKey, CosmicMappedRenderElement, CosmicWindow, MaximizedState,
+            CosmicMapped, CosmicMappedRenderElement, CosmicWindow, MaximizedState,
             resize_indicator::ResizeIndicator,
             stack::{CosmicStackRenderElement, MoveResult as StackMoveResult},
             window::CosmicWindowRenderElement,
@@ -62,7 +60,6 @@ use crate::{
     utils::{prelude::*, tween::EaseRectangle},
     wayland::handlers::xdg_shell::popup::get_popup_toplevel,
     wayland::protocols::backdrop_color::get_surface_backdrop_color,
-    wayland::protocols::blur::{get_blur_border, get_blur_saturation, get_blur_tint},
 };
 
 mod grabs;
@@ -384,22 +381,9 @@ impl TiledCorners {
     }
 }
 
-/// A group of consecutive blur windows that can share a single background capture.
-/// Windows are grouped when there are no non-blur windows between them.
-#[derive(Clone)]
-pub struct BlurWindowGroup {
-    /// The z-index threshold for capturing (lowest z-index in the group)
-    pub capture_z_threshold: usize,
-    /// Windows in this group: (key, geometry, alpha, z_index)
-    pub windows: Vec<(CosmicMappedKey, Rectangle<i32, Local>, f32, usize)>,
-    /// Whether every window here paints its backdrop over its full geometry with
-    /// no rounded corners and no transparency of its own.
-    ///
-    /// Necessary but not sufficient for the window to occlude what is below it --
-    /// the captured scene must also have been opaque, which is only known after
-    /// the capture and is tracked separately on the cached texture.
-    pub paints_full_geometry: bool,
-}
+// MERGE: dropped `BlurWindowGroup` — our multi-pass blur capture pipeline is
+// replaced by upstream's frosted-glass blur (backend/render/wayland/blur_effect.rs),
+// which blits from the live framebuffer and needs no per-window grouping.
 
 impl FloatingLayout {
     pub fn new(
@@ -538,28 +522,26 @@ impl FloatingLayout {
         }
     }
 
-    /// Render embedded children of a parent window.
-    /// Returns the render elements for all embedded children positioned relative to the parent.
-    fn render_embedded_children<R>(
+    /// Render embedded children of a parent window, positioned relative to the parent.
+    /// Elements are pushed front-to-back, like every other element collector.
+    fn push_embedded_children<R>(
         &self,
         renderer: &mut R,
         parent_elem: &CosmicMapped,
         parent_geometry: Rectangle<i32, Local>,
         output_scale: f64,
         alpha: f32,
-    ) -> Vec<CosmicMappedRenderElement<R>>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
     {
-        let mut embedded_elements = Vec::new();
-
         let parent_window = parent_elem.active_window();
         let Some(parent_surface) = parent_window.wl_surface() else {
-            return embedded_elements;
+            return;
         };
 
         let parent_surface_id = parent_surface.id().to_string();
@@ -623,7 +605,8 @@ impl FloatingLayout {
                 "Rendering embedded window in front of parent"
             );
 
-            let elements = embedded_elem.render_elements(
+            let mut below = SmallVec::<[_; 4]>::new_const();
+            embedded_elem.push_render_elements(
                 renderer,
                 render_location.to_physical_precise_round(output_scale),
                 clip_size,
@@ -631,35 +614,35 @@ impl FloatingLayout {
                 alpha,
                 None,
                 None,
+                push,
+                &mut |elem| below.push(elem),
             );
-            embedded_elements.extend(elements);
+            for elem in below.drain(..) {
+                push(elem);
+            }
         }
-
-        embedded_elements
     }
 
     /// Render popups for an embedded window at its correct visual position (inside parent)
-    fn render_embedded_popups<R>(
+    fn push_embedded_popups<R>(
         &self,
         renderer: &mut R,
         embedded_elem: &CosmicMapped,
         output_scale: f64,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<CosmicMappedRenderElement<R>>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
     {
-        let mut popup_elements = Vec::new();
-
         // Get the embedded window's surface ID
         let embedded_window = embedded_elem.active_window();
         let Some(embedded_surface) = embedded_window.wl_surface() else {
-            return popup_elements;
+            return;
         };
         let embedded_surface_id = embedded_surface.id().to_string();
 
@@ -667,7 +650,7 @@ impl FloatingLayout {
         let Some(embed_info) = crate::wayland::handlers::surface_embed::get_embed_render_info_by_id(
             &embedded_surface_id,
         ) else {
-            return popup_elements;
+            return;
         };
 
         // Find the parent element
@@ -679,7 +662,7 @@ impl FloatingLayout {
         });
 
         let Some(parent_elem) = parent_elem else {
-            return popup_elements;
+            return;
         };
 
         // Get parent geometry (possibly animated)
@@ -703,17 +686,16 @@ impl FloatingLayout {
         ));
         let render_location = parent_geometry.loc.as_logical() + embed_offset;
 
-        // popup_render_elements expects: target_render_loc - elem.geometry().loc
+        // push_popup_render_elements expects: target_render_loc - elem.geometry().loc
         let popup_render_offset = render_location - embedded_elem.geometry().loc;
-        popup_elements.extend(embedded_elem.popup_render_elements(
+        embedded_elem.push_popup_render_elements(
             renderer,
             popup_render_offset.to_physical_precise_round(output_scale),
             output_scale.into(),
             alpha,
             scanout_node,
-        ));
-
-        popup_elements
+            push,
+        );
     }
 
     pub fn map_maximized(
@@ -2381,7 +2363,7 @@ impl FloatingLayout {
             mapped.set_bounds(geometry.size.as_logical());
             let prev = self.space.element_geometry(&mapped).map(RectExt::as_local);
 
-            let window_geometry = if mapped.is_maximized(false) {
+            let window_geometry = if mapped.is_maximized(true) {
                 self.pre_slide_positions.remove(&mapped);
                 geometry
             } else {
@@ -3000,273 +2982,9 @@ impl FloatingLayout {
         self.refresh(); //fixup any out of bounds elements
     }
 
-    /// Check if any windows in this layout have blur enabled
-    pub fn has_blur_windows(&self) -> bool {
-        self.space.elements().any(|elem| elem.has_blur())
-    }
-
-    pub fn has_ssd_windows(&self) -> bool {
-        self.space
-            .elements()
-            .any(|elem| elem.has_ssd() && !elem.has_blur())
-    }
-
-    /// Get blur windows in Z-order (bottom to top) with their keys
-    /// Returns (window_key, geometry, alpha, global_z_index) tuples
-    /// global_z_index is the position among ALL windows where 0 = bottom and N-1 = top
-    pub fn blur_windows_ordered(
-        &self,
-        alpha: f32,
-    ) -> Vec<(CosmicMappedKey, Rectangle<i32, Local>, f32, usize)> {
-        if self.space.outputs().next().is_none() {
-            return Vec::new();
-        }
-
-        // Count minimizing animations and space elements to get total window count
-        let minimizing_count = self
-            .animations
-            .iter()
-            .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
-            .count();
-        let total_count = minimizing_count + self.space.elements().count();
-
-        if total_count == 0 {
-            return Vec::new();
-        }
-
-        self.animations
-            .iter()
-            .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
-            .map(|(elem, _)| elem)
-            .chain(self.space.elements().rev())
-            .enumerate()
-            .filter(|(_, elem)| elem.has_blur() || elem.has_ssd())
-            .filter_map(|(front_to_back_idx, elem)| {
-                // Convert front-to-back index to back-to-front z-index
-                // Index 0 in iteration = topmost window = z-index (total-1)
-                // Index (total-1) in iteration = bottom window = z-index 0
-                let global_z_idx = total_count - 1 - front_to_back_idx;
-
-                let anim_opt = self.animations.get(elem);
-                let (geometry, elem_alpha) = if let Some(anim) = anim_opt {
-                    (
-                        *anim.previous_geometry(),
-                        alpha * anim.alpha(self.theme.motion),
-                    )
-                } else {
-                    let geo = self.space.element_geometry(elem)?;
-                    (geo.as_local(), alpha)
-                };
-                Some((elem.key(), geometry, elem_alpha, global_z_idx))
-            })
-            .collect()
-    }
-
-    /// Get blur windows grouped by shared capture requirements.
-    /// Consecutive blur windows (no non-blur windows between them) share a capture.
-    /// This optimizes rendering by reducing the number of scene captures needed.
-    ///
-    /// Example:
-    /// - Windows: [non-blur z=0, blur z=1, blur z=2, non-blur z=3, blur z=4]
-    /// - Groups: [{threshold=1, windows=[z=1,z=2]}, {threshold=4, windows=[z=4]}]
-    /// - Only 2 captures needed instead of 3 (when windows don't overlap)
-    ///
-    /// When consecutive blur windows OVERLAP geometrically, they need separate groups
-    /// because the top window needs to capture the bottom window in its blur.
-    pub fn blur_windows_grouped(&self, alpha: f32) -> Vec<BlurWindowGroup> {
-        if self.space.outputs().next().is_none() {
-            return Vec::new();
-        }
-
-        // Count minimizing animations and space elements to get total window count
-        let minimizing_count = self
-            .animations
-            .iter()
-            .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
-            .count();
-        let space_element_count = self.space.elements().count();
-        let total_count = minimizing_count + space_element_count;
-
-        // Trace: Log window counts to track z-order stability
-        tracing::trace!(
-            minimizing_count,
-            space_element_count,
-            total_count,
-            "blur_windows_grouped: window counts"
-        );
-
-        if total_count == 0 {
-            return Vec::new();
-        }
-
-        // Collect all windows with their blur status and z-index
-        // We need to track non-blur windows to detect gaps between blur windows
-        let all_windows: Vec<(
-            Option<(CosmicMappedKey, Rectangle<i32, Local>, f32, bool)>,
-            usize,
-            bool,
-        )> = self
-            .animations
-            .iter()
-            .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
-            .map(|(elem, _)| elem)
-            .chain(self.space.elements().rev())
-            .enumerate()
-            .filter_map(|(front_to_back_idx, elem)| {
-                let global_z_idx = total_count - 1 - front_to_back_idx;
-                let needs_blur = elem.has_blur() || (elem.has_ssd() && !elem.has_blur());
-
-                if needs_blur {
-                    let anim_opt = self.animations.get(elem);
-                    let (geometry, elem_alpha) = if let Some(anim) = anim_opt {
-                        (
-                            *anim.previous_geometry(),
-                            alpha * anim.alpha(self.theme.motion),
-                        )
-                    } else {
-                        let geo = self.space.element_geometry(elem)?;
-                        (geo.as_local(), alpha)
-                    };
-                    // A settled, square-cornered, fully-opaque window covers every
-                    // pixel of its geometry. Animating windows are excluded via
-                    // elem_alpha, which is scaled by the animation.
-                    let square_corners = elem
-                        .blur_corner_radius(geometry.size.as_logical(), 0)
-                        .iter()
-                        .all(|r| *r == 0.0);
-                    let paints_full = square_corners && elem_alpha >= 1.0;
-                    Some((
-                        Some((elem.key(), geometry, elem_alpha, paints_full)),
-                        global_z_idx,
-                        true,
-                    ))
-                } else {
-                    // Non-blur window - we just need to track its position
-                    Some((None, global_z_idx, false))
-                }
-            })
-            .collect();
-
-        // Group consecutive blur windows that don't overlap
-        // If windows overlap, the top one needs to see the bottom one in its blur
-        let mut groups: Vec<BlurWindowGroup> = Vec::new();
-        let mut current_group: Option<BlurWindowGroup> = None;
-        let mut last_z_idx: Option<usize> = None;
-
-        // Sort by z-index (ascending = bottom to top)
-        let mut sorted_windows = all_windows;
-        sorted_windows.sort_by_key(|(_, z_idx, _)| *z_idx);
-
-        for (window_data, z_idx, is_blur) in sorted_windows {
-            if is_blur {
-                if let Some((key, geometry, elem_alpha, paints_full)) = window_data {
-                    // Check if this blur window is consecutive with the previous
-                    let is_consecutive = last_z_idx.map(|last| z_idx == last + 1).unwrap_or(true);
-
-                    // Check if this window overlaps with any window in the current group
-                    let overlaps_with_group = current_group
-                        .as_ref()
-                        .map(|group| {
-                            group.windows.iter().any(|(_, group_geo, _, _)| {
-                                // Check if rectangles intersect
-                                geometry.overlaps(*group_geo)
-                            })
-                        })
-                        .unwrap_or(false);
-
-                    if is_consecutive && !overlaps_with_group {
-                        // Add to current group or start new one
-                        if let Some(ref mut group) = current_group {
-                            group.windows.push((key, geometry, elem_alpha, z_idx));
-                            group.paints_full_geometry &= paints_full;
-                        } else {
-                            current_group = Some(BlurWindowGroup {
-                                capture_z_threshold: z_idx,
-                                windows: vec![(key, geometry, elem_alpha, z_idx)],
-                                paints_full_geometry: paints_full,
-                            });
-                        }
-                    } else {
-                        // Gap detected OR windows overlap - finish current group and start new one
-                        if let Some(group) = current_group.take() {
-                            groups.push(group);
-                        }
-                        current_group = Some(BlurWindowGroup {
-                            capture_z_threshold: z_idx,
-                            windows: vec![(key, geometry, elem_alpha, z_idx)],
-                            paints_full_geometry: paints_full,
-                        });
-                    }
-                }
-            } else {
-                // Non-blur window creates a gap - finish current group
-                if let Some(group) = current_group.take() {
-                    groups.push(group);
-                }
-            }
-            last_z_idx = Some(z_idx);
-        }
-
-        // Don't forget the last group
-        if let Some(group) = current_group {
-            groups.push(group);
-        }
-
-        groups
-    }
-
-    /// Get the geometries of all windows that have blur enabled
-    /// Returns (geometry, alpha) tuples
-    pub fn blur_window_geometries(
-        &self,
-        alpha: f32,
-        ssd_blur: bool,
-    ) -> Vec<(Rectangle<i32, Local>, f32)> {
-        if self.space.outputs().next().is_none() {
-            return Vec::new();
-        }
-
-        let mut geometries: Vec<(Rectangle<i32, Local>, f32)> = self
-            .animations
-            .iter()
-            .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
-            .map(|(elem, _)| elem)
-            .chain(self.space.elements().rev())
-            .filter(|elem| elem.has_blur())
-            .filter_map(|elem| {
-                let anim_opt = self.animations.get(elem);
-                let (geometry, elem_alpha) = if let Some(anim) = anim_opt {
-                    (
-                        *anim.previous_geometry(),
-                        alpha * anim.alpha(self.theme.motion),
-                    )
-                } else {
-                    let geo = self.space.element_geometry(elem)?;
-                    (geo.as_local(), alpha)
-                };
-                Some((geometry, elem_alpha))
-            })
-            .collect();
-
-        // Add SSD header blur regions for windows with server-side decorations
-        // that don't already have full-window blur
-        if ssd_blur {
-            for elem in self.space.elements().rev() {
-                if elem.has_ssd()
-                    && !elem.has_blur()
-                    && let Some(geo) = self.space.element_geometry(elem)
-                {
-                    let header_geo = Rectangle::new(
-                        geo.loc.as_local(),
-                        Size::from((geo.size.w, elem.ssd_height(false).unwrap_or(0))),
-                    );
-                    geometries.push((header_geo, alpha));
-                }
-            }
-        }
-
-        geometries
-    }
+    // MERGE: dropped has_blur_windows / has_ssd_windows / blur_windows_ordered /
+    // blur_windows_grouped / blur_window_geometries — they only existed to drive our
+    // multi-pass blur capture, which upstream's frosted-glass blur replaces.
 
     #[profiling::function]
     pub fn render_popups<R>(
@@ -3274,8 +2992,8 @@ impl FloatingLayout {
         renderer: &mut R,
         alpha: f32,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<CosmicMappedRenderElement<R>>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
@@ -3284,8 +3002,6 @@ impl FloatingLayout {
     {
         let output = self.space.outputs().next().unwrap();
         let output_scale = output.current_scale().fractional_scale();
-
-        let mut elements = Vec::default();
 
         for elem in self
             .animations
@@ -3302,9 +3018,7 @@ impl FloatingLayout {
             if is_embedded {
                 // For embedded windows, we need to render popups at the embedded position
                 // (inside the parent window), not at the embedded window's workspace position
-                let embedded_popup_elements =
-                    self.render_embedded_popups(renderer, elem, output_scale, alpha, scanout_node);
-                elements.extend(embedded_popup_elements);
+                self.push_embedded_popups(renderer, elem, output_scale, alpha, scanout_node, push);
             } else {
                 // Normal window - render popups at workspace position
                 let (geometry, alpha) = self
@@ -3321,21 +3035,18 @@ impl FloatingLayout {
                     });
 
                 let render_location = geometry.loc - elem.geometry().loc.as_local();
-                elements.extend(
-                    elem.popup_render_elements(
-                        renderer,
-                        render_location
-                            .as_logical()
-                            .to_physical_precise_round(output_scale),
-                        output_scale.into(),
-                        alpha,
-                        scanout_node,
-                    ),
+                elem.push_popup_render_elements(
+                    renderer,
+                    render_location
+                        .as_logical()
+                        .to_physical_precise_round(output_scale),
+                    output_scale.into(),
+                    alpha,
+                    scanout_node,
+                    push,
                 );
             }
         }
-
-        elements
     }
 
     /// Render `mapped`'s current content (at its committed buffer size) into
@@ -3368,8 +3079,20 @@ impl FloatingLayout {
             .to_physical_precise_round(output_scale);
 
         let glow = renderer.glow_renderer_mut();
-        let elements: Vec<CosmicMappedRenderElement<GlowRenderer>> =
-            mapped.render_elements(glow, location, None, output_scale.into(), 1.0, None, None);
+        let mut elements: Vec<CosmicMappedRenderElement<GlowRenderer>> = Vec::new();
+        let mut below: Vec<CosmicMappedRenderElement<GlowRenderer>> = Vec::new();
+        mapped.push_render_elements(
+            glow,
+            location,
+            None,
+            output_scale.into(),
+            1.0,
+            None,
+            None,
+            &mut |elem| elements.push(elem),
+            &mut |elem| below.push(elem),
+        );
+        elements.extend(below);
         if elements.is_empty() {
             return None;
         }
@@ -3429,57 +3152,40 @@ impl FloatingLayout {
         indicator_thickness: u8,
         alpha: f32,
         theme: &crate::comp_theme::CompTheme,
-        element_filter: ElementFilter,
         attached_orb_state: Option<&VoiceOrbState>,
         scanout_node: Option<DrmNode>,
-    ) -> Vec<CosmicMappedRenderElement<R>>
-    where
+        push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
         CosmicWindowRenderElement<R>: RenderElement<R>,
         CosmicStackRenderElement<R>: RenderElement<R>,
     {
+        // MERGE: dropped the `ElementFilter::BlurCapture` / `LayerBlurCapture` plumbing
+        // (blur context, per-window z-index thresholds, grabbed-window skipping). Upstream's
+        // frosted-glass blur blits from the live framebuffer, so no capture pass is needed.
         let output = self.space.outputs().next().unwrap();
         let output_geometry = {
             let layers = layer_map_for_output(output);
             layers.non_exclusive_zone()
         };
         let output_scale = output.current_scale().fractional_scale();
+        let mut lower_elements = SmallVec::<[_; 4]>::new_const();
 
-        let mut elements = Vec::default();
-
-        // Extract blur capture context if present, or grabbed window key from LayerBlurCapture
-        let (blur_ctx, layer_blur_grabbed_key) = match &element_filter {
-            ElementFilter::BlurCapture(ctx) => (Some(ctx), None),
-            ElementFilter::LayerBlurCapture(_, grabbed_key) => (None, grabbed_key.as_ref()),
-            _ => (None, None),
-        };
-
-        // Count total windows for z-index calculation
-        let minimizing_count = self
-            .animations
-            .iter()
-            .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
-            .count();
-        let total_window_count = minimizing_count + self.space.elements().count();
-
-        // Iterate front-to-back (topmost first) using enumerate to track iteration index
-        for (front_to_back_idx, elem) in self
+        for elem in self
             .animations
             .iter()
             .filter(|(_, anim)| matches!(anim, Animation::Minimize { .. }))
             .map(|(elem, _)| elem)
             .chain(self.space.elements().rev())
-            .enumerate()
         {
             // Check if this is an embedded window - if so, get the embed render info
             let embed_info = elem.windows().find_map(|(w, _)| {
                 crate::wayland::handlers::surface_embed::get_embed_render_info(&w)
             });
 
-            // For now, skip embedded windows - we'll render them separately
-            // TODO: Render embedded windows at their parent position + offset
+            // Embedded windows are rendered by their parent (at parent position + offset)
             if embed_info.is_some() {
                 tracing::info!(
                     app_id = %elem.active_window().app_id(),
@@ -3502,60 +3208,6 @@ impl FloatingLayout {
                     app_id = %elem.active_window().app_id(),
                     surface_id = %surface_id,
                     "Hiding window - pending embed for this surface"
-                );
-                continue;
-            }
-
-            // Convert front-to-back index to back-to-front z-index
-            // Index 0 in iteration = topmost window = z-index (total-1)
-            // Index (total-1) in iteration = bottom window = z-index 0
-            let z_idx = if total_window_count > 0 {
-                total_window_count - 1 - front_to_back_idx
-            } else {
-                0
-            };
-
-            // When capturing background for blur (iterative multi-pass):
-            // - Skip grabbed/dragged windows (they're rendered on top and shouldn't blur themselves)
-            // - Skip windows at or above the z-index threshold (blur window and everything above)
-            // - For final render (not skipping backdrops), render all windows normally
-            if let Some(ctx) = blur_ctx {
-                // Skip grabbed/dragged window - it's always on top
-                if ctx.is_window_grabbed(elem) {
-                    tracing::trace!(
-                        window_class = %elem.active_window().app_id(),
-                        z_idx = z_idx,
-                        "Skipping grabbed window during blur capture"
-                    );
-                    continue;
-                }
-
-                // Check if this window is at or above the z-index threshold
-                if ctx.is_z_index_excluded(z_idx) {
-                    tracing::trace!(
-                        window_class = %elem.active_window().app_id(),
-                        z_idx = z_idx,
-                        "Excluding window during blur capture (z-index threshold)"
-                    );
-                    continue;
-                }
-
-                // This window WILL be rendered in blur capture
-                tracing::trace!(
-                    window_class = %elem.active_window().app_id(),
-                    z_idx = z_idx,
-                    "Including window in blur capture"
-                );
-            }
-
-            // For LayerBlurCapture: skip grabbed/dragged window (they shouldn't appear in layer blur)
-            if let Some(grabbed_key) = layer_blur_grabbed_key
-                && elem.key() == *grabbed_key
-            {
-                tracing::debug!(
-                    window_class = %elem.active_window().app_id(),
-                    z_idx = z_idx,
-                    "Skipping grabbed window during layer blur capture"
                 );
                 continue;
             }
@@ -3622,8 +3274,8 @@ impl FloatingLayout {
                 .unwrap_or_else(|| (self.space.element_geometry(elem).unwrap().as_local(), alpha));
 
             // During slide animations (no per-element animation), override geometry
-            // with the target from recalculate. This ensures shadow, blur, decorations,
-            // and content ALL render at the correct animated size — not the buffer's
+            // with the target from recalculate. This ensures shadow, decorations and
+            // content ALL render at the correct animated size — not the buffer's
             // committed size. Eliminates visual snapping when client commits new frames.
             // Also applies post-slide while waiting for client buffers to catch up.
             if anim_opt.is_none()
@@ -3633,7 +3285,7 @@ impl FloatingLayout {
             }
 
             // Pre-compute the animated geometry for Tiled animations.
-            // This is used for blur/backdrop placement so they track the animated size,
+            // This is used for backdrop placement so it tracks the animated size,
             // while the actual buffer stays at previous_geometry and gets rescaled later.
             // ClientPipelinedResize does NOT use this — its geometry is already correct
             // (computed from buffer size above).
@@ -3658,85 +3310,7 @@ impl FloatingLayout {
 
             let render_location = geometry.loc - elem.geometry().loc.as_local();
 
-            let mut window_elements = elem.render_elements(
-                renderer,
-                render_location
-                    .as_logical()
-                    .to_physical_precise_round(output_scale),
-                None,
-                output_scale.into(),
-                alpha,
-                None,
-                scanout_node,
-            );
-            window_elements.extend(
-                elem.shadow_render_element(
-                    renderer,
-                    render_location
-                        .as_logical()
-                        .to_physical_precise_round(output_scale),
-                    None,
-                    output_scale.into(),
-                    1.,
-                    alpha,
-                ),
-            );
-
-            // Track animation info for later use (blur needs to be added before rescaling for minimize)
-            // Tuple: (original_geo, scale, relocation, buffer_size)
-            let minimize_anim_info: Option<(
-                Rectangle<i32, Local>,
-                Scale<f64>,
-                Point<i32, Physical>,
-                Size<i32, Local>,
-            )> = if let Some(anim) = anim_opt {
-                if matches!(
-                    anim,
-                    Animation::Minimize { .. } | Animation::Unminimize { .. }
-                ) {
-                    let original_geo = anim.previous_geometry();
-                    let target_geometry = anim.geometry(
-                        output_geometry,
-                        self.space
-                            .element_geometry(elem)
-                            .map(RectExt::as_local)
-                            .unwrap_or(geometry),
-                        elem.floating_tiled.lock().unwrap().as_ref(),
-                        self.gaps(),
-                        self.theme.motion,
-                    );
-
-                    let buffer_size = elem.geometry().size.as_local();
-
-                    // Use uniform scaling to maintain aspect ratio
-                    let scale_x = target_geometry.size.w as f64 / buffer_size.w as f64;
-                    let scale_y = target_geometry.size.h as f64 / buffer_size.h as f64;
-                    let uniform_scale = scale_x.min(scale_y);
-
-                    // Calculate centering offset
-                    let scaled_w = (buffer_size.w as f64 * uniform_scale) as i32;
-                    let scaled_h = (buffer_size.h as f64 * uniform_scale) as i32;
-                    let offset_x = (target_geometry.size.w - scaled_w) / 2;
-                    let offset_y = (target_geometry.size.h - scaled_h) / 2;
-
-                    let scale = Scale {
-                        x: uniform_scale,
-                        y: uniform_scale,
-                    };
-                    let relocation = (target_geometry.loc - original_geo.loc
-                        + Point::from((offset_x, offset_y)).as_local())
-                    .as_logical()
-                    .to_physical_precise_round(output_scale);
-
-                    Some((*original_geo, scale, relocation, buffer_size))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            // Compute window border radius from theme (used by both orb and blur)
+            // Compute window border radius from theme (used by the voice orb)
             let radius_s = theme.radius_s()[0];
             let window_border_radius = if radius_s < 4.0 {
                 radius_s
@@ -3744,8 +3318,7 @@ impl FloatingLayout {
                 radius_s + 4.0
             };
 
-            // If this window has the attached voice orb, insert it behind window content
-            // (In front-to-back rendering: content -> shadow -> orb -> backdrop)
+            // If this window has the attached voice orb, render it behind window content
             if let Some(orb_state) = attached_orb_state
                 && let Some(attached_surface_id) = orb_state.attached_surface_id_for_render()
             {
@@ -3765,214 +3338,22 @@ impl FloatingLayout {
                         Some(current_window_geo),
                         Some(window_border_radius),
                     ) {
-                        window_elements.push(orb_element.into());
+                        lower_elements.push(orb_element.into());
                     }
                 }
             }
 
-            // Add blur backdrop for windows that request KDE blur (independent of focus state)
-            // Design spec: background: rgba(255, 255, 255, 0.10), backdrop-filter: blur(50px)
-            // Skip adding backdrop if we're capturing background for blur
-            if elem.has_blur() && blur_ctx.is_none() {
-                // For minimize/unminimize animation, calculate the scaled blur geometry
-                // Use buffer_size (actual window size) not original_geo (which could be minimized size for unminimize)
-                let blur_geometry = if let Some((_original_geo, scale, _relocation, buffer_size)) =
-                    &minimize_anim_info
-                {
-                    // Calculate the animated size for blur based on buffer size and scale
-                    let scaled_w = (buffer_size.w as f64 * scale.x) as i32;
-                    let scaled_h = (buffer_size.h as f64 * scale.y) as i32;
-
-                    // Get the target geometry from the animation (this is the interpolated position/size)
-                    if let Some(anim) = anim_opt {
-                        let anim_geometry = anim.geometry(
-                            output_geometry,
-                            self.space
-                                .element_geometry(elem)
-                                .map(RectExt::as_local)
-                                .unwrap_or(geometry),
-                            elem.floating_tiled.lock().unwrap().as_ref(),
-                            self.gaps(),
-                            self.theme.motion,
-                        );
-
-                        tracing::debug!(
-                            buffer_w = buffer_size.w,
-                            buffer_h = buffer_size.h,
-                            scale_x = scale.x,
-                            scale_y = scale.y,
-                            scaled_w = scaled_w,
-                            scaled_h = scaled_h,
-                            anim_geo_x = anim_geometry.loc.x,
-                            anim_geo_y = anim_geometry.loc.y,
-                            anim_geo_w = anim_geometry.size.w,
-                            anim_geo_h = anim_geometry.size.h,
-                            "Minimize/unminimize blur geometry calculation"
-                        );
-
-                        // Center the scaled blur within the animation geometry
-                        let offset_x = (anim_geometry.size.w - scaled_w) / 2;
-                        let offset_y = (anim_geometry.size.h - scaled_h) / 2;
-                        Rectangle::new(
-                            Point::from((
-                                anim_geometry.loc.x + offset_x,
-                                anim_geometry.loc.y + offset_y,
-                            )),
-                            Size::from((scaled_w, scaled_h)),
-                        )
-                    } else {
-                        geometry
-                    }
-                } else {
-                    // For Tiled animations, use the interpolated geometry
-                    tiled_anim_geometry.unwrap_or(geometry)
-                };
-
-                let corner_radius = elem.blur_corner_radius(
-                    blur_geometry.size.as_logical(),
-                    window_border_radius.round() as u8,
-                );
-
-                // Get the output name for looking up cached blur texture
-                let output_name = output.name();
-                let window_key = elem.key();
-                let output_transform = output.current_transform();
-                let output_scale = output.current_scale().fractional_scale();
-
-                // Get per-window blur texture (iterative multi-pass blur)
-                let blur_info = get_cached_blur_texture_for_window(&output_name, &window_key);
-
-                if let Some(blur_info) = blur_info {
-                    let active = elem.active_window();
-                    let blur_saturation = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_saturation(&s))
-                        .unwrap_or(1.0);
-                    let blur_tint = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_tint(&s))
-                        .unwrap_or(BLUR_TINT_STRENGTH);
-                    let blur_border = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_border(&s))
-                        .unwrap_or(BLUR_BORDER_STRENGTH);
-                    // Use BlurredBackdropShader with the cached blurred texture
-                    let blur_backdrop = BlurredBackdropShader::element(
-                        renderer,
-                        &blur_info.texture,
-                        blur_geometry,
-                        blur_info.size,
-                        blur_info.screen_size,
-                        output_scale,
-                        output_transform,
-                        corner_radius,
-                        alpha,
-                        BLUR_TINT_COLOR,
-                        blur_tint,
-                        false, // No blur border for regular windows
-                        blur_saturation,
-                        blur_border,
-                    );
-
-                    window_elements.push(blur_backdrop.into());
-                } else {
-                    tracing::debug!(
-                        output = %output_name,
-                        "No cached blur texture available, using fallback"
-                    );
-                    // Fallback
-                    let blur_backdrop = BackdropShader::element(
-                        renderer,
-                        Key::Window(Usage::Overlay, elem.key()),
-                        blur_geometry,
-                        corner_radius,
-                        alpha * BLUR_FALLBACK_ALPHA,
-                        BLUR_FALLBACK_COLOR,
-                    );
-                    window_elements.push(blur_backdrop.into());
-                }
-            }
-
-            // Add blur backdrop for SSD header on windows without full-window blur
-            if !elem.has_blur()
-                && elem.has_ssd()
-                && blur_ctx.is_none()
-                && theme.header_backdrop_blur()
-            {
-                let header_geo = Rectangle::new(
-                    geometry.loc,
-                    Size::from((geometry.size.w, elem.ssd_height(false).unwrap_or(0))),
-                );
-                // Use window's top corner radius for the header (bottom corners are flat
-                // since the header meets the window content below).
-                // NOTE: The shader's rounded_box SDF uses y-up convention but screen
-                // coords are y-down, so tr/br uniforms are swapped relative to screen.
-                // Pass top-right radius in the br slot (index 2) for correct screen mapping.
-                let full_radius = elem.blur_corner_radius(
-                    geometry.size.as_logical(),
-                    window_border_radius.round() as u8,
-                );
-                let ssd_corner_radius = [full_radius[0], 0.0, full_radius[1], 0.0];
-
-                let output_name = output.name();
-                let window_key = elem.key();
-                let output_transform = output.current_transform();
-                let output_scale = output.current_scale().fractional_scale();
-
-                let blur_info = get_cached_blur_texture_for_window(&output_name, &window_key);
-                if let Some(blur_info) = blur_info {
-                    let active = elem.active_window();
-                    let blur_saturation = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_saturation(&s))
-                        .unwrap_or(1.0);
-                    let blur_tint = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_tint(&s))
-                        .unwrap_or(BLUR_TINT_STRENGTH);
-                    let blur_border = active
-                        .wl_surface()
-                        .and_then(|s| get_blur_border(&s))
-                        .unwrap_or(BLUR_BORDER_STRENGTH);
-                    let blur_backdrop = BlurredBackdropShader::element(
-                        renderer,
-                        &blur_info.texture,
-                        header_geo,
-                        blur_info.size,
-                        blur_info.screen_size,
-                        output_scale,
-                        output_transform,
-                        ssd_corner_radius,
-                        alpha,
-                        BLUR_TINT_COLOR,
-                        blur_tint,
-                        false,
-                        blur_saturation,
-                        blur_border,
-                    );
-                    window_elements.push(blur_backdrop.into());
-                } else {
-                    let blur_backdrop = BackdropShader::element(
-                        renderer,
-                        Key::Window(Usage::Overlay, elem.key()),
-                        header_geo,
-                        ssd_corner_radius,
-                        alpha * BLUR_FALLBACK_ALPHA,
-                        BLUR_FALLBACK_COLOR,
-                    );
-                    window_elements.push(blur_backdrop.into());
-                }
-            }
-
-            // Render backdrop color for windows that set the backdrop_color protocol
-            // (only when blur is not already providing a backdrop)
-            if (!elem.has_blur() || blur_ctx.is_some())
-                && let Some(wl_surface) = elem.active_window().wl_surface()
+            // Render backdrop color for windows that set the backdrop_color protocol.
+            // MERGE: this used to be gated on `!elem.has_blur()`; our blur is gone and
+            // upstream's frosted glass emits its own element below the window, so the
+            // gate went with it.
+            if let Some(wl_surface) = elem.active_window().wl_surface()
                 && let Some(color) = get_surface_backdrop_color(&wl_surface)
             {
                 let backdrop_geo = tiled_anim_geometry.unwrap_or(geometry);
-                let corner_radius =
-                    elem.blur_corner_radius(backdrop_geo.size.as_logical(), indicator_thickness);
+                let corner_radius = elem
+                    .corner_radius(backdrop_geo.size.as_logical(), indicator_thickness)
+                    .map(|r| r as f32);
                 let backdrop = BackdropShader::element(
                     renderer,
                     Key::Window(Usage::Overlay, elem.key()),
@@ -3981,182 +3362,144 @@ impl FloatingLayout {
                     alpha * color.alpha_f32(),
                     color.to_rgb_f32(),
                 );
-                window_elements.push(backdrop.into());
+                lower_elements.push(backdrop.into());
             }
 
-            // Now apply animation transformations
-            if let Some(anim) = anim_opt {
-                if matches!(anim, Animation::ClientPipelinedResize { .. }) {
-                    // No rescaling for client-driven pipelined resize.
-                    // Position is already computed from the buffer's actual size above.
-                } else if let Some((original_geo, scale, relocation, _buffer_size)) =
-                    minimize_anim_info
-                {
-                    // For minimize/unminimize: scale window elements with uniform scaling
-                    // Blur is already rendered at scaled geometry above
-                    window_elements = window_elements
-                        .into_iter()
-                        .map(|element| match element {
-                            CosmicMappedRenderElement::Stack(elem) => {
-                                CosmicMappedRenderElement::MovingStack({
-                                    let rescaled = RescaleRenderElement::from_element(
-                                        elem,
-                                        original_geo
-                                            .loc
-                                            .as_logical()
-                                            .to_physical_precise_round(output_scale),
-                                        scale,
-                                    );
+            // Animation transform applied to the window's own content elements:
+            // rescale around `origin`, then relocate by `relocation`.
+            let anim_transform: Option<(Point<i32, Physical>, Scale<f64>, Point<i32, Physical>)> =
+                if let Some(anim) = anim_opt {
+                    match anim {
+                        // No rescaling for client-driven pipelined resize — the position
+                        // is already computed from the buffer's actual size above.
+                        Animation::ClientPipelinedResize { .. } => None,
+                        Animation::Minimize { .. } | Animation::Unminimize { .. } => {
+                            // Uniform (aspect-preserving) scaling, centered in the target.
+                            let original_geo = anim.previous_geometry();
+                            let target_geometry = anim.geometry(
+                                output_geometry,
+                                self.space
+                                    .element_geometry(elem)
+                                    .map(RectExt::as_local)
+                                    .unwrap_or(geometry),
+                                elem.floating_tiled.lock().unwrap().as_ref(),
+                                self.gaps(),
+                                self.theme.motion,
+                            );
 
-                                    RelocateRenderElement::from_element(
-                                        rescaled,
-                                        relocation,
-                                        Relocate::Relative,
-                                    )
-                                })
-                            }
-                            CosmicMappedRenderElement::Window(elem) => {
-                                CosmicMappedRenderElement::MovingWindow({
-                                    let rescaled = RescaleRenderElement::from_element(
-                                        elem,
-                                        original_geo
-                                            .loc
-                                            .as_logical()
-                                            .to_physical_precise_round(output_scale),
-                                        scale,
-                                    );
+                            let buffer_size = elem.geometry().size.as_local();
+                            let scale_x = target_geometry.size.w as f64 / buffer_size.w as f64;
+                            let scale_y = target_geometry.size.h as f64 / buffer_size.h as f64;
+                            let uniform_scale = scale_x.min(scale_y);
 
-                                    RelocateRenderElement::from_element(
-                                        rescaled,
-                                        relocation,
-                                        Relocate::Relative,
-                                    )
-                                })
-                            }
-                            x => x,
-                        })
-                        .collect();
-                } else {
-                    // For other compositor-driven animations (like Tiled), use per-axis scaling
-                    let original_geo = anim.previous_geometry();
-                    geometry = anim.geometry(
-                        output_geometry,
-                        self.space
-                            .element_geometry(elem)
-                            .map(RectExt::as_local)
-                            .unwrap_or(geometry),
-                        elem.floating_tiled.lock().unwrap().as_ref(),
-                        self.gaps(),
-                        self.theme.motion,
-                    );
+                            let scaled_w = (buffer_size.w as f64 * uniform_scale) as i32;
+                            let scaled_h = (buffer_size.h as f64 * uniform_scale) as i32;
+                            let offset_x = (target_geometry.size.w - scaled_w) / 2;
+                            let offset_y = (target_geometry.size.h - scaled_h) / 2;
 
+                            let relocation = (target_geometry.loc - original_geo.loc
+                                + Point::from((offset_x, offset_y)).as_local())
+                            .as_logical()
+                            .to_physical_precise_round(output_scale);
+
+                            Some((
+                                original_geo
+                                    .loc
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
+                                Scale {
+                                    x: uniform_scale,
+                                    y: uniform_scale,
+                                },
+                                relocation,
+                            ))
+                        }
+                        _ => {
+                            // Other compositor-driven animations (like Tiled): per-axis scaling
+                            let original_geo = anim.previous_geometry();
+                            geometry = anim.geometry(
+                                output_geometry,
+                                self.space
+                                    .element_geometry(elem)
+                                    .map(RectExt::as_local)
+                                    .unwrap_or(geometry),
+                                elem.floating_tiled.lock().unwrap().as_ref(),
+                                self.gaps(),
+                                self.theme.motion,
+                            );
+
+                            let buffer_size = elem.geometry().size;
+                            let scale = Scale {
+                                x: geometry.size.w as f64 / buffer_size.w as f64,
+                                y: geometry.size.h as f64 / buffer_size.h as f64,
+                            };
+                            let relocation = (geometry.loc - original_geo.loc)
+                                .as_logical()
+                                .to_physical_precise_round(output_scale);
+
+                            Some((
+                                original_geo
+                                    .loc
+                                    .as_logical()
+                                    .to_physical_precise_round(output_scale),
+                                scale,
+                                relocation,
+                            ))
+                        }
+                    }
+                } else if self.slide_target_geometries.contains_key(elem) {
+                    // No per-element animation, but a layer slide is active (or just ended
+                    // and we're waiting for client catch-up). geometry is already overridden
+                    // to target_geo above, so we just need to scale the buffer content.
                     let buffer_size = elem.geometry().size;
-                    let scale = Scale {
-                        x: geometry.size.w as f64 / buffer_size.w as f64,
-                        y: geometry.size.h as f64 / buffer_size.h as f64,
-                    };
+                    if buffer_size.w > 0
+                        && buffer_size.h > 0
+                        && (buffer_size.w != geometry.size.w || buffer_size.h != geometry.size.h)
+                    {
+                        Some((
+                            geometry
+                                .loc
+                                .as_logical()
+                                .to_physical_precise_round(output_scale),
+                            Scale {
+                                x: geometry.size.w as f64 / buffer_size.w as f64,
+                                y: geometry.size.h as f64 / buffer_size.h as f64,
+                            },
+                            Point::from((0, 0)),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
-                    let relocation = (geometry.loc - original_geo.loc)
-                        .as_logical()
-                        .to_physical_precise_round(output_scale);
-
-                    window_elements = window_elements
-                        .into_iter()
-                        .map(|element| match element {
-                            CosmicMappedRenderElement::Stack(elem) => {
-                                CosmicMappedRenderElement::MovingStack({
-                                    let rescaled = RescaleRenderElement::from_element(
-                                        elem,
-                                        original_geo
-                                            .loc
-                                            .as_logical()
-                                            .to_physical_precise_round(output_scale),
-                                        scale,
-                                    );
-
-                                    RelocateRenderElement::from_element(
-                                        rescaled,
-                                        relocation,
-                                        Relocate::Relative,
-                                    )
-                                })
-                            }
-                            CosmicMappedRenderElement::Window(elem) => {
-                                CosmicMappedRenderElement::MovingWindow({
-                                    let rescaled = RescaleRenderElement::from_element(
-                                        elem,
-                                        original_geo
-                                            .loc
-                                            .as_logical()
-                                            .to_physical_precise_round(output_scale),
-                                        scale,
-                                    );
-
-                                    RelocateRenderElement::from_element(
-                                        rescaled,
-                                        relocation,
-                                        Relocate::Relative,
-                                    )
-                                })
-                            }
-                            x => x,
+            let map_anim = |element| match anim_transform {
+                Some((origin, scale, relocation)) => match element {
+                    CosmicMappedRenderElement::Stack(elem) => {
+                        CosmicMappedRenderElement::MovingStack({
+                            let rescaled = RescaleRenderElement::from_element(elem, origin, scale);
+                            RelocateRenderElement::from_element(
+                                rescaled,
+                                relocation,
+                                Relocate::Relative,
+                            )
                         })
-                        .collect();
-                }
-            } else if self.slide_target_geometries.contains_key(elem) {
-                // No per-element animation, but a layer slide is active (or just ended
-                // and we're waiting for client catch-up). geometry is already overridden
-                // to target_geo above, so we just need to scale the buffer content.
-                let buffer_size = elem.geometry().size;
-                if buffer_size.w > 0
-                    && buffer_size.h > 0
-                    && (buffer_size.w != geometry.size.w || buffer_size.h != geometry.size.h)
-                {
-                    let scale = Scale {
-                        x: geometry.size.w as f64 / buffer_size.w as f64,
-                        y: geometry.size.h as f64 / buffer_size.h as f64,
-                    };
-                    let render_loc_phys = geometry
-                        .loc
-                        .as_logical()
-                        .to_physical_precise_round(output_scale);
-
-                    window_elements = window_elements
-                        .into_iter()
-                        .map(|element| match element {
-                            CosmicMappedRenderElement::Stack(elem) => {
-                                CosmicMappedRenderElement::MovingStack({
-                                    let rescaled = RescaleRenderElement::from_element(
-                                        elem,
-                                        render_loc_phys,
-                                        scale,
-                                    );
-                                    RelocateRenderElement::from_element(
-                                        rescaled,
-                                        Point::from((0, 0)),
-                                        Relocate::Relative,
-                                    )
-                                })
-                            }
-                            CosmicMappedRenderElement::Window(elem) => {
-                                CosmicMappedRenderElement::MovingWindow({
-                                    let rescaled = RescaleRenderElement::from_element(
-                                        elem,
-                                        render_loc_phys,
-                                        scale,
-                                    );
-                                    RelocateRenderElement::from_element(
-                                        rescaled,
-                                        Point::from((0, 0)),
-                                        Relocate::Relative,
-                                    )
-                                })
-                            }
-                            x => x,
+                    }
+                    CosmicMappedRenderElement::Window(elem) => {
+                        CosmicMappedRenderElement::MovingWindow({
+                            let rescaled = RescaleRenderElement::from_element(elem, origin, scale);
+                            RelocateRenderElement::from_element(
+                                rescaled,
+                                relocation,
+                                Relocate::Relative,
+                            )
                         })
-                        .collect();
-                }
-            }
+                    }
+                    x => x,
+                },
+                None => element,
+            };
 
             // Slide content crossfade. Windows are configured to their final
             // size the moment a slide starts and their old content is
@@ -4164,6 +3507,7 @@ impl FloatingLayout {
             // content swap, whenever it happens — the snapshot fades out over
             // it. Until the swap the snapshot stays hidden: the live (old)
             // buffer is still on screen with identical pixels.
+            let mut snapshot_element = None;
             if anim_opt.is_none() {
                 let mut snapshots = self.slide_snapshots.lock().unwrap();
                 let buffer_size = elem.geometry().size.as_local();
@@ -4271,8 +3615,8 @@ impl FloatingLayout {
                             Some(geometry.size.as_logical()),
                             Kind::Unspecified,
                         );
-                        window_elements
-                            .insert(0, CosmicMappedRenderElement::WindowSnapshot(snapshot_elem));
+                        snapshot_element =
+                            Some(CosmicMappedRenderElement::WindowSnapshot(snapshot_elem));
                     }
                 }
                 if remove {
@@ -4280,32 +3624,33 @@ impl FloatingLayout {
                 }
             }
 
+            // Embedded children render in front of their parent (and of its decorations)
+            self.push_embedded_children(renderer, elem, geometry, output_scale, alpha, push);
+
             if focused == Some(elem) && !elem.is_maximized(false) {
+                let active_window_hint = theme.active_window_hint();
+                let radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
+
                 if let Some((mode, resize)) = resize_indicator.as_mut() {
                     let mut resize_geometry = geometry;
                     resize_geometry.loc -= (18, 18).into();
                     resize_geometry.size += (36, 36).into();
 
                     resize.resize(resize_geometry.size.as_logical());
-                    resize.output_enter(output, Rectangle::default() /* unused */);
-                    window_elements = resize
-                        .render_elements::<CosmicWindowRenderElement<R>>(
-                            renderer,
-                            resize_geometry
-                                .loc
-                                .as_logical()
-                                .to_physical_precise_round(output_scale),
-                            output_scale.into(),
-                            alpha * mode.alpha(self.theme.motion.animation).unwrap_or(1.0),
-                        )
-                        .into_iter()
-                        .map(CosmicMappedRenderElement::Window)
-                        .chain(window_elements.into_iter())
-                        .collect();
+                    resize.output_enter(output);
+                    resize.push_render_elements(
+                        renderer,
+                        resize_geometry
+                            .loc
+                            .as_logical()
+                            .to_physical_precise_round(output_scale),
+                        output_scale.into(),
+                        alpha * mode.alpha(self.theme.motion.animation).unwrap_or(1.0),
+                        &mut |elem| push(CosmicMappedRenderElement::Window(elem.into())),
+                        None,
+                    );
                 }
 
-                let active_window_hint = theme.active_window_hint();
-                let radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
                 if indicator_thickness > 0 {
                     let element = IndicatorShader::focus_element(
                         renderer,
@@ -4321,30 +3666,44 @@ impl FloatingLayout {
                             active_window_hint.blue,
                         ],
                     );
-                    window_elements.insert(0, element.into());
+                    push(element.into());
                 }
             }
 
-            // Render embedded children in front of parent (they'll be on top in the z-order)
-            let embedded_elements =
-                self.render_embedded_children(renderer, elem, geometry, output_scale, alpha);
-
-            // Log embedded children during blur capture
-            if blur_ctx.is_some() && !embedded_elements.is_empty() {
-                tracing::debug!(
-                    parent_app_id = %elem.active_window().app_id(),
-                    embedded_count = embedded_elements.len(),
-                    "Blur capture: including embedded children for parent"
-                );
+            // The snapshot of the pre-slide content fades out *over* the live content.
+            if let Some(snapshot_element) = snapshot_element {
+                push(snapshot_element);
             }
 
-            // Combine: embedded first (on top), then parent's elements (behind)
-            let mut all_window_elements = embedded_elements;
-            all_window_elements.extend(window_elements);
-            elements.extend(all_window_elements);
+            elem.push_render_elements(
+                renderer,
+                render_location
+                    .as_logical()
+                    .to_physical_precise_round(output_scale),
+                None,
+                output_scale.into(),
+                alpha,
+                None,
+                scanout_node,
+                &mut |elem| push(map_anim(elem)),
+                &mut |elem| lower_elements.push(map_anim(elem)),
+            );
+            if let Some(shadow_element) = elem.shadow_render_element(
+                renderer,
+                render_location
+                    .as_logical()
+                    .to_physical_precise_round(output_scale),
+                None,
+                output_scale.into(),
+                1.,
+                alpha,
+            ) {
+                push(map_anim(shadow_element));
+            }
+            for elem in lower_elements.drain(..) {
+                push(elem);
+            }
         }
-
-        elements
     }
 
     pub fn snap_to_corner(&self, mapped: &CosmicMapped, corners: &TiledCorners) {

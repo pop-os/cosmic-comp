@@ -354,12 +354,6 @@ impl Config {
             }
         }
 
-        // Initialize blur config globals from loaded config
-        crate::backend::render::blur::init_blur_config(
-            cosmic_comp_config.blur_enabled,
-            cosmic_comp_config.blur_intensity,
-        );
-
         Config {
             dynamic_conf: Self::load_dynamic(&xdg),
             cosmic_conf: cosmic_comp_config,
@@ -1018,7 +1012,6 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<bool>(&config, "blur_enabled");
                 if new != state.common.config.cosmic_conf.blur_enabled {
                     state.common.config.cosmic_conf.blur_enabled = new;
-                    crate::backend::render::blur::set_blur_enabled(new);
                     for output in state.common.shell.read().outputs() {
                         state.backend.schedule_render(output);
                     }
@@ -1028,9 +1021,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<f32>(&config, "blur_intensity");
                 if (new - state.common.config.cosmic_conf.blur_intensity).abs() > f32::EPSILON {
                     state.common.config.cosmic_conf.blur_intensity = new;
-                    crate::backend::render::blur::set_blur_intensity(new);
                     // Invalidate blur caches so new intensity takes effect
-                    crate::backend::render::blur::invalidate_all_blur_caches();
                     for output in state.common.shell.read().outputs() {
                         state.backend.schedule_render(output);
                     }
