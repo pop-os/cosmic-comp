@@ -1027,6 +1027,82 @@ fn process_blur(
 
         let can_reuse_cache = (!content_changed && all_cached) || throttled;
 
+        // A group re-blurs for one of two quite different reasons, and the single
+        // "re-blurred" count cannot tell them apart: either its content really
+        // changed, or it has no cached texture to reuse -- and the latter ignores
+        // both the content hash and the throttle, so it repeats every frame.
+        if !can_reuse_cache {
+            if !all_cached {
+                stats.reblur_uncached += 1;
+            } else {
+                stats.reblur_content += 1;
+            }
+
+            // Resolve surface ids to something a human can act on. The ids in the
+            // diff below identify a surface but not who owns it, and the answer
+            // decides where the fix goes -- a client repainting needlessly is a
+            // different problem from the compositor rebuilding an element.
+            {
+                static LAST_INVENTORY: std::sync::Mutex<Option<std::time::Instant>> =
+                    std::sync::Mutex::new(None);
+                let mut last = LAST_INVENTORY.lock().unwrap();
+                if last.is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(10)) {
+                    *last = Some(std::time::Instant::now());
+                    drop(last);
+
+                    use smithay::reexports::wayland_server::Resource as _;
+                    let shell_ref = shell.read();
+                    if let Some((_, ws)) = shell_ref.workspaces.active(output_ref) {
+                        for mapped in ws.mapped() {
+                            for window in mapped.windows().map(|(w, _)| w) {
+                                if let Some(surface) = window.wl_surface() {
+                                    tracing::debug!(
+                                        surface = ?surface.id(),
+                                        app_id = %window.app_id(),
+                                        title = %window.title(),
+                                        "blur inventory: window"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    drop(shell_ref);
+
+                    for layer in smithay::desktop::layer_map_for_output(output_ref).layers() {
+                        tracing::debug!(
+                            surface = ?layer.wl_surface().id(),
+                            namespace = %layer.namespace(),
+                            layer = ?layer.layer(),
+                            "blur inventory: layer"
+                        );
+                    }
+                }
+            }
+
+            // Name the surfaces responsible. The content hash says something
+            // changed but never what, which is not enough to act on.
+            if crate::backend::render::gpu_profiler::perf_logging_enabled() {
+                let (changed, added, removed) =
+                    crate::backend::render::blur::diff_blur_group_elements(
+                        &output_name,
+                        group.capture_z_threshold,
+                        &capture_elements,
+                        scale,
+                    );
+                if !changed.is_empty() || !added.is_empty() || !removed.is_empty() {
+                    tracing::debug!(
+                        group = group_idx,
+                        all_cached = all_cached,
+                        changed = ?changed.iter().take(4).collect::<Vec<_>>(),
+                        changed_total = changed.len(),
+                        added = ?added.iter().take(4).collect::<Vec<_>>(),
+                        removed = ?removed.iter().take(4).collect::<Vec<_>>(),
+                        "blur invalidated by"
+                    );
+                }
+            }
+        }
+
         if can_reuse_cache {
             let group_elapsed = group_start.elapsed();
             tracing::trace!(

@@ -222,6 +222,11 @@ pub struct BlurStats {
     pub groups_reblurred: usize,
     /// Groups skipped because an opaque backdrop above hides their result.
     pub groups_occluded: usize,
+    /// Re-blurs caused by the captured content actually changing.
+    pub reblur_content: usize,
+    /// Re-blurs caused by a missing cached texture. These ignore the content
+    /// hash and the throttle, so they repeat every frame until the cache fills.
+    pub reblur_uncached: usize,
     /// Blur windows across all groups.
     pub windows: usize,
     /// Layer-shell surfaces with blur.
@@ -494,11 +499,13 @@ impl FrameProfiler {
                 / n
         };
         warn!(
-            "│ Blur:    path={}  groups={:.1}  reblur={:.1}  occluded={:.1}",
+            "│ Blur:    path={}  groups={:.1}  reblur={:.1}  occluded={:.1}  (content={:.1} uncached={:.1})",
             super::blur::active_blur_path(),
             avg(|p| p.blur.groups as f64),
             avg(|p| p.blur.groups_reblurred as f64),
             avg(|p| p.blur.groups_occluded as f64),
+            avg(|p| p.blur.reblur_content as f64),
+            avg(|p| p.blur.reblur_uncached as f64),
         );
         warn!(
             "│ Blur ms: capture={:.2}  bg_render={:.2}  passes={:.2}  copy={:.2}",

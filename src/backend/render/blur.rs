@@ -944,6 +944,80 @@ pub fn store_layer_blur_content_hash(output_name: &str, hash: u64) {
 /// NOTE: We intentionally DO NOT include element IDs in the hash because some
 /// render elements (like shadows, decorations) get recreated each frame with
 /// new ExternalIds. We rely on commit counters + geometry for change detection.
+/// Per-element commit fingerprints of the last blur, for diagnosing invalidation.
+///
+/// The content hash collapses the whole capture into one number, which answers
+/// "did anything change" but never "what". This keeps the inputs so an
+/// invalidation can be attributed to a specific surface.
+static BLUR_GROUP_ELEMENT_COMMITS: LazyLock<
+    RwLock<HashMap<BlurGroupContentKey, Vec<(String, String)>>>,
+> = LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Records this capture's fingerprints and returns what changed since the last
+/// one: `(changed, added, removed)` element identities.
+///
+/// Only for diagnostics -- it allocates per element, so callers must gate it on
+/// performance logging being enabled.
+pub fn diff_blur_group_elements<E: Element>(
+    output_name: &str,
+    z_threshold: usize,
+    elements: &[E],
+    scale: Scale<f64>,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let current: Vec<(String, String)> = elements
+        .iter()
+        .map(|e| {
+            (
+                format!("{:?}", e.id()),
+                format!("{:?}|{:?}", e.current_commit(), e.geometry(scale)),
+            )
+        })
+        .collect();
+
+    let key = (output_name.to_string(), z_threshold);
+    let previous = BLUR_GROUP_ELEMENT_COMMITS
+        .read()
+        .unwrap()
+        .get(&key)
+        .cloned();
+    BLUR_GROUP_ELEMENT_COMMITS
+        .write()
+        .unwrap()
+        .insert(key, current.clone());
+
+    let Some(previous) = previous else {
+        return (
+            Vec::new(),
+            current.iter().map(|(id, _)| id.clone()).collect(),
+            Vec::new(),
+        );
+    };
+
+    let prev_map: HashMap<&str, &str> = previous
+        .iter()
+        .map(|(id, c)| (id.as_str(), c.as_str()))
+        .collect();
+    let cur_ids: std::collections::HashSet<&str> =
+        current.iter().map(|(id, _)| id.as_str()).collect();
+
+    let mut changed = Vec::new();
+    let mut added = Vec::new();
+    for (id, commit) in &current {
+        match prev_map.get(id.as_str()) {
+            Some(prev_commit) if prev_commit != &commit.as_str() => changed.push(id.clone()),
+            Some(_) => {}
+            None => added.push(id.clone()),
+        }
+    }
+    let removed = previous
+        .iter()
+        .filter(|(id, _)| !cur_ids.contains(id.as_str()))
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    (changed, added, removed)
+}
+
 pub fn compute_element_content_hash<E: Element>(
     z_threshold: usize,
     elements: &[E],
