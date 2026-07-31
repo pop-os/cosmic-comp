@@ -147,6 +147,8 @@ pub static DUAL_KAWASE_DOWNSAMPLE_SHADER: &str =
     include_str!("./shaders/dual_kawase_downsample.frag");
 pub static DUAL_KAWASE_UPSAMPLE_SHADER: &str = include_str!("./shaders/dual_kawase_upsample.frag");
 pub static BLURRED_BACKDROP_SHADER: &str = include_str!("./shaders/blurred_backdrop.frag");
+pub static FSR_EASU_SHADER: &str = include_str!("./shaders/fsr_easu.frag");
+pub static FSR_RCAS_SHADER: &str = include_str!("./shaders/fsr_rcas.frag");
 pub static GROUP_COLOR: [f32; 3] = [0.788, 0.788, 0.788];
 pub static ACTIVE_GROUP_COLOR: [f32; 3] = [0.58, 0.922, 0.922];
 
@@ -441,6 +443,34 @@ impl BackdropShader {
 }
 
 pub struct PostprocessShader(pub GlesTexProgram);
+/// FSR upscaling pass — see `shaders/fsr_easu.frag`.
+pub struct FsrEasuShader(pub GlesTexProgram);
+/// FSR sharpening pass — see `shaders/fsr_rcas.frag`.
+pub struct FsrRcasShader(pub GlesTexProgram);
+
+impl FsrEasuShader {
+    pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesTexProgram {
+        Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
+            .egl_context()
+            .user_data()
+            .get::<FsrEasuShader>()
+            .expect("Custom Shaders not initialized")
+            .0
+            .clone()
+    }
+}
+
+impl FsrRcasShader {
+    pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesTexProgram {
+        Borrow::<GlesRenderer>::borrow(renderer.glow_renderer())
+            .egl_context()
+            .user_data()
+            .get::<FsrRcasShader>()
+            .expect("Custom Shaders not initialized")
+            .0
+            .clone()
+    }
+}
 
 impl DualKawaseDownsampleShader {
     pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesTexProgram {
@@ -706,6 +736,20 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("offset", UniformType::_1f),
         ],
     )?;
+    let fsr_easu_shader = renderer.compile_custom_texture_shader(
+        FSR_EASU_SHADER,
+        &[
+            UniformName::new("src_size", UniformType::_2f),
+            UniformName::new("dst_size", UniformType::_2f),
+        ],
+    )?;
+    let fsr_rcas_shader = renderer.compile_custom_texture_shader(
+        FSR_RCAS_SHADER,
+        &[
+            UniformName::new("inv_size", UniformType::_2f),
+            UniformName::new("sharpness", UniformType::_1f),
+        ],
+    )?;
     let blurred_backdrop_shader = renderer.compile_custom_texture_shader(
         BLURRED_BACKDROP_SHADER,
         &[
@@ -747,6 +791,12 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     egl_context
         .user_data()
         .insert_if_missing(|| DualKawaseUpsampleShader(dual_kawase_upsample_shader));
+    egl_context
+        .user_data()
+        .insert_if_missing(|| FsrEasuShader(fsr_easu_shader));
+    egl_context
+        .user_data()
+        .insert_if_missing(|| FsrRcasShader(fsr_rcas_shader));
     egl_context
         .user_data()
         .insert_if_missing(|| BlurredBackdropShader(blurred_backdrop_shader));
