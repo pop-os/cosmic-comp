@@ -817,6 +817,7 @@ dependencies = [
  "profiling",
  "rand 0.10.0",
  "regex",
+ "resvg 0.45.1",
  "ron 0.12.0",
  "rust-embed",
  "rustix 1.1.4",
@@ -6893,9 +6894,9 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "xcursor"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bec9e4a500ca8864c5b47b8b482a73d62e4237670e5b5f1d6b9e3cae50f28f2b"
+checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 
 [[package]]
 name = "xdg"
