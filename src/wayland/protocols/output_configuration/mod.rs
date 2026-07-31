@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use calloop::{
-    LoopHandle,
-    timer::{TimeoutAction, Timer},
-};
+use calloop::LoopHandle;
 use cosmic_comp_config::output::comp::AdaptiveSync;
 use cosmic_protocols::output_management::v1::server::{
     zcosmic_output_configuration_head_v1::ZcosmicOutputConfigurationHeadV1,
@@ -30,7 +27,7 @@ use smithay::{
     utils::{Logical, Physical, Point, Size, Transform},
     wayland::output::WlOutputData,
 };
-use std::{convert::TryFrom, sync::Mutex, time::Duration};
+use std::{convert::TryFrom, sync::Mutex};
 
 mod handlers;
 
@@ -519,26 +516,6 @@ where
     }
 }
 
-fn remove_global_with_timer<D: 'static>(
-    dh: &DisplayHandle,
-    event_loop_handle: &LoopHandle<D>,
-    id: GlobalId,
-) {
-    dh.disable_global::<D>(id.clone());
-    let source = Timer::from_duration(Duration::from_secs(5));
-    let dh = dh.clone();
-    let res = event_loop_handle.insert_source(source, move |_, _, _state| {
-        dh.remove_global::<D>(id.clone());
-        TimeoutAction::Drop
-    });
-    if let Err(err) = res {
-        tracing::error!(
-            "failed to insert timer source to destroy output global: {}",
-            err
-        );
-    }
-}
-
 macro_rules! delegate_output_configuration {
     ($(@<$( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+>)? $ty: ty) => {
         smithay::reexports::wayland_server::delegate_global_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
@@ -578,4 +555,4 @@ macro_rules! delegate_output_configuration {
 }
 pub(crate) use delegate_output_configuration;
 
-use crate::utils::prelude::OutputExt;
+use crate::utils::{global::remove_global_with_timer, prelude::OutputExt};

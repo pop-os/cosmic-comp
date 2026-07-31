@@ -838,10 +838,7 @@ impl CosmicSurface {
         self.0
             .send_dmabuf_feedback(output, primary_scan_out_output, |_, data| {
                 if is_fullscreen {
-                    feedback
-                        .primary_scanout_feedback
-                        .as_ref()
-                        .unwrap_or(&feedback.render_feedback)
+                    &feedback.primary_scanout_feedback
                 } else if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
                     feedback
                         .overlay_scanout_feedback
