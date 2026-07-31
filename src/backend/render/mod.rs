@@ -169,9 +169,10 @@ pub use blur::{
     copy_blur_texture_for_cache, downsample_texture, get_blur_group_content_hash,
     get_cached_blur_texture_for_layer, get_cached_blur_texture_for_window,
     get_cached_layer_surfaces, get_layer_blur_content_hash, get_layer_blur_surfaces,
-    output_has_layer_blur, set_cached_layer_surfaces, set_layer_blur_surfaces,
-    should_throttle_blur, should_throttle_layer_blur, store_blur_group_content_hash,
-    store_blur_group_last_update, store_layer_blur_content_hash, store_layer_blur_last_update,
+    output_has_layer_blur, set_blur_texture_opaque, set_cached_layer_surfaces,
+    set_layer_blur_surfaces, should_throttle_blur, should_throttle_layer_blur,
+    store_blur_group_content_hash, store_blur_group_last_update, store_layer_blur_content_hash,
+    store_layer_blur_last_update,
 };
 
 /// Dual Kawase downsample shader (blur + halve resolution)
@@ -3156,6 +3157,7 @@ where
                                     // this per capture. The others record false so no skip is
                                     // ever taken on an unmeasured guess.
                                     capture_was_opaque: false,
+                                    declared_opaque: false,
                                 },
                             );
                             tracing::trace!(
@@ -3537,6 +3539,7 @@ where
                                     // this per capture. The others record false so no skip is
                                     // ever taken on an unmeasured guess.
                                     capture_was_opaque: false,
+                                    declared_opaque: false,
                                 },
                             );
                             tracing::trace!(

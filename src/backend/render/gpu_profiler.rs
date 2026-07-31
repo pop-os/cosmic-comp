@@ -254,8 +254,36 @@ pub struct FrameProfile {
     pub blur_window_count: usize,
     pub blur_layer_count: usize,
     pub blur: BlurStats,
+    pub draw: DrawStats,
     pub damage_rects: usize,
     pub skipped: bool,
+}
+
+/// What the frame submission actually drew.
+///
+/// Read back from smithay's frame result rather than timed separately: it
+/// already decides, per element, whether the element was composited, handed to a
+/// plane, or skipped as invisible, and how many pixels of it were visible.
+///
+/// `overdraw_px` is the sum of those visible areas. Compared against the output
+/// size it says how many times over the screen was painted -- which is the
+/// number that distinguishes "compositing is inherently costly here" from
+/// "we are drawing windows nobody can see".
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DrawStats {
+    /// Elements composited through the GPU.
+    pub rendered: usize,
+    /// Elements handed directly to a plane, costing no compositing.
+    pub zero_copy: usize,
+    /// Elements skipped because nothing of them was visible.
+    pub skipped: usize,
+    /// Total visible pixels across composited elements.
+    pub overdraw_px: usize,
+    /// Pixels of the output itself, for the ratio.
+    pub output_px: usize,
+    /// Whether the primary plane took an element directly instead of the
+    /// composited swapchain image.
+    pub primary_scanout: bool,
 }
 
 impl Default for FrameProfile {
@@ -271,6 +299,7 @@ impl Default for FrameProfile {
             blur_window_count: 0,
             blur_layer_count: 0,
             blur: BlurStats::default(),
+            draw: DrawStats::default(),
             damage_rects: 0,
             skipped: false,
         }
@@ -513,6 +542,21 @@ impl FrameProfiler {
             ms(|p| p.blur.bg_render_duration),
             ms(|p| p.blur.passes_duration),
             ms(|p| p.blur.copy_duration),
+        );
+        // Overdraw is the headline: at 1.0x the compositor painted each output
+        // pixel once, at 10x it painted the screen ten times over.
+        let overdraw = {
+            let px: f64 = avg(|p| p.draw.overdraw_px as f64);
+            let out: f64 = avg(|p| p.draw.output_px as f64);
+            if out > 0.0 { px / out } else { 0.0 }
+        };
+        warn!(
+            "│ Draw:    rendered={:.1}  zerocopy={:.1}  skipped={:.1}  overdraw={:.2}x  scanout={:.0}%",
+            avg(|p| p.draw.rendered as f64),
+            avg(|p| p.draw.zero_copy as f64),
+            avg(|p| p.draw.skipped as f64),
+            overdraw,
+            avg(|p| if p.draw.primary_scanout { 100.0 } else { 0.0 }),
         );
         warn!("└──────────────────────────────────────────────────────────────");
     }

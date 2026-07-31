@@ -10,9 +10,9 @@ use crate::{
         element::{CosmicElement, DamageElement},
         get_blur_group_content_hash, get_cached_blur_texture_for_layer,
         get_cached_blur_texture_for_window, get_layer_blur_content_hash, get_layer_blur_surfaces,
-        init_shaders, output_elements, should_throttle_blur, should_throttle_layer_blur,
-        store_blur_group_content_hash, store_blur_group_last_update, store_layer_blur_content_hash,
-        store_layer_blur_last_update, workspace_elements,
+        init_shaders, output_elements, set_blur_texture_opaque, should_throttle_blur,
+        should_throttle_layer_blur, store_blur_group_content_hash, store_blur_group_last_update,
+        store_layer_blur_content_hash, store_layer_blur_last_update, workspace_elements,
     },
     config::ScreenFilter,
     shell::{Shell, grabs::SeatMoveGrabState},
@@ -912,6 +912,19 @@ fn process_blur(
     let mut any_blur_applied = false;
     let window_blur_start = std::time::Instant::now();
     for (group_idx, group) in blur_groups.iter().enumerate() {
+        // Tell the renderer whether this group's backdrop is opaque, so its
+        // occlusion cull can drop whatever is underneath. Re-evaluated every
+        // frame rather than only on re-blur: a window that starts fading or gains
+        // rounded corners stops covering what is below it immediately, and a
+        // stale claim would leave holes rather than a stale image.
+        for (window_key, _, alpha, _) in &group.windows {
+            let opaque = group.paints_full_geometry
+                && *alpha >= 1.0
+                && get_cached_blur_texture_for_window(&output_name, window_key)
+                    .is_some_and(|info| info.capture_was_opaque);
+            set_blur_texture_opaque(&output_name, window_key, opaque);
+        }
+
         if let Some((occluder_idx, covered)) = occluded_below.as_ref()
             && group_idx < *occluder_idx
             && group
@@ -1271,6 +1284,7 @@ fn process_blur(
                                 background_state_hash: content_hash,
                                 capture_size: (window_geo.size.w, window_geo.size.h),
                                 capture_was_opaque,
+                                declared_opaque: false,
                             },
                         );
                     }
@@ -1702,6 +1716,7 @@ fn process_blur(
                                     // this per capture. The others record false so no skip is
                                     // ever taken on an unmeasured guess.
                                     capture_was_opaque: false,
+                                    declared_opaque: false,
                                 },
                             );
                         }
@@ -2737,6 +2752,38 @@ impl SurfaceThreadState {
         };
         self.timings.draw_done(&self.clock);
         profile.draw_duration = draw_phase_start.elapsed();
+
+        // Read back what the frame actually drew. smithay has already decided,
+        // per element, whether it was composited, taken by a plane, or skipped
+        // as invisible, and how much of it was on screen -- so this is a walk of
+        // an existing map rather than new measurement.
+        if let Ok(frame_result) = res.as_ref() {
+            use smithay::backend::renderer::element::RenderElementPresentationState;
+
+            let mut draw = crate::backend::render::gpu_profiler::DrawStats {
+                output_px: self
+                    .output
+                    .current_mode()
+                    .map(|m| (m.size.w as usize) * (m.size.h as usize))
+                    .unwrap_or(0),
+                primary_scanout: !matches!(
+                    frame_result.primary_element,
+                    smithay::backend::drm::compositor::PrimaryPlaneElement::Swapchain(_)
+                ),
+                ..Default::default()
+            };
+            for state in frame_result.states.states.values() {
+                match state.presentation_state {
+                    RenderElementPresentationState::Rendering { .. } => {
+                        draw.rendered += 1;
+                        draw.overdraw_px += state.visible_area;
+                    }
+                    RenderElementPresentationState::ZeroCopy => draw.zero_copy += 1,
+                    RenderElementPresentationState::Skipped => draw.skipped += 1,
+                }
+            }
+            profile.draw = draw;
+        }
 
         if has_layer_slides {
             match &res {

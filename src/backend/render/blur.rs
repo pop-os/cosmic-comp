@@ -546,6 +546,9 @@ pub struct BlurredTextureInfo {
     /// or one with alpha) leaves this false everywhere and the blur work below
     /// such a window goes on being done.
     pub capture_was_opaque: bool,
+    /// Whether the texture currently declares itself opaque to the renderer.
+    /// Tracked so the per-frame update can skip the write lock when unchanged.
+    pub declared_opaque: bool,
 }
 
 /// Cache key combining output name and the window's identity key.
@@ -944,6 +947,49 @@ pub fn store_layer_blur_content_hash(output_name: &str, hash: u64) {
 /// NOTE: We intentionally DO NOT include element IDs in the hash because some
 /// render elements (like shadows, decorations) get recreated each frame with
 /// new ExternalIds. We rely on commit counters + geometry for change detection.
+/// Declares whether a window's cached backdrop is fully opaque.
+///
+/// A blur backdrop normally declares no opaque region, so nothing above it ever
+/// registers as covering what is below and the renderer's occlusion cull cannot
+/// fire -- every hidden window is composited anyway. When the captured scene was
+/// opaque and the window paints its full geometry, the backdrop really does
+/// cover everything beneath it, and saying so lets the existing cull drop those
+/// elements.
+///
+/// Updated in place so the buffer keeps its identity; rebuilding it would give
+/// the element a new id every frame, which reads as new damage.
+///
+/// Returns whether anything changed, so callers can skip the write lock.
+pub fn set_blur_texture_opaque(
+    output_name: &str,
+    window_key: &CosmicMappedKey,
+    opaque: bool,
+) -> bool {
+    let key = (output_name.to_string(), window_key.clone());
+
+    {
+        let cache = BLUR_TEXTURE_CACHE.read().unwrap();
+        match cache.get(&key) {
+            Some(info) if info.declared_opaque == opaque => return false,
+            Some(_) => {}
+            None => return false,
+        }
+    }
+
+    let mut cache = BLUR_TEXTURE_CACHE.write().unwrap();
+    let Some(info) = cache.get_mut(&key) else {
+        return false;
+    };
+    let regions = opaque.then(|| {
+        vec![Rectangle::from_size(
+            Size::<i32, smithay::utils::Buffer>::from((info.size.w, info.size.h)),
+        )]
+    });
+    info.texture.render().update_opaque_regions(regions);
+    info.declared_opaque = opaque;
+    true
+}
+
 /// Per-element commit fingerprints of the last blur, for diagnosing invalidation.
 ///
 /// The content hash collapses the whole capture into one number, which answers
