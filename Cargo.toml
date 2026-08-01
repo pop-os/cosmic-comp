@@ -160,9 +160,9 @@ inherits = "release"
 lto = "fat"
 
 [patch."https://github.com/pop-os/cosmic-protocols"]
-# MERGE(upstream-blur): local rebase of our force_close commit onto pop-os main,
-# which upstream cosmic-comp requires for the newer corner-radius API.
-cosmic-protocols = { path = "../cosmic-protocols" }
+# Our force_close commit rebased onto pop-os main, which upstream cosmic-comp
+# requires for the newer corner-radius API.
+cosmic-protocols = { git = "https://github.com/playtron-os/cosmic-protocols", branch = "force-close-on-main" }
 [patch."https://github.com/pop-os/libcosmic/"]
 cosmic-config = { git = "https://github.com/playtron-os/libcosmic.git" }
 cosmic-config-derive = { git = "https://github.com/playtron-os/libcosmic.git" }
