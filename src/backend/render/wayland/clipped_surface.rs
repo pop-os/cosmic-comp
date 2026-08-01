@@ -131,6 +131,13 @@ where
             // fractional scales. Without it the band is infinite and the corner
             // mask never clips.
             Uniform::new("scale", scale.x as f32),
+            // Identity values for the frosted-glass appearance: this path just
+            // clips a surface to its corners, it is not a backdrop. `saturation`
+            // in particular must be set explicitly -- an unset uniform is 0,
+            // which would render every clipped surface greyscale.
+            Uniform::new("saturation", UniformValue::_1f(1.0)),
+            Uniform::new("frost_tint", UniformValue::_1f(0.0)),
+            Uniform::new("border", UniformValue::_1f(0.0)),
         ];
 
         Self {

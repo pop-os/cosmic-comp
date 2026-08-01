@@ -496,6 +496,13 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             // Leaving it unregistered leaves it at 0, so the corner
             // antialiasing band becomes infinite and nothing is ever clipped.
             UniformName::new("scale", UniformType::_1f),
+            // Frosted-glass appearance (ext_background_effect_v1 version 3).
+            // Every call site building uniforms for this program must set
+            // `saturation`: an unset uniform reads as 0, which is fully
+            // greyscale rather than "unchanged".
+            UniformName::new("saturation", UniformType::_1f),
+            UniformName::new("frost_tint", UniformType::_1f),
+            UniformName::new("border", UniformType::_1f),
         ],
     )?;
     let shadow_shader = renderer.compile_custom_pixel_shader(
@@ -1363,6 +1370,30 @@ where
                 };
                 // Whether to route through the center-scale render path this frame.
                 let is_scaling = is_opening || is_closing;
+                // One line per rendered frame while a surface animates, so a
+                // "it just pops in" report can be told apart from "the state
+                // machine never ran": no lines means the animation state never
+                // reached the renderer, few lines spread over the duration means
+                // the redraw loop is starving it.
+                if is_scaling || alpha < 1.0 {
+                    tracing::trace!(
+                        surface_protocol_id = surface_id.protocol_id(),
+                        ns = %layer.namespace(),
+                        alpha = format!("{:.3}", alpha),
+                        is_opening,
+                        is_closing,
+                        anim_scale = format!("{:.3}", anim_scale),
+                        anim_y,
+                        // Size of the buffer being faded. A fade over a surface
+                        // that has no real content yet looks exactly like no
+                        // fade at all, so these have to be read together: a
+                        // size that only reaches its final value at the end of
+                        // the ramp means the client, not the animation.
+                        geo_w = layer_geo.size.w,
+                        geo_h = layer_geo.size.h,
+                        "layer_anim: rendering layer surface mid-animation"
+                    );
+                }
                 let total_offset_x = offset_x + slide_x + anim_x + resize_x + pin_x;
                 let total_offset_y = offset_y + slide_y + anim_y + resize_y + pin_y;
                 let render_location = if total_offset_x != 0 || total_offset_y != 0 {

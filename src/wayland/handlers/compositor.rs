@@ -39,6 +39,12 @@ use smithay::{
 };
 use std::{collections::VecDeque, sync::Mutex, time::Duration};
 
+/// Largest buffer edge, in logical pixels, still treated as a placeholder rather
+/// than real content. Layer-shell toolkits commit a 1-2px buffer while they
+/// resolve their auto-size geometry; nothing a user is meant to see is this
+/// small, and the entrance animation would otherwise play out entirely on it.
+const PLACEHOLDER_BUFFER_MAX: i32 = 4;
+
 fn toplevel_ensure_initial_configure(
     toplevel: &ToplevelSurface,
     size: Option<Size<i32, Logical>>,
@@ -160,12 +166,21 @@ pub fn recursive_frame_time_estimation(
     overall_estimate
 }
 
-/// True when this surface requests client blur (`org_kde_kwin_blur`).
+/// True when this surface currently has a blurred backdrop.
 fn surface_is_blur_backed(states: &SurfaceData) -> bool {
-    // Upstream tracks this per surface through the background-effect protocol.
-    states
-        .cached_state
-        .has::<crate::wayland::handlers::background_effect::ComputedBlurRegionCachedState>()
+    use crate::wayland::handlers::background_effect::ComputedBlurRegionCachedState;
+    // The slot existing only means the surface touched blur state once. Asking
+    // whether it has an area right now matters, because the answer keeps the
+    // surface off overlay planes: a surface that enabled blur and later dropped
+    // it would otherwise stay ineligible for scanout for the rest of its life.
+    states.cached_state.has::<ComputedBlurRegionCachedState>() && {
+        let state = states
+            .cached_state
+            .get::<ComputedBlurRegionCachedState>()
+            .current()
+            .clone();
+        state.whole_surface || state.blur_region.is_some()
+    }
 }
 
 pub fn frame_time_filter_fn(states: &SurfaceData) -> Kind {
@@ -439,7 +454,25 @@ impl CompositorHandler for State {
             // start the blur animation now that the client has committed
             // a fresh buffer with actual content.
             let surface_id = surface.id();
-            shell.activate_pending_fade_in(&surface_id);
+            // Whether this commit carries the surface's real content, rather
+            // than the buffer-less commit and 1-2px placeholder that layer-shell
+            // toolkits send while they are still resolving their auto-size
+            // geometry. The entrance animation waits for this so it fades in
+            // something the user can actually see -- see
+            // `Shell::activate_pending_fade_in`.
+            let buffer_size =
+                with_renderer_surface_state(surface, |state| state.buffer_size()).flatten();
+            let has_content = buffer_size.is_some_and(|size| {
+                size.w > PLACEHOLDER_BUFFER_MAX && size.h > PLACEHOLDER_BUFFER_MAX
+            });
+            tracing::trace!(
+                surface_protocol_id = surface_id.protocol_id(),
+                ?buffer_size,
+                has_content,
+                pending_fade_in = shell.is_layer_fade_in_pending(&surface_id),
+                "layer_commit: layer surface committed a buffer"
+            );
+            shell.activate_pending_fade_in(&surface_id, has_content);
 
             // Update layer blur cache when layer surfaces are committed
             // (blur protocol state may have changed)
@@ -642,16 +675,6 @@ impl State {
         {
             // compute initial dimensions by mapping
             let target = shell.map_layer(&layer_surface);
-
-            let map_output = shell
-                .outputs()
-                .find(|o| {
-                    let map = layer_map_for_output(o);
-                    map.layer_for_surface(layer_surface.wl_surface(), WindowSurfaceType::ALL)
-                        .is_some()
-                })
-                .cloned();
-            if let Some(_output) = map_output {}
 
             if let Some(target) = target {
                 let seat = shell.seats.last_active().clone();

@@ -37,6 +37,77 @@ pub static BLUR_UPSAMPLE_SHADER: &str = include_str!("../shaders/blur_upsample.f
 const NOISE: f32 = 0.03;
 const MAX_STEPS: usize = 15;
 
+/// Lower bound of the radius-to-strength map: ~1px is effectively no blur.
+const BLUR_RADIUS_MIN_PX: f32 = 1.0;
+/// Upper bound: ~100px is full strength, larger values clamp here.
+const BLUR_RADIUS_MAX_PX: f32 = 100.0;
+
+/// Map a client's requested radius, in surface-local pixels, onto the step axis
+/// [`BLUR_PARAMS`] is indexed by.
+///
+/// The protocol specifies the radius in pixels; the dual-Kawase table is indexed
+/// by step. Feeding pixels straight in read a 60px request as step 60, which
+/// clamps to the maximum -- every radius above the step count produced the same
+/// heaviest blur. Routing it through the same 0..1 intensity axis the config
+/// slider uses keeps both ways of asking on one curve.
+///
+/// Non-finite values from a malformed client map to 0 rather than propagating a
+/// NaN into the shader.
+fn strength_for_radius(radius_px: f32) -> usize {
+    if !radius_px.is_finite() {
+        return 0;
+    }
+    let t = ((radius_px - BLUR_RADIUS_MIN_PX) / (BLUR_RADIUS_MAX_PX - BLUR_RADIUS_MIN_PX))
+        .clamp(0.0, 1.0);
+    ((t * (MAX_STEPS - 1) as f32).round() as usize).min(MAX_STEPS - 1)
+}
+
+/// Backdrop saturation used when the client does not ask for one. `1.0` leaves
+/// saturation unchanged, matching what the protocol promises.
+const DEFAULT_SATURATION: f32 = 1.0;
+/// White-overlay strength used when the client does not ask for one. Carried
+/// over from the `org_kde_kwin_blur` stack's `BLUR_TINT_STRENGTH`, so surfaces
+/// that never set it keep the frosting they had before.
+const DEFAULT_TINT: f32 = 0.15;
+/// Border alpha used when the client does not ask for one, from the old
+/// stack's `BLUR_BORDER_STRENGTH`.
+const DEFAULT_BORDER: f32 = 0.2;
+
+/// How the backdrop looks, once the client's requests and the compositor
+/// defaults have been reconciled. Resolved once per surface rather than per
+/// rect, since every rect of one surface shares it.
+#[derive(Debug, Clone, Copy)]
+struct BlurAppearance {
+    saturation: f32,
+    tint: f32,
+    border: f32,
+}
+
+impl Default for BlurAppearance {
+    /// What a backdrop with no client behind it gets -- the compositor-drawn
+    /// iced surfaces, which have no protocol state to read.
+    fn default() -> Self {
+        Self {
+            saturation: DEFAULT_SATURATION,
+            tint: DEFAULT_TINT,
+            border: DEFAULT_BORDER,
+        }
+    }
+}
+
+impl BlurAppearance {
+    /// Fall back to the compositor default for anything the client left unset.
+    /// `0` cannot serve as the sentinel here -- it is a real value for all three
+    /// (greyscale, no tint, no border) -- so absence is carried as `None`.
+    fn resolve(state: &ComputedBlurRegionCachedState) -> Self {
+        Self {
+            saturation: state.saturation.unwrap_or(DEFAULT_SATURATION),
+            tint: state.tint.unwrap_or(DEFAULT_TINT),
+            border: state.border.unwrap_or(DEFAULT_BORDER),
+        }
+    }
+}
+
 /// Blur strength from configuration, as a step index into [`BLUR_PARAMS`].
 ///
 /// Upstream derives strength from a single frosted-glass boolean, which gives
@@ -185,7 +256,12 @@ pub struct BlurElement {
     id: Id,
     commit: CommitCounter,
     src: Size<f64, Buffer>,
+    /// Margin actually captured on the near side, which the edge trim can make
+    /// smaller than the blur radius.
     extended_offset: Point<f64, Logical>,
+    /// The element's own size inside the extended capture. Kept explicitly
+    /// because the near and far margins differ once the near one is trimmed.
+    element_size: Size<f64, Logical>,
     geometry: Rectangle<f64, Logical>,
     scaling_shaders: BlurShaders,
     render_shader: GlesTexProgram,
@@ -209,6 +285,13 @@ impl BlurElement {
         strength: usize,
         alpha: f32,
     ) -> Result<Option<Self>, R::Error> {
+        // Config applies to compositor-drawn chrome too. `from_surface` checks
+        // this, but this constructor takes no protocol state and so used to blur
+        // regardless -- leaving the iced surfaces frosted with blur turned off.
+        if !blur_enabled() {
+            return Ok(None);
+        }
+
         let region = vec![Rectangle::from_size(geometry.size.to_i32_round())];
 
         Self::internal(
@@ -220,6 +303,7 @@ impl BlurElement {
             radii,
             strength,
             alpha,
+            BlurAppearance::default(),
         )
     }
 
@@ -249,6 +333,15 @@ impl BlurElement {
         } else if let Some(region) = blur.blur_region.as_deref() {
             region
         } else {
+            // A surface that asked for blur but produced no area is
+            // indistinguishable on screen from one that never asked, so say
+            // which it was.
+            tracing::trace!(
+                geo_w = geometry.size.w,
+                geo_h = geometry.size.h,
+                has_effect_state = true,
+                "blur_skip: surface has blur state but neither a region nor whole_surface"
+            );
             return Ok(Vec::new());
         };
 
@@ -256,8 +349,19 @@ impl BlurElement {
         // the blur can actually render.
         let strength = blur
             .blur_radius
-            .map(|r| (r as usize).min(MAX_STEPS))
+            .map(|r| strength_for_radius(r as f32))
             .unwrap_or(strength);
+
+        tracing::trace!(
+            geo_w = geometry.size.w,
+            geo_h = geometry.size.h,
+            whole_surface = blur.whole_surface,
+            rects = region.len(),
+            requested_radius = ?blur.blur_radius,
+            radii_entries = blur.region_radii.len(),
+            strength,
+            "blur_region: building blur elements for surface"
+        );
 
         let state = states
             .data_map
@@ -272,6 +376,7 @@ impl BlurElement {
         // screen corners and nothing else. A client that rounds each card to its
         // own radius needs an element per card. It also blits only each rect
         // rather than the whole surface.
+        let appearance = BlurAppearance::resolve(&blur);
         let mut elements = Vec::with_capacity(region.len());
         for (idx, rect) in region.iter().enumerate() {
             if rect.size.w <= 0 || rect.size.h <= 0 {
@@ -307,6 +412,7 @@ impl BlurElement {
                 rect_radii,
                 strength,
                 alpha,
+                appearance,
             )? {
                 elements.push(element);
             }
@@ -315,7 +421,7 @@ impl BlurElement {
         Ok(elements)
     }
 
-    pub fn internal<R: ImportAll + AsGlowRenderer>(
+    fn internal<R: ImportAll + AsGlowRenderer>(
         renderer: &mut R,
         state: &mut BlurState,
         geometry: Rectangle<f64, Logical>,
@@ -324,6 +430,7 @@ impl BlurElement {
         radii: [u8; 4],
         strength: usize,
         alpha: f32,
+        appearance: BlurAppearance,
     ) -> Result<Option<Self>, R::Error> {
         if strength == 0 || geometry.size.w == 0. || geometry.size.h == 0. {
             return Ok(None);
@@ -395,10 +502,23 @@ impl BlurElement {
             // The backdrop draws through the same clipping program, so it needs
             // `scale` too -- without it the corner mask never rounds the blur.
             Uniform::new("scale", output_scale as f32),
+            // Frosted-glass appearance. Each falls back to the compositor
+            // default until the client sends it: 0 is a real value for all
+            // three (greyscale / no tint / no border) and so cannot double as
+            // "unset".
+            Uniform::new("saturation", UniformValue::_1f(appearance.saturation)),
+            Uniform::new("frost_tint", UniformValue::_1f(appearance.tint)),
+            Uniform::new("border", UniformValue::_1f(appearance.border)),
         ];
 
         let geometry = extended_geo.to_logical(output_scale);
-        let extended_offset = Point::<f64, Physical>::new(radius, radius).to_logical(output_scale);
+        // The margin actually captured on the near side, which is `radius` only
+        // when the capture had room for it. Against the top or left edge the
+        // trim above shortened it, and deriving this from `radius` regardless
+        // shifted the region rects -- and the damage -- down and right by the
+        // difference, leaving an unblurred strip along those edges.
+        let extended_offset = (geo.loc - extended_geo.loc).to_logical(output_scale);
+        let element_size = geo.size.to_logical(output_scale);
 
         let renderer_id = renderer.glow_renderer().context_id();
         let src = geometry.size.to_buffer(output_scale, Transform::Normal);
@@ -428,6 +548,7 @@ impl BlurElement {
             src,
             geometry,
             extended_offset,
+            element_size,
             scaling_shaders: BlurShaders::get(renderer),
             render_shader: ClippingShader::get(renderer),
             offset: state.offset,
@@ -473,14 +594,12 @@ impl Element for BlurElement {
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
         if self.commit.distance(commit).is_none_or(|d| d > 0) {
+            // The element's own area inside the extended capture. Derived from
+            // the stored size rather than `geometry - offset * 2`, which only
+            // holds while the near and far margins are both the full radius.
             DamageSet::from_slice(&[Rectangle::new(
                 self.extended_offset.to_physical_precise_round(scale),
-                self.geometry.size.to_physical_precise_round(scale)
-                    - self
-                        .extended_offset
-                        .to_size()
-                        .upscale(2.)
-                        .to_physical_precise_round(scale),
+                self.element_size.to_physical_precise_round(scale),
             )])
         } else {
             DamageSet::default()

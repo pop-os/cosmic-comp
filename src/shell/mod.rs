@@ -139,6 +139,12 @@ const MOVE_GRAB_Y_OFFSET: f64 = 16.;
 /// When dragging a zone-filling window, shrink it to this fraction of the zone.
 const DRAG_UNMAXIMIZE_FRACTION: (i32, i32) = (2, 3);
 const ACTIVATION_TOKEN_EXPIRE_TIME: Duration = Duration::from_secs(5);
+/// How many entrance-animation durations a layer surface may wait for real
+/// content before it animates in over whatever it has. Expressed against the
+/// animation's own duration so it tracks the motion token, and generous enough
+/// that a client rendering its first real frame (~220ms in practice) is never
+/// cut short.
+const PENDING_CONTENT_TIMEOUT_FACTOR: u32 = 4;
 
 #[derive(Debug, Clone)]
 pub enum Trigger {
@@ -817,9 +823,11 @@ pub struct Shell {
 
     /// Layer surfaces currently fading in (surface ObjectId -> map instant)
     layer_fade_in: std::collections::HashMap<ObjectId, Instant>,
-    /// Layer surfaces waiting for a buffer commit before starting their fade-in.
-    /// Moved to `layer_fade_in` when the surface next commits a buffer.
-    pending_layer_fade_in: std::collections::HashSet<ObjectId>,
+    /// Layer surfaces waiting for a buffer commit before starting their fade-in,
+    /// with the instant they started waiting. Moved to `layer_fade_in` when the
+    /// surface commits a buffer with real content (see
+    /// [`Shell::activate_pending_fade_in`]).
+    pending_layer_fade_in: std::collections::HashMap<ObjectId, Instant>,
     /// Layer surfaces currently fading out (surface ObjectId -> start instant).
     /// While fading out, the surface remains visible with decreasing alpha.
     /// When the animation completes, moved to `hidden_surfaces`.
@@ -882,9 +890,10 @@ pub struct Shell {
     pub layer_opens: Vec<layer_open::LayerOpen>,
     /// Surfaces that will play the open animation but are waiting for their first
     /// buffer commit (auto_size geometry is 0 until then, and a re-shown surface
-    /// must render its first frame before it fades in). Moved to `layer_opens`
-    /// when the surface next commits a buffer (see `activate_pending_fade_in`).
-    pending_layer_opens: std::collections::HashSet<ObjectId>,
+    /// must render its first frame before it fades in), with the instant they
+    /// started waiting. Moved to `layer_opens` when the surface commits a buffer
+    /// with real content (see `activate_pending_fade_in`).
+    pending_layer_opens: std::collections::HashMap<ObjectId, Instant>,
 
     /// Layer surfaces currently playing the compositor-side CLOSE animation (the
     /// reverse of the open: 160ms easeInOut slide-down + scale-down + fade-out).
@@ -2505,7 +2514,7 @@ impl Shell {
 
             // Layer surface fade-in tracking
             layer_fade_in: std::collections::HashMap::new(),
-            pending_layer_fade_in: std::collections::HashSet::new(),
+            pending_layer_fade_in: std::collections::HashMap::new(),
             layer_fade_out: std::collections::HashMap::new(),
 
             // Layer surfaces that follow the cursor to whichever output
@@ -2530,7 +2539,7 @@ impl Shell {
 
             // Fade+rise open/close animations (the default layer transition)
             layer_opens: Vec::new(),
-            pending_layer_opens: std::collections::HashSet::new(),
+            pending_layer_opens: std::collections::HashMap::new(),
             layer_closes: Vec::new(),
             rise_surfaces: std::collections::HashSet::new(),
 
@@ -5238,7 +5247,7 @@ impl Shell {
                     let p = (o.start.elapsed().as_secs_f32() / motion.layer_open.as_secs_f32())
                         .clamp(0.0, 1.0);
                     ((1.0 - p) * motion.layer_open.as_millis() as f32) as u64
-                } else if self.pending_layer_opens.contains(&surface_id) {
+                } else if self.pending_layer_opens.contains_key(&surface_id) {
                     motion.layer_open.as_millis() as u64
                 } else {
                     0
@@ -5253,7 +5262,7 @@ impl Shell {
             // Use slide animation for side-anchored panels
             if hidden {
                 let was_fading_in = self.layer_fade_in.remove(&surface_id).is_some();
-                let was_pending = self.pending_layer_fade_in.remove(&surface_id);
+                let was_pending = self.pending_layer_fade_in.remove(&surface_id).is_some();
                 tracing::debug!(
                     ?surface_id,
                     ?edge,
@@ -5335,7 +5344,7 @@ impl Shell {
             // perfectly synced with the translate + scale.
             if hidden {
                 let was_fading_in = self.layer_fade_in.remove(&surface_id).is_some();
-                let was_pending = self.pending_layer_fade_in.remove(&surface_id);
+                let was_pending = self.pending_layer_fade_in.remove(&surface_id).is_some();
                 // Any in-flight open was already folded into `close_backdate_ms`
                 // and removed above via `remove_layer_open`.
                 tracing::debug!(
@@ -5378,7 +5387,7 @@ impl Shell {
                     // Defer the rise-in until the surface commits its first buffer
                     // (so neither content nor blur shows a stale frame). Held at
                     // alpha 0 until then by `layer_fade_in_alphas`.
-                    self.pending_layer_opens.insert(surface_id);
+                    self.pending_layer_opens.insert(surface_id, Instant::now());
                 } else if let Some(close_progress) = reversing_close {
                     // Reverse the in-flight close into an open. Back-date the open
                     // so its first frame matches the close's current alpha/scale/
@@ -5562,7 +5571,7 @@ impl Shell {
             .collect();
         // Surfaces waiting for a buffer commit before their fade-in starts
         // are held at alpha=0 so neither content nor blur is visible yet.
-        for surface_id in &self.pending_layer_fade_in {
+        for surface_id in self.pending_layer_fade_in.keys() {
             result.entry(surface_id.clone()).or_insert(0.0);
         }
         // Open animations drive their alpha (0→1) from the SAME single eased
@@ -5574,7 +5583,7 @@ impl Shell {
             result.insert(open.surface_id.clone(), open.alpha());
         }
         // Surfaces still waiting for their first buffer commit are held at 0.
-        for surface_id in &self.pending_layer_opens {
+        for surface_id in self.pending_layer_opens.keys() {
             result.entry(surface_id.clone()).or_insert(0.0);
         }
         if !result.is_empty() {
@@ -5707,15 +5716,48 @@ impl Shell {
         self.layer_fade_out.remove(surface_id);
     }
 
+    /// Whether this surface is still waiting for its first buffer before its
+    /// entrance animation starts.
+    pub fn is_layer_fade_in_pending(&self, surface_id: &ObjectId) -> bool {
+        self.pending_layer_opens.contains_key(surface_id)
+            || self.pending_layer_fade_in.contains_key(surface_id)
+    }
+
     /// Activate a pending fade-in for a surface.
     /// Called from the compositor `commit()` handler when a layer surface commits
     /// a buffer.  If the surface has a pending fade-in (was just un-hidden),
     /// this starts the actual animation so the blur fades in together with the
     /// freshly rendered content.
-    pub fn activate_pending_fade_in(&mut self, surface_id: &ObjectId) {
-        if self.pending_layer_fade_in.remove(surface_id) {
+    pub fn activate_pending_fade_in(&mut self, surface_id: &ObjectId, has_content: bool) {
+        // Layer-shell toolkits commit before they know their auto-size geometry:
+        // first a buffer-less commit, then a 1-2px placeholder, and only ~220ms
+        // later the real content. Starting the entrance animation on those spends
+        // the whole ~190ms fade on a 1x1 surface and lands the real buffer after
+        // it has already finished, so the surface appears at full opacity having
+        // visibly animated nothing.
+        //
+        // Waiting for real content instead means the fade runs over the thing it
+        // is supposed to reveal. The placeholder stays at alpha 0 meanwhile,
+        // which is what we want to show of it anyway.
+        //
+        // The wait is bounded: a surface that never grows past the placeholder
+        // would otherwise sit in `pending_*` forever, and those keep
+        // `animations_going()` true — pinning the compositor to a permanent
+        // redraw loop. After the timeout it animates regardless.
+        let waited_long_enough = |since: Instant| {
+            since.elapsed() >= self.theme.motion.layer_open * PENDING_CONTENT_TIMEOUT_FACTOR
+        };
+        let ready = |pending: &std::collections::HashMap<ObjectId, Instant>| {
+            pending
+                .get(surface_id)
+                .is_some_and(|since| has_content || waited_long_enough(*since))
+        };
+
+        if ready(&self.pending_layer_fade_in) {
+            self.pending_layer_fade_in.remove(surface_id);
             tracing::debug!(
                 ?surface_id,
+                has_content,
                 "activate_pending_fade_in: starting blur fade-in on buffer commit"
             );
             self.layer_fade_in
@@ -5726,9 +5768,11 @@ impl Shell {
         // first-buffer-commit hook (auto_size means geometry is only valid now,
         // and a re-shown surface must render its first frame first). Replace any
         // stale entry so a re-show restarts the animation cleanly.
-        if self.pending_layer_opens.remove(surface_id) {
+        if ready(&self.pending_layer_opens) {
+            self.pending_layer_opens.remove(surface_id);
             tracing::debug!(
                 ?surface_id,
+                has_content,
                 "activate_pending_fade_in: starting open (slide-up) animation on buffer commit"
             );
             self.layer_opens.retain(|o| o.surface_id != *surface_id);
@@ -5747,7 +5791,7 @@ impl Shell {
     pub fn restart_layer_fade_in(&mut self, surface_id: ObjectId) {
         let is_already_fading_in = self.layer_fade_in.contains_key(&surface_id);
         let is_fading_out = self.layer_fade_out.contains_key(&surface_id);
-        let is_pending = self.pending_layer_fade_in.contains(&surface_id);
+        let is_pending = self.pending_layer_fade_in.contains_key(&surface_id);
         let is_hidden = self.hidden_surfaces.contains(&surface_id);
 
         // Only restart when the surface is pending its first fade-in or
@@ -7250,7 +7294,8 @@ impl Shell {
                 }
             } else {
                 self.rise_surfaces.insert(surface_id.clone());
-                self.pending_layer_opens.insert(surface_id.clone());
+                self.pending_layer_opens
+                    .insert(surface_id.clone(), Instant::now());
             }
         }
 

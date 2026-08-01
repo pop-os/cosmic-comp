@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Version 2 of `ext_background_effect_v1`.
+//! Version 3 of `ext_background_effect_v1`.
 //!
 //! Version 1 is the upstream staging protocol and is implemented by smithay.
-//! We bind the global ourselves instead, because version 2 adds three requests
-//! upstream does not have -- blur strength, corner rounding, and a whole-surface
-//! mode -- and a client cannot get those through smithay's version 1 dispatch.
+//! We bind the global ourselves instead, because our later versions add requests
+//! upstream does not have and a client cannot reach those through smithay's
+//! version 1 dispatch:
+//!
+//! - version 2: blur strength, per-rect corner rounding, whole-surface mode
+//! - version 3: backdrop saturation, frosted tint, border -- the appearance
+//!   controls carried over from the `org_kde_kwin_blur` v4 stack this replaced
 //!
 //! Version 1 clients are unaffected: they negotiate version 1 and only ever send
 //! the requests upstream defines.
@@ -67,6 +71,18 @@ pub trait BackgroundEffectHandler: 'static {
     /// The client asked for the blurred area's corners to be rounded, one entry
     /// per region rect, clockwise from top-left.
     fn set_region_radii(&mut self, surface: WlSurface, radii: Vec<[u32; 4]>);
+
+    /// The client asked for a backdrop saturation, CSS `saturate()` semantics.
+    /// `None` means the compositor default; `Some(0.0)` means greyscale.
+    fn set_saturation(&mut self, surface: WlSurface, saturation: Option<f32>);
+
+    /// The client asked for a frosted white-overlay strength. `None` means the
+    /// compositor default; `Some(0.0)` means no tint.
+    fn set_tint(&mut self, surface: WlSurface, tint: Option<f32>);
+
+    /// The client asked for a border alpha. `None` means the compositor
+    /// default; `Some(0.0)` means no border.
+    fn set_border(&mut self, surface: WlSurface, border: Option<f32>);
 }
 
 /// State and global for the background-effect protocol.
@@ -84,7 +100,7 @@ impl BackgroundEffectState {
             + BackgroundEffectHandler
             + 'static,
     {
-        let global = dh.create_global::<D, ExtBackgroundEffectManagerV1, _>(2, ());
+        let global = dh.create_global::<D, ExtBackgroundEffectManagerV1, _>(3, ());
         Self { global }
     }
 
@@ -232,6 +248,19 @@ where
                     })
                     .collect();
                 state.set_region_radii(surface, radii);
+            }
+            // A `fixed` carries the fractional precision these need. Unlike the
+            // radius, 0 is a real value for all three -- greyscale, no tint, no
+            // border -- so it cannot double as "use the default"; the default
+            // applies only until the client sends the request at all.
+            ext_background_effect_surface_v1::Request::SetSaturation { saturation } => {
+                state.set_saturation(surface, Some(saturation.max(0.0) as f32));
+            }
+            ext_background_effect_surface_v1::Request::SetTint { tint } => {
+                state.set_tint(surface, Some(tint.clamp(0.0, 1.0) as f32));
+            }
+            ext_background_effect_surface_v1::Request::SetBorder { border } => {
+                state.set_border(surface, Some(border.clamp(0.0, 1.0) as f32));
             }
             ext_background_effect_surface_v1::Request::Destroy => {
                 compositor::with_states(&surface, |states| {

@@ -25,10 +25,15 @@ impl BlurHandler for State {
 
     fn blur_set(&mut self, surface: &WlSurface) {
         with_states(surface, |states| {
+            // `pending`, not `current`: org_kde_kwin_blur.commit writes the new
+            // state into the pending slot and calls straight into here, so
+            // `current` still holds the previous surface commit -- every update
+            // would land a cycle late, and the first would read the default
+            // (no region, disabled) and blur nothing at all.
             let blur = states
                 .cached_state
                 .get::<CacheableBlurState>()
-                .current()
+                .pending()
                 .clone();
 
             let mut computed = states.cached_state.get::<ComputedBlurRegionCachedState>();
@@ -68,6 +73,24 @@ impl BlurHandler for State {
                         .collect()
                 })
                 .unwrap_or_default();
+
+            // Saturation, tint and border, which the KDE protocol carries from
+            // its version 3. These were parsed into `CacheableBlurState` but
+            // never reached the renderer, so a kwin client asking for them got
+            // the compositor default silently.
+            //
+            // Each is `None` until the client sends it, which the renderer reads
+            // as "use the default" -- 0 is a meaningful value for all three
+            // (greyscale / no tint / no border) and cannot double as "unset".
+            pending.saturation = blur
+                .saturation
+                .or_else(|| blur.data.as_ref().and_then(|data| data.saturation));
+            pending.tint = blur
+                .tint
+                .or_else(|| blur.data.as_ref().and_then(|data| data.tint));
+            pending.border = blur
+                .border
+                .or_else(|| blur.data.as_ref().and_then(|data| data.border));
         });
 
         let shell = self.common.shell.read();

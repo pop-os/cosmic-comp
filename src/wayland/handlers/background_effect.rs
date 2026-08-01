@@ -35,6 +35,24 @@ pub struct ComputedBlurRegionCachedState {
     /// the same way -- which is what a client sending one radius for a
     /// whole-surface blur means.
     pub region_radii: Vec<[u32; 4]>,
+    /// Saturation applied to the blurred backdrop, matching CSS
+    /// `backdrop-filter: saturate()` (protocol version 3).
+    ///
+    /// `1.0` leaves saturation unchanged. `None` means the compositor default.
+    pub saturation: Option<f32>,
+    /// Strength of the white overlay blended onto the backdrop -- the frosted
+    /// lightening (protocol version 3).
+    ///
+    /// `0.0` disables it, leaving a faithful `backdrop-filter: blur()` with the
+    /// surface's own background providing the glass colour. `None` means the
+    /// compositor default.
+    pub tint: Option<f32>,
+    /// Alpha of the 1px frosted border drawn around the backdrop (protocol
+    /// version 3).
+    ///
+    /// `0.0` disables it, which is what a surface drawing its own border wants.
+    /// `None` means the compositor default.
+    pub border: Option<f32>,
 }
 
 impl Cacheable for ComputedBlurRegionCachedState {
@@ -107,6 +125,27 @@ impl BackgroundEffectHandler for State {
         with_states(&surface, |states| {
             let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
             blur_state.pending().region_radii = radii;
+        })
+    }
+
+    fn set_saturation(&mut self, surface: WlSurface, saturation: Option<f32>) {
+        with_states(&surface, |states| {
+            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+            blur_state.pending().saturation = saturation;
+        })
+    }
+
+    fn set_tint(&mut self, surface: WlSurface, tint: Option<f32>) {
+        with_states(&surface, |states| {
+            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+            blur_state.pending().tint = tint;
+        })
+    }
+
+    fn set_border(&mut self, surface: WlSurface, border: Option<f32>) {
+        with_states(&surface, |states| {
+            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+            blur_state.pending().border = border;
         })
     }
 }

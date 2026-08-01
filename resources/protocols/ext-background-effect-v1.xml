@@ -41,12 +41,21 @@
     say "the whole surface" without the client having to resend a region on
     every resize.
 
-    WARNING: version 2 is not part of the upstream protocol. A client must
-    check the version of the bound global before using any version 2 request,
-    and must be prepared for a compositor to only implement version 1.
+    Version 3 adds the appearance of the backdrop itself, rather than its shape:
+    how saturated it is, how strongly it is lightened towards white, and whether
+    the compositor draws a hairline border around it. A blurred backdrop is not
+    just a blurred copy of what is behind it -- the "frosted glass" look every
+    toolkit draws is blur plus a saturation lift plus a light overlay -- and
+    without control of those a client cannot match its own design, nor turn them
+    off when it would rather draw the glass colour itself.
+
+    WARNING: versions 2 and 3 are not part of the upstream protocol. A client
+    must check the version of the bound global before using any request above
+    version 1, and must be prepared for a compositor to only implement
+    version 1.
   </description>
 
-  <interface name="ext_background_effect_manager_v1" version="2">
+  <interface name="ext_background_effect_manager_v1" version="3">
     <description summary="background effect factory">
       This object is a factory for background effect objects.
     </description>
@@ -90,7 +99,7 @@
     </request>
   </interface>
 
-  <interface name="ext_background_effect_surface_v1" version="2">
+  <interface name="ext_background_effect_surface_v1" version="3">
     <description summary="background effects for a surface">
       This interface allows a client to apply effects to the background of a
       surface.
@@ -213,6 +222,78 @@
         error will be raised.
       </description>
       <arg name="radii" type="array" summary="four uint radii per rectangle, clockwise from top-left"/>
+    </request>
+
+    <request name="set_saturation" since="3">
+      <description summary="set the backdrop saturation">
+        Set the saturation applied to the blurred backdrop, matching CSS
+        `backdrop-filter: saturate()`.
+
+        1.0 leaves saturation unchanged, values above 1.0 increase it, below
+        1.0 desaturate, and 0.0 is fully greyscale. Blurring averages colour
+        away, so a backdrop reads flatter than what it was sampled from; a
+        saturation above 1.0 is what restores it.
+
+        Until this request is sent the compositor applies its own default.
+        There is no way to return to that default afterwards -- send the value
+        you want.
+
+        This is a hint. The compositor may clamp or ignore it.
+
+        This state is double-buffered and applies on the next
+        wl_surface.commit.
+
+        If the associated surface has been destroyed, the surface_destroyed
+        error will be raised.
+      </description>
+      <arg name="saturation" type="fixed" summary="saturation multiplier, 1.0 leaves it unchanged"/>
+    </request>
+
+    <request name="set_tint" since="3">
+      <description summary="set the frosted-glass tint strength">
+        Set how strongly the compositor blends a white overlay onto the blurred
+        backdrop -- the lightening that makes blur read as frosted glass rather
+        than as a smeared copy of the wallpaper.
+
+        0.0 disables it, so the backdrop is a faithful `backdrop-filter:
+        blur()` and the surface's own background provides the glass colour,
+        which is what a client that draws its own scrim wants. Higher values
+        add more white, up to 1.0 for a fully white backdrop.
+
+        Until this request is sent the compositor applies its own default.
+        Note that 0.0 means "no tint", not "use the default".
+
+        This state is double-buffered and applies on the next
+        wl_surface.commit.
+
+        If the associated surface has been destroyed, the surface_destroyed
+        error will be raised.
+      </description>
+      <arg name="tint" type="fixed" summary="white overlay strength, 0.0 disables the tint"/>
+    </request>
+
+    <request name="set_border" since="3">
+      <description summary="set the frosted-glass border strength">
+        Set the alpha of the hairline border the compositor draws around the
+        blurred area.
+
+        0.0 disables it, which is what a client drawing its own border wants --
+        two borders a physical pixel apart read as a seam. Higher values make
+        the compositor's border more opaque.
+
+        Until this request is sent the compositor applies its own default.
+        Note that 0.0 means "no border", not "use the default".
+
+        The border follows the corner radii set by set_region_radii, so it
+        traces the same shape as the backdrop it outlines.
+
+        This state is double-buffered and applies on the next
+        wl_surface.commit.
+
+        If the associated surface has been destroyed, the surface_destroyed
+        error will be raised.
+      </description>
+      <arg name="border" type="fixed" summary="border alpha, 0.0 disables the border"/>
     </request>
 
   </interface>
