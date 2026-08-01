@@ -126,14 +126,11 @@ where
                     transpose: false,
                 },
             ),
-            // MERGE: dropped our `scale` uniform (which narrowed the corner-antialiasing band to
-            // half a *physical* pixel at fractional scales) in favour of upstream's `noise`
-            // uniform from the frosted-glass work. The uniform list here must stay a subset of the
-            // `UniformName`s registered for CLIPPING_SHADER in `backend::render::init_shaders`, or
-            // every draw fails with `GlesError::UnknownUniform`. If the merged
-            // `shaders/clipped_surface.frag` keeps `uniform float scale`, re-add
-            // `Uniform::new("scale", scale.x as f32)` here *and* its `UniformName` there.
             Uniform::new("noise", UniformValue::_1f(0.0)),
+            // Keeps the corner antialiasing band half a *physical* pixel at
+            // fractional scales. Without it the band is infinite and the corner
+            // mask never clips.
+            Uniform::new("scale", scale.x as f32),
         ];
 
         Self {

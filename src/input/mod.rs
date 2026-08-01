@@ -3437,7 +3437,7 @@ pub fn update_output_image_copy_cursor_position(
     position: Point<f64, Global>,
 ) {
     let output_geometry = output.geometry();
-    for session in cursor_sessions_for_output(&shell, &output) {
+    for session in cursor_sessions_for_output(shell, output) {
         if let Some(cursor_geometry) = seat.cursor_geometry(
             (position - output_geometry.loc.to_f64())
                 .as_logical()

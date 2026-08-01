@@ -161,7 +161,6 @@ where
                 data_init.init(id, BackgroundEffectSurfaceData(surface.downgrade()));
             }
             ext_background_effect_manager_v1::Request::Destroy => {}
-            _ => unreachable!(),
         }
     }
 }
@@ -234,7 +233,6 @@ where
                 });
                 state.unset_blur_region(surface);
             }
-            _ => unreachable!(),
         }
     }
 }

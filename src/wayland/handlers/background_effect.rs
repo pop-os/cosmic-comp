@@ -29,7 +29,12 @@ pub struct ComputedBlurRegionCachedState {
     /// Corner radii of the blurred area, clockwise from top-left, so the
     /// backdrop can follow the shape the client actually draws (protocol
     /// version 2).
-    pub corner_radius: [u32; 4],
+    ///
+    /// One entry per rect in `blur_region`, index-matched. A shorter list
+    /// leaves the remaining rects square, and a single entry rounds every rect
+    /// the same way -- which is what a client sending one radius for a
+    /// whole-surface blur means.
+    pub region_radii: Vec<[u32; 4]>,
 }
 
 impl Cacheable for ComputedBlurRegionCachedState {
@@ -101,7 +106,7 @@ impl BackgroundEffectHandler for State {
     fn set_corner_radius(&mut self, surface: WlSurface, radii: [u32; 4]) {
         with_states(&surface, |states| {
             let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
-            blur_state.pending().corner_radius = radii;
+            blur_state.pending().region_radii = vec![radii];
         })
     }
 }

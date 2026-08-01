@@ -193,6 +193,13 @@ impl Config {
                 c
             });
 
+        // Seed the render-side blur strength from config, so the first frame
+        // already uses the configured intensity rather than a default.
+        crate::backend::render::wayland::blur_effect::set_blur_config(
+            cosmic_comp_config.blur_enabled,
+            cosmic_comp_config.blur_intensity,
+        );
+
         // Listen for updates to the toolkit config
         if let Ok(tk_config_ctx) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
             fn handle_new_toolkit_config(config: ToolkitConfig, state: &mut State) {
@@ -1012,6 +1019,10 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<bool>(&config, "blur_enabled");
                 if new != state.common.config.cosmic_conf.blur_enabled {
                     state.common.config.cosmic_conf.blur_enabled = new;
+                    crate::backend::render::wayland::blur_effect::set_blur_config(
+                        new,
+                        state.common.config.cosmic_conf.blur_intensity,
+                    );
                     for output in state.common.shell.read().outputs() {
                         state.backend.schedule_render(output);
                     }
@@ -1021,6 +1032,10 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<f32>(&config, "blur_intensity");
                 if (new - state.common.config.cosmic_conf.blur_intensity).abs() > f32::EPSILON {
                     state.common.config.cosmic_conf.blur_intensity = new;
+                    crate::backend::render::wayland::blur_effect::set_blur_config(
+                        state.common.config.cosmic_conf.blur_enabled,
+                        new,
+                    );
                     // Invalidate blur caches so new intensity takes effect
                     for output in state.common.shell.read().outputs() {
                         state.backend.schedule_render(output);

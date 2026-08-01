@@ -37,6 +37,42 @@ pub static BLUR_UPSAMPLE_SHADER: &str = include_str!("../shaders/blur_upsample.f
 const NOISE: f32 = 0.03;
 const MAX_STEPS: usize = 15;
 
+/// Blur strength from configuration, as a step index into [`BLUR_PARAMS`].
+///
+/// Upstream derives strength from a single frosted-glass boolean, which gives
+/// only two of the fifteen steps and reads far weaker than a configurable blur.
+/// This keeps the `blur_intensity` config value driving it instead.
+static BLUR_INTENSITY_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Whether blur is enabled at all, from configuration.
+static BLUR_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Update the configured blur strength. `intensity` is 0.0..=1.0.
+pub fn set_blur_config(enabled: bool, intensity: f32) {
+    BLUR_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    BLUR_INTENSITY_BITS.store(
+        intensity.clamp(0.0, 1.0).to_bits(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Whether blur is enabled in configuration.
+pub fn blur_enabled() -> bool {
+    BLUR_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The configured strength as a step index.
+///
+/// `frosted` is the theme's frosted-glass flag, kept as the floor so a theme
+/// that asks for frosting still gets some even at intensity 0.
+pub fn configured_blur_strength(frosted: bool) -> usize {
+    let intensity = f32::from_bits(BLUR_INTENSITY_BITS.load(std::sync::atomic::Ordering::Relaxed));
+    let floor = frosted as usize;
+    // Spread the configured intensity across the whole step range rather than
+    // the two steps a boolean can express.
+    let steps = (intensity * (MAX_STEPS - 1) as f32).round() as usize;
+    steps.max(floor).min(MAX_STEPS - 1)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct BlurParameters {
     passes: usize,
@@ -188,7 +224,13 @@ impl BlurElement {
         output_scale: f64,
         radii: [u8; 4],
         strength: usize,
-    ) -> Result<Option<Self>, R::Error> {
+    ) -> Result<Vec<Self>, R::Error> {
+        // Blur disabled in config means no blur element at all, rather than a
+        // zero-strength one that still pays for the blit and the passes.
+        if !blur_enabled() {
+            return Ok(Vec::new());
+        }
+
         let mut blur_region_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
         let blur = blur_region_state.current().clone();
 
@@ -200,38 +242,69 @@ impl BlurElement {
         } else if let Some(region) = blur.blur_region.as_deref() {
             region
         } else {
-            return Ok(None);
+            return Ok(Vec::new());
         };
 
-        // Version 2 lets the client ask for a strength and for the backdrop's
-        // corners to follow its own. Both are hints: the strength is clamped to
-        // what the blur can actually render, and each corner to half the
-        // shorter side so adjacent arcs cannot overlap.
+        // Version 2 lets the client ask for a strength. A hint: clamped to what
+        // the blur can actually render.
         let strength = blur
             .blur_radius
             .map(|r| (r as usize).min(MAX_STEPS))
             .unwrap_or(strength);
-        let radii = if blur.corner_radius.iter().any(|r| *r != 0) {
-            let half_min = (geometry.size.w.min(geometry.size.h) / 2.0).max(0.0) as u32;
-            blur.corner_radius
-                .map(|r| r.min(half_min).min(u8::MAX as u32) as u8)
-        } else {
-            radii
-        };
 
         let state = states
             .data_map
             .get_or_insert_threadsafe::<Mutex<BlurState>, _>(Default::default);
+        let mut state = state.lock().unwrap();
 
-        Self::internal(
-            renderer,
-            &mut state.lock().unwrap(),
-            geometry,
-            region,
-            output_scale,
-            radii,
-            strength,
-        )
+        // One element per rect, rather than one element clipped to all of them.
+        //
+        // Corner radii round the element's own geometry, so a single element
+        // spanning every rect would round the outer bounds and leave each rect
+        // square -- which for a full-screen layer surface means rounding the
+        // screen corners and nothing else. A client that rounds each card to its
+        // own radius needs an element per card. It also blits only each rect
+        // rather than the whole surface.
+        let mut elements = Vec::with_capacity(region.len());
+        for (idx, rect) in region.iter().enumerate() {
+            if rect.size.w <= 0 || rect.size.h <= 0 {
+                continue;
+            }
+
+            // Per-rect radii if the client sent them, falling back to a single
+            // entry applied to every rect, then to the caller's value.
+            let rect_radii = blur
+                .region_radii
+                .get(idx)
+                .or_else(|| blur.region_radii.first())
+                .map(|r| {
+                    // Half the shorter side, so adjacent arcs cannot overlap and
+                    // erode the edge between them.
+                    let half_min = (rect.size.w.min(rect.size.h) / 2).max(0) as u32;
+                    r.map(|v| v.min(half_min).min(u8::MAX as u32) as u8)
+                })
+                .unwrap_or(radii);
+
+            // The rect is surface-local; the element carries it as its own
+            // geometry, so its region is that rect at the origin.
+            let mut rect_geo = geometry;
+            rect_geo.loc += rect.loc.to_f64();
+            rect_geo.size = rect.size.to_f64();
+
+            if let Some(element) = Self::internal(
+                renderer,
+                &mut state,
+                rect_geo,
+                &[Rectangle::from_size(rect.size)],
+                output_scale,
+                rect_radii,
+                strength,
+            )? {
+                elements.push(element);
+            }
+        }
+
+        Ok(elements)
     }
 
     pub fn internal<R: ImportAll + AsGlowRenderer>(
@@ -286,6 +359,9 @@ impl BlurElement {
                 },
             ),
             Uniform::new("noise", UniformValue::_1f(NOISE)),
+            // The backdrop draws through the same clipping program, so it needs
+            // `scale` too -- without it the corner mask never rounds the blur.
+            Uniform::new("scale", output_scale as f32),
         ];
 
         let geometry = extended_geo.to_logical(output_scale);
@@ -301,7 +377,7 @@ impl BlurElement {
             .is_some_and(|id| id == &renderer_id)
             && state.offset == params.offset
             && state.passes == params.passes
-            && &state.region == region
+            && state.region == region
             && state.src == src);
 
         state.renderer_id = Some(renderer_id);
@@ -515,6 +591,32 @@ fn blit_from_active_fb(
     let tex_size = to_texture.size();
     let tex_size_phys = tex_size.to_logical(1, Transform::Normal).to_physical(1);
     let fb_size = frame.output_size();
+
+    // The capture is deliberately extended past the element so the blur kernel
+    // has something to reach into, which means a surface sitting against a
+    // screen edge asks to read outside the framebuffer. Reading out of bounds
+    // leaves that part of the capture undefined -- visible as an unblurred
+    // block where the surface meets the edge, squarest in a corner where it
+    // overruns on two sides at once.
+    //
+    // Clamp the read to the framebuffer and shrink the write by the same
+    // proportion, so the part that is read still lands where it belongs. What
+    // falls outside stays transparent from the clear below, which the blur then
+    // feathers rather than leaving a hard edge.
+    let (src, dst) = match dst.intersection(Rectangle::from_size(fb_size)) {
+        Some(clamped) if clamped != dst && dst.size.w > 0 && dst.size.h > 0 => {
+            let sx = src.size.w / dst.size.w as f64;
+            let sy = src.size.h / dst.size.h as f64;
+            let mut clamped_src = src;
+            clamped_src.loc.x += (clamped.loc.x - dst.loc.x) as f64 * sx;
+            clamped_src.loc.y += (clamped.loc.y - dst.loc.y) as f64 * sy;
+            clamped_src.size.w = clamped.size.w as f64 * sx;
+            clamped_src.size.h = clamped.size.h as f64 * sy;
+            (clamped_src, clamped)
+        }
+        // Fully outside the framebuffer, or already inside it.
+        _ => (src, dst),
+    };
 
     let mut renderer = frame.renderer();
     let mut fb = renderer.as_mut().bind(to_texture)?;

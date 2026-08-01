@@ -276,7 +276,7 @@ impl Program for ContextMenu {
                     && let Some((seat, _)) = last_seat.cloned()
                 {
                     let items = items.clone();
-                    let _ = loop_handle.insert_idle(move |state| {
+                    loop_handle.insert_idle(move |state| {
                         let grab_state = seat
                             .user_data()
                             .get::<SeatMenuGrabState>()
@@ -372,7 +372,7 @@ impl Program for ContextMenu {
                 if let Some(Item::Submenu { .. }) = self.items.get_mut(idx)
                     && let Some((seat, _)) = last_seat.cloned()
                 {
-                    let _ = loop_handle.insert_idle(move |_| {
+                    loop_handle.insert_idle(move |_| {
                         let grab_state = seat
                             .user_data()
                             .get::<SeatMenuGrabState>()

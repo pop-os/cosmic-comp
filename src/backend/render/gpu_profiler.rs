@@ -204,43 +204,6 @@ impl GpuInfo {
 // Frame Phase Profiler
 // =============================================================================
 
-/// What the blur phase actually did in a frame.
-///
-/// Returned by the blur pass rather than recomputed afterwards: the counts are
-/// a by-product of work it has already done, and re-deriving them meant walking
-/// the space a second time on every frame, profiling enabled or not.
-///
-/// `groups` is the number that matters most. Blur windows that overlap cannot
-/// share a capture, so a stack of maximized windows produces one group each, and
-/// the per-group cost is a full-resolution capture of the scene below it --
-/// `windows` alone cannot distinguish that from the cheap tiled case.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct BlurStats {
-    /// Window blur groups considered.
-    pub groups: usize,
-    /// Groups that actually re-blurred rather than reusing a cached texture.
-    pub groups_reblurred: usize,
-    /// Groups skipped because an opaque backdrop above hides their result.
-    pub groups_occluded: usize,
-    /// Re-blurs caused by the captured content actually changing.
-    pub reblur_content: usize,
-    /// Re-blurs caused by a missing cached texture. These ignore the content
-    /// hash and the throttle, so they repeat every frame until the cache fills.
-    pub reblur_uncached: usize,
-    /// Blur windows across all groups.
-    pub windows: usize,
-    /// Layer-shell surfaces with blur.
-    pub layers: usize,
-    /// Building the capture element list, plus the content hash.
-    pub capture_duration: Duration,
-    /// Rendering the captured scene into the background texture.
-    pub bg_render_duration: Duration,
-    /// Downsample plus the Kawase passes.
-    pub passes_duration: Duration,
-    /// Copying each group's result out of the shared ping/pong texture.
-    pub copy_duration: Duration,
-}
-
 /// Tracks timing of individual phases within a single frame render.
 #[derive(Debug, Clone)]
 pub struct FrameProfile {
@@ -251,9 +214,6 @@ pub struct FrameProfile {
     pub submit_duration: Duration,
     pub total_duration: Duration,
     pub element_count: usize,
-    pub blur_window_count: usize,
-    pub blur_layer_count: usize,
-    pub blur: BlurStats,
     pub draw: DrawStats,
     pub damage_rects: usize,
     pub skipped: bool,
@@ -296,9 +256,6 @@ impl Default for FrameProfile {
             submit_duration: Duration::ZERO,
             total_duration: Duration::ZERO,
             element_count: 0,
-            blur_window_count: 0,
-            blur_layer_count: 0,
-            blur: BlurStats::default(),
             draw: DrawStats::default(),
             damage_rects: 0,
             skipped: false,
@@ -362,8 +319,6 @@ impl FrameProfiler {
                 draw_ms = format!("{:.2}", profile.draw_duration.as_secs_f64() * 1000.0),
                 submit_ms = format!("{:.2}", profile.submit_duration.as_secs_f64() * 1000.0),
                 elements = profile.element_count,
-                blur_windows = profile.blur_window_count,
-                blur_layers = profile.blur_layer_count,
                 damage = profile.damage_rects,
                 "SLOW FRAME (>{:.1}ms): {:.2}ms total",
                 self.slow_threshold.as_secs_f64() * 2000.0,
@@ -466,18 +421,6 @@ impl FrameProfiler {
             .map(|p| p.element_count as f64)
             .sum::<f64>()
             / window_size as f64;
-        let avg_blur_wins: f64 = self
-            .profiles
-            .iter()
-            .map(|p| p.blur_window_count as f64)
-            .sum::<f64>()
-            / window_size as f64;
-        let avg_blur_layers: f64 = self
-            .profiles
-            .iter()
-            .map(|p| p.blur_layer_count as f64)
-            .sum::<f64>()
-            / window_size as f64;
         let avg_damage: f64 = self
             .profiles
             .iter()
@@ -511,8 +454,8 @@ impl FrameProfiler {
             avg_submit.as_secs_f64() * 1000.0,
         );
         warn!(
-            "│ Load:    elements={:.0}  blur_windows={:.1}  blur_layers={:.1}  damage_rects={:.0}",
-            avg_elements, avg_blur_wins, avg_blur_layers, avg_damage,
+            "│ Load:    elements={:.0}  damage_rects={:.0}",
+            avg_elements, avg_damage,
         );
         let n = window_size as f64;
         let avg = |f: fn(&FrameProfile) -> f64| self.profiles.iter().map(f).sum::<f64>() / n;

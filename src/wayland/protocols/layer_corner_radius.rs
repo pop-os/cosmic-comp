@@ -273,10 +273,10 @@ impl LayerCornerRadiusInternal {
         bottom_left: u32,
     ) {
         let corners = Corners {
-            top_left: top_left,
-            top_right: top_right,
-            bottom_right: bottom_right,
-            bottom_left: bottom_left,
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
         };
         self.corners = Some(corners);
     }

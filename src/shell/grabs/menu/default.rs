@@ -176,7 +176,7 @@ pub fn tab_items(
         Item::new(fl!("window-menu-unstack"), move |handle| {
             let mapped = unstack_clone_stack.clone();
             let surface = unstack_clone_tab.clone();
-            let _ = handle.insert_idle(move |state| {
+            handle.insert_idle(move |state| {
                 mapped.stack_ref().unwrap().remove_window(&surface);
                 let mapped: CosmicMapped = CosmicWindow::new(
                     surface,
@@ -212,7 +212,7 @@ pub fn tab_items(
         Item::Separator,
         Item::new(fl!("window-menu-screenshot"), move |handle| {
             let tab = screenshot_clone.clone();
-            let _ = handle.insert_idle(move |state| screenshot_window(state, &tab));
+            handle.insert_idle(move |state| screenshot_window(state, &tab));
         }),
         Item::Separator,
         Item::new(fl!("window-menu-close"), move |_handle| {
@@ -275,7 +275,7 @@ pub fn window_items(
         Some(
             Item::new(fl!("window-menu-minimize"), move |handle| {
                 let mapped = minimize_clone.clone();
-                let _ = handle.insert_idle(move |state| {
+                handle.insert_idle(move |state| {
                     state
                         .common
                         .shell
@@ -288,7 +288,7 @@ pub fn window_items(
         Some(
             Item::new(fl!("window-menu-maximize"), move |handle| {
                 let mapped = maximize_clone.clone();
-                let _ = handle.insert_idle(move |state| {
+                handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     shell.maximize_toggle(&mapped, &seat, &state.common.event_loop_handle);
@@ -300,7 +300,7 @@ pub fn window_items(
         Some(
             Item::new(fl!("window-menu-fullscreen"), move |handle| {
                 let mapped = fullscreen_clone.clone();
-                let _ = handle.insert_idle(move |state| {
+                handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     let output = seat.active_output();
@@ -320,7 +320,7 @@ pub fn window_items(
         (tiling_enabled && !is_sticky).then_some(
             Item::new(fl!("window-menu-tiled"), move |handle| {
                 let tile_clone = tile_clone.clone();
-                let _ = handle.insert_idle(move |state| {
+                handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     if let Some(ws) = shell.space_for_mut(&tile_clone) {
@@ -335,13 +335,12 @@ pub fn window_items(
         // TODO: Where to save?
         Some(Item::new(fl!("window-menu-screenshot"), move |handle| {
             let mapped = screenshot_clone.clone();
-            let _ =
-                handle.insert_idle(move |state| screenshot_window(state, &mapped.active_window()));
+            handle.insert_idle(move |state| screenshot_window(state, &mapped.active_window()));
         })),
         Some(Item::Separator),
         Some(Item::new(fl!("window-menu-move"), move |handle| {
             let move_clone = move_clone.clone();
-            let _ = handle.insert_idle(move |state| {
+            handle.insert_idle(move |state| {
                 if let Some(surface) = move_clone.wl_surface() {
                     let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
@@ -381,7 +380,7 @@ pub fn window_items(
             vec![
                 Item::new(fl!("window-menu-resize-edge-top"), move |handle| {
                     let resize_clone = resize_top_clone.clone();
-                    let _ = handle.insert_idle(move |state| {
+                    handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
@@ -416,7 +415,7 @@ pub fn window_items(
                 .disabled(!possible_resizes.contains(ResizeEdge::TOP)),
                 Item::new(fl!("window-menu-resize-edge-left"), move |handle| {
                     let resize_clone = resize_left_clone.clone();
-                    let _ = handle.insert_idle(move |state| {
+                    handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
@@ -451,7 +450,7 @@ pub fn window_items(
                 .disabled(!possible_resizes.contains(ResizeEdge::LEFT)),
                 Item::new(fl!("window-menu-resize-edge-right"), move |handle| {
                     let resize_clone = resize_right_clone.clone();
-                    let _ = handle.insert_idle(move |state| {
+                    handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
@@ -486,7 +485,7 @@ pub fn window_items(
                 .disabled(!possible_resizes.contains(ResizeEdge::RIGHT)),
                 Item::new(fl!("window-menu-resize-edge-bottom"), move |handle| {
                     let resize_clone = resize_bottom_clone.clone();
-                    let _ = handle.insert_idle(move |state| {
+                    handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write();
                         let seat = shell.seats.last_active().clone();
                         let res = shell.menu_resize_request(
@@ -525,8 +524,7 @@ pub fn window_items(
             Some(
                 Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
                     let mapped = move_prev_clone.clone();
-                    let _ = handle
-                        .insert_idle(move |state| move_element_prev_workspace(state, &mapped));
+                    handle.insert_idle(move |state| move_element_prev_workspace(state, &mapped));
                 })
                 .shortcut(config.shortcut_for_action(&Action::MoveToPreviousWorkspace))
                 .disabled(is_sticky),
@@ -538,8 +536,7 @@ pub fn window_items(
             Some(
                 Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
                     let mapped = move_next_clone.clone();
-                    let _ = handle
-                        .insert_idle(move |state| move_element_next_workspace(state, &mapped));
+                    handle.insert_idle(move |state| move_element_next_workspace(state, &mapped));
                 })
                 .shortcut(config.shortcut_for_action(&Action::MoveToNextWorkspace))
                 .disabled(is_sticky),
@@ -551,7 +548,7 @@ pub fn window_items(
         Some(
             Item::new(fl!("window-menu-sticky"), move |handle| {
                 let mapped = sticky_clone.clone();
-                let _ = handle.insert_idle(move |state| {
+                handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
                     shell.toggle_sticky(&seat, &mapped);
@@ -592,7 +589,7 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
         Some(
             Item::new(fl!("window-menu-minimize"), move |handle| {
                 let window = minimize_clone.clone();
-                let _ = handle.insert_idle(move |state| {
+                handle.insert_idle(move |state| {
                     state.common.shell.write().minimize_request(&window);
                 });
             })
@@ -601,7 +598,7 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
         Some(
             Item::new(fl!("window-menu-fullscreen"), move |handle| {
                 let window = fullscreen_clone.clone();
-                let _ = handle.insert_idle(move |state| {
+                handle.insert_idle(move |state| {
                     let mut shell = state.common.shell.write();
                     if let Some(target) =
                         shell.unfullscreen_request(&window, &state.common.event_loop_handle)
@@ -619,12 +616,12 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
         // TODO: Where to save?
         Some(Item::new(fl!("window-menu-screenshot"), move |handle| {
             let window = screenshot_clone.clone();
-            let _ = handle.insert_idle(move |state| screenshot_window(state, &window));
+            handle.insert_idle(move |state| screenshot_window(state, &window));
         })),
         Some(Item::Separator),
         Some(Item::new(fl!("window-menu-move"), move |handle| {
             let move_clone = move_clone.clone();
-            let _ = handle.insert_idle(move |state| {
+            handle.insert_idle(move |state| {
                 if let Some(surface) = move_clone.wl_surface() {
                     let mut shell = state.common.shell.write();
                     let seat = shell.seats.last_active().clone();
@@ -663,8 +660,7 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
             Some(
                 Item::new(fl!("window-menu-move-prev-workspace"), move |handle| {
                     let window = move_prev_clone.clone();
-                    let _ = handle
-                        .insert_idle(move |state| move_fullscreen_prev_workspace(state, &window));
+                    handle.insert_idle(move |state| move_fullscreen_prev_workspace(state, &window));
                 })
                 .shortcut(config.shortcut_for_action(&Action::MoveToPreviousWorkspace)),
             )
@@ -675,8 +671,7 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
             Some(
                 Item::new(fl!("window-menu-move-next-workspace"), move |handle| {
                     let window = move_next_clone.clone();
-                    let _ = handle
-                        .insert_idle(move |state| move_fullscreen_next_workspace(state, &window));
+                    handle.insert_idle(move |state| move_fullscreen_next_workspace(state, &window));
                 })
                 .shortcut(config.shortcut_for_action(&Action::MoveToNextWorkspace)),
             )

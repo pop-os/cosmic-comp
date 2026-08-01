@@ -346,6 +346,9 @@ pub struct Common {
     pub dbus_state: DBusState,
     pub keyboard_layout_state: KeyboardLayoutState,
     pub background_effect_state: crate::wayland::protocols::background_effect::BackgroundEffectState,
+    /// KDE blur, kept so clients that predate the background-effect protocol
+    /// still get a blurred backdrop. Both feed the same per-surface state.
+    pub blur_state: crate::wayland::protocols::blur::BlurState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -774,6 +777,7 @@ impl State {
 
         let background_effect_state =
             crate::wayland::protocols::background_effect::BackgroundEffectState::new::<Self>(dh);
+        let blur_state = crate::wayland::protocols::blur::BlurState::new::<Self>(dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
@@ -916,6 +920,7 @@ impl State {
                 xdg_toplevel_icon_manager,
                 workspace_state,
                 background_effect_state,
+                blur_state,
                 a11y_state,
                 game_mode_bridge,
                 xwayland_scale: None,

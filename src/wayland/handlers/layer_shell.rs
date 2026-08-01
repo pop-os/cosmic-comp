@@ -13,9 +13,6 @@ use smithay::{
     },
 };
 
-/// All layer types that need to be cached for render thread access
-const CACHED_LAYERS: [Layer; 4] = [Layer::Background, Layer::Bottom, Layer::Top, Layer::Overlay];
-
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
         &mut self.common.layer_shell_state

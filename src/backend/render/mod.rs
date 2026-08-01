@@ -491,8 +491,11 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             UniformName::new("geo_size", UniformType::_2f),
             UniformName::new("corner_radius", UniformType::_4f),
             UniformName::new("input_to_geo", UniformType::Matrix3x3),
-            // MERGE: upstream's clipped_surface.frag takes `noise`, not our `scale`.
             UniformName::new("noise", UniformType::_1f),
+            // The shader still declares and uses `scale` (half_px = 0.5 / scale).
+            // Leaving it unregistered leaves it at 0, so the corner
+            // antialiasing band becomes infinite and nothing is ever clipped.
+            UniformName::new("scale", UniformType::_1f),
         ],
     )?;
     let shadow_shader = renderer.compile_custom_pixel_shader(
@@ -978,9 +981,11 @@ where
         return Ok(Vec::new());
     }
     let theme = shell_ref.theme().clone();
-    // MERGE: upstream derives this from `theme.cosmic().frosted`; our `CompTheme`
-    // exposes the equivalent frosted-glass flag as `header_backdrop_blur()`.
-    let blur_strength = (theme.header_backdrop_blur() as u8 + 1) as usize;
+    // Upstream derives this from a frosted-glass boolean, which reaches only two
+    // of the available steps. Ours comes from the blur_intensity config value so
+    // the strength is actually adjustable, with the theme flag as the floor.
+    let blur_strength =
+        wayland::blur_effect::configured_blur_strength(theme.header_backdrop_blur());
     let scale = output.current_scale().fractional_scale();
 
     // Gather embedded children for any move-grabbed window before dropping shell lock

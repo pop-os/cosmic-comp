@@ -73,7 +73,7 @@ pub fn push_render_elements_from_surface_tree<R>(
             let mut location = *location;
             let kind = kind.eval(states);
             let data = states.data_map.get::<RendererSurfaceStateUserData>();
-            let mut blur = Ok(None);
+            let mut blur = Ok(Vec::new());
 
             if let Some(data) = data {
                 let has_view = if let Some(view) = data.lock().unwrap().view() {
@@ -130,13 +130,15 @@ pub fn push_render_elements_from_surface_tree<R>(
                 passed_main = true;
             }
 
-            if let Ok(Some(elem)) = blur {
-                if let Some(push_below) = push_below.as_mut()
-                    && passed_main
-                {
-                    push_below(elem.into());
-                } else {
-                    push_above(elem.into());
+            if let Ok(elems) = blur {
+                for elem in elems {
+                    if let Some(push_below) = push_below.as_mut()
+                        && passed_main
+                    {
+                        push_below(elem.into());
+                    } else {
+                        push_above(elem.into());
+                    }
                 }
             }
         },
