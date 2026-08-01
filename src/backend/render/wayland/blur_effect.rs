@@ -335,6 +335,30 @@ impl BlurElement {
         extended_geo.loc -= Point::<f64, Physical>::new(radius, radius);
         extended_geo.size += Size::<f64, Physical>::new(radius, radius).upscale(2.);
 
+        // Keep the capture inside the framebuffer's origin.
+        //
+        // The capture is extended past the element so the blur kernel has
+        // something to reach into, but a surface against the top or left edge
+        // has no screen there to read. That read gets clamped, so the texture
+        // receives content at its own origin while everything derived below
+        // still assumes the margin exists -- the whole backdrop samples shifted
+        // by the radius, and the far edge samples texels nothing ever wrote.
+        //
+        // Trimming the margin here instead keeps src, input_to_geo and the
+        // texture size agreeing with what the blit can actually produce. The
+        // far side needs no such trim: src only ever covers the element's own
+        // extent, so an over-long right or bottom margin is read by the kernel
+        // alone, where unwritten texels are transparent and feather away.
+        for (loc, size) in [
+            (&mut extended_geo.loc.x, &mut extended_geo.size.w),
+            (&mut extended_geo.loc.y, &mut extended_geo.size.h),
+        ] {
+            if *loc < 0.0 {
+                *size += *loc;
+                *loc = 0.0;
+            }
+        }
+
         // compute input_to_geo so that it crops the extended capture radius
         let geo_scale = {
             let Scale { x, y } = geo.size / extended_geo.size;
@@ -566,18 +590,6 @@ where
             })
             .flat_map(|rect| damage.iter().flat_map(move |r| r.intersection(rect)))
             .collect::<Vec<_>>();
-        // The blur only paints where the region and the frame's damage overlap,
-        // so a region that survives element creation can still go unpainted here.
-        tracing::debug!(
-            ?src,
-            ?dst,
-            region = ?self.region,
-            damage_rects = damage.len(),
-            damage = ?damage.iter().take(4).collect::<Vec<_>>(),
-            alpha = self.alpha,
-            "blur draw"
-        );
-
         let cache = cache.expect("Framebuffer element without cache?");
         let Some(texture) = cache.get::<BlurTexture<R::TextureId>>() else {
             return Err(R::from_gles_error(GlesError::BlitError));
@@ -616,32 +628,6 @@ fn blit_from_active_fb(
     let tex_size = to_texture.size();
     let tex_size_phys = tex_size.to_logical(1, Transform::Normal).to_physical(1);
     let fb_size = frame.output_size();
-
-    // The capture is deliberately extended past the element so the blur kernel
-    // has something to reach into, which means a surface sitting against a
-    // screen edge asks to read outside the framebuffer. Reading out of bounds
-    // leaves that part of the capture undefined -- visible as an unblurred
-    // block where the surface meets the edge, squarest in a corner where it
-    // overruns on two sides at once.
-    //
-    // Clamp the read to the framebuffer and shrink the write by the same
-    // proportion, so the part that is read still lands where it belongs. What
-    // falls outside stays transparent from the clear below, which the blur then
-    // feathers rather than leaving a hard edge.
-    let (src, dst) = match dst.intersection(Rectangle::from_size(fb_size)) {
-        Some(clamped) if clamped != dst && dst.size.w > 0 && dst.size.h > 0 => {
-            let sx = src.size.w / dst.size.w as f64;
-            let sy = src.size.h / dst.size.h as f64;
-            let mut clamped_src = src;
-            clamped_src.loc.x += (clamped.loc.x - dst.loc.x) as f64 * sx;
-            clamped_src.loc.y += (clamped.loc.y - dst.loc.y) as f64 * sy;
-            clamped_src.size.w = clamped.size.w as f64 * sx;
-            clamped_src.size.h = clamped.size.h as f64 * sy;
-            (clamped_src, clamped)
-        }
-        // Fully outside the framebuffer, or already inside it.
-        _ => (src, dst),
-    };
 
     let mut renderer = frame.renderer();
     let mut fb = renderer.as_mut().bind(to_texture)?;
