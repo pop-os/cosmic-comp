@@ -97,6 +97,7 @@ pub fn push_render_elements_from_surface_tree<R>(
                                 scale.x,
                                 radii,
                                 blur_strength,
+                                alpha,
                             );
                             let elem: SurfaceRenderElement<R> = if radii.iter().any(|r| *r != 0)
                                 && should_clip

@@ -1557,6 +1557,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
                     scale.x,
                     radii,
                     CHROME_BLUR_STRENGTH,
+                    alpha,
                 ) {
                     Ok(Some(elem)) => {
                         if let Some(push_below) = push_below {

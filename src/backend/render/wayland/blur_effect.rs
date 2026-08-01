@@ -192,6 +192,10 @@ pub struct BlurElement {
     region: Vec<Rectangle<i32, Logical>>,
     offset: f64,
     passes: usize,
+    /// The surface's own alpha, so the backdrop fades with it. A surface
+    /// animating out otherwise keeps a fully opaque blur until it is destroyed,
+    /// and the blur pops instead of fading.
+    alpha: f32,
     uniforms: Vec<Uniform<'static>>,
 }
 
@@ -203,6 +207,7 @@ impl BlurElement {
         output_scale: f64,
         radii: [u8; 4],
         strength: usize,
+        alpha: f32,
     ) -> Result<Option<Self>, R::Error> {
         let region = vec![Rectangle::from_size(geometry.size.to_i32_round())];
 
@@ -214,6 +219,7 @@ impl BlurElement {
             output_scale,
             radii,
             strength,
+            alpha,
         )
     }
 
@@ -224,6 +230,7 @@ impl BlurElement {
         output_scale: f64,
         radii: [u8; 4],
         strength: usize,
+        alpha: f32,
     ) -> Result<Vec<Self>, R::Error> {
         // Blur disabled in config means no blur element at all, rather than a
         // zero-strength one that still pays for the blit and the passes.
@@ -299,6 +306,7 @@ impl BlurElement {
                 output_scale,
                 rect_radii,
                 strength,
+                alpha,
             )? {
                 elements.push(element);
             }
@@ -315,6 +323,7 @@ impl BlurElement {
         output_scale: f64,
         radii: [u8; 4],
         strength: usize,
+        alpha: f32,
     ) -> Result<Option<Self>, R::Error> {
         if strength == 0 || geometry.size.w == 0. || geometry.size.h == 0. {
             return Ok(None);
@@ -399,6 +408,7 @@ impl BlurElement {
             render_shader: ClippingShader::get(renderer),
             offset: state.offset,
             passes: state.passes,
+            alpha,
             region: region
                 .iter()
                 .cloned()
@@ -454,7 +464,7 @@ impl Element for BlurElement {
     }
 
     fn alpha(&self) -> f32 {
-        1.0
+        self.alpha
     }
 
     fn kind(&self) -> Kind {
@@ -556,6 +566,18 @@ where
             })
             .flat_map(|rect| damage.iter().flat_map(move |r| r.intersection(rect)))
             .collect::<Vec<_>>();
+        // The blur only paints where the region and the frame's damage overlap,
+        // so a region that survives element creation can still go unpainted here.
+        tracing::debug!(
+            ?src,
+            ?dst,
+            region = ?self.region,
+            damage_rects = damage.len(),
+            damage = ?damage.iter().take(4).collect::<Vec<_>>(),
+            alpha = self.alpha,
+            "blur draw"
+        );
+
         let cache = cache.expect("Framebuffer element without cache?");
         let Some(texture) = cache.get::<BlurTexture<R::TextureId>>() else {
             return Err(R::from_gles_error(GlesError::BlitError));
@@ -572,7 +594,10 @@ where
                 &damage,
                 opaque_regions,
                 Transform::Normal,
-                1.0,
+                // Fade the backdrop with the surface. A surface animating out
+                // otherwise keeps an opaque blur until it is destroyed, so the
+                // blur pops rather than fading with everything else.
+                self.alpha,
             )?;
             BorrowMut::<GlesFrame>::borrow_mut(<R as AsGlowRenderer>::glow_frame_mut(frame))
                 .clear_tex_program_override();
