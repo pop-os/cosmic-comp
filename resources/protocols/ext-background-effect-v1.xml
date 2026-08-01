@@ -185,22 +185,26 @@
       <arg name="radius" type="uint" summary="blur radius in surface-local coordinates, 0 for the compositor default"/>
     </request>
 
-    <request name="set_corner_radius" since="2">
+    <request name="set_region_radii" since="2">
       <description summary="round the corners of the blurred area">
-        Round the corners of the blurred area, so the backdrop follows the
-        shape the surface actually draws.
+        Round the corners of the blurred area, so the backdrop follows the shape
+        the surface actually draws.
 
-        Without this, a client drawing a rounded card over a rectangular
-        blurred area shows blurred pixels poking out past its own corners.
-        The client cannot fix that itself, because the blur is composited
-        underneath it.
+        Without this, a client drawing a rounded card over a rectangular blurred
+        area shows blurred pixels poking out past its own corners. The client
+        cannot fix that itself, because the blur is composited underneath it.
 
-        The radii are in surface-local coordinates and apply to the blurred
-        area, which is the region set by set_blur_region or the whole surface
-        after blur_whole_surface. A compositor should clamp each radius so
-        that adjacent corners cannot overlap.
+        The array holds four unsigned 32-bit values per rectangle, in native
+        byte order, giving the radii clockwise from top-left. The entries are
+        index-matched to the rectangles of the region set by set_blur_region: a
+        shorter array leaves the remaining rectangles square, and a single entry
+        rounds every rectangle the same way, which is what a client blurring the
+        whole surface means.
 
-        All radii are initially 0, meaning square corners.
+        The radii are in surface-local coordinates. A compositor should clamp
+        each radius so that adjacent corners cannot overlap.
+
+        All corners are initially square.
 
         This state is double-buffered and applies on the next
         wl_surface.commit.
@@ -208,10 +212,7 @@
         If the associated surface has been destroyed, the surface_destroyed
         error will be raised.
       </description>
-      <arg name="top_left" type="uint" summary="top-left radius in surface-local coordinates"/>
-      <arg name="top_right" type="uint" summary="top-right radius in surface-local coordinates"/>
-      <arg name="bottom_right" type="uint" summary="bottom-right radius in surface-local coordinates"/>
-      <arg name="bottom_left" type="uint" summary="bottom-left radius in surface-local coordinates"/>
+      <arg name="radii" type="array" summary="four uint radii per rectangle, clockwise from top-left"/>
     </request>
 
   </interface>

@@ -64,9 +64,9 @@ pub trait BackgroundEffectHandler: 'static {
     /// default; the value is a hint and may be clamped.
     fn set_blur_radius(&mut self, surface: WlSurface, radius: Option<u32>);
 
-    /// The client asked for the blurred area's corners to be rounded,
-    /// clockwise from top-left.
-    fn set_corner_radius(&mut self, surface: WlSurface, radii: [u32; 4]);
+    /// The client asked for the blurred area's corners to be rounded, one entry
+    /// per region rect, clockwise from top-left.
+    fn set_region_radii(&mut self, surface: WlSurface, radii: Vec<[u32; 4]>);
 }
 
 /// State and global for the background-effect protocol.
@@ -217,13 +217,21 @@ where
                 // 0 is "compositor default", not "no blur".
                 state.set_blur_radius(surface, (radius != 0).then_some(radius));
             }
-            ext_background_effect_surface_v1::Request::SetCornerRadius {
-                top_left,
-                top_right,
-                bottom_right,
-                bottom_left,
-            } => {
-                state.set_corner_radius(surface, [top_left, top_right, bottom_right, bottom_left]);
+            ext_background_effect_surface_v1::Request::SetRegionRadii { radii } => {
+                // Four native-endian u32 per rect. A trailing partial group is
+                // dropped rather than guessed at: it would silently shift every
+                // later rect's corners.
+                let radii = radii
+                    .chunks_exact(16)
+                    .map(|chunk| {
+                        let mut corners = [0u32; 4];
+                        for (corner, bytes) in corners.iter_mut().zip(chunk.chunks_exact(4)) {
+                            *corner = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                        }
+                        corners
+                    })
+                    .collect();
+                state.set_region_radii(surface, radii);
             }
             ext_background_effect_surface_v1::Request::Destroy => {
                 compositor::with_states(&surface, |states| {

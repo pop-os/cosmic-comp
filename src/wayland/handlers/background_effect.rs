@@ -103,10 +103,10 @@ impl BackgroundEffectHandler for State {
         })
     }
 
-    fn set_corner_radius(&mut self, surface: WlSurface, radii: [u32; 4]) {
+    fn set_region_radii(&mut self, surface: WlSurface, radii: Vec<[u32; 4]>) {
         with_states(&surface, |states| {
             let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
-            blur_state.pending().region_radii = vec![radii];
+            blur_state.pending().region_radii = radii;
         })
     }
 }
