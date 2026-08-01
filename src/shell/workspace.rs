@@ -1972,7 +1972,20 @@ impl Workspace {
                                         duration,
                                     )
                                     .0,
-                                    ease(EaseInOutCubic, 0.0, 1.0, duration) * window_alpha,
+                                    // A window that was already on screen grows into
+                                    // fullscreen. Fading it up from nothing as well makes it
+                                    // vanish and then reappear, because it stops being drawn
+                                    // as an ordinary window the moment the transition starts.
+                                    //
+                                    // The fade is only right when there is no previous
+                                    // geometry to grow from -- a surface that maps straight
+                                    // into fullscreen has nothing on screen to become, and
+                                    // would otherwise snap in at full opacity.
+                                    if fullscreen.previous_geometry.is_some() {
+                                        window_alpha
+                                    } else {
+                                        ease(EaseInOutCubic, 0.0, 1.0, duration) * window_alpha
+                                    },
                                 )
                             }
                             (_, Some(ended)) => {
