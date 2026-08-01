@@ -2006,15 +2006,25 @@ impl Workspace {
                     // settled game with no scale request is left UNWRAPPED (direct scanout,
                     // never composited-to-black for scanout-only Proton/Vulkan buffers).
                     let scaling = fullscreen.scale_to.is_some();
+                    // Upscale source: the committed BUFFER (bbox) for a fill, or the
+                    // window geometry for the entrance/exit animation.
+                    //
+                    // Resolved HERE rather than inside the callback below. Both
+                    // `bbox()` and `geometry()` take the surface's state lock, and the
+                    // callback runs inside `with_surface_tree_downward`, which already
+                    // holds that same lock for the surface being visited -- so asking
+                    // from in there deadlocks the render thread against itself. (The
+                    // callback only became re-entrant on the traversal when the element
+                    // API moved from returning a Vec to pushing.) It is also loop
+                    // invariant, so this is one lookup instead of one per element.
+                    let src = if scaling {
+                        fullscreen.surface.bbox().size
+                    } else {
+                        fullscreen.surface.0.geometry().size
+                    };
+                    let is_animating = fullscreen.is_animating();
                     let animation_rescale = |elem| {
-                        // Upscale source: the committed BUFFER (bbox) for a fill, or the
-                        // window geometry for the entrance/exit animation.
-                        let src = if scaling {
-                            fullscreen.surface.bbox().size
-                        } else {
-                            fullscreen.surface.0.geometry().size
-                        };
-                        if (fullscreen.is_animating() || scaling) && src.w > 0 && src.h > 0 {
+                        if (is_animating || scaling) && src.w > 0 && src.h > 0 {
                             let scale = Scale {
                                 x: target_geo.size.w as f64 / src.w as f64,
                                 y: target_geo.size.h as f64 / src.h as f64,

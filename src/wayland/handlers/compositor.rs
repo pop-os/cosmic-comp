@@ -166,21 +166,18 @@ pub fn recursive_frame_time_estimation(
     overall_estimate
 }
 
-/// True when this surface currently has a blurred backdrop.
+/// True when this surface has ever carried blur state.
+///
+/// Deliberately only asks whether the slot exists rather than whether there is
+/// an area right now. `has` is lock-free; `get` takes a `MutexGuard` on the
+/// surface's cached state, and this runs inside the render traversal where
+/// other holders of that same guard are hard to rule out. A surface that
+/// enabled blur and later dropped it therefore stays off overlay planes, which
+/// is the conservative direction: it costs a composite, not a hang.
 fn surface_is_blur_backed(states: &SurfaceData) -> bool {
-    use crate::wayland::handlers::background_effect::ComputedBlurRegionCachedState;
-    // The slot existing only means the surface touched blur state once. Asking
-    // whether it has an area right now matters, because the answer keeps the
-    // surface off overlay planes: a surface that enabled blur and later dropped
-    // it would otherwise stay ineligible for scanout for the rest of its life.
-    states.cached_state.has::<ComputedBlurRegionCachedState>() && {
-        let state = states
-            .cached_state
-            .get::<ComputedBlurRegionCachedState>()
-            .current()
-            .clone();
-        state.whole_surface || state.blur_region.is_some()
-    }
+    states
+        .cached_state
+        .has::<crate::wayland::handlers::background_effect::ComputedBlurRegionCachedState>()
 }
 
 pub fn frame_time_filter_fn(states: &SurfaceData) -> Kind {
