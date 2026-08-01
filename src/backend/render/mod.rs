@@ -1188,6 +1188,10 @@ where
     // `hidden_surfaces`. Applied to the popup's content and shadow below so they
     // fade out together instead of the surface vanishing instantly.
     let popup_fade_alphas = shell.layer_fade_out_alphas();
+    // Opening counterpart of the above. Collected but never read after the
+    // element-collection rework, so layer popups appeared fully formed instead
+    // of fading in.
+    let popup_fade_in_alphas = shell.layer_fade_in_alphas();
     let popup_hidden = shell.hidden_surfaces().clone();
 
     render_input_order::<()>(&shell, output, previous, current, element_filter, |stage| {
@@ -1215,8 +1219,12 @@ where
                 // visibility protocol; 1.0 when not closing.
                 // MERGE: the blur backdrop is no longer faded here — upstream's
                 // frosted glass rides the surface's own alpha.
+                // A surface is in at most one of the two maps: fading out takes
+                // precedence, so a popup dismissed mid-open fades from where it
+                // got to rather than jumping back to its opening alpha.
                 let popup_alpha = popup_fade_alphas
                     .get(&popup_wl_surface.id())
+                    .or_else(|| popup_fade_in_alphas.get(&popup_wl_surface.id()))
                     .copied()
                     .unwrap_or_else(|| {
                         if popup_hidden.contains(&popup_wl_surface.id()) {
