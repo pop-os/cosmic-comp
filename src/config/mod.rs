@@ -198,6 +198,7 @@ impl Config {
         crate::backend::render::wayland::blur_effect::set_blur_config(
             cosmic_comp_config.blur_enabled,
             cosmic_comp_config.blur_intensity,
+            cosmic_comp_config.blur_noise,
         );
 
         // Listen for updates to the toolkit config
@@ -1022,6 +1023,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     crate::backend::render::wayland::blur_effect::set_blur_config(
                         new,
                         state.common.config.cosmic_conf.blur_intensity,
+                        state.common.config.cosmic_conf.blur_noise,
                     );
                     for output in state.common.shell.read().outputs() {
                         state.backend.schedule_render(output);
@@ -1035,8 +1037,23 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     crate::backend::render::wayland::blur_effect::set_blur_config(
                         state.common.config.cosmic_conf.blur_enabled,
                         new,
+                        state.common.config.cosmic_conf.blur_noise,
                     );
                     // Invalidate blur caches so new intensity takes effect
+                    for output in state.common.shell.read().outputs() {
+                        state.backend.schedule_render(output);
+                    }
+                }
+            }
+            "blur_noise" => {
+                let new = get_config::<f32>(&config, "blur_noise");
+                if (new - state.common.config.cosmic_conf.blur_noise).abs() > f32::EPSILON {
+                    state.common.config.cosmic_conf.blur_noise = new;
+                    crate::backend::render::wayland::blur_effect::set_blur_config(
+                        state.common.config.cosmic_conf.blur_enabled,
+                        state.common.config.cosmic_conf.blur_intensity,
+                        new,
+                    );
                     for output in state.common.shell.read().outputs() {
                         state.backend.schedule_render(output);
                     }

@@ -496,7 +496,7 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
             // Leaving it unregistered leaves it at 0, so the corner
             // antialiasing band becomes infinite and nothing is ever clipped.
             UniformName::new("scale", UniformType::_1f),
-            // Frosted-glass appearance (ext_background_effect_v1 version 3).
+            // Frosted-glass appearance, from org_kde_kwin_blur.
             // Every call site building uniforms for this program must set
             // `saturation`: an unset uniform reads as 0, which is fully
             // greyscale rather than "unchanged".

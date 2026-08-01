@@ -3,11 +3,12 @@
 pub mod a11y;
 pub mod animated_resize;
 pub mod backdrop_color;
-pub mod background_effect;
+// Fork-only client-facing KDE blur protocol (org_kde_kwin_blur). Upstream's
+// `ext_background_effect_v1` is bound too, from smithay, but it is a staging
+// protocol that carries only a region -- strength, corner rounding, saturation,
+// tint and border have nowhere to go in it. Our clients speak this one instead;
+// both write the same per-surface state.
 pub mod blur;
-// MERGE: fork-only client-facing KDE blur protocol (org_kde_kwin_blur). Kept because it is
-// self-contained plumbing, but upstream's ext background-effect now drives rendering — review
-// whether our layer-shell clients should migrate and this module be dropped.
 pub mod corner_radius;
 pub mod drm;
 pub mod exclusive_mode;

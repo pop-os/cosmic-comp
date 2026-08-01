@@ -34,7 +34,20 @@ use crate::{
 pub static BLUR_DOWNSAMPLE_SHADER: &str = include_str!("../shaders/blur_downsample.frag");
 pub static BLUR_UPSAMPLE_SHADER: &str = include_str!("../shaders/blur_upsample.frag");
 
-const NOISE: f32 = 0.03;
+/// Backdrop dither amount, from configuration. Off by default.
+///
+/// Upstream mixes a fixed 0.03 of film grain into the blurred backdrop; the
+/// stack this replaced had no such term. It does not read as grain: the hash is
+/// evaluated on the capture's normalised coordinates and scaled by only 727.727,
+/// so across a typical capture that is just under one cycle per pixel, and it
+/// aliases into a coarse structured beat that no amount of tint hides. Anyone
+/// who wants it can dial it in.
+static BLUR_NOISE_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The configured dither amount.
+fn configured_noise() -> f32 {
+    f32::from_bits(BLUR_NOISE_BITS.load(std::sync::atomic::Ordering::Relaxed))
+}
 const MAX_STEPS: usize = 15;
 
 /// Lower bound of the radius-to-strength map: ~1px is effectively no blur.
@@ -118,10 +131,14 @@ static BLUR_INTENSITY_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::At
 static BLUR_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// Update the configured blur strength. `intensity` is 0.0..=1.0.
-pub fn set_blur_config(enabled: bool, intensity: f32) {
+pub fn set_blur_config(enabled: bool, intensity: f32, noise: f32) {
     BLUR_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
     BLUR_INTENSITY_BITS.store(
         intensity.clamp(0.0, 1.0).to_bits(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    BLUR_NOISE_BITS.store(
+        noise.clamp(0.0, 1.0).to_bits(),
         std::sync::atomic::Ordering::Relaxed,
     );
 }
@@ -327,11 +344,24 @@ impl BlurElement {
 
         // A whole-surface request carries no region: the area is the surface
         // itself, resolved here so it stays correct as the surface resizes.
-        let whole = [Rectangle::from_size(geometry.size.to_i32_round())];
+        let whole = Rectangle::from_size(geometry.size.to_i32_round());
+        let clamped;
         let region = if blur.whole_surface {
-            whole.as_slice()
+            std::slice::from_ref(&whole)
         } else if let Some(region) = blur.blur_region.as_deref() {
-            region
+            // Clip to the surface. The region is surface-local and a client is
+            // free to send one larger than its surface -- an
+            // `ext_background_effect_v1` client with no whole-surface request
+            // has "everything" spelt as an oversized rect -- and blurring
+            // outside the surface would paint over its neighbours.
+            clamped = region
+                .iter()
+                .filter_map(|rect| rect.intersection(whole))
+                .collect::<Vec<_>>();
+            if clamped.is_empty() {
+                return Ok(Vec::new());
+            }
+            clamped.as_slice()
         } else {
             // A surface that asked for blur but produced no area is
             // indistinguishable on screen from one that never asked, so say
@@ -345,8 +375,8 @@ impl BlurElement {
             return Ok(Vec::new());
         };
 
-        // Version 2 lets the client ask for a strength. A hint: clamped to what
-        // the blur can actually render.
+        // The client may ask for a strength. A hint: clamped to what the blur
+        // can actually render.
         let strength = blur
             .blur_radius
             .map(|r| strength_for_radius(r as f32))
@@ -498,7 +528,7 @@ impl BlurElement {
                     transpose: false,
                 },
             ),
-            Uniform::new("noise", UniformValue::_1f(NOISE)),
+            Uniform::new("noise", UniformValue::_1f(configured_noise())),
             // The backdrop draws through the same clipping program, so it needs
             // `scale` too -- without it the corner mask never rounds the blur.
             Uniform::new("scale", output_scale as f32),
@@ -867,6 +897,16 @@ fn render_blur(
                 ffi::TEXTURE_WRAP_T,
                 ffi::CLAMP_TO_EDGE as i32,
             );
+            // Dual-Kawase is built entirely on BILINEAR taps: each pass reads
+            // four samples half a texel off-centre and lets the hardware blend
+            // them. Leaving the filters unset takes the GL defaults, where
+            // TEXTURE_MIN_FILTER is NEAREST_MIPMAP_LINEAR -- mipmap sampling on
+            // a texture that has no mip levels, i.e. incomplete. The downsample
+            // half of the chain is the half that minifies, so it point-samples
+            // and aliases, and every later pass inherits the aliasing. No
+            // parameter curve can smooth that out; the taps have to interpolate.
+            gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+            gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
         })?;
         frame.render_texture_from_to(
             src_tex,
@@ -930,6 +970,16 @@ fn render_blur(
                 ffi::TEXTURE_WRAP_T,
                 ffi::CLAMP_TO_EDGE as i32,
             );
+            // Dual-Kawase is built entirely on BILINEAR taps: each pass reads
+            // four samples half a texel off-centre and lets the hardware blend
+            // them. Leaving the filters unset takes the GL defaults, where
+            // TEXTURE_MIN_FILTER is NEAREST_MIPMAP_LINEAR -- mipmap sampling on
+            // a texture that has no mip levels, i.e. incomplete. The downsample
+            // half of the chain is the half that minifies, so it point-samples
+            // and aliases, and every later pass inherits the aliasing. No
+            // parameter curve can smooth that out; the taps have to interpolate.
+            gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
+            gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
         })?;
         frame.render_texture_from_to(
             src_tex,

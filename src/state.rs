@@ -345,9 +345,10 @@ pub struct Common {
     pub game_mode_bridge: crate::dbus::game_mode::GameModeBridge,
     pub dbus_state: DBusState,
     pub keyboard_layout_state: KeyboardLayoutState,
-    pub background_effect_state: crate::wayland::protocols::background_effect::BackgroundEffectState,
-    /// KDE blur, kept so clients that predate the background-effect protocol
-    /// still get a blurred backdrop. Both feed the same per-surface state.
+    pub background_effect_state: smithay::wayland::background_effect::BackgroundEffectState,
+    /// KDE blur, which carries the strength, corner rounding and frosted-glass
+    /// appearance the staging protocol above has no requests for. Our own
+    /// clients speak this one; both feed the same per-surface state.
     pub blur_state: crate::wayland::protocols::blur::BlurState,
 
     // shell-related wayland state
@@ -776,7 +777,7 @@ impl State {
         let keyboard_layout_state = KeyboardLayoutState::new::<State, _>(dh, client_not_sandboxed);
 
         let background_effect_state =
-            crate::wayland::protocols::background_effect::BackgroundEffectState::new::<Self>(dh);
+            smithay::wayland::background_effect::BackgroundEffectState::new::<Self>(dh);
         let blur_state = crate::wayland::protocols::blur::BlurState::new::<Self>(dh);
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());

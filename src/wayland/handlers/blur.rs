@@ -2,11 +2,12 @@
 
 //! Bridges the KDE blur protocol onto the background-effect state.
 //!
-//! Clients that predate `ext_background_effect` still speak `org_kde_kwin_blur`,
-//! and a compositor that drops it makes their glass render flat. Rather than
-//! keep a second blur implementation alive for them, translate their state into
-//! the same per-surface state the background-effect protocol writes, so both
-//! protocols end up driving one renderer.
+//! `ext_background_effect_v1` is upstream's staging protocol and carries only a
+//! region -- no strength, no corner rounding, no frosted-glass appearance. Our
+//! clients need all three, so they speak `org_kde_kwin_blur`, which we own and
+//! which carries them. Rather than keep a second blur implementation alive for
+//! it, translate its state into the same per-surface state the background-effect
+//! handler writes, so both protocols end up driving one renderer.
 //!
 //! A surface that uses both wins nothing and loses nothing: the two write the
 //! same fields, and the later commit is the one that takes effect.

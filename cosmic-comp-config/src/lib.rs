@@ -107,6 +107,13 @@ pub struct CosmicCompConfig {
     pub blur_enabled: bool,
     /// Blur intensity (0.0 = no blur, 1.0 = maximum blur)
     pub blur_intensity: f32,
+    /// Film-grain dither mixed into the blurred backdrop (0.0 = none).
+    ///
+    /// Defaults to off. The hash is evaluated per fragment over the capture's
+    /// normalised coordinates, so at typical capture sizes its frequency lands
+    /// near one cycle per pixel and aliases into a coarse structured beat rather
+    /// than the fine grain it looks like at small scales.
+    pub blur_noise: f32,
     /// Hide the cursor after this many seconds of pointer inactivity (None disables)
     pub cursor_hide_timeout: Option<u32>,
     pub activation_policy: ActivationPolicy,
@@ -159,6 +166,7 @@ impl Default for CosmicCompConfig {
             night_shift: 0,
             blur_enabled: true,
             blur_intensity: 0.55,
+            blur_noise: 0.0,
             cursor_hide_timeout: None,
             activation_policy: ActivationPolicy::default(),
             clipboard_persistence: true,

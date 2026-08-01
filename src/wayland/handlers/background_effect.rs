@@ -1,16 +1,21 @@
 use smithay::{
     reexports::wayland_server::{DisplayHandle, protocol::wl_surface::WlSurface},
     utils::{Logical, Rectangle},
-    wayland::compositor::{Cacheable, RectangleKind, RegionAttributes, with_states},
-};
-
-use crate::{
-    state::State,
-    wayland::protocols::background_effect::{
-        BackgroundEffectHandler, ext_background_effect_manager_v1::Capability,
+    wayland::{
+        background_effect::{Capability, ExtBackgroundEffectHandler},
+        compositor::{Cacheable, RectangleKind, RegionAttributes, with_states},
     },
 };
 
+use crate::state::State;
+
+/// The blur state the renderer reads, resolved from whichever protocol the
+/// client spoke.
+///
+/// `ext_background_effect_v1` is upstream's staging protocol and carries only a
+/// region; everything below it comes from `org_kde_kwin_blur`, which we own and
+/// which our own clients speak. Both write here so the renderer has one type to
+/// read rather than a protocol to branch on.
 #[derive(Debug, Clone, Default)]
 pub struct ComputedBlurRegionCachedState {
     /// Region of the surface that will have its background blurred.
@@ -19,16 +24,15 @@ pub struct ComputedBlurRegionCachedState {
     /// and the area is taken from the surface geometry at render time instead,
     /// so it stays correct across resizes without the client resending it.
     pub blur_region: Option<Vec<Rectangle<i32, Logical>>>,
-    /// Blur the entire surface, tracking its size (protocol version 2).
+    /// Blur the entire surface, tracking its size.
     pub whole_surface: bool,
     /// Requested blur strength in surface-local coordinates, or `None` for the
-    /// compositor default (protocol version 2).
+    /// compositor default.
     ///
     /// A hint: the compositor clamps this to what it can render.
     pub blur_radius: Option<u32>,
     /// Corner radii of the blurred area, clockwise from top-left, so the
-    /// backdrop can follow the shape the client actually draws (protocol
-    /// version 2).
+    /// backdrop can follow the shape the client actually draws.
     ///
     /// One entry per rect in `blur_region`, index-matched. A shorter list
     /// leaves the remaining rects square, and a single entry rounds every rect
@@ -36,19 +40,18 @@ pub struct ComputedBlurRegionCachedState {
     /// whole-surface blur means.
     pub region_radii: Vec<[u32; 4]>,
     /// Saturation applied to the blurred backdrop, matching CSS
-    /// `backdrop-filter: saturate()` (protocol version 3).
+    /// `backdrop-filter: saturate()`.
     ///
     /// `1.0` leaves saturation unchanged. `None` means the compositor default.
     pub saturation: Option<f32>,
     /// Strength of the white overlay blended onto the backdrop -- the frosted
-    /// lightening (protocol version 3).
+    /// lightening.
     ///
     /// `0.0` disables it, leaving a faithful `backdrop-filter: blur()` with the
     /// surface's own background providing the glass colour. `None` means the
     /// compositor default.
     pub tint: Option<f32>,
-    /// Alpha of the 1px frosted border drawn around the backdrop (protocol
-    /// version 3).
+    /// Alpha of the 1px frosted border drawn around the backdrop.
     ///
     /// `0.0` disables it, which is what a surface drawing its own border wants.
     /// `None` means the compositor default.
@@ -65,7 +68,7 @@ impl Cacheable for ComputedBlurRegionCachedState {
     }
 }
 
-impl BackgroundEffectHandler for State {
+impl ExtBackgroundEffectHandler for State {
     fn capabilities(&self) -> Capability {
         Capability::Blur
     }
@@ -101,53 +104,4 @@ impl BackgroundEffectHandler for State {
             pending.whole_surface = false;
         })
     }
-
-    fn set_blur_whole_surface(&mut self, surface: WlSurface) {
-        with_states(&surface, |states| {
-            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
-            let pending = blur_state.pending();
-
-            // The area is resolved from the surface at render time, so any
-            // explicit region is dropped rather than left to compete with it.
-            pending.whole_surface = true;
-            pending.blur_region.take();
-        })
-    }
-
-    fn set_blur_radius(&mut self, surface: WlSurface, radius: Option<u32>) {
-        with_states(&surface, |states| {
-            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
-            blur_state.pending().blur_radius = radius;
-        })
-    }
-
-    fn set_region_radii(&mut self, surface: WlSurface, radii: Vec<[u32; 4]>) {
-        with_states(&surface, |states| {
-            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
-            blur_state.pending().region_radii = radii;
-        })
-    }
-
-    fn set_saturation(&mut self, surface: WlSurface, saturation: Option<f32>) {
-        with_states(&surface, |states| {
-            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
-            blur_state.pending().saturation = saturation;
-        })
-    }
-
-    fn set_tint(&mut self, surface: WlSurface, tint: Option<f32>) {
-        with_states(&surface, |states| {
-            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
-            blur_state.pending().tint = tint;
-        })
-    }
-
-    fn set_border(&mut self, surface: WlSurface, border: Option<f32>) {
-        with_states(&surface, |states| {
-            let mut blur_state = states.cached_state.get::<ComputedBlurRegionCachedState>();
-            blur_state.pending().border = border;
-        })
-    }
 }
-
-crate::delegate_background_effect!(State);
