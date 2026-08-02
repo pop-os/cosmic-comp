@@ -7,7 +7,7 @@ use crate::{
 use indexmap::IndexSet;
 use smithay::{
     desktop::{PopupUngrabStrategy, layer_map_for_output},
-    input::{Seat, pointer::MotionEvent},
+    input::{Seat, keyboard::Layout, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     utils::{IsAlive, Point, SERIAL_COUNTER, Serial},
@@ -18,7 +18,7 @@ use smithay::{
         shell::wlr_layer::{KeyboardInteractivity, Layer},
     },
 };
-use std::{borrow::Cow, hash::Hash, mem, sync::Mutex};
+use std::{borrow::Cow, cell::Cell, hash::Hash, mem, sync::Mutex};
 
 use tracing::{debug, trace};
 
@@ -356,6 +356,16 @@ impl Shell {
     }
 }
 
+/// The window (if any) a keyboard focus target should remember/restore a
+/// per-window xkb layout for.
+fn xkb_layout_surface(target: &KeyboardFocusTarget) -> Option<CosmicSurface> {
+    match target {
+        KeyboardFocusTarget::Element(mapped) => Some(mapped.active_window()),
+        KeyboardFocusTarget::Fullscreen(surface) => Some(surface.clone()),
+        _ => None,
+    }
+}
+
 /// Internal, used to ensure that ActiveFocus, KeyboardFocusTarget, and FocusedOutput are all in sync
 #[profiling::function]
 fn update_focus_state(
@@ -369,6 +379,29 @@ fn update_focus_state(
     if let Some(keyboard) = seat.get_keyboard() {
         // remove constraint when target changed
         let old_focus = keyboard.current_focus();
+
+        if state.common.config.cosmic_conf.xkb_config.per_window_layout
+            && let Some(old_surface) = old_focus.as_ref().and_then(xkb_layout_surface)
+        {
+            let active_layout = keyboard.with_xkb_state(state, |context| {
+                context.xkb().lock().unwrap().active_layout()
+            });
+            old_surface
+                .user_data()
+                .insert_if_missing(|| Cell::new(Layout::default()));
+            old_surface
+                .user_data()
+                .get::<Cell<Layout>>()
+                .unwrap()
+                .set(active_layout);
+            debug!(
+                app_id = %old_surface.app_id(),
+                title = %old_surface.title(),
+                group = active_layout.0,
+                "xkb: stored per-window layout"
+            );
+        }
+
         if let Some(old_target) = old_focus
             && target != Some(&old_target)
             && let Some(surface) = old_target.wl_surface()
@@ -439,6 +472,21 @@ fn update_focus_state(
             .xwayland_notify_focus_change(target.cloned(), serial);
         ActiveFocus::set(seat, target.cloned());
         keyboard.set_focus(state, target.cloned(), serial);
+
+        if state.common.config.cosmic_conf.xkb_config.per_window_layout
+            && let Some(new_surface) = target.and_then(xkb_layout_surface)
+            && let Some(stored_layout) = new_surface.user_data().get::<Cell<Layout>>()
+        {
+            let stored_layout = stored_layout.get();
+            debug!(
+                app_id = %new_surface.app_id(),
+                title = %new_surface.title(),
+                group = stored_layout.0,
+                "xkb: restoring per-window layout"
+            );
+            keyboard.with_xkb_state(state, |mut context| context.set_layout(stored_layout));
+        }
+
         std::mem::drop(keyboard);
 
         //update the focused output or set it to the active output
