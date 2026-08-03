@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="adaptive_foreground">
+  <copyright><![CDATA[
+    SPDX-License-Identifier: GPL-3.0-only
+  ]]></copyright>
+
+  <description summary="backdrop luminance reporting for self-styling surfaces">
+    This protocol lets a client ask the compositor what is behind parts of its
+    own surface, so it can pick a foreground colour that stays legible there.
+
+    The motivating case is text drawn directly onto the wallpaper -- a desktop
+    greeting, a widget label -- which becomes unreadable when the wallpaper's
+    lightness happens to match the text colour the active colour scheme chose.
+
+    The compositor does not restyle the surface. It reports the relative
+    luminance of what it composited beneath each zone the client marked, and the
+    client restyles itself. Reporting rather than recolouring is deliberate: the
+    client can then move text, icons, dividers and shadows together, which a
+    compositor-side recolour of already-rasterised pixels could not do, and it
+    needs no agreement about how those pixels were rendered.
+  </description>
+
+  <interface name="adaptive_foreground_manager_v1" version="1">
+    <description summary="adaptive foreground manager">
+      Grants access to per-surface backdrop luminance reporting.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Destroying the manager does not affect objects already created by it.
+      </description>
+    </request>
+
+    <request name="get_adaptive_foreground">
+      <description summary="observe backdrop luminance for a surface">
+        Create an object that reports backdrop luminance for the given surface.
+
+        If the surface already has an adaptive_foreground_surface_v1 that has
+        not been destroyed, the already_constructed error is raised.
+      </description>
+      <arg name="id" type="new_id" interface="adaptive_foreground_surface_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+
+    <enum name="error">
+      <entry name="already_constructed" value="0"
+             summary="the surface already has an adaptive foreground object"/>
+    </enum>
+  </interface>
+
+  <interface name="adaptive_foreground_surface_v1" version="1">
+    <description summary="backdrop luminance for one surface">
+      Reports the luminance of what the compositor composited beneath each zone
+      of a surface.
+
+      A zone is a rectangle of the surface the client wants a reading for --
+      typically the measured bounds of a run of text. Zones are set as a
+      wl_region and are identified in events by their index in that region, in
+      the order the client added them.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="stop observing">
+        Stops luminance reporting. The surface is otherwise unaffected.
+      </description>
+    </request>
+
+    <request name="set_region">
+      <description summary="set the zones to sample">
+        Set the zones to report luminance for, in surface-local coordinates.
+
+        Each rectangle added to the region is one zone. Zones are indexed by the
+        order they were added, and that index is what the luminance event
+        carries, so a client with several independently styled labels can tell
+        their readings apart. Rectangles must be added and never subtracted;
+        the effect of a subtract operation on the region is undefined.
+
+        A null region, or a region with no rectangles, disables reporting.
+
+        This state takes effect immediately rather than on the next
+        wl_surface.commit. Unlike a blur region, which must land in the same
+        frame as the surface it sits behind, a zone only says where to sample;
+        a reading one frame stale is not observable. After the zones change the
+        compositor sends a fresh set of luminance events for them.
+      </description>
+      <arg name="region" type="object" interface="wl_region" allow-null="true"/>
+    </request>
+
+    <event name="luminance">
+      <description summary="backdrop luminance of one zone">
+        The relative luminance of what was composited beneath the zone at
+        `index`, as a fixed-point number with 8 bits of fractional precision:
+        0 is black, 256 is white. It is the WCAG relative luminance of the mean
+        colour under the zone -- a single value for the whole zone, not a
+        gradient, because a glyph that straddles a light/dark edge reads far
+        better in one colour than sliced into two.
+
+        Only zones whose reading actually changed are sent. A client that has
+        received no event for a zone should keep its last value.
+
+        The compositor rate-limits these; a client must not assume it will see
+        every intermediate value under an animated wallpaper.
+      </description>
+      <arg name="index" type="uint" summary="zone index within the region"/>
+      <arg name="luminance" type="uint" summary="relative luminance, 8.8 fixed point"/>
+    </event>
+
+    <event name="done">
+      <description summary="the current batch of readings is complete">
+        Sent after a group of luminance events. The client should apply them
+        together, so a surface with several zones restyles in one frame rather
+        than one zone at a time.
+      </description>
+    </event>
+  </interface>
+</protocol>

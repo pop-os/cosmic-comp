@@ -95,6 +95,7 @@ use smithay::{
 #[cfg(feature = "debug")]
 use smithay_egui::EguiState;
 
+pub mod adaptive_foreground;
 pub mod animations;
 pub mod cursor;
 pub mod element;

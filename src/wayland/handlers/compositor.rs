@@ -320,6 +320,27 @@ impl CompositorHandler for State {
             self.backend.schedule_render(output);
         }
 
+        // A wallpaper commit is the one event that invalidates every backdrop
+        // reading without anything client-side moving, so re-sample then.
+        // Checked before the `mapped` early return below, since a wallpaper that
+        // has just been mapped is exactly when the first reading matters.
+        let is_background = shell
+            .visible_output_for_surface(surface)
+            .map(|output| {
+                smithay::desktop::layer_map_for_output(output)
+                    .layers()
+                    .any(|l| {
+                        l.wl_surface() == surface
+                            && l.layer() == smithay::wayland::shell::wlr_layer::Layer::Background
+                    })
+            })
+            .unwrap_or(false);
+        if is_background {
+            std::mem::drop(shell);
+            self.adaptive_foreground_backdrop_changed();
+            shell = self.common.shell.write();
+        }
+
         if mapped {
             return;
         }

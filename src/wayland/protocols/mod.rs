@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub mod a11y;
+pub mod adaptive_foreground;
 pub mod animated_resize;
 pub mod backdrop_color;
 // Fork-only client-facing KDE blur protocol (org_kde_kwin_blur). Upstream's

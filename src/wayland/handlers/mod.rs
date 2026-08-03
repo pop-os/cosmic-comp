@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 pub mod a11y;
+pub mod adaptive_foreground;
 pub mod animated_resize;
 pub mod backdrop_color;
 pub mod background_effect;

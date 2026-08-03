@@ -350,6 +350,10 @@ pub struct Common {
     /// appearance the staging protocol above has no requests for. Our own
     /// clients speak this one; both feed the same per-surface state.
     pub blur_state: crate::wayland::protocols::blur::BlurState,
+    /// Backdrop luminance reporting, for surfaces that draw text straight onto
+    /// the wallpaper and have to stay legible against whatever it happens to be.
+    pub adaptive_foreground_state:
+        crate::wayland::protocols::adaptive_foreground::AdaptiveForegroundState,
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
@@ -779,6 +783,10 @@ impl State {
         let background_effect_state =
             smithay::wayland::background_effect::BackgroundEffectState::new::<Self>(dh);
         let blur_state = crate::wayland::protocols::blur::BlurState::new::<Self>(dh);
+        let adaptive_foreground_state =
+            crate::wayland::protocols::adaptive_foreground::AdaptiveForegroundState::new::<Self>(
+                dh,
+            );
 
         let idle_notifier_state = IdleNotifierState::<Self>::new(dh, handle.clone());
         let idle_inhibit_manager_state = IdleInhibitManagerState::new::<State>(dh);
@@ -922,6 +930,7 @@ impl State {
                 workspace_state,
                 background_effect_state,
                 blur_state,
+                adaptive_foreground_state,
                 a11y_state,
                 game_mode_bridge,
                 xwayland_scale: None,
