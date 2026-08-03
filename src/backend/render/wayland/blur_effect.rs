@@ -289,7 +289,25 @@ impl BlurShaders {
     }
 }
 
-type BlurTexture<T> = Mutex<Option<T>>;
+/// The pair of scratch textures a blur capture ping-pongs between.
+///
+/// `render_blur` performs `2 * passes` swaps — an even number — so the blurred
+/// result always lands back in `tex`, which is what `draw` samples. `off_tex`
+/// only ever holds intermediates, but it is cached alongside `tex` regardless:
+/// allocating it per capture meant a `glGenTextures` + `glTexImage2D` (and a
+/// free) for every blurred surface on every frame that damaged it.
+///
+/// Both are sized to the capture area, so they are validated and invalidated
+/// together — see the size / context check in `capture_framebuffer`.
+#[derive(Debug)]
+struct BlurTextures<T> {
+    /// Receives the framebuffer blit and holds the blurred result.
+    tex: T,
+    /// Scratch target for the intermediate downsample/upsample passes.
+    off_tex: T,
+}
+
+type BlurTexture<T> = Mutex<Option<BlurTextures<T>>>;
 
 #[derive(Debug)]
 pub struct BlurState {
@@ -874,13 +892,13 @@ where
 
         let texture_ref = cache.get_or_insert_threadsafe(BlurTexture::<R::TextureId>::default);
         let mut texture_entry = texture_ref.lock().unwrap();
-        if texture_entry.as_ref().is_some_and(|tex| {
-            tex.size() != tex_size
-                || R::tex_to_gl(
-                    &renderer.as_ref().context_id(),
-                    texture_entry.as_ref().unwrap(),
-                )
-                .is_none()
+        // Both textures are sized to the capture area and live in the same
+        // context, so either going stale invalidates the pair.
+        if texture_entry.as_ref().is_some_and(|entry| {
+            let context_id = renderer.as_ref().context_id();
+            entry.tex.size() != tex_size
+                || R::tex_to_gl(&context_id, &entry.tex).is_none()
+                || R::tex_to_gl(&context_id, &entry.off_tex).is_none()
         }) {
             texture_entry.take();
         }
@@ -889,18 +907,21 @@ where
                 .as_mut()
                 .create_buffer(Fourcc::Abgr8888, tex_size)
                 .map_err(R::from_gles_error)?;
-            *texture_entry = Some(R::tex_from_gl(&renderer.as_ref().context_id(), gl_texture));
+            let gl_off_texture = renderer
+                .as_mut()
+                .create_buffer(Fourcc::Abgr8888, tex_size)
+                .map_err(R::from_gles_error)?;
+            let context_id = renderer.as_ref().context_id();
+            *texture_entry = Some(BlurTextures {
+                tex: R::tex_from_gl(&context_id, gl_texture),
+                off_tex: R::tex_from_gl(&context_id, gl_off_texture),
+            });
         }
 
-        let mut texture = R::tex_to_gl(
-            &renderer.as_ref().context_id(),
-            texture_entry.as_ref().unwrap(),
-        )
-        .unwrap();
-        let mut off_texture = renderer
-            .as_mut()
-            .create_buffer(Fourcc::Abgr8888, tex_size)
-            .map_err(R::from_gles_error)?;
+        let entry = texture_entry.as_ref().unwrap();
+        let context_id = renderer.as_ref().context_id();
+        let mut texture = R::tex_to_gl(&context_id, &entry.tex).unwrap();
+        let mut off_texture = R::tex_to_gl(&context_id, &entry.off_tex).unwrap();
         std::mem::drop(renderer);
 
         let sync = blit_from_active_fb(gles_frame, src, dst, transform, &mut texture)
@@ -951,7 +972,8 @@ where
         };
         let texture_ref = texture.lock().unwrap();
 
-        if let Some(tex) = texture_ref.as_ref() {
+        // `render_blur` swaps an even number of times, so the result is in `tex`.
+        if let Some(tex) = texture_ref.as_ref().map(|entry| &entry.tex) {
             BorrowMut::<GlesFrame>::borrow_mut(<R as AsGlowRenderer>::glow_frame_mut(frame))
                 .override_default_tex_program(self.render_shader.clone(), self.uniforms.clone());
             frame.render_texture_from_to(
