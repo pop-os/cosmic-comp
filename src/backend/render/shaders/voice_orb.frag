@@ -23,6 +23,9 @@ uniform float window_aspect;  // Window aspect ratio (w/h) when attached
 uniform float border_radius;  // Border radius in pixels for rounded corners when attached
 uniform float viewport_scale; // UV scale factor for viewport padding (1.0 = no padding)
 uniform float thinking;       // Thinking mode progress (0.0 = normal, 1.0 = fully thinking)
+// Fade-out opacity, carried as a uniform rather than as the element's alpha so
+// the render element itself never has to be rebuilt (see VoiceOrbShader::element).
+uniform float opacity;
 
 // Configuration constants
 const float innerRadius = 0.47;    // Aperture
@@ -232,7 +235,7 @@ void main() {
     float orbMask = 1.0 - smoothstep(orbEdge - 0.05, orbEdge + 0.05, len);
     
     // Final alpha (scale is handled by geometry size, not shader)
-    float finalAlpha = orbMask * alpha;
+    float finalAlpha = orbMask * alpha * opacity;
     
     // When attached, apply rounded corner mask
     if (attached > 0.5 && border_radius > 0.0) {
