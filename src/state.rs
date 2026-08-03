@@ -1508,6 +1508,26 @@ impl Common {
 
         let shell = self.shell.read();
 
+        // While voice mode holds windows at alpha 0 the renderer skips the whole
+        // workspace (see the `effective_alpha > 0.0` guard in
+        // `workspace_elements`), so those surfaces are absent from
+        // `RenderElementStates` and smithay clears their primary scanout output.
+        // `should_send` would then withhold callbacks and `throttle` would drop
+        // clients to ~1fps for the duration of voice mode. A zero throttle keeps
+        // every frame "overdue", so callbacks continue at exactly the cadence
+        // they had before the skip — the skip stays purely a rendering change.
+        fn window_throttle(
+            voice_faded: bool,
+            session_holder: &impl SessionHolder,
+        ) -> Option<Duration> {
+            if voice_faded {
+                Some(Duration::ZERO)
+            } else {
+                throttle(session_holder)
+            }
+        }
+        let voice_faded = shell.voice_mode_window_alpha() <= 0.0;
+
         if let Some(session_lock) = shell.session_lock.as_ref()
             && let Some(lock_surface) = session_lock.surfaces.get(output)
         {
@@ -1571,17 +1591,26 @@ impl Common {
             && shell.game_mode.output.as_ref() == Some(output)
             && let Some(overlay) = shell.game_mode.overlay_surface.as_ref()
         {
-            overlay.send_frame(output, time, throttle(overlay), should_send);
+            overlay.send_frame(output, time, window_throttle(voice_faded, overlay), should_send);
         }
 
         if let Some(active) = shell.active_space(output) {
             if let Some(fs) = active.get_fullscreen(shell.seats.last_active()) {
-                fs.surface
-                    .send_frame(output, time, throttle(&fs.surface), should_send);
+                fs.surface.send_frame(
+                    output,
+                    time,
+                    window_throttle(voice_faded, &fs.surface),
+                    should_send,
+                );
             }
             active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    window.send_frame(
+                        output,
+                        time,
+                        window_throttle(voice_faded, &window),
+                        should_send,
+                    );
                 }
             });
 

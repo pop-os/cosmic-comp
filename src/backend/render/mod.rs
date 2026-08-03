@@ -1861,32 +1861,51 @@ where
                 alpha,
                 game_mode_only,
             } => {
-                workspace.render(
-                    renderer,
-                    last_active_seat,
-                    !move_active && is_active_space,
-                    overview.clone(),
-                    resize_indicator.clone(),
-                    active_hint,
-                    &theme,
-                    // Multiply the workspace-transition opacity (1.0 except
-                    // during a crossfade) into the existing window-alpha slot.
-                    voice_mode_alpha * alpha,
-                    attached_orb_state.as_ref(),
-                    scanout_node,
-                    game_mode_only,
-                    &mut |elem| {
-                        if let Some(elem) = crop_to_output(elem) {
-                            elements.push(CosmicElement::Workspace(
-                                RelocateRenderElement::from_element(
-                                    elem,
-                                    offset.to_physical_precise_round(scale),
-                                    Relocate::Relative,
-                                ),
-                            ));
-                        }
-                    },
-                );
+                // Multiply the workspace-transition opacity (1.0 except
+                // during a crossfade) into the existing window-alpha slot.
+                let effective_alpha = voice_mode_alpha * alpha;
+
+                // Voice mode holds windows at exactly 0.0 for the orb's entire
+                // life (`VoiceMode::window_alpha`: WaitingForOrbGrow | Active |
+                // WaitingForOrbShrink). Compositing them anyway costs a
+                // full-screen pass per window for zero pixels — and because a
+                // translucent surface reports no opaque region
+                // (`is_likely_translucent`), nothing in the scene occludes
+                // anything, so the wallpaper and every window below are drawn
+                // in full too. Skipping the workspace restores real opaque
+                // regions for what remains.
+                //
+                // The attached orb is rendered *inside* `workspace.render`, so
+                // never skip while it is live at window level.
+                //
+                // Clients keep their per-frame callbacks across this: see the
+                // matching zero-throttle in `Common::send_frames`.
+                if effective_alpha > 0.0 || attached_orb_state.is_some() {
+                    workspace.render(
+                        renderer,
+                        last_active_seat,
+                        !move_active && is_active_space,
+                        overview.clone(),
+                        resize_indicator.clone(),
+                        active_hint,
+                        &theme,
+                        effective_alpha,
+                        attached_orb_state.as_ref(),
+                        scanout_node,
+                        game_mode_only,
+                        &mut |elem| {
+                            if let Some(elem) = crop_to_output(elem) {
+                                elements.push(CosmicElement::Workspace(
+                                    RelocateRenderElement::from_element(
+                                        elem,
+                                        offset.to_physical_precise_round(scale),
+                                        Relocate::Relative,
+                                    ),
+                                ));
+                            }
+                        },
+                    );
+                }
             }
         };
 
