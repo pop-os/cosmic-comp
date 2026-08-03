@@ -865,6 +865,9 @@ impl VoiceOrbState {
                 self.animation = None;
                 self.shrinking_from_attached = false;
                 self.orb_state = OrbState::Hidden;
+                // Reaches Hidden without an animation, so `update()` never runs
+                // the completion branch that would otherwise restart the clock.
+                self.reset_shader_time();
             } else {
                 // Track if we're shrinking from attached state (for render layer)
                 self.shrinking_from_attached = stay_in_place;
@@ -1083,6 +1086,8 @@ impl VoiceOrbState {
                     self.opacity = 1.0;
                     // Clear target output so next show picks current cursor output
                     self.target_output = None;
+                    // Safe here: scale is 0, so the phase jump is not on screen.
+                    self.reset_shader_time();
                 }
                 // If transitioning (attach_and_transition), complete -> hidden
                 if self.orb_state == OrbState::Transitioning {
@@ -1097,6 +1102,8 @@ impl VoiceOrbState {
                     self.target_output = None;
                     // Set flag for external state sync
                     self.transition_just_completed = true;
+                    // Safe here: scale is 0, so the phase jump is not on screen.
+                    self.reset_shader_time();
                 }
                 // If attached, ensure we're at burst scale
                 if self.orb_state == OrbState::Attached {
@@ -1288,6 +1295,26 @@ impl VoiceOrbState {
     /// Get the shader time in seconds
     pub fn shader_time(&self) -> f32 {
         self.shader_time_start.elapsed().as_secs_f32()
+    }
+
+    /// Restart the shader clock.
+    ///
+    /// `shader_time_start` is set once at construction, so without this the
+    /// `time` uniform is compositor *uptime*. That degrades two ways: an f32
+    /// holding a day's worth of seconds quantizes to ~8ms, which is half a frame
+    /// at 60Hz and shows up as the animation stepping rather than flowing; and
+    /// `sin`/`cos` range reduction on the GPU loses precision badly once the
+    /// argument reaches the tens of thousands of radians (`animTime` is
+    /// `time * 1.5`).
+    ///
+    /// Only ever called while the orb is fully hidden. The shader's noise term
+    /// walks the z axis of a 3D simplex field and is not periodic, so there is
+    /// no phase this can be reset to without a visible jump — it is only safe
+    /// when nothing is on screen. In particular this must NOT move to
+    /// `show_floating`/`show_attached`, which are reachable mid-animation when a
+    /// show interrupts a hide.
+    fn reset_shader_time(&mut self) {
+        self.shader_time_start = Instant::now();
     }
 
     /// Check if the orb is attached to a window and in burst phase,
