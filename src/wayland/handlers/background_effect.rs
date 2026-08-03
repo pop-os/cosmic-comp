@@ -39,6 +39,19 @@ pub struct ComputedBlurRegionCachedState {
     /// the same way -- which is what a client sending one radius for a
     /// whole-surface blur means.
     pub region_radii: Vec<[u32; 4]>,
+    /// The exact sub-pixel area of each rect, index-matched to `blur_region`.
+    ///
+    /// `blur_region` is whole logical pixels, which is not where a surface
+    /// generally draws: a card laid out from measured text, or one under a
+    /// scale animation, sits at a fractional position and size. Rounding it
+    /// either way is visible -- out and the backdrop escapes past the shape
+    /// drawn over it, in and that shape's translucent border has no backdrop
+    /// beneath it -- so the client sends what it actually means and the integer
+    /// rect stays only as the conservative bound for capture and damage.
+    ///
+    /// A shorter vec leaves the remaining rects on their integer rect, which is
+    /// also what an older client that never sends it gets.
+    pub region_geometry: Vec<Rectangle<f64, Logical>>,
     /// Saturation applied to the blurred backdrop, matching CSS
     /// `backdrop-filter: saturate()`.
     ///

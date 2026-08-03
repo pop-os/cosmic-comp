@@ -249,6 +249,13 @@ pub struct BlurState {
     pub offset: f64,
     pub passes: usize,
     pub region: Vec<Rectangle<i32, Logical>>,
+    /// The exact area last rendered, so a sub-pixel move still counts as a
+    /// change. `region` is whole logical pixels and `src` only tracks size, so
+    /// neither notices a surface sliding a fraction of a pixel -- which is
+    /// precisely what a scale animation does every frame. Without this the
+    /// commit counter never advances, no damage is emitted, and the backdrop
+    /// sits still while the surface moves off it.
+    pub geometry: Rectangle<f64, Logical>,
     pub commit: CommitCounter,
 }
 
@@ -261,6 +268,7 @@ impl Default for BlurState {
             id: Id::new(),
             renderer_id: None,
             src: Size::new(0., 0.),
+            geometry: Rectangle::default(),
             offset: 0.,
             passes: 0,
             region: Vec::new(),
@@ -317,7 +325,12 @@ impl BlurElement {
             geometry,
             &region,
             output_scale,
-            radii,
+            // Clamped like the per-rect path below: half the shorter side, in
+            // f32, so a fully-rounded caller gets the same cap the client drew.
+            {
+                let half_min = (geometry.size.w.min(geometry.size.h) as f32 / 2.).max(0.);
+                radii.map(|v| (v as f32).min(half_min))
+            },
             strength,
             alpha,
             BlurAppearance::default(),
@@ -413,25 +426,68 @@ impl BlurElement {
                 continue;
             }
 
+            // The rect is surface-local; the element carries it as its own
+            // geometry, so its region is that rect at the origin.
+            //
+            // Prefer the client's exact sub-pixel geometry where it sent one:
+            // the integer rect is the conservative bound the capture and damage
+            // were sized for, but rounding the RENDERED area to it is visible
+            // either way -- out and the backdrop escapes past the shape drawn
+            // over it, in and that shape's own border loses its backdrop.
+            let exact = blur.region_geometry.get(idx).copied();
+            let mut rect_geo = geometry;
+            rect_geo.loc += exact.map_or(rect.loc.to_f64(), |geo| geo.loc);
+            rect_geo.size = exact.map_or(rect.size.to_f64(), |geo| geo.size);
+            if rect_geo.size.w <= 0. || rect_geo.size.h <= 0. {
+                continue;
+            }
+
             // Per-rect radii if the client sent them, falling back to a single
             // entry applied to every rect, then to the caller's value.
+            //
+            // Clamped against the EXACT geometry, in f32. Half the shorter side,
+            // so adjacent arcs cannot overlap and erode the edge between them --
+            // but taking that half from the whole-pixel rect, by integer
+            // division, rounds the cap twice over. A pill 46.92 tall wants
+            // 23.46; against a 47-tall bound `47 / 2` yields 23, and a cap a
+            // half-pixel squarer than the one the client drew bulges out either
+            // side of it. The client's own clamp is fractional, so this one has
+            // to be too.
+            let half_min = (rect_geo.size.w.min(rect_geo.size.h) as f32 / 2.).max(0.);
             let rect_radii = blur
                 .region_radii
                 .get(idx)
                 .or_else(|| blur.region_radii.first())
-                .map(|r| {
-                    // Half the shorter side, so adjacent arcs cannot overlap and
-                    // erode the edge between them.
-                    let half_min = (rect.size.w.min(rect.size.h) / 2).max(0) as u32;
-                    r.map(|v| v.min(half_min).min(u8::MAX as u32) as u8)
-                })
-                .unwrap_or(radii);
+                .map(|r| r.map(|v| (v as f32).min(half_min)))
+                .unwrap_or(radii.map(|v| (v as f32).min(half_min)));
 
-            // The rect is surface-local; the element carries it as its own
-            // geometry, so its region is that rect at the origin.
-            let mut rect_geo = geometry;
-            rect_geo.loc += rect.loc.to_f64();
-            rect_geo.size = rect.size.to_f64();
+            // What a client asked for beside what gets rasterised for it.
+            //
+            // Both ends of this pipeline round, and an artifact along a card's
+            // edge is almost always one of them disagreeing with the other by a
+            // fraction of a pixel. `rect` is the whole-pixel bound that arrived
+            // over the wire, `rect_geo` the exact area the client meant, and
+            // `physical` the pixels covered on this output -- enough to tell a
+            // client-side fault from a compositor-side one without a rebuild.
+            let physical = physical_rect_snapped(rect_geo, output_scale);
+            trace!(
+                idx,
+                recv_x = rect.loc.x,
+                recv_y = rect.loc.y,
+                recv_w = rect.size.w,
+                recv_h = rect.size.h,
+                phys_x = physical.loc.x,
+                phys_y = physical.loc.y,
+                phys_w = physical.size.w,
+                phys_h = physical.size.h,
+                exact_x = rect_geo.loc.x,
+                exact_y = rect_geo.loc.y,
+                exact_w = rect_geo.size.w,
+                exact_h = rect_geo.size.h,
+                radii = ?rect_radii,
+                output_scale,
+                "blur_rect_resolved: wire bound, exact area and the pixels drawn"
+            );
 
             if let Some(element) = Self::internal(
                 renderer,
@@ -457,7 +513,7 @@ impl BlurElement {
         geometry: Rectangle<f64, Logical>,
         region: &[Rectangle<i32, Logical>],
         output_scale: f64,
-        radii: [u8; 4],
+        radii: [f32; 4],
         strength: usize,
         alpha: f32,
         appearance: BlurAppearance,
@@ -466,7 +522,7 @@ impl BlurElement {
             return Ok(None);
         }
 
-        let geo = geometry.to_physical_precise_round(output_scale);
+        let geo = physical_rect_snapped(geometry, output_scale);
         let mut extended_geo = geo;
         let radius = BLUR_PARAMS[(strength + 2).min(MAX_STEPS - 1)].extended_radius as f64;
         extended_geo.loc -= Point::<f64, Physical>::new(radius, radius);
@@ -496,13 +552,24 @@ impl BlurElement {
             }
         }
 
-        // compute input_to_geo so that it crops the extended capture radius
+        // Compute input_to_geo so that it crops the extended capture radius.
+        //
+        // From the EXACT rect, not the pixel-snapped `geo`. The capture, the
+        // blit and the damage all have to be whole pixels -- a framebuffer
+        // region is not addressable otherwise -- but the shape drawn inside that
+        // capture does not. `geo_size` below is already the exact fractional
+        // size, so deriving the mapping from `geo` instead would tell the shader
+        // a fractional size while placing its origin on a whole pixel: the
+        // backdrop comes out the right size in the wrong place, off by up to
+        // half a physical pixel on the near edges, and the client's own border
+        // along those edges is left half over blurred backdrop and half not.
+        let exact = geometry.to_physical(output_scale);
         let geo_scale = {
-            let Scale { x, y } = geo.size / extended_geo.size;
+            let Scale { x, y } = exact.size / extended_geo.size;
             Affine2::from_scale(Vec2::new(x as f32, y as f32)).inverse()
         };
         let geo_translation = {
-            let offset = geo.loc - extended_geo.loc;
+            let offset = exact.loc - extended_geo.loc;
             Affine2::from_translation(-Vec2::new(
                 (offset.x / extended_geo.size.w) as f32,
                 (offset.y / extended_geo.size.h) as f32,
@@ -512,15 +579,7 @@ impl BlurElement {
 
         let uniforms = vec![
             Uniform::new("geo_size", (geometry.size.w as f32, geometry.size.h as f32)),
-            Uniform::new(
-                "corner_radius",
-                [
-                    radii[3] as f32,
-                    radii[1] as f32,
-                    radii[0] as f32,
-                    radii[2] as f32,
-                ],
-            ),
+            Uniform::new("corner_radius", [radii[3], radii[1], radii[0], radii[2]]),
             Uniform::new(
                 "input_to_geo",
                 UniformValue::Matrix3x3 {
@@ -561,12 +620,14 @@ impl BlurElement {
             && state.offset == params.offset
             && state.passes == params.passes
             && state.region == region
+            && state.geometry == geometry
             && state.src == src);
 
         state.renderer_id = Some(renderer_id);
         state.offset = params.offset;
         state.passes = params.passes;
         state.region = region.to_vec();
+        state.geometry = geometry;
         state.src = src;
         if dirty {
             state.commit.increment();
@@ -584,17 +645,65 @@ impl BlurElement {
             offset: state.offset,
             passes: state.passes,
             alpha,
+            // Placed by rounding the rect's EDGES outward, never the offset on
+            // its own.
+            //
+            // `extended_offset` is a whole number of PHYSICAL pixels, but it is
+            // not generally a whole number of logical ones: against the top or
+            // left edge the trim above shortens the near margin to whatever room
+            // there was, so at 2x a 39px margin is 19.5 logical. Rounding that
+            // to 20 and then adding it displaces the region half a logical pixel
+            // -- a whole physical one -- along that edge alone, which on a 2px
+            // border cuts half of it away. Off-screen surfaces never hit it
+            // because an untrimmed margin is the full radius, and integral.
             region: region
                 .iter()
-                .cloned()
-                .map(|mut rect| {
-                    rect.loc += extended_offset.to_i32_round();
-                    rect
+                .map(|rect| {
+                    let x0 = extended_offset.x + rect.loc.x as f64;
+                    let y0 = extended_offset.y + rect.loc.y as f64;
+                    let (x1, y1) = (x0 + rect.size.w as f64, y0 + rect.size.h as f64);
+                    // Outward: this bounds the drawn area for clipping and
+                    // damage, so it has to contain the shape rather than sit
+                    // nearest to it.
+                    let (x0, y0) = (x0.floor(), y0.floor());
+                    Rectangle::new(
+                        (x0 as i32, y0 as i32).into(),
+                        ((x1.ceil() - x0) as i32, (y1.ceil() - y0) as i32).into(),
+                    )
                 })
                 .collect(),
             uniforms,
         }))
     }
+}
+
+/// A logical rect in physical pixels, with the origin and the far edge each
+/// rounded to the pixel grid.
+///
+/// `Rectangle::to_physical_precise_round` rounds `loc` and `size`
+/// independently (smithay's `Rectangle::to_i32_round`), so the far edge lands
+/// at `round(x * s) + round(w * s)` rather than at `round((x + w) * s)`. Those
+/// differ by a pixel whenever both fractional parts land on the same side of
+/// .5 -- at scale 1.25 a rect at x=100.4 w=320.4 ends at 527 one way and 526
+/// the other.
+///
+/// A client snapping the same rect rounds both of its ends, so the two
+/// rasterisers disagree about where the edge is and leave a seam between the
+/// backdrop and the border drawn over it. Rounding both ends here is the same
+/// rule, so the edges land together.
+fn physical_rect_snapped(
+    geometry: Rectangle<f64, Logical>,
+    output_scale: f64,
+) -> Rectangle<f64, Physical> {
+    let x0 = (geometry.loc.x * output_scale).round();
+    let y0 = (geometry.loc.y * output_scale).round();
+    let x1 = ((geometry.loc.x + geometry.size.w) * output_scale).round();
+    let y1 = ((geometry.loc.y + geometry.size.h) * output_scale).round();
+
+    Rectangle::new(
+        Point::<f64, Physical>::new(x0, y0),
+        Size::<f64, Physical>::new((x1 - x0).max(0.), (y1 - y0).max(0.)),
+    )
 }
 
 impl Element for BlurElement {
@@ -627,9 +736,20 @@ impl Element for BlurElement {
             // The element's own area inside the extended capture. Derived from
             // the stored size rather than `geometry - offset * 2`, which only
             // holds while the near and far margins are both the full radius.
+            //
+            // Edges rounded outward, not the offset and the size separately: a
+            // trimmed near margin leaves `extended_offset` on a half logical
+            // pixel, and rounding it alone would move the damage off the area
+            // actually redrawn.
+            let scale_x = scale.x;
+            let scale_y = scale.y;
+            let x0 = (self.extended_offset.x * scale_x).floor();
+            let y0 = (self.extended_offset.y * scale_y).floor();
+            let x1 = ((self.extended_offset.x + self.element_size.w) * scale_x).ceil();
+            let y1 = ((self.extended_offset.y + self.element_size.h) * scale_y).ceil();
             DamageSet::from_slice(&[Rectangle::new(
-                self.extended_offset.to_physical_precise_round(scale),
-                self.element_size.to_physical_precise_round(scale),
+                (x0 as i32, y0 as i32).into(),
+                ((x1 - x0) as i32, (y1 - y0) as i32).into(),
             )])
         } else {
             DamageSet::default()
@@ -1009,4 +1129,82 @@ fn render_blur(
     // textures always end up the right way around with `self.texture` containing our final render,
     // since we render PASSES * 2 (downscale and upscale), so the number of swaps is always even.
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::physical_rect_snapped;
+    use smithay::utils::{Logical, Rectangle};
+
+    /// The far edge is rounded as an edge, not as an independently rounded size
+    /// added to an independently rounded origin.
+    #[test]
+    fn far_edge_rounds_with_the_origin() {
+        // At 1.25x both x*s = 125.5 and w*s = 400.5 round up, so rounding them
+        // separately puts the far edge at 526 + 1. The edge itself is at
+        // (100.4 + 320.4) * 1.25 = 526.0 exactly.
+        let geo = Rectangle::<f64, Logical>::new((100.4, 0.).into(), (320.4, 10.).into());
+        let snapped = physical_rect_snapped(geo, 1.25);
+
+        assert_eq!(snapped.loc.x, 126.);
+        assert_eq!(snapped.loc.x + snapped.size.w, 526.);
+    }
+
+    /// Integral logical rects at integral scales are untouched, so the common
+    /// case keeps landing exactly where it did.
+    #[test]
+    fn integral_geometry_is_unchanged() {
+        let geo = Rectangle::<f64, Logical>::new((10., 20.).into(), (300., 180.).into());
+
+        for scale in [1., 2., 3.] {
+            let snapped = physical_rect_snapped(geo, scale);
+            assert_eq!(snapped.loc.x, 10. * scale);
+            assert_eq!(snapped.loc.y, 20. * scale);
+            assert_eq!(snapped.size.w, 300. * scale);
+            assert_eq!(snapped.size.h, 180. * scale);
+        }
+    }
+
+    /// A trimmed near margin lands on a half logical pixel, and rounding that
+    /// offset on its own displaces the region by a whole physical pixel.
+    ///
+    /// This is the cut-top-border case: at 2x, a capture clamped to 39 physical
+    /// px of margin is 19.5 logical, `to_i32_round` takes it to 20, and the
+    /// region moves one physical pixel down the screen -- half of a 2px border.
+    /// Only the top and left can hit it, because only they are ever trimmed.
+    #[test]
+    fn a_half_pixel_offset_does_not_displace_the_region() {
+        let offset = 19.5_f64;
+        let size = 47.0_f64;
+
+        // What the old code did: round the offset, then add the size.
+        assert_eq!(offset.round(), 20.0, "the offset alone rounds up");
+
+        // What it does now: round the EDGES, outward, so the region contains
+        // the shape instead of sliding off it.
+        let x0 = offset.floor();
+        let x1 = (offset + size).ceil();
+        assert!(
+            x0 <= offset,
+            "near edge {x0} cuts into the shape at {offset}"
+        );
+        assert!(
+            x1 >= offset + size,
+            "far edge {x1} cuts into the shape at {}",
+            offset + size
+        );
+        assert!(x1 - x0 <= size + 2.0, "region {} inflated", x1 - x0);
+    }
+
+    /// A rect thinner than a physical pixel collapses rather than going
+    /// negative: the size is a difference of two rounded edges, which can
+    /// otherwise invert.
+    #[test]
+    fn subpixel_rect_never_goes_negative() {
+        let geo = Rectangle::<f64, Logical>::new((10.6, 10.6).into(), (0.1, 0.1).into());
+        let snapped = physical_rect_snapped(geo, 1.);
+
+        assert!(snapped.size.w >= 0.);
+        assert!(snapped.size.h >= 0.);
+    }
 }

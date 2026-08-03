@@ -75,6 +75,30 @@ impl BlurHandler for State {
                 })
                 .unwrap_or_default();
 
+            // The exact sub-pixel area of each rect, where the client sent it.
+            // Index-matched like the radii, and clamped to its own region rect:
+            // the integer rect is what the capture and damage were sized for, so
+            // a geometry reaching past it would blur pixels nothing captured.
+            pending.region_geometry = blur
+                .data
+                .as_ref()
+                .and_then(|data| data.region_geometry.as_ref())
+                .map(|geometry| {
+                    geometry
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, geo)| {
+                            pending
+                                .blur_region
+                                .as_ref()
+                                .and_then(|region| region.get(idx))
+                                .and_then(|rect| geo.intersection(rect.to_f64()))
+                                .unwrap_or(*geo)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             // Saturation, tint and border, which the KDE protocol carries from
             // its version 3. These were parsed into `CacheableBlurState` but
             // never reached the renderer, so a kwin client asking for them got

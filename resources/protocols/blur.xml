@@ -7,7 +7,7 @@
     SPDX-License-Identifier: LGPL-2.1-or-later
   ]]></copyright>
 
-  <interface name="org_kde_kwin_blur_manager" version="4">
+  <interface name="org_kde_kwin_blur_manager" version="5">
     <description summary="blur manager">
       This interface allows a client to request blur effect for a surface.
     </description>
@@ -28,7 +28,7 @@
     </request>
   </interface>
 
-  <interface name="org_kde_kwin_blur" version="4">
+  <interface name="org_kde_kwin_blur" version="5">
     <description summary="blur interface">
       This interface allows a client to specify a blur region for a surface.
     </description>
@@ -132,6 +132,47 @@
         carries a region but no radii rounds every rectangle the old way.
       </description>
       <arg name="radii" type="array" summary="four uint32 radii (tl, tr, br, bl) per region rectangle"/>
+    </request>
+
+    <!-- Version 5 additions -->
+
+    <request name="set_region_geometry" since="5">
+      <description summary="set the exact sub-pixel geometry of the blur region"
+                   >
+        Set the exact geometry of the individual rectangles of the blur region,
+        with sub-pixel precision.
+
+        A wl_region carries whole logical pixels, but a surface does not
+        generally draw on whole logical pixels: a card laid out from measured
+        text, or one under a scale animation, sits at a fractional position and
+        size. The compositor must therefore round the region to something, and
+        whichever way it rounds is visible — rounding out lets the backdrop
+        escape past the shape the client draws over it, and rounding in leaves
+        the client's own translucent border with no backdrop beneath it. Neither
+        is correctable by the client, because the client cannot express what it
+        means.
+
+        This request carries that missing precision. The wl_region rectangles
+        remain the conservative whole-pixel bound the compositor uses for
+        capture, clipping and damage; the geometry given here is the exact area
+        the effect is rendered to, and must be contained by its region
+        rectangle. A compositor clamps it if it is not.
+
+        The argument is an array of 32-bit signed integers, four per rectangle —
+        x, y, width, height, in surface-local logical pixels as fixed-point
+        numbers with 8 bits of fractional precision (multiply by 256) — ordered
+        to match the rectangles added to the wl_region passed to set_region.
+        Rectangles without a corresponding entry (a shorter array) use their
+        whole-pixel region rectangle unchanged, so a client may supply geometry
+        for a prefix of the region. A trailing partial quadruple is ignored.
+
+        The geometry pairs with the region committed in the same cycle: like
+        set_region, this is pending state applied on the next commit, and the two
+        requests may be sent in either order within a cycle. A commit that
+        carries a region but no geometry uses the region rectangles as-is,
+        exactly as version 4 did.
+      </description>
+      <arg name="geometry" type="array" summary="four fixed-point int32 (x, y, width, height) per region rectangle"/>
     </request>
   </interface>
 </protocol>

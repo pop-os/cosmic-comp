@@ -44,6 +44,15 @@ pub struct BlurRegionData {
     /// remaining rects on the surface's single radius). `None` when the client
     /// didn't send `set_region_radii`, i.e. one radius rounds every rect.
     pub region_radii: Option<Vec<[f32; 4]>>,
+    /// The exact sub-pixel area of each rect, index-matched to `region` (a
+    /// shorter vec leaves the remaining rects on their whole-pixel rect).
+    /// `None` when the client didn't send `set_region_geometry`.
+    ///
+    /// `region` stays the conservative whole-pixel bound used for capture and
+    /// damage; this is what the effect is actually rendered to, so a surface at
+    /// a fractional position or under a scale animation gets a backdrop that
+    /// matches the shape it draws rather than one rounded away from it.
+    pub region_geometry: Option<Vec<Rectangle<f64, Logical>>>,
     /// Custom blur radius in pixels. If None, the compositor default is used.
     pub radius: Option<f32>,
     /// Backdrop saturation multiplier (1.0 = unchanged). If None, no saturation
@@ -88,6 +97,7 @@ pub struct BlurData {
     surface: Weak<WlSurface>,
     pending_region: Mutex<Option<Vec<Rectangle<i32, Logical>>>>,
     pending_region_radii: Mutex<Option<Vec<[f32; 4]>>>,
+    pending_region_geometry: Mutex<Option<Vec<Rectangle<f64, Logical>>>>,
     pending_radius: Mutex<Option<f32>>,
     pending_saturation: Mutex<Option<f32>>,
     pending_tint: Mutex<Option<f32>>,
@@ -111,7 +121,7 @@ impl BlurState {
             + 'static,
     {
         let global =
-            dh.create_global::<D, org_kde_kwin_blur_manager::OrgKdeKwinBlurManager, _>(4, ());
+            dh.create_global::<D, org_kde_kwin_blur_manager::OrgKdeKwinBlurManager, _>(5, ());
         BlurState { global }
     }
 
@@ -176,6 +186,7 @@ where
                     surface: surface.downgrade(),
                     pending_region: Mutex::new(None),
                     pending_region_radii: Mutex::new(None),
+                    pending_region_geometry: Mutex::new(None),
                     pending_radius: Mutex::new(None),
                     pending_saturation: Mutex::new(None),
                     pending_tint: Mutex::new(None),
@@ -222,6 +233,7 @@ where
 
                 let pending_region = data.pending_region.lock().unwrap().take();
                 let pending_region_radii = data.pending_region_radii.lock().unwrap().take();
+                let pending_region_geometry = data.pending_region_geometry.lock().unwrap().take();
                 let pending_radius = data.pending_radius.lock().unwrap().take();
                 let pending_saturation = data.pending_saturation.lock().unwrap().take();
                 let pending_tint = data.pending_tint.lock().unwrap().take();
@@ -250,6 +262,7 @@ where
                     pending.data = Some(BlurRegionData {
                         region: pending_region,
                         region_radii: pending_region_radii,
+                        region_geometry: pending_region_geometry,
                         radius: pending_radius,
                         saturation: pending_saturation,
                         tint: pending_tint,
@@ -287,6 +300,11 @@ where
                     result
                 });
                 *data.pending_region.lock().unwrap() = regions;
+            }
+            org_kde_kwin_blur::Request::SetRegionGeometry { geometry } => {
+                let geometry = parse_region_geometry(&geometry);
+                tracing::trace!(rect_count = geometry.len(), "Blur SetRegionGeometry");
+                *data.pending_region_geometry.lock().unwrap() = Some(geometry);
             }
             org_kde_kwin_blur::Request::SetRegionRadii { radii } => {
                 let radii = parse_region_radii(&radii);
@@ -344,6 +362,27 @@ fn parse_region_radii(bytes: &[u8]) -> Vec<[f32; 4]> {
                 u32::from_ne_bytes([quad[i], quad[i + 1], quad[i + 2], quad[i + 3]]) as f32
             };
             [at(0), at(4), at(8), at(12)]
+        })
+        .collect()
+}
+
+/// Parse a `set_region_geometry` array: four native-endian `i32` per region
+/// rect -- x, y, width, height in surface-local logical px, fixed-point with 8
+/// fractional bits -- in the order the rects were added to the region. A
+/// trailing partial quadruple is ignored, as the protocol specifies.
+fn parse_region_geometry(bytes: &[u8]) -> Vec<Rectangle<f64, Logical>> {
+    bytes
+        .chunks_exact(std::mem::size_of::<i32>() * 4)
+        .map(|quad| {
+            let at = |i: usize| {
+                i32::from_ne_bytes([quad[i], quad[i + 1], quad[i + 2], quad[i + 3]]) as f64 / 256.0
+            };
+            // A negative extent is not expressible as a rectangle; clamp rather
+            // than let it invert the far edge downstream.
+            Rectangle::new(
+                (at(0), at(4)).into(),
+                (at(8).max(0.0), at(12).max(0.0)).into(),
+            )
         })
         .collect()
 }
