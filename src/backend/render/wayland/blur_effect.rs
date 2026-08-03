@@ -1,6 +1,7 @@
 use std::{
     borrow::{Borrow, BorrowMut},
     sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
 };
 
 use glam::{Affine2, Mat3, Vec2};
@@ -49,6 +50,55 @@ fn configured_noise() -> f32 {
     f32::from_bits(BLUR_NOISE_BITS.load(std::sync::atomic::Ordering::Relaxed))
 }
 const MAX_STEPS: usize = 15;
+
+/// How long a newly-appearing blur rect takes to reach full opacity.
+///
+/// Matched to `motion.layer_open` so a card's backdrop arriving reads as the
+/// same system as a surface opening. It is a constant rather than the theme
+/// value because the render path reaches this without a theme handle -- see
+/// `blur_strength`, which is threaded down from `render::init_shaders` for the
+/// same reason. Worth threading properly if a brand ever wants to retime it.
+const BLUR_FADE_IN: Duration = Duration::from_millis(200);
+
+/// When the last in-flight rect fade ends, so the shell knows to keep redrawing.
+///
+/// A fade advances only when something renders it. `blur_set` schedules a single
+/// frame, which would draw the first step and then freeze until an unrelated
+/// commit happened to trigger the next -- the same stall the slide-content
+/// crossfade documents in `Shell::animations_going`.
+static BLUR_FADE_DEADLINE: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Whether any blur rect is still fading in.
+pub fn blur_fade_in_flight() -> bool {
+    let mut deadline = BLUR_FADE_DEADLINE.lock().unwrap();
+    match *deadline {
+        Some(at) if Instant::now() < at => true,
+        // Clear once past, so a settled fade stops claiming redraws forever.
+        Some(_) => {
+            *deadline = None;
+            false
+        }
+        None => false,
+    }
+}
+
+/// Extend the redraw deadline to cover a fade starting now.
+fn schedule_blur_fade(now: Instant) {
+    let mut deadline = BLUR_FADE_DEADLINE.lock().unwrap();
+    let ends_at = now + BLUR_FADE_IN;
+    if deadline.is_none_or(|at| at < ends_at) {
+        *deadline = Some(ends_at);
+    }
+}
+
+/// How opaque a rect that first appeared `since` ago should be drawn.
+///
+/// Smoothstep rather than linear: a backdrop entering at a constant rate reads
+/// as a wipe, and the ease matches what the layer-open animation uses.
+fn fade_alpha(since: Instant) -> f32 {
+    let t = (since.elapsed().as_secs_f32() / BLUR_FADE_IN.as_secs_f32()).clamp(0., 1.);
+    t * t * (3. - 2. * t)
+}
 
 /// Lower bound of the radius-to-strength map: ~1px is effectively no blur.
 const BLUR_RADIUS_MIN_PX: f32 = 1.0;
@@ -249,6 +299,14 @@ pub struct BlurState {
     pub offset: f64,
     pub passes: usize,
     pub region: Vec<Rectangle<i32, Logical>>,
+    /// The rects drawn last frame, each with when it first appeared, so a rect
+    /// that is NEW can fade in while its neighbours stay put.
+    ///
+    /// Matched by overlap rather than by index: a client re-sends its whole
+    /// region every time any part of it changes, so index is not identity --
+    /// inserting one card would renumber the rest and re-fade every one of them.
+    /// Overlap also keeps a card that MOVES (a hover lift) matched to itself.
+    pub seen: Vec<(Rectangle<f64, Logical>, Instant)>,
     /// The exact area last rendered, so a sub-pixel move still counts as a
     /// change. `region` is whole logical pixels and `src` only tracks size, so
     /// neither notices a surface sliding a fraction of a pixel -- which is
@@ -268,6 +326,7 @@ impl Default for BlurState {
             id: Id::new(),
             renderer_id: None,
             src: Size::new(0., 0.),
+            seen: Vec::new(),
             geometry: Rectangle::default(),
             offset: 0.,
             passes: 0,
@@ -420,6 +479,13 @@ impl BlurElement {
         // own radius needs an element per card. It also blits only each rect
         // rather than the whole surface.
         let appearance = BlurAppearance::resolve(&blur);
+
+        // Per-rect fade bookkeeping. `seen` is taken rather than borrowed, so
+        // the loop below can hand `state` to `internal` mutably.
+        let previously_seen = std::mem::take(&mut state.seen);
+        let mut seen_now = Vec::with_capacity(region.len());
+        let now = Instant::now();
+
         let mut elements = Vec::with_capacity(region.len());
         for (idx, rect) in region.iter().enumerate() {
             if rect.size.w <= 0 || rect.size.h <= 0 {
@@ -489,6 +555,24 @@ impl BlurElement {
                 "blur_rect_resolved: wire bound, exact area and the pixels drawn"
             );
 
+            // Fade this rect in only if it is NEW. A client re-sends its whole
+            // region whenever any part of it changes, so an appearing card must
+            // not restart its neighbours -- match by overlap and inherit their
+            // first-seen instant. Overlap also keeps a card matched to itself
+            // across a hover lift, which moves it without making it new.
+            let first_seen = previously_seen
+                .iter()
+                .find(|(seen, _)| seen.overlaps(rect_geo))
+                .map(|(_, at)| *at)
+                .unwrap_or_else(|| {
+                    // Claim redraws for the whole fade: nothing else will
+                    // schedule the frames it needs to advance.
+                    schedule_blur_fade(now);
+                    now
+                });
+            seen_now.push((rect_geo, first_seen));
+            let rect_alpha = alpha * fade_alpha(first_seen);
+
             if let Some(element) = Self::internal(
                 renderer,
                 &mut state,
@@ -497,12 +581,14 @@ impl BlurElement {
                 output_scale,
                 rect_radii,
                 strength,
-                alpha,
+                rect_alpha,
                 appearance,
             )? {
                 elements.push(element);
             }
         }
+
+        state.seen = seen_now;
 
         Ok(elements)
     }
@@ -1133,8 +1219,9 @@ fn render_blur(
 
 #[cfg(test)]
 mod tests {
-    use super::physical_rect_snapped;
+    use super::{BLUR_FADE_IN, fade_alpha, physical_rect_snapped};
     use smithay::utils::{Logical, Rectangle};
+    use std::time::Instant;
 
     /// The far edge is rounded as an edge, not as an independently rounded size
     /// added to an independently rounded origin.
@@ -1163,6 +1250,70 @@ mod tests {
             assert_eq!(snapped.size.w, 300. * scale);
             assert_eq!(snapped.size.h, 180. * scale);
         }
+    }
+
+    /// An appearing rect must not restart its neighbours' fades.
+    ///
+    /// A client re-sends its WHOLE region whenever any part of it changes, so
+    /// index is not identity -- a card inserted in the middle renumbers every
+    /// later rect. Matching by overlap keeps each existing rect paired with
+    /// itself, so only the genuinely new one starts at zero alpha.
+    #[test]
+    fn only_a_new_rect_fades_in() {
+        let card = |x: f64| Rectangle::<f64, Logical>::new((x, 100.).into(), (300., 200.).into());
+        let long_ago = Instant::now() - BLUR_FADE_IN * 2;
+
+        // Two settled cards, then a third appears BEFORE them in the region.
+        let previously_seen = [(card(400.), long_ago), (card(800.), long_ago)];
+        let now = Instant::now();
+
+        let resolved: Vec<_> = [card(0.), card(400.), card(800.)]
+            .into_iter()
+            .map(|rect| {
+                previously_seen
+                    .iter()
+                    .find(|(seen, _)| seen.overlaps(rect))
+                    .map(|(_, at)| *at)
+                    .unwrap_or(now)
+            })
+            .map(fade_alpha)
+            .collect();
+
+        // Not exactly 0: a few ns elapse between taking `now` and reading it.
+        assert!(resolved[0] < 0.01, "the new rect starts transparent");
+        assert_eq!(resolved[1], 1., "an existing rect keeps full alpha");
+        assert_eq!(resolved[2], 1., "and so does the one after it");
+    }
+
+    /// A rect that MOVES is the same rect, not a new one.
+    ///
+    /// The hover lift shifts a card by a couple of percent every frame. Treating
+    /// each position as a new rect would restart the fade continuously and hold
+    /// the backdrop near zero alpha for the whole hover.
+    #[test]
+    fn a_lifted_rect_keeps_its_fade() {
+        let rest = Rectangle::<f64, Logical>::new((120., 200.).into(), (320., 180.).into());
+        let lifted = Rectangle::<f64, Logical>::new((116.8, 198.2).into(), (326.4, 183.6).into());
+        let long_ago = Instant::now() - BLUR_FADE_IN * 2;
+
+        let matched = [(rest, long_ago)]
+            .iter()
+            .find(|(seen, _)| seen.overlaps(lifted))
+            .map(|(_, at)| *at);
+
+        assert!(
+            matched.is_some(),
+            "the lifted rect must match its resting one"
+        );
+        assert_eq!(fade_alpha(matched.unwrap()), 1., "and stay fully opaque");
+    }
+
+    /// The fade runs from nothing to fully opaque, and settles.
+    #[test]
+    fn fade_spans_zero_to_one_and_stops() {
+        assert!(fade_alpha(Instant::now()) < 0.01);
+        assert_eq!(fade_alpha(Instant::now() - BLUR_FADE_IN), 1.);
+        assert_eq!(fade_alpha(Instant::now() - BLUR_FADE_IN * 10), 1.);
     }
 
     /// A trimmed near margin lands on a half logical pixel, and rounding that

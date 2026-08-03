@@ -3484,6 +3484,7 @@ impl Shell {
             || pending_fade
             || fade_out
             || layer_resize
+            || crate::backend::render::wayland::blur_effect::blur_fade_in_flight()
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
