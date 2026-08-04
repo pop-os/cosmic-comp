@@ -208,6 +208,7 @@ impl MoveGrabState {
             alpha,
             scanout_node,
             push,
+            None,
         );
 
         let active_window_hint = theme.active_window_hint();

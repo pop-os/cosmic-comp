@@ -2,6 +2,7 @@ use super::{
     CosmicSurface,
     window::{Focus, RESIZE_BORDER},
 };
+use crate::shell::element::surface::PopupShadow;
 use crate::{
     backend::render::{
         IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
@@ -686,6 +687,7 @@ impl CosmicStack {
         alpha: f32,
         scanout_node: Option<DrmNode>,
         push: &mut dyn FnMut(CosmicStackRenderElement<R>),
+        shadow: Option<PopupShadow<'_>>,
     ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
@@ -703,6 +705,7 @@ impl CosmicStack {
                 scanout_node,
                 FROSTED_BLUR_STRENGTH,
                 &mut |elem| push(elem.into()),
+                shadow,
             )
         })
     }

@@ -2346,6 +2346,7 @@ impl Workspace {
                 scanout_node,
                 0,
                 &mut |elem| push(WorkspaceRenderElement::FullscreenPopup(elem.into())),
+                None,
             );
         }
 
@@ -2407,6 +2408,7 @@ impl Workspace {
                         alpha,
                         scanout_node,
                         &mut |elem| push(WorkspaceRenderElement::from(elem)),
+                        None,
                     );
                 }
             } else {

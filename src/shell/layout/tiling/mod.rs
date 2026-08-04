@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::shell::element::surface::PopupShadow;
 use crate::{
     backend::render::{
         ACTIVE_GROUP_COLOR, BackdropShader, GROUP_COLOR, IndicatorShader, Key, Usage,
@@ -4263,6 +4264,9 @@ impl TilingLayout {
         CosmicStackRenderElement<R>: RenderElement<R>,
     {
         let output_scale = self.output.current_scale().fractional_scale();
+        // Resolved once: the theme is the same for every popup on the output,
+        // and this allocates.
+        let shadow_layers = theme.dropdown_shadow();
 
         let (target_tree, duration, _) = if self.queue.animation_start.is_some() {
             self.queue
@@ -4332,6 +4336,7 @@ impl TilingLayout {
                 percentage,
                 swap_desc.is_some(),
                 scanout_node,
+                &shadow_layers,
                 push,
             );
 
@@ -4373,6 +4378,7 @@ impl TilingLayout {
             overview,
             swap_desc.clone(),
             scanout_node,
+            &shadow_layers,
             push,
         );
     }
@@ -5066,6 +5072,7 @@ fn render_old_tree_popups<R>(
     percentage: f32,
     is_swap_mode: bool,
     scanout_node: Option<DrmNode>,
+    shadow_layers: &[iced_core::Shadow],
     push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
 ) where
     R: AsGlowRenderer,
@@ -5082,6 +5089,10 @@ fn render_old_tree_popups<R>(
         percentage,
         is_swap_mode,
         |mapped, elem_geometry, geo, alpha, _| {
+            // Collected rather than pushed straight through: the shadow has to
+            // land BEHIND the popup's own content, and elements are drawn
+            // front to back, so it goes in after.
+            let mut shadows = Vec::new();
             mapped.push_popup_render_elements(
                 renderer,
                 geo.loc.as_logical().to_physical_precise_round(output_scale) - elem_geometry.loc,
@@ -5089,7 +5100,14 @@ fn render_old_tree_popups<R>(
                 alpha,
                 scanout_node,
                 push,
-            )
+                Some(PopupShadow {
+                    layers: &shadow_layers,
+                    push: &mut |element| shadows.push(element),
+                }),
+            );
+            for element in shadows {
+                push(CosmicMappedRenderElement::from(element));
+            }
         },
     )
 }
@@ -5306,6 +5324,7 @@ fn render_new_tree_popups<R>(
     overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
     swap_desc: Option<NodeDesc>,
     scanout_node: Option<DrmNode>,
+    shadow_layers: &[iced_core::Shadow],
     push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
 ) where
     R: AsGlowRenderer,
@@ -5344,6 +5363,7 @@ fn render_new_tree_popups<R>(
 
                 let elem_geometry = mapped.geometry().to_physical_precise_round(output_scale);
 
+                let mut shadows = Vec::new();
                 mapped.push_popup_render_elements(
                     renderer,
                     geo.loc.as_logical().to_physical_precise_round(output_scale)
@@ -5352,7 +5372,14 @@ fn render_new_tree_popups<R>(
                     alpha,
                     scanout_node,
                     push,
+                    Some(PopupShadow {
+                        layers: &shadow_layers,
+                        push: &mut |element| shadows.push(element),
+                    }),
                 );
+                for element in shadows {
+                    push(CosmicMappedRenderElement::from(element));
+                }
             }
         },
     );

@@ -1,13 +1,21 @@
+use iced_core::Shadow;
+use smithay::backend::renderer::gles::element::PixelShaderElement;
+use smithay::reexports::wayland_server::Resource;
+use smithay::reexports::wayland_server::protocol::wl_surface;
+
 use crate::{
     backend::render::{
         element::AsGlowRenderer,
+        shadow::ShadowShader,
         wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
     },
     shell::focus::target::PointerFocusTarget,
+    utils::prelude::*,
     wayland::handlers::{
         background_effect::ComputedBlurRegionCachedState, compositor::frame_time_filter_fn,
         corner_radius::surface_corners,
     },
+    wayland::protocols::layer_shadow::surface_has_shadow,
 };
 use std::{
     borrow::Cow,
@@ -72,7 +80,6 @@ use tracing::trace;
 
 use crate::{
     state::{State, SurfaceDmabufFeedback},
-    utils::prelude::*,
     wayland::handlers::{
         compositor::FRAME_TIME_FILTER,
         decoration::{KdeDecorationData, PreferredDecorationMode},
@@ -212,6 +219,20 @@ struct Sticky(AtomicBool);
 
 #[derive(Default)]
 struct GlobalGeometry(Mutex<Option<Rectangle<i32, Global>>>);
+
+/// How to draw the shadow behind a popup that asked for one.
+///
+/// The element is built where the popup's geometry is worked out, but handed
+/// back rather than pushed: `SurfaceRenderElement` cannot carry a shader
+/// element, and the callers that can are the ones whose render element type
+/// already accepts one.
+pub struct PopupShadow<'a> {
+    /// Layers to draw, in the order the theme lists them — furthest from the
+    /// surface first, so later ones land on top.
+    pub layers: &'a [Shadow],
+    /// Where each element built goes.
+    pub push: &'a mut dyn FnMut(PixelShaderElement),
+}
 
 impl CosmicSurface {
     pub fn title(&self) -> String {
@@ -1080,6 +1101,7 @@ impl CosmicSurface {
         scanout_node: Option<DrmNode>,
         blur_strength: usize,
         push: &mut dyn FnMut(SurfaceRenderElement<R>),
+        mut shadow: Option<PopupShadow<'_>>,
     ) where
         R: Renderer + ImportAll + AsGlowRenderer,
         R::TextureId: Clone + 'static,
@@ -1153,6 +1175,23 @@ impl CosmicSurface {
                     })
                     .unwrap_or([0; 4]);
 
+                    // Behind the popup's own content, and only when the client
+                    // asked for it over the shadow protocol. Pushed first
+                    // because elements are collected front to back.
+                    if let Some(shadow) = shadow.as_mut()
+                        && surface_has_shadow(popup.wl_surface())
+                    {
+                        Self::push_popup_shadow(
+                            renderer,
+                            popup.wl_surface(),
+                            geometry,
+                            scale,
+                            alpha,
+                            radii,
+                            shadow,
+                        );
+                    }
+
                     push_render_elements_from_surface_tree(
                         renderer,
                         popup.wl_surface(),
@@ -1171,6 +1210,48 @@ impl CosmicSurface {
                 }
             }
             WindowSurface::X11(_) => {}
+        }
+    }
+
+    /// Build the shadow layers behind one popup.
+    ///
+    /// One element per layer, in the theme's order, so a multi-layer shadow
+    /// composites the way it does when an application draws it — taking only
+    /// the first layer, as the layer-shell paths do, leaves a menu shadow
+    /// almost invisible.
+    fn push_popup_shadow<R>(
+        renderer: &mut R,
+        surface: &wl_surface::WlSurface,
+        geometry: Rectangle<f64, Logical>,
+        scale: Scale<f64>,
+        alpha: f32,
+        radii: [u8; 4],
+        shadow: &mut PopupShadow<'_>,
+    ) where
+        R: Renderer + AsGlowRenderer,
+        R::TextureId: Clone + 'static,
+    {
+        // The shader works in the same logical space the geometry is already
+        // in; `Local` is that space tagged as output-relative, which is what
+        // the caller has resolved by this point.
+        let geo = geometry.to_i32_round().as_local();
+        let surface_id = surface.id();
+
+        for layer in shadow.layers {
+            let element = ShadowShader::layer_element(
+                renderer,
+                &surface_id,
+                geo,
+                radii,
+                // The popup's own alpha, so a shadow fades out with the popup
+                // rather than outliving it.
+                alpha * layer.color.a,
+                scale.x,
+                [layer.color.r, layer.color.g, layer.color.b, layer.color.a],
+                [layer.offset.x, layer.offset.y],
+                layer.blur_radius,
+            );
+            (shadow.push)(element);
         }
     }
 

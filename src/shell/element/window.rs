@@ -1,3 +1,4 @@
+use crate::shell::element::surface::PopupShadow;
 use crate::{
     backend::render::{
         IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
@@ -854,6 +855,7 @@ impl CosmicWindow {
         alpha: f32,
         scanout_node: Option<DrmNode>,
         push: &mut dyn FnMut(CosmicWindowRenderElement<R>),
+        shadow: Option<PopupShadow<'_>>,
     ) where
         R: Renderer + AsGlowRenderer + ImportAll + ImportMem,
         R::TextureId: Send + Clone + 'static,
@@ -875,6 +877,7 @@ impl CosmicWindow {
                 scanout_node,
                 WINDOW_BLUR_STRENGTH,
                 &mut |elem| push(elem.into()),
+                shadow,
             )
         })
     }

@@ -1,3 +1,4 @@
+use crate::shell::element::surface::PopupShadow;
 use crate::{
     backend::render::element::AsGlowRenderer,
     state::State,
@@ -656,6 +657,7 @@ impl CosmicMapped {
         alpha: f32,
         scanout_node: Option<DrmNode>,
         push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
+        shadow: Option<PopupShadow<'_>>,
     ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
@@ -669,6 +671,7 @@ impl CosmicMapped {
                 alpha,
                 scanout_node,
                 &mut |elem| push(elem.into()),
+                shadow,
             ),
             CosmicMappedInternal::Window(w) => w.push_popup_render_elements(
                 renderer,
@@ -677,6 +680,7 @@ impl CosmicMapped {
                 alpha,
                 scanout_node,
                 &mut |elem| push(elem.into()),
+                shadow,
             ),
             _ => unreachable!(),
         }

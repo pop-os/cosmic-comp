@@ -36,6 +36,7 @@ use smithay::{
     wayland::seat::WaylandFocus,
 };
 
+use crate::shell::element::surface::PopupShadow;
 use crate::{
     backend::render::{
         BackdropShader, IndicatorShader, Key, Usage,
@@ -695,6 +696,7 @@ impl FloatingLayout {
             alpha,
             scanout_node,
             push,
+            None,
         );
     }
 
@@ -3002,6 +3004,9 @@ impl FloatingLayout {
     {
         let output = self.space.outputs().next().unwrap();
         let output_scale = output.current_scale().fractional_scale();
+        // Resolved once: the theme is the same for every popup on the output,
+        // and this allocates.
+        let shadow_layers = self.theme.dropdown_shadow();
 
         for elem in self
             .animations
@@ -3035,6 +3040,10 @@ impl FloatingLayout {
                     });
 
                 let render_location = geometry.loc - elem.geometry().loc.as_local();
+                // Collected rather than pushed straight through: the shadow
+                // has to land BEHIND the popup's own content, and elements are
+                // drawn front to back, so it goes in after.
+                let mut shadows = Vec::new();
                 elem.push_popup_render_elements(
                     renderer,
                     render_location
@@ -3044,7 +3053,17 @@ impl FloatingLayout {
                     alpha,
                     scanout_node,
                     push,
+                    Some(PopupShadow {
+                        // The same shadow an application draws under its own
+                        // menus, so a compositor-drawn one is not a different
+                        // weight from a client-drawn one.
+                        layers: &shadow_layers,
+                        push: &mut |element| shadows.push(element),
+                    }),
                 );
+                for element in shadows {
+                    push(CosmicMappedRenderElement::from(element));
+                }
             }
         }
     }
