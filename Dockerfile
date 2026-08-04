@@ -1,6 +1,8 @@
-ARG version=1.92
+# Keep in sync with rust-toolchain.toml. Drift is no longer fatal -- the rustup step
+# below installs the pinned channel regardless -- but a matching tag avoids
+# re-downloading a whole toolchain on every image build.
+ARG version=1.93
 FROM rust:${version}
-ARG version
 
 RUN dpkg --add-architecture arm64
 RUN apt-get update && apt-get install -y \
@@ -77,9 +79,21 @@ RUN apt-get install -y task
 # RPM support
 RUN apt-get install -y rpm librpmbuild10 elfutils
 
-RUN rustup target add --toolchain $version aarch64-unknown-linux-gnu
-RUN rustup toolchain install --force-non-host $version-aarch64-unknown-linux-gnu
-RUN rustup component add clippy
+# rust-toolchain.toml pins the channel and rustup honours it for every cargo
+# invocation in the mounted repo, so the cross std must be installed for THAT
+# channel -- not for whatever `version` above happens to be. Resolving it from the
+# file keeps the image correct when the pin moves ahead of the base image tag;
+# a mismatch surfaces as "can't find crate for `std`" on the aarch64 build only
+# (the host std gets auto-downloaded, the cross one does not).
+COPY rust-toolchain.toml /tmp/rust-toolchain.toml
+RUN set -eux; \
+  channel="$(sed -n 's/^ *channel *= *"\([^"]*\)".*/\1/p' /tmp/rust-toolchain.toml)"; \
+  test -n "$channel"; \
+  rustup toolchain install "$channel"; \
+  rustup component add --toolchain "$channel" clippy rust-src; \
+  rustup target add --toolchain "$channel" aarch64-unknown-linux-gnu; \
+  rustup toolchain install --force-non-host "$channel-aarch64-unknown-linux-gnu"; \
+  rm /tmp/rust-toolchain.toml
 RUN chmod -R 777 /usr/local/rustup
 
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc

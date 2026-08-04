@@ -14,8 +14,10 @@ vars:
   ARCH:
     sh: echo "{{.TARGET_ARCH}}" | cut -d'-' -f1
   IMAGE_NAME: "{{.NAME}}-builder"
+  # rust-toolchain.toml is baked into the image (it selects the cross std), so a
+  # channel bump has to invalidate the cached image just like a Dockerfile edit does.
   IMAGE_TAG:
-    sh: sha256sum Dockerfile | cut -d' ' -f1
+    sh: cat Dockerfile rust-toolchain.toml | sha256sum | cut -d' ' -f1
 
 tasks:
   default:
