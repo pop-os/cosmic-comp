@@ -1307,6 +1307,7 @@ where
                         let shadow_element = ShadowShader::layer_element(
                             renderer,
                             &popup_surface_id,
+                            0,
                             local_geo,
                             shadow_radius,
                             popup_alpha,
@@ -1679,6 +1680,7 @@ where
                         let shadow_element = ShadowShader::layer_element(
                             renderer,
                             &surface_id,
+                            0,
                             local_geo,
                             shadow_radius,
                             alpha,

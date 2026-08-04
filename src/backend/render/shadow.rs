@@ -32,8 +32,14 @@ pub struct ShadowParameters {
     shadow_softness: f32,
 }
 type ShadowCache = RefCell<HashMap<CosmicMappedKey, (ShadowParameters, PixelShaderElement)>>;
-/// Cache for layer surface shadows (keyed by WlSurface ObjectId)
-type LayerShadowCache = RefCell<HashMap<ObjectId, (ShadowParameters, PixelShaderElement)>>;
+/// Cache for layer surface shadows.
+///
+/// Keyed by surface *and* layer index: a multi-layer shadow calls this several
+/// times for one surface with different parameters, and a key of the surface
+/// alone would have each call evict the last. Every element would then be
+/// rebuilt every frame with a fresh id, which reads as damage and repaints the
+/// popup continuously.
+type LayerShadowCache = RefCell<HashMap<(ObjectId, u8), (ShadowParameters, PixelShaderElement)>>;
 
 impl ShadowShader {
     pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesPixelProgram {
@@ -222,6 +228,9 @@ impl ShadowShader {
     pub fn layer_element<R: AsGlowRenderer>(
         renderer: &R,
         surface_id: &ObjectId,
+        // Which layer of a multi-layer shadow this is, so each keeps its own
+        // cache slot. Callers drawing a single shadow pass 0.
+        layer: u8,
         geo: Rectangle<i32, Local>,
         radius: [u8; 4],
         alpha: f32,
@@ -255,8 +264,9 @@ impl ShadowShader {
         user_data.insert_if_missing(|| LayerShadowCache::new(HashMap::new()));
         let mut cache = user_data.get::<LayerShadowCache>().unwrap().borrow_mut();
 
+        let key = (surface_id.clone(), layer);
         if cache
-            .get(surface_id)
+            .get(&key)
             .filter(|(old_params, _)| &params == old_params)
             .is_none()
         {
@@ -381,9 +391,9 @@ impl ShadowShader {
                 Kind::Unspecified,
             );
 
-            cache.insert(surface_id.clone(), (params, element));
+            cache.insert(key.clone(), (params, element));
         }
 
-        cache.get(surface_id).unwrap().1.clone()
+        cache.get(&key).unwrap().1.clone()
     }
 }

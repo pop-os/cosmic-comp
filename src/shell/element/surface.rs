@@ -1237,15 +1237,20 @@ impl CosmicSurface {
         let geo = geometry.to_i32_round().as_local();
         let surface_id = surface.id();
 
-        for layer in shadow.layers {
+        for (index, layer) in shadow.layers.iter().enumerate() {
             let element = ShadowShader::layer_element(
                 renderer,
                 &surface_id,
+                // Its own cache slot, or each layer would evict the last and
+                // all three would be rebuilt every frame.
+                u8::try_from(index).unwrap_or(u8::MAX),
                 geo,
                 radii,
-                // The popup's own alpha, so a shadow fades out with the popup
-                // rather than outliving it.
-                alpha * layer.color.a,
+                // The popup's own alpha, and only that. The shader multiplies
+                // the colour — which already carries the layer's opacity — by
+                // this, so folding the opacity in here as well would square it
+                // and leave a 4% shadow drawing at 0.16%.
+                alpha,
                 scale.x,
                 [layer.color.r, layer.color.g, layer.color.b, layer.color.a],
                 [layer.offset.x, layer.offset.y],
