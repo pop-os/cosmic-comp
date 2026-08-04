@@ -3,10 +3,12 @@
 use crate::state::State;
 use smithay::{
     backend::input::TabletToolDescriptor, input::pointer::CursorImageStatus,
-    wayland::tablet_manager::TabletSeatHandler,
+    input::tablet::TabletSeatHandler, reexports::wayland_server::protocol::wl_surface,
 };
 
 impl TabletSeatHandler for State {
+    type ToolFocus = wl_surface::WlSurface;
+
     fn tablet_tool_image(&mut self, _tool: &TabletToolDescriptor, _image: CursorImageStatus) {
         // TODO display cursor for each tablet tool
     }
