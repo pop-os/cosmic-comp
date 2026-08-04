@@ -221,9 +221,10 @@ where
                             }
                         }) {
                             extension_obj.post_error(
-                            zcosmic_output_configuration_v1::Error::MirroredHeadBusy,
-                            format!("{:?} can't mirror, it is either a mirror target itself or {:?} is not enabled/already mirroring", head, mirroring),
-                        );
+                                zcosmic_output_configuration_v1::Error::MirroredHeadBusy,
+                                format!("{:?} can't mirror, it is either a mirror target itself or {:?} is not enabled/already mirroring", head, mirroring),
+                            );
+                            return;
                         }
 
                         let output_conf = PendingOutputConfiguration::default();
