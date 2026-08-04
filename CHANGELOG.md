@@ -1,3 +1,18 @@
+# [1.34.0](https://github.com/playtron-os/cosmic-comp/compare/v1.33.0...v1.34.0) (2026-08-04)
+
+
+### Bug Fixes
+
+* **blur:** keep a backdrop settled while its surface moves ([698bcf7](https://github.com/playtron-os/cosmic-comp/commit/698bcf762e1fb1aec3a30e8fd686318113f2497f))
+* **blur:** let a backdrop arriving with its surface appear with it ([77b5e14](https://github.com/playtron-os/cosmic-comp/commit/77b5e14465552f6783d5d41a5daed7ba967e86e9))
+* **shadow:** stop squaring the popup shadow's opacity ([36eaba5](https://github.com/playtron-os/cosmic-comp/commit/36eaba59ce35f435cdea1d9e7639d2a86c7f766a))
+* **shadow:** wait for a popup to be drawn before shadowing it ([9265ae3](https://github.com/playtron-os/cosmic-comp/commit/9265ae399135e2992a7f36479c0685adf0adaa9a))
+
+
+### Features
+
+* **shadow:** draw shadows behind popups of ordinary windows ([3baf8b4](https://github.com/playtron-os/cosmic-comp/commit/3baf8b4c6d92ac37de245db638d000434dfa68fd))
+
 # [1.33.0](https://github.com/playtron-os/cosmic-comp/compare/v1.32.0...v1.33.0) (2026-08-04)
 
 
