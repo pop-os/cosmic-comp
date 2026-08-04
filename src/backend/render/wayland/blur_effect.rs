@@ -99,6 +99,15 @@ fn schedule_blur_fade(now: Instant) {
     }
 }
 
+/// Where a rect sits inside its surface, which is the space the fade
+/// bookkeeping is keyed in -- see [`first_seen_for`].
+fn surface_local(
+    geometry: Rectangle<f64, Logical>,
+    rect: Rectangle<f64, Logical>,
+) -> Rectangle<f64, Logical> {
+    Rectangle::new(rect.loc - geometry.loc, rect.size)
+}
+
 /// When a blur rect should be treated as having first appeared, and whether
 /// that start needs redraws scheduled for it.
 ///
@@ -107,6 +116,13 @@ fn schedule_blur_fade(now: Instant) {
 /// Matching by overlap keeps each existing rect paired with itself, so only a
 /// genuinely new one starts at zero alpha. Overlap also keeps a card matched to
 /// itself across a hover lift, which moves it without making it new.
+///
+/// Rects are compared SURFACE-LOCAL, so the surface moving under them is not a
+/// change: identity is where a card sits on its surface, not where that surface
+/// sits on screen. Globally there is not even one position to compare against --
+/// a workspace slide emits the bottom and background layers twice per frame, one
+/// copy per workspace and always a full output apart, and the two would each
+/// read the other's rects as brand new every frame.
 ///
 /// A rect on a surface that is itself new does not fade at all: the backdrop
 /// arrives with the surface, so the surface's own appearance already governs
@@ -357,13 +373,18 @@ pub struct BlurState {
     pub offset: f64,
     pub passes: usize,
     pub region: Vec<Rectangle<i32, Logical>>,
-    /// The rects drawn last frame, each with when it first appeared, so a rect
-    /// that is NEW can fade in while its neighbours stay put.
+    /// The rects drawn last frame, SURFACE-LOCAL, each with when it first
+    /// appeared, so a rect that is NEW can fade in while its neighbours stay put.
     ///
     /// Matched by overlap rather than by index: a client re-sends its whole
     /// region every time any part of it changes, so index is not identity --
     /// inserting one card would renumber the rest and re-fade every one of them.
     /// Overlap also keeps a card that MOVES (a hover lift) matched to itself.
+    ///
+    /// Surface-local rather than global because the surface itself moves for
+    /// reasons that have nothing to do with its backdrop -- a workspace slide,
+    /// an auto-hide, a layer open -- and one of those (the slide) renders the
+    /// surface twice per frame, a full output apart. See [`first_seen_for`].
     pub seen: Vec<(Rectangle<f64, Logical>, Instant)>,
     /// The exact area last rendered, so a sub-pixel move still counts as a
     /// change. `region` is whole logical pixels and `src` only tracks size, so
@@ -624,14 +645,15 @@ impl BlurElement {
                 "blur_rect_resolved: wire bound, exact area and the pixels drawn"
             );
 
+            let local = surface_local(geometry, rect_geo);
             let (first_seen, needs_redraws) =
-                first_seen_for(&previously_seen, rect_geo, surface_is_new, now);
+                first_seen_for(&previously_seen, local, surface_is_new, now);
             if needs_redraws {
                 // Claim redraws for the whole fade: nothing else will schedule
                 // the frames it needs to advance.
                 schedule_blur_fade(now);
             }
-            seen_now.push((rect_geo, first_seen));
+            seen_now.push((local, first_seen));
             let rect_alpha = alpha * fade_alpha(first_seen);
 
             if let Some(element) = Self::internal(
@@ -1284,7 +1306,7 @@ fn render_blur(
 
 #[cfg(test)]
 mod tests {
-    use super::{BLUR_FADE_IN, fade_alpha, first_seen_for, physical_rect_snapped};
+    use super::{BLUR_FADE_IN, fade_alpha, first_seen_for, physical_rect_snapped, surface_local};
     use smithay::utils::{Logical, Rectangle};
     use std::time::Instant;
 
@@ -1361,6 +1383,39 @@ mod tests {
             !needs_redraws,
             "nothing is animating, so no frames need claiming for it"
         );
+    }
+
+    /// A surface that MOVES keeps its backdrops settled.
+    ///
+    /// A workspace slide emits the bottom and background layers twice per frame,
+    /// one copy per workspace and always a full output apart, both drawing the
+    /// same surface through the same bookkeeping. Compared globally the two
+    /// copies never overlap, so each read the other's rects as new every frame:
+    /// the blur stayed at zero through the slide and then faded in once the
+    /// switch settled. Surface-local, the position of the surface drops out.
+    #[test]
+    fn a_surface_moving_does_not_refade_its_rects() {
+        let surface =
+            |x: f64| Rectangle::<f64, Logical>::new((x, 0.).into(), (1920., 1080.).into());
+        let card = |origin: f64| {
+            Rectangle::<f64, Logical>::new((origin + 40., 100.).into(), (300., 200.).into())
+        };
+        let long_ago = Instant::now() - BLUR_FADE_IN * 2;
+        let now = Instant::now();
+
+        // The incoming workspace's copy, at the settled position.
+        let previously_seen = [(surface_local(surface(0.), card(0.)), long_ago)];
+
+        // The outgoing workspace's copy of the same surface, one output away.
+        let (first_seen, needs_redraws) = first_seen_for(
+            &previously_seen,
+            surface_local(surface(-1920.), card(-1920.)),
+            false,
+            now,
+        );
+
+        assert_eq!(fade_alpha(first_seen), 1., "the backdrop stays settled");
+        assert!(!needs_redraws, "nothing is animating, so nothing to claim");
     }
 
     /// A surface that was already up and gains a backdrop still fades.
