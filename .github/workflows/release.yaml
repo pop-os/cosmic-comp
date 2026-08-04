@@ -41,6 +41,16 @@ jobs:
           npx semantic-release --dry-run 2>&1 | tee sr.log || true
           VERSION=$(grep -oP 'The next release version is \K[0-9]+\.[0-9]+\.[0-9]+' sr.log | tail -n1 || true)
           if [ -n "$VERSION" ]; then
+            # semantic-release only counts tags REACHABLE from the release branch, so a
+            # tag whose release commit never landed (or was dropped by a history rewrite)
+            # is invisible here and the same version gets computed twice. Left alone that
+            # collides at `git tag` in the publish job -- an hour of builds later, and
+            # only AFTER @semantic-release/git has already pushed a bogus release commit
+            # to the branch. Catch it now, while nothing has been built or pushed.
+            if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+              echo "::error::Tag v$VERSION already exists on origin but is not reachable from $(git rev-parse --abbrev-ref HEAD). The v$VERSION release commit is missing from this branch's history, so semantic-release recomputed an already-published version. Reconcile the tag with the branch (e.g. 'git merge -s ours v$VERSION') before re-running this workflow."
+              exit 1
+            fi
             echo "Next release version: $VERSION"
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
