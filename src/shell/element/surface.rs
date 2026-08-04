@@ -3,6 +3,8 @@ use smithay::backend::renderer::gles::element::PixelShaderElement;
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_surface;
 
+use smithay::backend::renderer::utils::with_renderer_surface_state;
+
 use crate::{
     backend::render::{
         element::AsGlowRenderer,
@@ -1176,9 +1178,23 @@ impl CosmicSurface {
                     .unwrap_or([0; 4]);
 
                     // Behind the popup's own content, and only when the client
-                    // asked for it over the shadow protocol. Pushed first
-                    // because elements are collected front to back.
+                    // asked for it over the shadow protocol.
+                    //
+                    // Gated on the popup having a buffer as well. A popup is
+                    // created, told it wants a shadow, and committed before the
+                    // compositor has positioned it or the client has drawn
+                    // anything — and on that frame its geometry is still the
+                    // origin. The content elements come out empty, so without
+                    // this the shadow is the only thing drawn: it appears
+                    // alone at the top-left of the parent window and jumps to
+                    // the pointer once the first buffer lands.
+                    let drawn = with_renderer_surface_state(popup.wl_surface(), |state| {
+                        state.buffer().is_some()
+                    })
+                    .unwrap_or(false);
+
                     if let Some(shadow) = shadow.as_mut()
+                        && drawn
                         && surface_has_shadow(popup.wl_surface())
                     {
                         Self::push_popup_shadow(
