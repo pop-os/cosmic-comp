@@ -82,12 +82,52 @@ pub fn blur_fade_in_flight() -> bool {
     }
 }
 
+/// Marks that a surface has had blur drawn for it at least once.
+///
+/// Present from the first blurred frame onward, so a rect appearing on the
+/// same frame the surface does can be told apart from one appearing on a
+/// surface that has been up for a while.
+#[derive(Debug)]
+struct BlurSeenSurface;
+
 /// Extend the redraw deadline to cover a fade starting now.
 fn schedule_blur_fade(now: Instant) {
     let mut deadline = BLUR_FADE_DEADLINE.lock().unwrap();
     let ends_at = now + BLUR_FADE_IN;
     if deadline.is_none_or(|at| at < ends_at) {
         *deadline = Some(ends_at);
+    }
+}
+
+/// When a blur rect should be treated as having first appeared, and whether
+/// that start needs redraws scheduled for it.
+///
+/// A client re-sends its whole region whenever any part of it changes, so index
+/// is not identity -- a card inserted in the middle renumbers every later rect.
+/// Matching by overlap keeps each existing rect paired with itself, so only a
+/// genuinely new one starts at zero alpha. Overlap also keeps a card matched to
+/// itself across a hover lift, which moves it without making it new.
+///
+/// A rect on a surface that is itself new does not fade at all: the backdrop
+/// arrives with the surface, so the surface's own appearance already governs
+/// how it comes in. Fading on top of that is what makes a popup's backdrop lag
+/// behind the card that pops up instantly.
+fn first_seen_for(
+    previously_seen: &[(Rectangle<f64, Logical>, Instant)],
+    rect: Rectangle<f64, Logical>,
+    surface_is_new: bool,
+    now: Instant,
+) -> (Instant, bool) {
+    if let Some((_, at)) = previously_seen.iter().find(|(seen, _)| seen.overlaps(rect)) {
+        return (*at, false);
+    }
+
+    if surface_is_new {
+        // Dated far enough back to read as already finished, which is also
+        // what later frames inherit through the overlap match above.
+        (now - BLUR_FADE_IN, false)
+    } else {
+        (now, true)
     }
 }
 
@@ -501,6 +541,17 @@ impl BlurElement {
         // Per-rect fade bookkeeping. `seen` is taken rather than borrowed, so
         // the loop below can hand `state` to `internal` mutably.
         let previously_seen = std::mem::take(&mut state.seen);
+
+        // Whether this is the first frame blur has been drawn for this
+        // surface. Recorded on the surface rather than beside the rects,
+        // because the rects are matched by overlap and a surface that changes
+        // its region has no single rect to hang this on.
+        let surface_is_new = states.data_map.get::<BlurSeenSurface>().is_none();
+        if surface_is_new {
+            states
+                .data_map
+                .insert_if_missing_threadsafe(|| BlurSeenSurface);
+        }
         let mut seen_now = Vec::with_capacity(region.len());
         let now = Instant::now();
 
@@ -573,21 +624,13 @@ impl BlurElement {
                 "blur_rect_resolved: wire bound, exact area and the pixels drawn"
             );
 
-            // Fade this rect in only if it is NEW. A client re-sends its whole
-            // region whenever any part of it changes, so an appearing card must
-            // not restart its neighbours -- match by overlap and inherit their
-            // first-seen instant. Overlap also keeps a card matched to itself
-            // across a hover lift, which moves it without making it new.
-            let first_seen = previously_seen
-                .iter()
-                .find(|(seen, _)| seen.overlaps(rect_geo))
-                .map(|(_, at)| *at)
-                .unwrap_or_else(|| {
-                    // Claim redraws for the whole fade: nothing else will
-                    // schedule the frames it needs to advance.
-                    schedule_blur_fade(now);
-                    now
-                });
+            let (first_seen, needs_redraws) =
+                first_seen_for(&previously_seen, rect_geo, surface_is_new, now);
+            if needs_redraws {
+                // Claim redraws for the whole fade: nothing else will schedule
+                // the frames it needs to advance.
+                schedule_blur_fade(now);
+            }
             seen_now.push((rect_geo, first_seen));
             let rect_alpha = alpha * fade_alpha(first_seen);
 
@@ -1241,7 +1284,7 @@ fn render_blur(
 
 #[cfg(test)]
 mod tests {
-    use super::{BLUR_FADE_IN, fade_alpha, physical_rect_snapped};
+    use super::{BLUR_FADE_IN, fade_alpha, first_seen_for, physical_rect_snapped};
     use smithay::utils::{Logical, Rectangle};
     use std::time::Instant;
 
@@ -1291,13 +1334,7 @@ mod tests {
 
         let resolved: Vec<_> = [card(0.), card(400.), card(800.)]
             .into_iter()
-            .map(|rect| {
-                previously_seen
-                    .iter()
-                    .find(|(seen, _)| seen.overlaps(rect))
-                    .map(|(_, at)| *at)
-                    .unwrap_or(now)
-            })
+            .map(|rect| first_seen_for(&previously_seen, rect, false, now).0)
             .map(fade_alpha)
             .collect();
 
@@ -1305,6 +1342,58 @@ mod tests {
         assert!(resolved[0] < 0.01, "the new rect starts transparent");
         assert_eq!(resolved[1], 1., "an existing rect keeps full alpha");
         assert_eq!(resolved[2], 1., "and so does the one after it");
+    }
+
+    /// A backdrop arriving with its surface must not fade.
+    ///
+    /// The surface's own appearance already governs how it comes in: a popup
+    /// pops up, so its backdrop must too. Fading here on top of that is what
+    /// left a menu's blur visibly trailing the card.
+    #[test]
+    fn a_rect_on_a_new_surface_appears_with_it() {
+        let card = Rectangle::<f64, Logical>::new((0., 0.).into(), (300., 200.).into());
+        let now = Instant::now();
+
+        let (first_seen, needs_redraws) = first_seen_for(&[], card, true, now);
+
+        assert_eq!(fade_alpha(first_seen), 1., "full alpha on the first frame");
+        assert!(
+            !needs_redraws,
+            "nothing is animating, so no frames need claiming for it"
+        );
+    }
+
+    /// A surface that was already up and gains a backdrop still fades.
+    ///
+    /// That is the case the fade was built for -- nothing else is animating,
+    /// so without it the backdrop simply pops.
+    #[test]
+    fn a_rect_on_an_existing_surface_still_fades_in() {
+        let card = Rectangle::<f64, Logical>::new((0., 0.).into(), (300., 200.).into());
+        let now = Instant::now();
+
+        let (first_seen, needs_redraws) = first_seen_for(&[], card, false, now);
+
+        assert!(fade_alpha(first_seen) < 0.01, "starts transparent");
+        assert!(needs_redraws, "the fade needs frames to advance it");
+    }
+
+    /// Later frames of a new surface inherit its already-finished start.
+    ///
+    /// The rect is matched by overlap from the second frame on, so whatever
+    /// the first frame decided has to keep reading as settled rather than
+    /// starting a fade one frame late.
+    #[test]
+    fn a_new_surface_stays_settled_on_later_frames() {
+        let card = Rectangle::<f64, Logical>::new((0., 0.).into(), (300., 200.).into());
+        let now = Instant::now();
+
+        let (first_seen, _) = first_seen_for(&[], card, true, now);
+        let (again, needs_redraws) = first_seen_for(&[(card, first_seen)], card, false, now);
+
+        assert_eq!(again, first_seen, "the same start is inherited");
+        assert_eq!(fade_alpha(again), 1.);
+        assert!(!needs_redraws);
     }
 
     /// A rect that MOVES is the same rect, not a new one.
