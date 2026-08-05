@@ -1,3 +1,11 @@
+## [1.34.2](https://github.com/playtron-os/cosmic-comp/compare/v1.34.1...v1.34.2) (2026-08-05)
+
+
+### Bug Fixes
+
+* **minimize:** animate the backdrop color with the window ([ff679af](https://github.com/playtron-os/cosmic-comp/commit/ff679af87553c2f68137840d6fb4bd3430ceec6f))
+* **theme:** reach minimized windows when applying a theme change ([e2e175a](https://github.com/playtron-os/cosmic-comp/commit/e2e175a015809ce4c871531944c91c0eff31d2f5))
+
 ## [1.34.1](https://github.com/playtron-os/cosmic-comp/compare/v1.34.0...v1.34.1) (2026-08-05)
 
 
