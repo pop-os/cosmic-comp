@@ -1315,7 +1315,7 @@ impl TilingLayout {
             .ok_or(NodeIdError::NodeIdNoLongerValid)?;
         let state = {
             let tree = &self.queue.trees.back().unwrap().0;
-            tree.get(&node_id).unwrap().parent().and_then(|parent_id| {
+            tree.get(&node_id)?.parent().and_then(|parent_id| {
                 let parent = tree.get(parent_id).unwrap();
                 let idx = parent
                     .children()
