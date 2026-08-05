@@ -3303,28 +3303,58 @@ impl FloatingLayout {
                 geometry = *target_geo;
             }
 
-            // Pre-compute the animated geometry for Tiled animations.
-            // This is used for backdrop placement so it tracks the animated size,
-            // while the actual buffer stays at previous_geometry and gets rescaled later.
+            // Pre-compute the animated geometry for Tiled/Minimize/Unminimize
+            // animations. This is used for backdrop placement so it tracks the
+            // animated size/position, while the actual buffer stays at
+            // previous_geometry and gets rescaled later via `anim_transform`.
             // ClientPipelinedResize does NOT use this — its geometry is already correct
             // (computed from buffer size above).
-            let tiled_anim_geometry = anim_opt.and_then(|anim| {
-                if matches!(anim, Animation::Tiled { .. }) {
-                    Some(
-                        anim.geometry(
-                            output_geometry,
-                            self.space
-                                .element_geometry(elem)
-                                .map(RectExt::as_local)
-                                .unwrap_or(geometry),
-                            elem.floating_tiled.lock().unwrap().as_ref(),
-                            self.gaps(),
-                            self.theme.motion,
-                        ),
-                    )
-                } else {
-                    None
+            let tiled_anim_geometry = anim_opt.and_then(|anim| match anim {
+                Animation::Tiled { .. } => Some(anim.geometry(
+                    output_geometry,
+                    self.space
+                        .element_geometry(elem)
+                        .map(RectExt::as_local)
+                        .unwrap_or(geometry),
+                    elem.floating_tiled.lock().unwrap().as_ref(),
+                    self.gaps(),
+                    self.theme.motion,
+                )),
+                Animation::Minimize { .. } | Animation::Unminimize { .. } => {
+                    // Minimize/Unminimize scale the content uniformly (aspect
+                    // preserved) and center it inside the animation's current
+                    // rect — mirror that here so the backdrop tracks where the
+                    // content actually renders each frame instead of sitting
+                    // frozen at the window's pre-animation size/position.
+                    let target_geometry = anim.geometry(
+                        output_geometry,
+                        self.space
+                            .element_geometry(elem)
+                            .map(RectExt::as_local)
+                            .unwrap_or(geometry),
+                        elem.floating_tiled.lock().unwrap().as_ref(),
+                        self.gaps(),
+                        self.theme.motion,
+                    );
+
+                    let buffer_size = elem.geometry().size.as_local();
+                    let scale_x = target_geometry.size.w as f64 / buffer_size.w as f64;
+                    let scale_y = target_geometry.size.h as f64 / buffer_size.h as f64;
+                    let uniform_scale = scale_x.min(scale_y);
+
+                    let scaled_w = (buffer_size.w as f64 * uniform_scale) as i32;
+                    let scaled_h = (buffer_size.h as f64 * uniform_scale) as i32;
+                    let offset = Point::from((
+                        (target_geometry.size.w - scaled_w) / 2,
+                        (target_geometry.size.h - scaled_h) / 2,
+                    ));
+
+                    Some(Rectangle::new(
+                        target_geometry.loc + offset,
+                        Size::from((scaled_w, scaled_h)),
+                    ))
                 }
+                _ => None,
             });
 
             let render_location = geometry.loc - elem.geometry().loc.as_local();
