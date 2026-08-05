@@ -333,17 +333,15 @@ impl XdgShellHandler for State {
                     if let Some(ref grab) = grab {
                         if grab.has_ended() {
                             should_ungrab = true;
-                        } else if let Some(target) = grab.current_grab() {
-                            if let Some(wl_surface) = target.wl_surface() {
-                                if wl_surface.as_ref() == surface.wl_surface()
-                                    || smithay::desktop::PopupManager::popups_for_surface(
-                                        surface.wl_surface(),
-                                    )
-                                    .any(|(p, _)| p.wl_surface() == wl_surface.as_ref())
-                                {
-                                    should_ungrab = true;
-                                }
-                            }
+                        } else if let Some(target) = grab.current_grab()
+                            && let Some(wl_surface) = target.wl_surface()
+                            && (wl_surface.as_ref() == surface.wl_surface()
+                                || smithay::desktop::PopupManager::popups_for_surface(
+                                    surface.wl_surface(),
+                                )
+                                .any(|(p, _)| p.wl_surface() == wl_surface.as_ref()))
+                        {
+                            should_ungrab = true;
                         }
                     }
                     if should_ungrab {
