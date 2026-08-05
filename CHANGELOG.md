@@ -1,3 +1,10 @@
+## [1.34.1](https://github.com/playtron-os/cosmic-comp/compare/v1.34.0...v1.34.1) (2026-08-05)
+
+
+### Bug Fixes
+
+* stop recording a rejected mirror configuration ([76a3cfe](https://github.com/playtron-os/cosmic-comp/commit/76a3cfe350207e91474176c1c5b9a201c93202c8))
+
 # [1.34.0](https://github.com/playtron-os/cosmic-comp/compare/v1.33.0...v1.34.0) (2026-08-04)
 
 
