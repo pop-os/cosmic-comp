@@ -2156,9 +2156,11 @@ impl Workspaces {
                 w.tiling_layer.theme = theme.clone();
                 w.floating_layer.theme = theme.clone();
 
-                w.mapped().for_each(|m| {
-                    m.update_theme(theme.clone());
-                });
+                w.mapped()
+                    .chain(w.minimized_windows.iter().flat_map(|m| m.mapped()))
+                    .for_each(|m| {
+                        m.update_theme(theme.clone());
+                    });
             }
         }
 
@@ -2173,9 +2175,11 @@ impl Workspaces {
             s.sticky_layer.refresh();
 
             for w in &mut s.workspaces {
-                w.mapped().for_each(|m| {
-                    m.force_redraw();
-                });
+                w.mapped()
+                    .chain(w.minimized_windows.iter().flat_map(|m| m.mapped()))
+                    .for_each(|m| {
+                        m.force_redraw();
+                    });
 
                 w.refresh();
                 w.dirty.store(true, Ordering::Relaxed);
