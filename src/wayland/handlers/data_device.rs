@@ -123,9 +123,32 @@ impl DndGrabHandler for State {
         seat: Seat<Self>,
         _location: Point<f64, Logical>,
     ) {
-        if let Some(icon) = seat.user_data().get::<Mutex<Option<DnDIcon>>>() {
-            icon.lock().unwrap().take();
+        clear_dnd_icon(&seat);
+    }
+
+    fn cancelled(&mut self, seat: Seat<Self>, _location: Point<f64, Logical>) {
+        // A cancelled grab (e.g. the source destroying its data source) never drops, so this is
+        // the only chance to drop the icon. Clients commonly keep the icon surface alive for the
+        // next drag, so relying on it dying would leave it painted on the cursor.
+        clear_dnd_icon(&seat);
+
+        // Unlike a drop, a cancel isn't driven by input, so nothing else damages the cursor plane.
+        let outputs = self
+            .common
+            .shell
+            .read()
+            .outputs()
+            .cloned()
+            .collect::<Vec<_>>();
+        for output in outputs {
+            self.backend.schedule_render(&output);
         }
+    }
+}
+
+fn clear_dnd_icon(seat: &Seat<State>) {
+    if let Some(icon) = seat.user_data().get::<Mutex<Option<DnDIcon>>>() {
+        icon.lock().unwrap().take();
     }
 }
 
