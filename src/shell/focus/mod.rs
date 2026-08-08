@@ -282,7 +282,7 @@ impl Shell {
                     return None;
                 }
 
-                let output = seat.focused_or_active_output();
+                let output = seat.keyboard_or_active_output();
                 let space = self.active_space(&output).unwrap();
                 let stack = space.focus_stack.get(seat);
                 stack.last().and_then(|target| match target {

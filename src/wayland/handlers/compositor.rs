@@ -385,8 +385,8 @@ impl State {
             let initial_size = if let Some(output) = pending.fullscreen.as_ref() {
                 Some(output.geometry().size.as_logical())
             } else if pending.maximized {
-                let active_output = shell.seats.last_active().active_output();
-                let zone = layer_map_for_output(&active_output).non_exclusive_zone();
+                let output = pending.seat.keyboard_or_active_output();
+                let zone = layer_map_for_output(&output).non_exclusive_zone();
                 Some(zone.size)
             } else {
                 None

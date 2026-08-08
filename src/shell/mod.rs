@@ -4814,7 +4814,11 @@ impl Shell {
         ) {
             return;
         }
-        let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
+        let set = self
+            .workspaces
+            .sets
+            .get_mut(&seat.keyboard_or_active_output())
+            .unwrap();
         let workspace = &mut set.workspaces[set.active];
 
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();

@@ -697,7 +697,7 @@ impl State {
             }
 
             Action::MigrateWorkspaceToOutput(direction) => {
-                let active_output = seat.active_output();
+                let active_output = seat.keyboard_or_active_output();
                 let (active, next_output) = {
                     let shell = self.common.shell.read();
 
@@ -840,7 +840,7 @@ impl State {
                                 .as_ref()
                                 .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
                             {
-                                let current_output = seat.active_output();
+                                let current_output = seat.keyboard_or_active_output();
                                 let workspace_idx = shell.workspaces.active_num(&current_output).1;
                                 shell.previous_workspace_idx = Some((
                                     last_mod_serial,
@@ -880,7 +880,7 @@ impl State {
                         Shell::set_focus(self, Some(&shift), seat, None, true);
                     }
                     _ => {
-                        let current_output = seat.active_output();
+                        let current_output = seat.keyboard_or_active_output();
                         let mut shell = self.common.shell.write();
                         let workspace = shell.active_space(&current_output).unwrap();
                         if let Some(FocusTarget::Window(focused_window)) =
@@ -973,17 +973,15 @@ impl State {
                 &self.common.config,
                 self.common.event_loop_handle.clone(),
             ),
-            // NOTE: implementation currently assumes actions that apply to outputs should apply to the active output
-            // rather than the output that has keyboard focus
             Action::ToggleOrientation => {
-                let output = seat.active_output();
+                let output = seat.keyboard_or_active_output();
                 let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.tiling_layer.update_orientation(None, seat);
             }
 
             Action::Orientation(orientation) => {
-                let output = seat.active_output();
+                let output = seat.keyboard_or_active_output();
                 let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace
@@ -1026,7 +1024,7 @@ impl State {
                         }
                     });
                 } else {
-                    let output = seat.active_output();
+                    let output = seat.keyboard_or_active_output();
                     let mut shell = self.common.shell.write();
                     let workspace = shell.workspaces.active_mut(&output).unwrap();
                     let mut guard = self.common.workspace_state.update();

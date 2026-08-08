@@ -783,14 +783,14 @@ where
         .lock()
         .unwrap()
         .is_some();
-    let focused_output = last_active_seat.focused_or_active_output();
+    let keyboard_output = last_active_seat.keyboard_or_active_output();
     let set = shell.workspaces.sets.get(output).ok_or(OutputNoMode)?;
     let workspace = set
         .workspaces
         .iter()
         .find(|w| w.handle == current.0)
         .ok_or(OutputNoMode)?;
-    let is_active_space = workspace.output == focused_output;
+    let is_active_space = workspace.output == keyboard_output;
     let active_hint = if shell.active_hint {
         theme.cosmic().active_hint as u8
     } else {
@@ -799,9 +799,8 @@ where
 
     // Dim panel / layer-shell surfaces on outputs that don't have keyboard focus, as a hint
     // for which output keyboard-driven shortcuts act on. Only meaningful with multiple outputs
-    let dim_inactive_panels = shell.dim_inactive_panels
-        && shell.outputs().count() > 1
-        && last_active_seat.keyboard_or_active_output() != *output;
+    let dim_inactive_panels =
+        shell.dim_inactive_panels && shell.outputs().count() > 1 && keyboard_output != *output;
 
     let output_size = output
         .geometry()
