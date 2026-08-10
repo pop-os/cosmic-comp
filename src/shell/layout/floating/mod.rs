@@ -3310,16 +3310,18 @@ impl FloatingLayout {
             // ClientPipelinedResize does NOT use this — its geometry is already correct
             // (computed from buffer size above).
             let tiled_anim_geometry = anim_opt.and_then(|anim| match anim {
-                Animation::Tiled { .. } => Some(anim.geometry(
-                    output_geometry,
-                    self.space
-                        .element_geometry(elem)
-                        .map(RectExt::as_local)
-                        .unwrap_or(geometry),
-                    elem.floating_tiled.lock().unwrap().as_ref(),
-                    self.gaps(),
-                    self.theme.motion,
-                )),
+                Animation::Tiled { .. } => Some(
+                    anim.geometry(
+                        output_geometry,
+                        self.space
+                            .element_geometry(elem)
+                            .map(RectExt::as_local)
+                            .unwrap_or(geometry),
+                        elem.floating_tiled.lock().unwrap().as_ref(),
+                        self.gaps(),
+                        self.theme.motion,
+                    ),
+                ),
                 Animation::Minimize { .. } | Animation::Unminimize { .. } => {
                     // Minimize/Unminimize scale the content uniformly (aspect
                     // preserved) and center it inside the animation's current

@@ -1591,7 +1591,12 @@ impl Common {
             && shell.game_mode.output.as_ref() == Some(output)
             && let Some(overlay) = shell.game_mode.overlay_surface.as_ref()
         {
-            overlay.send_frame(output, time, window_throttle(voice_faded, overlay), should_send);
+            overlay.send_frame(
+                output,
+                time,
+                window_throttle(voice_faded, overlay),
+                should_send,
+            );
         }
 
         if let Some(active) = shell.active_space(output) {
