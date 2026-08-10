@@ -66,17 +66,15 @@ tasks:
       - ./target/{{.TARGET_ARCH}}/debug/{{.NAME}}
 
   dist:prepare:
-    desc: Prepare the project for packaging
-    deps:
-      - build:release
-    sources:
-      - target/{{.TARGET_ARCH}}/release/{{.NAME}}
-    generates:
-      - .cache/{{.NAME}}/usr/bin/{{.NAME}}
+    desc: Prepare the project for packaging (set PROFILE=debug for a debuggable build)
+    vars:
+      PROFILE: '{{.PROFILE | default "release"}}'
+      BUILD_FLAGS: '{{if eq .PROFILE "debug"}}--features debug{{else}}--release{{end}}'
     cmds:
+      - cargo build {{.BUILD_FLAGS}} --target {{.TARGET_ARCH}}
       - rm -rf .cache/{{.NAME}}
       - mkdir -p .cache/{{.NAME}}/usr/bin
-      - install -Dm0755 "target/{{.TARGET_ARCH}}/release/{{.NAME}}" ".cache/{{.NAME}}/usr/bin/{{.NAME}}"
+      - install -Dm0755 "target/{{.TARGET_ARCH}}/{{.PROFILE}}/{{.NAME}}" ".cache/{{.NAME}}/usr/bin/{{.NAME}}"
       - install -Dm0644 "data/keybindings.ron" ".cache/{{.NAME}}/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults"
       - install -Dm0644 "data/tiling-exceptions.ron" ".cache/{{.NAME}}/usr/share/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults"
       - install -Dm0644 "LICENSE" ".cache/{{.NAME}}/usr/share/licenses/cosmic-comp/LICENSE"
@@ -89,22 +87,32 @@ tasks:
   dist:archive:
     desc: Build a tar archive of the project
     deps:
-      - dist:prepare
+      - task: dist:prepare
+        vars:
+          PROFILE: '{{.PROFILE}}'
+    vars:
+      # Debug and release must not share an artifact name: they stage identical paths, so a
+      # shared name lets the up-to-date check package the other profile's tree.
+      SUFFIX: '{{if eq .PROFILE "debug"}}-debug{{end}}'
     sources:
       - .cache/{{.NAME}}/**/*
     generates:
-      - dist/{{.NAME}}-{{.ARCH}}.tar.gz
+      - dist/{{.NAME}}-{{.ARCH}}{{.SUFFIX}}.tar.gz
     cmds:
-      - tar cvfz dist/{{.NAME}}-{{.ARCH}}.tar.gz -C .cache {{.NAME}}
+      - tar cvfz dist/{{.NAME}}-{{.ARCH}}{{.SUFFIX}}.tar.gz -C .cache {{.NAME}}
 
   dist:rpm:
     desc: Build an RPM package
     aliases:
       - rpm
     deps:
-      - dist:archive
+      - task: dist:archive
+        vars:
+          PROFILE: '{{.PROFILE}}'
+    vars:
+      SUFFIX: '{{if eq .PROFILE "debug"}}-debug{{end}}'
     sources:
-      - dist/{{.NAME}}-{{.ARCH}}.tar.gz
+      - dist/{{.NAME}}-{{.ARCH}}{{.SUFFIX}}.tar.gz
       - pkg/rpm/{{.NAME}}.spec
     generates:
       - dist/{{.NAME}}-{{.VERSION}}-*.{{.ARCH}}.rpm
@@ -114,9 +122,20 @@ tasks:
     cmds:
       - mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
       - cp ./pkg/rpm/{{.NAME}}.spec ~/rpmbuild/SPECS
-      - cp dist/{{.NAME}}-{{.ARCH}}.tar.gz ~/rpmbuild/SOURCES/{{.NAME}}.tar.gz
+      - cp dist/{{.NAME}}-{{.ARCH}}{{.SUFFIX}}.tar.gz ~/rpmbuild/SOURCES/{{.NAME}}.tar.gz
       - rpmbuild -bb --target {{.ARCH}} --define '_prefix /usr' ~/rpmbuild/SPECS/{{.NAME}}.spec
       - cp ~/rpmbuild/RPMS/{{.ARCH}}/{{.NAME}}-{{.VERSION}}-*.{{.ARCH}}.rpm dist
+
+  dist:rpm:debug:
+    desc: "Build a debug RPM (unoptimized + the debug feature) - much faster to iterate than rpm"
+    aliases:
+      - rpm:debug
+    cmds:
+      # Same NVR as the release RPM, so it installs straight over one. The binary is far larger
+      # and slower; rebuild with `rpm` before measuring anything or shipping.
+      - task: dist:rpm
+        vars:
+          PROFILE: debug
 
   dist:all:
     desc: Build all supported distributable packages
@@ -246,6 +265,7 @@ tasks:
       - |
         docker run --rm \
           -v "{{.PWD}}:{{.PWD}}" \
+          -v "{{.PWD}}/../smithay:{{.PWD}}/../smithay" \
           -v "{{.PWD}}/.cache/home:/home/build" \
           -v "{{.PWD}}/.cache/var/lib/rpm:/var/lib/rpm" \
           -v "{{.PWD}}/.cache/.ssh:/home/build/.ssh" \
