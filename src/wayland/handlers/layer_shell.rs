@@ -138,13 +138,60 @@ impl WlrLayerShellHandler for State {
             .cloned();
 
         if let Some(output) = maybe_output {
+            use smithay::wayland::shell::wlr_layer::Layer;
+            let torn_layer;
             {
                 let mut map = layer_map_for_output(&output);
                 let layer = map
                     .layer_for_surface(surface.wl_surface(), WindowSurfaceType::TOPLEVEL)
                     .unwrap()
                     .clone();
+                torn_layer = layer.layer();
                 map.unmap_layer(&layer);
+            }
+            let torn_was_background = torn_layer == Layer::Background;
+
+            // Latch the current frame the instant the outgoing UI dies, before the
+            // schedule_render below composites a content-less frame the freeze would
+            // capture. Desktop: the wallpaper (Background) dies — a wallpaper CHANGE also
+            // lands here and is released by the fresh map. Greeter: it has no wallpaper, so
+            // an Overlay teardown in a session with no Background layer is the signal.
+            let no_wallpaper_session = || {
+                !shell.outputs().any(|o| {
+                    layer_map_for_output(o)
+                        .layers()
+                        .any(|l| l.layer() == Layer::Background)
+                })
+            };
+            let should_arm = crate::freeze_on_exit_enabled()
+                && !shell.logout_hold
+                && (torn_was_background
+                    || (matches!(torn_layer, Layer::Top | Layer::Overlay)
+                        && no_wallpaper_session()));
+            if should_arm {
+                shell.logout_hold = true;
+                tracing::debug!(
+                    ?torn_layer,
+                    "freeze hold: latching last frame for session handoff"
+                );
+                let _ = self.common.event_loop_handle.insert_source(
+                    smithay::reexports::calloop::timer::Timer::from_duration(
+                        std::time::Duration::from_secs(5),
+                    ),
+                    |_, _, state: &mut State| {
+                        let mut shell = state.common.shell.write();
+                        if shell.logout_hold {
+                            tracing::warn!("logout hold: timeout, releasing");
+                            shell.logout_hold = false;
+                            let outputs = shell.outputs().cloned().collect::<Vec<_>>();
+                            drop(shell);
+                            for output in outputs {
+                                state.backend.schedule_render(&output);
+                            }
+                        }
+                        smithay::reexports::calloop::timer::TimeoutAction::Drop
+                    },
+                );
             }
 
             // Update layer blur cache after unmapping

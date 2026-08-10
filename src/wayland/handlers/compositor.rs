@@ -694,6 +694,19 @@ impl State {
             // compute initial dimensions by mapping
             let target = shell.map_layer(&layer_surface);
 
+            // Logout-hold self-heal: a fresh wallpaper mapping means this was a
+            // wallpaper CHANGE, not a logout — resume presenting.
+            if shell.logout_hold
+                && layer_surface.layer() == smithay::wayland::shell::wlr_layer::Layer::Background
+            {
+                shell.logout_hold = false;
+                tracing::debug!("logout hold: fresh wallpaper mapped, releasing");
+                let outputs = shell.outputs().cloned().collect::<Vec<_>>();
+                for output in &outputs {
+                    self.backend.schedule_render(output);
+                }
+            }
+
             if let Some(target) = target {
                 let seat = shell.seats.last_active().clone();
                 std::mem::drop(shell);

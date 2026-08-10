@@ -36,7 +36,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use wayland::protocols::{
     keyboard_layout::KeyboardLayoutState, layer_usable_area::UsableAreaState,
     overlap_notify::OverlapNotifyState,
@@ -215,6 +215,10 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         warn!(?err, "Failed to watch theme");
     }
 
+    if let Err(err) = install_termination_handler(event_loop.handle()) {
+        warn!(?err, "Failed to install termination handler");
+    }
+
     // run the event loop
     event_loop.run(None, &mut state, |state| {
         // Only track main-loop health during an active capture window (a single
@@ -342,6 +346,24 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         for device in kms.drm_devices.values_mut() {
             device.drm.pause();
         }
+
+        // Keep the last frame scanning out after we exit, so the next compositor can adopt
+        // it. Ordering is load-bearing: AFTER pause() (buffer can no longer change) and
+        // BEFORE the drain (which drops each DrmOutput, removing it from the manager map).
+        if freeze_on_exit_enabled() {
+            for device in kms.drm_devices.values_mut() {
+                let mut drm = device.drm.lock();
+                let compositors = drm.compositors();
+                debug!(
+                    count = compositors.len(),
+                    "freeze-on-exit: freezing scanout"
+                );
+                for compositor in compositors.values() {
+                    compositor.lock().unwrap().freeze_scanout();
+                }
+            }
+        }
+
         for device in kms.drm_devices.values_mut() {
             for (_, surface) in device.inner.surfaces.drain() {
                 surface.drop_and_join();
@@ -374,6 +396,85 @@ Options:
   --no-xwayland       Run without Xwayland
   -v, --version       Show the version of cosmic-comp"#
     );
+}
+
+/// Write end of the signal self-pipe; -1 until installed.
+static SIGNAL_PIPE_WRITE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+extern "C" fn handle_termination_signal(sig: libc::c_int) {
+    let fd = SIGNAL_PIPE_WRITE.load(std::sync::atomic::Ordering::Relaxed);
+    if fd >= 0 {
+        // write(2) is async-signal-safe; a full pipe just means a wakeup is pending. The
+        // byte carries the signal number.
+        unsafe { libc::write(fd, [sig as u8].as_ptr() as *const _, 1) };
+    }
+}
+
+/// Turn SIGTERM/SIGINT/SIGHUP into a graceful shutdown instead of instant death.
+///
+/// As a child of cosmic-session we are ended by signal, not by the kiosk child exiting;
+/// the default disposition skips shutdown entirely (threads never join, no scanout freeze).
+/// Routed through a self-pipe — the only thing a handler may safely touch.
+fn install_termination_handler(handle: calloop::LoopHandle<'static, state::State>) -> Result<()> {
+    use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
+
+    let mut fds = [0 as libc::c_int; 2];
+    // CLOEXEC so the pipe doesn't leak into the kiosk child or Xwayland.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) } != 0 {
+        return Err(std::io::Error::last_os_error()).context("Failed to create signal pipe");
+    }
+    let (read_fd, write_fd) =
+        unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+
+    SIGNAL_PIPE_WRITE.store(write_fd.as_raw_fd(), std::sync::atomic::Ordering::Relaxed);
+    // Leaked deliberately: the handler may fire until process exit.
+    std::mem::forget(write_fd);
+
+    for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+        let handler = handle_termination_signal as *const () as libc::sighandler_t;
+        if unsafe { libc::signal(sig, handler) } == libc::SIG_ERR {
+            return Err(std::io::Error::last_os_error())
+                .context("Failed to install signal handler");
+        }
+    }
+
+    handle
+        .insert_source(
+            Generic::new(read_fd, Interest::READ, Mode::Level),
+            |_, fd, state: &mut state::State| {
+                // Drain so a level-triggered source doesn't spin.
+                let mut buf = [0u8; 16];
+                let mut last = 0u8;
+                loop {
+                    let n = unsafe {
+                        libc::read(fd.as_raw_fd(), buf.as_mut_ptr() as *mut _, buf.len())
+                    };
+                    if n <= 0 {
+                        break;
+                    }
+                    last = buf[n as usize - 1];
+                }
+                if !state.common.should_stop {
+                    let name = match libc::c_int::from(last) {
+                        libc::SIGTERM => "SIGTERM",
+                        libc::SIGINT => "SIGINT",
+                        libc::SIGHUP => "SIGHUP",
+                        _ => "signal",
+                    };
+                    info!("Received {name}, shutting down");
+                    state.common.should_stop = true;
+                }
+                Ok(PostAction::Continue)
+            },
+        )
+        .map_err(|err| anyhow::anyhow!("Failed to insert signal source: {err}"))?;
+
+    Ok(())
+}
+
+/// Session-handoff freeze opt-in (shared by the exit CLOSEFB and the logout frame hold).
+pub(crate) fn freeze_on_exit_enabled() -> bool {
+    std::env::var_os("COSMIC_FREEZE_SCANOUT_ON_EXIT").is_some_and(|v| v != "0")
 }
 
 fn init_wayland_display(

@@ -822,6 +822,10 @@ pub struct Shell {
     pub voice_orb_state: crate::backend::render::voice_orb::VoiceOrbState,
 
     /// Layer surfaces currently fading in (surface ObjectId -> map instant)
+    /// Stop presenting once the outgoing session's UI dies, so the last real frame stays
+    /// latched for the exit freeze. Armed in `layer_destroyed`, released by a fresh
+    /// wallpaper map or a 5s timer.
+    pub logout_hold: bool,
     layer_fade_in: std::collections::HashMap<ObjectId, Instant>,
     /// Layer surfaces waiting for a buffer commit before starting their fade-in,
     /// with the instant they started waiting. Moved to `layer_fade_in` when the
@@ -2518,6 +2522,7 @@ impl Shell {
 
             // Layer surface fade-in tracking
             layer_fade_in: std::collections::HashMap::new(),
+            logout_hold: false,
             pending_layer_fade_in: std::collections::HashMap::new(),
             layer_fade_out: std::collections::HashMap::new(),
 
@@ -5598,6 +5603,18 @@ impl Shell {
             );
         }
         result
+    }
+
+    /// Whether any layer surface is mapped but not yet visible (alpha 0 pending its first
+    /// buffer, or mid fade-in). Hidden surfaces are excluded: a start-hidden overlay never
+    /// commits a buffer and would keep this permanently true.
+    pub fn layer_fade_in_active(&self) -> bool {
+        self.pending_layer_fade_in
+            .keys()
+            .chain(self.pending_layer_opens.keys())
+            .any(|id| !self.is_surface_hidden(id))
+            || !self.layer_fade_in.is_empty()
+            || self.layer_opens.iter().any(|o| o.is_animating())
     }
 
     /// Remove completed layer fade-in entries (called from update_animations)

@@ -192,6 +192,123 @@ pub fn init_backend(
     Ok(())
 }
 
+/// Export a DRM GEM handle as a PRIME dmabuf fd (`DRM_IOCTL_PRIME_HANDLE_TO_FD`). No
+/// binding in drm-ffi 0.9, so issue the ioctl directly. Opcode verified against the
+/// kernel `<drm/drm.h>` (0xC00C642D; the arg struct is 12 bytes, not 8).
+fn prime_handle_to_fd(
+    card_fd: std::os::unix::io::RawFd,
+    handle: u32,
+) -> std::io::Result<std::os::fd::OwnedFd> {
+    #[repr(C)]
+    struct DrmPrimeHandle {
+        handle: u32,
+        flags: u32,
+        fd: i32,
+    }
+    const DRM_IOCTL_PRIME_HANDLE_TO_FD: libc::c_ulong = 0xC00C_642D;
+    let mut arg = DrmPrimeHandle {
+        handle,
+        flags: libc::O_CLOEXEC as u32,
+        fd: -1,
+    };
+    let ret = unsafe {
+        libc::ioctl(
+            card_fd,
+            DRM_IOCTL_PRIME_HANDLE_TO_FD,
+            &mut arg as *mut DrmPrimeHandle,
+        )
+    };
+    if ret != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(unsafe { std::os::fd::FromRawFd::from_raw_fd(arg.fd) })
+}
+
+/// Capture the previous compositor's still-scanning-out frame as a Dmabuf. Must run
+/// BEFORE `initialize_output` modesets. `None` on any failure (falls back to grey).
+fn capture_frozen_frame(
+    dev: &smithay::backend::drm::DrmDevice,
+    planes: &smithay::backend::drm::Planes,
+) -> Option<Dmabuf> {
+    use smithay::backend::allocator::dmabuf::DmabufFlags;
+    use smithay::reexports::drm::control::Device as _;
+
+    let primary = planes.primary.first()?;
+    let fb = dev.get_plane(primary.handle).ok()?.framebuffer()?;
+    let p = dev.get_planar_framebuffer(fb).ok()?;
+    let handle = p.buffers()[0]?;
+    let modifier = p.modifier()?;
+    let dfd = prime_handle_to_fd(
+        std::os::unix::io::AsRawFd::as_raw_fd(dev.device_fd()),
+        u32::from(handle),
+    )
+    .ok()?;
+    // Import under the matching X format (same layout, alpha ignored): scanout buffers
+    // commonly carry alpha=0 and would otherwise blend away to nothing.
+    use smithay::backend::allocator::Fourcc;
+    let format = match p.pixel_format() {
+        Fourcc::Argb2101010 => Fourcc::Xrgb2101010,
+        Fourcc::Abgr2101010 => Fourcc::Xbgr2101010,
+        Fourcc::Argb8888 => Fourcc::Xrgb8888,
+        Fourcc::Abgr8888 => Fourcc::Xbgr8888,
+        other => other,
+    };
+    let (w, h) = p.size();
+    let mut b = Dmabuf::builder((w as i32, h as i32), format, modifier, DmabufFlags::empty());
+    b.add_plane(dfd, 0, p.offsets()[0], p.pitches()[0]);
+    let dmabuf = b.build();
+    if dmabuf.is_some() {
+        debug!(size = ?p.size(), src_format = ?p.pixel_format(), import_format = ?format, "adopt: captured frozen frame for handoff backdrop");
+    }
+    dmabuf
+}
+
+/// Import a captured frozen frame as a fullscreen backdrop element for `output`.
+pub(crate) fn adopt_backdrop_element<R>(
+    renderer: &mut R,
+    dmabuf: &Dmabuf,
+    output: &Output,
+) -> Option<crate::backend::render::element::CosmicElement<R>>
+where
+    R: crate::backend::render::element::AsGlowRenderer,
+    R::TextureId: Send + 'static,
+    crate::shell::CosmicMappedRenderElement<R>:
+        smithay::backend::renderer::element::RenderElement<R>,
+{
+    use smithay::backend::renderer::element::{Id, Kind, texture::TextureRenderElement};
+    use smithay::backend::renderer::{ImportDma as _, Renderer as _};
+    use smithay::utils::Transform;
+
+    let tex = match renderer.glow_renderer_mut().import_dmabuf(dmabuf, None) {
+        Ok(tex) => {
+            debug!("handoff: initial-submit backdrop imported (first flip = frozen frame)");
+            tex
+        }
+        Err(err) => {
+            warn!(
+                ?err,
+                "handoff: initial-submit backdrop import FAILED (first flip = grey)"
+            );
+            return None;
+        }
+    };
+    let scale = output.current_scale().integer_scale();
+    let elem = TextureRenderElement::from_static_texture(
+        Id::new(),
+        renderer.glow_renderer().context_id(),
+        (0., 0.),
+        tex,
+        scale,
+        Transform::Normal,
+        Some(1.0),
+        None,
+        None,
+        None,
+        Kind::Unspecified,
+    );
+    Some(crate::backend::render::element::CosmicElement::Adopt(elem))
+}
+
 fn init_libinput(
     dh: &DisplayHandle,
     session: &LibSeatSession,
@@ -388,7 +505,20 @@ impl State {
         }
         // active drm, resume leases
         for device in backend.drm_devices.values_mut() {
-            if let Err(err) = device.drm.lock().activate(true) {
+            // `activate(true)` resets every CRTC (blanks the display); `false` adopts the
+            // previous master's mode+framebuffer so our first commit is a page-flip. Falls
+            // back to the reset, at the cost of one flash.
+            let mut drm = device.drm.lock();
+            let mut result = drm.activate(false);
+            match result.as_ref() {
+                Ok(()) => debug!("handoff: activate(false) adopted live CRTC state (no reset)"),
+                Err(err) => {
+                    warn!(?err, "handoff: activate(false) FAILED; reset with flash");
+                    result = drm.activate(true);
+                }
+            }
+            drop(drm);
+            if let Err(err) = result {
                 error!(?err, "Failed to resume drm device");
                 continue;
             }
@@ -1145,6 +1275,14 @@ impl KmsGuard<'_> {
                             planes.cursor = vec![];
                         }
 
+                        // Capture the previous session's frozen frame BEFORE initialize_output
+                        // modesets, to hand to the render thread as a handoff backdrop.
+                        let adopt_dmabuf = if crate::freeze_on_exit_enabled() {
+                            capture_frozen_frame(drm.device(), &planes)
+                        } else {
+                            None
+                        };
+
                         let compositor: GbmDrmOutput = {
                             let mut renderer = self
                                 .api
@@ -1152,8 +1290,9 @@ impl KmsGuard<'_> {
                                 .with_context(|| "Failed to create renderer")?;
 
                             let mut elements = DrmOutputRenderElements::default();
-                            for (crtc, output) in output_map.iter() {
-                                let output_elements = output_elements(
+                            let mut establishing_crtc_covered = false;
+                            for (loop_crtc, output) in output_map.iter() {
+                                let mut output_elements = output_elements(
                                     Some(&device.inner.render_node),
                                     &mut renderer,
                                     &shell,
@@ -1165,7 +1304,31 @@ impl KmsGuard<'_> {
                                 )
                                 .with_context(|| "Failed to render outputs")?;
 
-                                elements.add_output(crtc, CLEAR_COLOR, output_elements);
+                                if loop_crtc == crtc
+                                    && let Some(dmabuf) = adopt_dmabuf.as_ref()
+                                    && let Some(elem) =
+                                        adopt_backdrop_element(&mut renderer, dmabuf, output)
+                                {
+                                    output_elements.push(elem);
+                                    establishing_crtc_covered = true;
+                                }
+
+                                elements.add_output(loop_crtc, CLEAR_COLOR, output_elements);
+                            }
+
+                            // initialize_output flips before any surface-thread redraw, so
+                            // the backdrop must be on THIS submit or the first flip is bare
+                            // CLEAR_COLOR. output_map can be empty for this crtc (greeter
+                            // startup), hence the direct add.
+                            if !establishing_crtc_covered
+                                && let Some(dmabuf) = adopt_dmabuf.as_ref()
+                                && let Some(elem) =
+                                    adopt_backdrop_element(&mut renderer, dmabuf, &surface.output)
+                            {
+                                debug!(
+                                    "handoff: adding backdrop directly to establishing crtc (output_map did not cover it)"
+                                );
+                                elements.add_output(crtc, CLEAR_COLOR, vec![elem]);
                             }
 
                             let compositor = drm
@@ -1221,6 +1384,11 @@ impl KmsGuard<'_> {
                             primary_formats,
                             Some(overlay_formats).filter(|f| !f.indexset().is_empty()),
                         );
+
+                        // Hand it to the now-running render thread for the cross-fade.
+                        if let Some(dmabuf) = adopt_dmabuf {
+                            surface.adopt_frozen_frame(dmabuf);
+                        }
 
                         surface.output.set_adaptive_sync_support(vrr_support);
                         if match vrr_support {

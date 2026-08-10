@@ -4,7 +4,7 @@ use crate::{
     backend::render::{
         CLEAR_COLOR, CursorMode, GlMultiError, GlMultiRenderer, PostprocessOutputConfig,
         PostprocessShader, PostprocessState,
-        element::{CosmicElement, DamageElement},
+        element::{AsGlowRenderer, CosmicElement, DamageElement},
         init_shaders, output_elements,
     },
     config::ScreenFilter,
@@ -26,6 +26,7 @@ use smithay::{
     backend::{
         allocator::{
             Fourcc,
+            dmabuf::Dmabuf,
             format::FormatSet,
             gbm::{GbmAllocator, GbmBuffer},
         },
@@ -88,7 +89,7 @@ use smithay::{
         shm::{shm_format_to_fourcc, with_buffer_contents},
     },
 };
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::logger::GAMING_TARGET;
 
@@ -134,6 +135,18 @@ pub struct Surface {
     dpms: bool,
 }
 
+/// The outgoing session's frozen scanout, composited over the incoming one until its
+/// own content is ready, then cross-faded out.
+struct AdoptFrame {
+    dmabuf: Dmabuf,
+    texture: Option<GlesTexture>,
+    /// Stable: a fresh `Id` per frame would force a full repaint every frame.
+    id: smithay::backend::renderer::element::Id,
+    started: std::time::Instant,
+    /// `None` while held opaque; `Some` once the fade-out has begun.
+    fade_start: Option<std::time::Instant>,
+}
+
 pub struct SurfaceThreadState {
     // rendering
     api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
@@ -143,6 +156,7 @@ pub struct SurfaceThreadState {
     vrr_mode: AdaptiveSync,
     frame_flags: FrameFlags,
     compositor: Option<GbmDrmOutput>,
+    adopt: Option<AdoptFrame>,
 
     state: QueueState,
     timings: Timings,
@@ -249,6 +263,7 @@ pub enum ThreadCommand {
     ScheduleRender,
     AdaptiveSyncAvailable(SyncSender<Result<VrrSupport>>),
     UseAdaptiveSync(AdaptiveSync),
+    AdoptFrozenFrame(Dmabuf),
     AllowFrameFlags(bool, FrameFlags),
     End,
     DpmsOff,
@@ -434,6 +449,13 @@ impl Surface {
         }
     }
 
+    /// Hand the frozen frame to the render thread (see [`AdoptFrame`]).
+    pub fn adopt_frozen_frame(&self, dmabuf: Dmabuf) {
+        let _ = self
+            .thread_command
+            .send(ThreadCommand::AdoptFrozenFrame(dmabuf));
+    }
+
     pub fn set_mirroring(&mut self, output: Option<Output>) {
         let _ = self
             .thread_command
@@ -577,6 +599,7 @@ fn surface_thread(
         target_node,
         active,
         compositor: None,
+        adopt: None,
         frame_flags: FrameFlags::DEFAULT,
         vrr_mode: AdaptiveSync::Disabled,
 
@@ -668,6 +691,20 @@ fn surface_thread(
             }
             Event::Msg(ThreadCommand::UseAdaptiveSync(vrr)) => {
                 state.vrr_mode = vrr;
+            }
+            Event::Msg(ThreadCommand::AdoptFrozenFrame(dmabuf)) => {
+                state.adopt = Some(AdoptFrame {
+                    dmabuf,
+                    texture: None,
+                    id: smithay::backend::renderer::element::Id::new(),
+                    started: std::time::Instant::now(),
+                    fade_start: None,
+                });
+                // Same guard as ScheduleRender: redraw needs the active seat, which does
+                // not exist until startup completes (panics "No seat?").
+                if startup_done.load(Ordering::SeqCst) {
+                    state.queue_redraw(false);
+                }
             }
             Event::Msg(ThreadCommand::DpmsOff) => {
                 if let Some(compositor) = state.compositor.as_mut() {
@@ -988,7 +1025,11 @@ impl SurfaceThreadState {
             QueueState::WaitingForEstimatedVBlankAndQueued { .. } => unreachable!(),
         };
 
-        if redraw_needed || crate::perf::is_stressing() || self.shell.read().animations_going() {
+        if redraw_needed
+            || crate::perf::is_stressing()
+            || self.shell.read().animations_going()
+            || self.adopt.is_some()
+        {
             let vblank_frame = tracy_client::Client::running()
                 .unwrap()
                 .non_continuous_frame(self.vblank_frame_name);
@@ -1015,7 +1056,11 @@ impl SurfaceThreadState {
 
         self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
 
-        if force || crate::perf::is_stressing() || self.shell.read().animations_going() {
+        if force
+            || crate::perf::is_stressing()
+            || self.shell.read().animations_going()
+            || self.adopt.is_some()
+        {
             self.queue_redraw(false);
         }
         self.send_frame_callbacks();
@@ -1158,6 +1203,20 @@ impl SurfaceThreadState {
         let Some(compositor) = self.compositor.as_mut() else {
             return Ok(());
         };
+
+        // Present nothing so the last real frame stays latched for the exit freeze: the
+        // session tears its components down seconds before we exit, and those frames are
+        // empty. A still-armed estimated_vblank timer MUST be disarmed before parking in
+        // Idle, or it fires into on_estimated_vblank's unreachable!() and wedges output.
+        if self.shell.read().logout_hold {
+            if let QueueState::WaitingForEstimatedVBlankAndQueued {
+                estimated_vblank, ..
+            } = std::mem::replace(&mut self.state, QueueState::Idle)
+            {
+                self.loop_handle.remove(estimated_vblank);
+            }
+            return Ok(());
+        }
 
         let frame_start = std::time::Instant::now();
         let mut profile = crate::backend::render::gpu_profiler::FrameProfile::default();
@@ -1375,6 +1434,84 @@ impl SurfaceThreadState {
                     logical_w,
                     logical_h
                 );
+            }
+        }
+
+        // Hold the frozen frame opaque over the starting session, then ease it out to
+        // reveal the real content.
+        // Safety cap so a session that never paints can't strand a stale frame. A slow cold
+        // start can exceed this, in which case the fade lands on the grey clear.
+        const ADOPT_HOLD_CAP: std::time::Duration = std::time::Duration::from_secs(3);
+        const ADOPT_FADE: std::time::Duration = std::time::Duration::from_millis(400);
+
+        if let Some(adopt) = self.adopt.as_mut() {
+            // Content must be VISIBLE, not merely present: layer surfaces sit in the render
+            // list at alpha 0 while pending their first buffer, then fade in over
+            // `motion.layer_fade_in`. Fading the held frame out over those dissolves to
+            // BLACK and only then does their own fade bring the image up.
+            let has_content = elements
+                .iter()
+                .any(|e| !matches!(e, CosmicElement::Cursor(_) | CosmicElement::Dnd(_)));
+            let still_fading_in = self.shell.read().layer_fade_in_active();
+            let content_visible = has_content && !still_fading_in;
+            let timed_out = adopt.started.elapsed() > ADOPT_HOLD_CAP;
+            if adopt.fade_start.is_none() && (content_visible || timed_out) {
+                debug!(
+                    held_ms = adopt.started.elapsed().as_millis(),
+                    has_content,
+                    still_fading_in,
+                    reason = if content_visible {
+                        "content visible"
+                    } else {
+                        "hold cap"
+                    },
+                    "handoff: starting cross-fade of frozen frame"
+                );
+                adopt.fade_start = Some(std::time::Instant::now());
+            }
+            if adopt.texture.is_none() {
+                let dmabuf = adopt.dmabuf.clone();
+                match renderer.glow_renderer_mut().import_dmabuf(&dmabuf, None) {
+                    Ok(tex) => adopt.texture = Some(tex),
+                    Err(err) => {
+                        warn!(?err, "adopt: import_dmabuf failed; dropping backdrop");
+                        self.adopt = None;
+                    }
+                }
+            }
+        }
+        if let Some(adopt) = self.adopt.as_ref() {
+            // Ease-out cubic: mirrors the layer fade-in elsewhere in this fork
+            // (`1.0 - (1.0 - t).powi(3)`, 0->1) but inverted for a 1->0 fade OUT.
+            let alpha = match adopt.fade_start {
+                None => 1.0,
+                Some(start) => {
+                    let t = (start.elapsed().as_secs_f32() / ADOPT_FADE.as_secs_f32()).min(1.0);
+                    (1.0 - t).powi(3)
+                }
+            };
+            if alpha <= 0.0 {
+                debug!("handoff: cross-fade complete, frozen frame released");
+                self.adopt = None;
+            } else if let Some(tex) = adopt.texture.clone() {
+                let ctx = renderer.glow_renderer().context_id();
+                let scale = self.output.current_scale().integer_scale();
+                let elem = TextureRenderElement::from_static_texture(
+                    adopt.id.clone(),
+                    ctx,
+                    (0., 0.),
+                    tex,
+                    scale,
+                    Transform::Normal,
+                    Some(alpha),
+                    None,
+                    None,
+                    None,
+                    smithay::backend::renderer::element::Kind::Unspecified,
+                );
+                // On TOP (index 0 = highest z here — elements are drawn front-to-back) so
+                // fading it out progressively uncovers the real content, not the reverse.
+                elements.insert(0, CosmicElement::Adopt(elem));
             }
         }
 
