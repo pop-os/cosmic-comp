@@ -43,18 +43,28 @@ pub fn init_logger() -> Result<()> {
     } else {
         "warn"
     };
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            EnvFilter::new(if cfg!(debug_assertions) {
-                "info"
-            } else {
-                "warn"
-            })
+    // These are DEFAULTS: only applied for targets RUST_LOG didn't mention. add_directive
+    // replaces a target's directive, so applying them unconditionally would clobber the
+    // operator's own setting (`RUST_LOG=...,cosmic_comp=info` silently became warn in release).
+    let env = std::env::var(EnvFilter::DEFAULT_ENV).ok();
+    let unset = |target: &str| !env.as_deref().is_some_and(|e| e.contains(target));
+    let mut filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(if cfg!(debug_assertions) {
+            "info"
+        } else {
+            "warn"
         })
-        .add_directive(Directive::from_str("cosmic_text=error").unwrap())
-        .add_directive(Directive::from_str("calloop=error").unwrap())
-        .add_directive(Directive::from_str(&format!("smithay={level}")).unwrap())
-        .add_directive(Directive::from_str(&format!("cosmic_comp={level}")).unwrap());
+    });
+    for (target, lvl) in [
+        ("cosmic_text", "error"),
+        ("calloop", "error"),
+        ("smithay", level),
+        ("cosmic_comp", level),
+    ] {
+        if unset(target) {
+            filter = filter.add_directive(Directive::from_str(&format!("{target}={lvl}")).unwrap());
+        }
+    }
 
     // Game-mode / window instrumentation (target: GAMING_TARGET) is OPT-IN — in
     // debug builds too, so normal runs never carry the noise. Enable at runtime:
