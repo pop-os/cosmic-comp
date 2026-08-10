@@ -321,7 +321,16 @@ impl VoiceModeHandler for State {
             .send_focus_input_to_surface_or_default(None)
         {
             let shell = self.common.shell.read();
-            if let Some(layer_surface) = shell.find_layer_surface_by_wl_surface(&surface) {
+            // Only focus a receiver the user can SEE. Voice activation exits home mode,
+            // which drops a home-only receiver (the chat panel) to alpha 0 while it stays
+            // in the layer map — focusing it then points the keyboard at an invisible
+            // surface, and refresh_focus never repairs layer-surface focus. Skipping the
+            // grant leaves the pre-voice focus in place, which is the correct fallback.
+            let id = surface.id();
+            let visible = !shell.is_surface_hidden(&id) && shell.surface_home_visibility(&id).0;
+            if !visible {
+                debug!("Default receiver is not visible, keeping previous focus");
+            } else if let Some(layer_surface) = shell.find_layer_surface_by_wl_surface(&surface) {
                 drop(shell);
                 let seat = self.common.shell.read().seats.last_active().clone();
                 let focus_target = KeyboardFocusTarget::from(layer_surface);

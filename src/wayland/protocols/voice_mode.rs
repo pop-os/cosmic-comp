@@ -621,6 +621,15 @@ impl VoiceModeState {
         let mut receivers = self.receivers.lock().unwrap();
         receivers.retain(|r| r.resource.upgrade().is_ok() && r.surface.upgrade().is_ok());
     }
+
+    /// Remove the receiver registered for `surface` (Destroy request / client teardown),
+    /// pruning dead entries on the way.
+    pub fn remove_receiver_for_surface(&self, surface: &WlSurface) {
+        let mut receivers = self.receivers.lock().unwrap();
+        receivers.retain(|r| {
+            r.resource.upgrade().is_ok() && r.surface.upgrade().is_ok_and(|s| &s != surface)
+        });
+    }
 }
 
 /// Handler trait for voice mode events (compositor-side control)
@@ -760,6 +769,11 @@ where
         match request {
             zcosmic_voice_mode_v1::Request::Destroy => {
                 debug!(is_default = data.is_default, "Voice receiver destroyed");
+                // Actually prune the entry — leaving it registered kept dead clients
+                // eligible as focus_input/default-receiver targets forever.
+                state
+                    .voice_mode_state()
+                    .remove_receiver_for_surface(&data.surface);
             }
             zcosmic_voice_mode_v1::Request::AckStop { serial, freeze } => {
                 let freeze = freeze != 0;
