@@ -114,9 +114,6 @@ git = "https://github.com/Drakulix/id-tree.git"
 
 [dependencies.smithay]
 git = "https://github.com/playtron-os/smithay.git"
-# wl_region op-list compaction + upstream leak fixes; merge to master and
-# drop the branch pin once the leak-hunt branch lands.
-branch = "fix/region-pseudo-clear"
 default-features = false
 features = [
     "backend_drm",
@@ -194,7 +191,7 @@ iced_widget = { git = "https://github.com/playtron-os/iced.git" }
 cosmic-settings-config = { git = "https://github.com/playtron-os/cosmic-settings-daemon" }
 [patch.crates-io]
 smithay-egui = { git = "https://github.com/Smithay/smithay-egui.git" }
-smithay = { git = "https://github.com/playtron-os/smithay.git", branch = "fix/region-pseudo-clear" }
+smithay = { git = "https://github.com/playtron-os/smithay.git" }
 
 #[patch."https://github.com/playtron-os/iced.git"]
 #iced = { path = "../iced" }

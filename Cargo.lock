@@ -6463,7 +6463,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/playtron-os/smithay.git?branch=fix%2Fregion-pseudo-clear#c849069a398610d90caaaa4855aeab81db601811"
+source = "git+https://github.com/playtron-os/smithay.git#c849069a398610d90caaaa4855aeab81db601811"
 dependencies = [
  "aliasable",
  "appendlist",
