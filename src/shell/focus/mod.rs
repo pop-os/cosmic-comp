@@ -248,8 +248,17 @@ impl Shell {
         let workspace = if let Some(workspace) = workspace {
             self.workspaces.space_for_handle_mut(&workspace.0).unwrap()
         } else {
-            //should this be the active output or the focused output?
-            self.active_space_mut(&seat.focused_or_active_output())
+            let output = match &target {
+                FocusTarget::Window(mapped) => self
+                    .workspaces
+                    .sets
+                    .iter()
+                    .find(|(_, set)| set.sticky_layer.mapped().any(|m| m == mapped))
+                    .map(|(output, _)| output.clone()),
+                FocusTarget::Fullscreen(_) => None,
+            };
+
+            self.active_space_mut(&output.unwrap_or_else(|| seat.keyboard_or_active_output()))
                 .unwrap()
         };
 

@@ -508,6 +508,12 @@ impl WorkspaceSet {
         }
     }
 
+    fn refresh_focus_stacks(&mut self) {
+        for workspace in &mut self.workspaces {
+            workspace.refresh_focus_stack();
+        }
+    }
+
     fn activate(
         &mut self,
         idx: usize,
@@ -612,6 +618,7 @@ impl WorkspaceSet {
             self.workspaces[self.active].refresh();
         }
         self.sticky_layer.refresh();
+        self.refresh_focus_stacks();
     }
 
     fn add_empty_workspace(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
