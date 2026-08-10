@@ -294,13 +294,20 @@ fn resolve_app_icon(app_id: &str) -> Option<super::header_bar::AppIcon> {
 /// images (PNG) and leaking SVG bytes for static lifetime.
 fn prescale_icon_from_path(path: &str) -> super::header_bar::AppIcon {
     if path.ends_with(".svg") || path.ends_with(".svgz") {
-        // Read and leak SVG bytes to get &'static [u8] for icetron's title_icon API.
-        // Bounded leak: one per window, freed when process exits.
-        if let Ok(bytes) = std::fs::read(path) {
-            let leaked: &'static [u8] = Box::leak(bytes.into_boxed_slice());
-            return super::header_bar::AppIcon::Svg(leaked);
-        }
-        return super::header_bar::AppIcon::Svg(&[]);
+        // icetron's title_icon API wants &'static [u8], so the bytes are
+        // leaked -- memoized by path, so each icon file leaks ONCE ever.
+        // Leaking per call turned into the weekend leak: this runs from
+        // `refresh()` for client-set named icons, several times a second.
+        static SVG_BYTES: std::sync::LazyLock<
+            Mutex<std::collections::HashMap<String, &'static [u8]>>,
+        > = std::sync::LazyLock::new(Default::default);
+        let mut cache = SVG_BYTES.lock().unwrap();
+        let bytes = cache.entry(path.to_owned()).or_insert_with(|| {
+            std::fs::read(path)
+                .map(|bytes| &*Box::leak(bytes.into_boxed_slice()))
+                .unwrap_or(&[])
+        });
+        return super::header_bar::AppIcon::Svg(bytes);
     }
 
     // Raster image: pre-scale with Lanczos3 for crisp rendering
@@ -326,11 +333,15 @@ fn prescale_raster_icon(path: &str) -> Option<super::header_bar::AppIcon> {
 }
 
 /// Read the client-set toplevel icon (xdg-toplevel-icon protocol) committed on
-/// `surface`. Returns a `(fingerprint, icon)` pair: the fingerprint changes only
-/// when the committed icon changes, so the caller can skip rebuilding the icon
-/// (an expensive shm read) on unrelated commits. An empty fingerprint with `None`
-/// means the client has not set an icon (fall back to the app_id lookup).
-fn read_client_toplevel_icon(surface: &WlSurface) -> (String, Option<super::header_bar::AppIcon>) {
+/// `surface`, if it changed. Returns `None` when the committed icon still
+/// matches `last_fingerprint`, WITHOUT building an icon: this runs on every
+/// `refresh()`, and building first to compare after meant an icon-theme lookup
+/// (leaking SVG bytes) or a full shm decode several times a second, forever.
+/// A `Some(("", None))` means the client has no icon (fall back to app_id).
+fn read_client_toplevel_icon(
+    surface: &WlSurface,
+    last_fingerprint: &str,
+) -> Option<(String, Option<super::header_bar::AppIcon>)> {
     use smithay::reexports::wayland_server::Resource;
     use smithay::wayland::compositor::with_states;
     use smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState;
@@ -341,7 +352,12 @@ fn read_client_toplevel_icon(surface: &WlSurface) -> (String, Option<super::head
 
         // Named icon: resolve through the icon theme like an app_id.
         if let Some(name) = current.icon_name() {
-            return (format!("name:{name}"), resolve_app_icon(name));
+            let fingerprint = format!("name:{name}");
+            if fingerprint == last_fingerprint {
+                return None;
+            }
+            let icon = resolve_app_icon(name);
+            return Some((fingerprint, icon));
         }
 
         // Pixel buffers: pick the largest square buffer and decode it.
@@ -351,10 +367,17 @@ fn read_client_toplevel_icon(surface: &WlSurface) -> (String, Option<super::head
             .max_by_key(|(b, _)| shm_buffer_edge(b))
         {
             let fingerprint = format!("buf:{:?}", buffer.id());
-            return (fingerprint, shm_buffer_to_app_icon(buffer));
+            if fingerprint == last_fingerprint {
+                return None;
+            }
+            let icon = shm_buffer_to_app_icon(buffer);
+            return Some((fingerprint, icon));
         }
 
-        (String::new(), None)
+        if last_fingerprint.is_empty() {
+            return None;
+        }
+        Some((String::new(), None))
     })
 }
 
@@ -1520,9 +1543,8 @@ impl SpaceElement for CosmicWindow {
             // Pick up a client-set toplevel icon (xdg-toplevel-icon protocol);
             // it takes priority over the app_id-based icon in the header.
             if let Some(surface) = p.window.wl_surface() {
-                let (fingerprint, icon) = read_client_toplevel_icon(&surface);
                 let mut client = p.client_icon.lock().unwrap();
-                if client.0 != fingerprint {
+                if let Some((fingerprint, icon)) = read_client_toplevel_icon(&surface, &client.0) {
                     client.0 = fingerprint;
                     client.1 = icon;
                     needs_redraw = true;
