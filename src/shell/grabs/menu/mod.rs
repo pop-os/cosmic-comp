@@ -548,7 +548,7 @@ impl PointerGrab<State> for MenuGrab {
                 let mut bbox = elem.iced.bbox();
                 bbox.loc = elem.position.as_logical();
 
-                bbox.contains(event_location.to_i32_round())
+                bbox.contains(event_location.to_i32_floor())
             }) {
                 let element = &mut elements[i];
 
@@ -753,7 +753,7 @@ impl TouchGrab<State> for MenuGrab {
                 let mut bbox = elem.iced.bbox();
                 bbox.loc = elem.position.as_logical();
 
-                bbox.contains(event_location.to_i32_round())
+                bbox.contains(event_location.to_i32_floor())
             }) {
                 let element = &mut elements[i];
 

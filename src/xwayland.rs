@@ -807,9 +807,17 @@ impl XwmHandler for State {
                 *context,
             );
         }
-        if !shell.pending_windows.iter().any(|w| w.surface == window) {
-            let fullscreen = window.is_fullscreen().then(|| seat.active_output());
-            let maximized = window.is_maximized();
+        let fullscreen = window.is_fullscreen().then(|| seat.active_output());
+        let maximized = window.is_maximized();
+        if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|w| w.surface == window)
+        {
+            pending.seat = seat;
+            pending.fullscreen = fullscreen;
+            pending.maximized = maximized;
+        } else {
             let surface = CosmicSurface::from(window);
             shell.pending_windows.push(PendingWindow {
                 surface,
@@ -850,7 +858,7 @@ impl XwmHandler for State {
             if let Some(target) = res {
                 let seat = shell.seats.last_active().clone();
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, false);
+                Shell::set_focus_on_x11_map(self, &target, &seat, false);
             }
         }
     }

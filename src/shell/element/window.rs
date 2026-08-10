@@ -113,7 +113,7 @@ impl Focus {
         location: Point<f64, Logical>,
     ) -> Option<Focus> {
         let geo = surface.geometry();
-        let loc = location.to_i32_round::<i32>() - geo.loc;
+        let loc = location.to_i32_floor::<i32>() - geo.loc;
         if loc.y < 0 && loc.x < 0 {
             Some(Focus::ResizeTopLeft)
         } else if loc.y < 0 && loc.x >= geo.size.w {
@@ -292,7 +292,7 @@ impl CosmicWindow {
             {
                 let geo = p.window.geometry();
 
-                let point_i32 = relative_pos.to_i32_round::<i32>();
+                let point_i32 = relative_pos.to_i32_floor::<i32>();
                 let ssd_height = if has_ssd { SSD_HEIGHT } else { 0 };
 
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)

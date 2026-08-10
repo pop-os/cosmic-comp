@@ -530,7 +530,7 @@ impl CosmicStack {
             let geo = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry();
 
             if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                let point_i32 = relative_pos.to_i32_round::<i32>();
+                let point_i32 = relative_pos.to_i32_floor::<i32>();
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
