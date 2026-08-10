@@ -46,6 +46,10 @@ use crate::wayland::handlers::compositor::client_compositor_state;
 
 use clap_lex::RawArgs;
 
+#[cfg(feature = "heap-profile")]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use std::error::Error;
 
 pub mod backend;
@@ -171,6 +175,10 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     // Off by default; reports parking_lot lock cycles (e.g. a nested shell
     // read() racing a writer) that would otherwise hang the compositor silently.
     utils::deadlock::spawn_watchdog();
+
+    // Periodic RSS/swap/heap self-report; on its own thread so a stalled
+    // event loop still reports. See utils::memlog for the env knobs.
+    utils::memlog::spawn();
 
     profiling::register_thread!("Main Thread");
     #[cfg(feature = "profile-with-tracy")]

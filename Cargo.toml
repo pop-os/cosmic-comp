@@ -63,6 +63,13 @@ sanitize-filename = "0.6.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.18"
+tikv-jemallocator = { version = "0.6", optional = true, features = [
+    "profiling",
+    "stats",
+    "unprefixed_malloc_on_supported_platforms",
+] }
+tikv-jemalloc-ctl = { version = "0.6", optional = true, features = ["stats"] }
+tikv-jemalloc-sys = { version = "0.6", optional = true }
 jiff = "0.2"
 tiny-skia = "0.11"
 tracing = { version = "0.1.44", features = [
@@ -107,6 +114,9 @@ git = "https://github.com/Drakulix/id-tree.git"
 
 [dependencies.smithay]
 git = "https://github.com/playtron-os/smithay.git"
+# wl_region op-list compaction + upstream leak fixes; merge to master and
+# drop the branch pin once the leak-hunt branch lands.
+branch = "fix/region-pseudo-clear"
 default-features = false
 features = [
     "backend_drm",
@@ -137,6 +147,13 @@ default = ["systemd"]
 # Runtime detection of parking_lot lock cycles (see utils::deadlock). Adds
 # bookkeeping to every lock acquisition, so keep it out of release builds.
 deadlock-detection = ["parking_lot/deadlock_detection"]
+# Whole-process jemalloc with sampling heap profiler (covers C-side mallocs
+# too via the unprefixed override). See utils::memlog for runtime knobs.
+heap-profile = [
+    "dep:tikv-jemallocator",
+    "dep:tikv-jemalloc-ctl",
+    "dep:tikv-jemalloc-sys",
+]
 stacking = []
 logind = ["logind-zbus"]
 systemd = ["libsystemd", "logind"]
@@ -177,7 +194,7 @@ iced_widget = { git = "https://github.com/playtron-os/iced.git" }
 cosmic-settings-config = { git = "https://github.com/playtron-os/cosmic-settings-daemon" }
 [patch.crates-io]
 smithay-egui = { git = "https://github.com/Smithay/smithay-egui.git" }
-smithay = { git = "https://github.com/playtron-os/smithay.git" }
+smithay = { git = "https://github.com/playtron-os/smithay.git", branch = "fix/region-pseudo-clear" }
 
 #[patch."https://github.com/playtron-os/iced.git"]
 #iced = { path = "../iced" }

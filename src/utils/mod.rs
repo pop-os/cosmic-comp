@@ -4,6 +4,7 @@ pub mod apply;
 pub mod deadlock;
 pub mod env;
 mod ids;
+pub mod memlog;
 pub(crate) use self::ids::id_gen;
 pub mod geometry;
 pub mod global;
