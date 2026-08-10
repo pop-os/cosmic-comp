@@ -781,7 +781,11 @@ fn focus_target_is_valid(
             is_sticky || is_in_focus_stack
         }
         KeyboardFocusTarget::LayerSurface(layer) => {
+            // Hidden surfaces stay in the layer map; without this guard a focus that
+            // landed on one is "valid" forever and refresh_focus never repairs it
+            // (the exclusive arm above and update_focus_target already check this).
             layer_map_for_output(output).layers().any(|l| l == &layer)
+                && !shell.is_surface_hidden(&layer.wl_surface().id())
         }
         KeyboardFocusTarget::Group(WindowGroup { node, .. }) => shell
             .workspaces
@@ -801,7 +805,7 @@ fn focus_target_is_valid(
     }
 }
 
-fn update_focus_target(
+pub(crate) fn update_focus_target(
     shell: &Shell,
     seat: &Seat<State>,
     output: &Output,

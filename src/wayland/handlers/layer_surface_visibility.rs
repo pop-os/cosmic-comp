@@ -123,7 +123,18 @@ impl LayerSurfaceVisibilityHandler for State {
             std::mem::drop(shell);
 
             for seat in seats_to_clear {
-                Shell::set_focus(self, None, &seat, None, false);
+                // Restore focus to the normal target instead of clearing to None: a
+                // None focus is never repaired (refresh_focus only replaces INVALID
+                // targets, and None is not invalid), so after a start-hidden overlay
+                // (e.g. the launcher) mapped, took focus and was hidden, typing went
+                // to nobody for the rest of the session.
+                let target = {
+                    use crate::shell::SeatExt as _;
+                    let shell = self.common.shell.read();
+                    let output = seat.active_output();
+                    crate::shell::focus::update_focus_target(&shell, &seat, &output)
+                };
+                Shell::set_focus(self, target.as_ref(), &seat, None, false);
             }
         } else {
             // Surface becoming visible — grant keyboard focus if it has
