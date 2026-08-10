@@ -365,14 +365,63 @@ struct BlurTextures<T> {
 
 type BlurTexture<T> = Mutex<Option<BlurTextures<T>>>;
 
+/// Element state for ONE blur rect of a surface.
+///
+/// One of these per rect rather than one per surface: every rect becomes its
+/// own render element, and elements sharing an `Id` poison everything keyed by
+/// it. With shared state, rect *i* compared itself against rect *i-1*'s
+/// values, so `commit` advanced for every rect on every frame -- the damage
+/// tracker saw permanent damage (the compositor could never submit an empty
+/// frame and go idle), the duplicated `Id` tripped smithay's
+/// forced-recapture-every-frame path, and all rects fought over a single
+/// cached capture texture, reallocating a pair of GL textures per rect per
+/// frame.
 #[derive(Debug)]
-pub struct BlurState {
+pub struct BlurRectState {
     pub id: Id,
     pub renderer_id: Option<ContextId<GlesTexture>>,
     pub src: Size<f64, Buffer>,
     pub offset: f64,
     pub passes: usize,
     pub region: Vec<Rectangle<i32, Logical>>,
+    /// The exact area last rendered, so a sub-pixel move still counts as a
+    /// change. `region` is whole logical pixels and `src` only tracks size, so
+    /// neither notices a surface sliding a fraction of a pixel -- which is
+    /// precisely what a scale animation does every frame. Without this the
+    /// commit counter never advances, no damage is emitted, and the backdrop
+    /// sits still while the surface moves off it.
+    pub geometry: Rectangle<f64, Logical>,
+    pub commit: CommitCounter,
+}
+
+unsafe impl Send for BlurRectState {}
+unsafe impl Sync for BlurRectState {}
+
+impl Default for BlurRectState {
+    fn default() -> Self {
+        BlurRectState {
+            id: Id::new(),
+            renderer_id: None,
+            src: Size::new(0., 0.),
+            geometry: Rectangle::default(),
+            offset: 0.,
+            passes: 0,
+            region: Vec::new(),
+            commit: CommitCounter::default(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct BlurState {
+    /// Per-rect state, indexed by the rect's position among the surface's
+    /// non-empty rects. Index is stable while the client's region list is --
+    /// and a client that DOES change its list genuinely needs those rects
+    /// re-blurred, so the one spurious commit bump a renumbering causes is a
+    /// redraw that was due anyway. Stale tails are truncated so their `Id`s
+    /// disappear from the element list and the damage tracker drops their
+    /// cached capture textures.
+    pub rects: Vec<BlurRectState>,
     /// The rects drawn last frame, SURFACE-LOCAL, each with when it first
     /// appeared, so a rect that is NEW can fade in while its neighbours stay put.
     ///
@@ -386,32 +435,47 @@ pub struct BlurState {
     /// an auto-hide, a layer open -- and one of those (the slide) renders the
     /// surface twice per frame, a full output apart. See [`first_seen_for`].
     pub seen: Vec<(Rectangle<f64, Logical>, Instant)>,
-    /// The exact area last rendered, so a sub-pixel move still counts as a
-    /// change. `region` is whole logical pixels and `src` only tracks size, so
-    /// neither notices a surface sliding a fraction of a pixel -- which is
-    /// precisely what a scale animation does every frame. Without this the
-    /// commit counter never advances, no damage is emitted, and the backdrop
-    /// sits still while the surface moves off it.
-    pub geometry: Rectangle<f64, Logical>,
-    pub commit: CommitCounter,
 }
 
-unsafe impl Send for BlurState {}
-unsafe impl Sync for BlurState {}
-
-impl Default for BlurState {
-    fn default() -> Self {
-        BlurState {
-            id: Id::new(),
-            renderer_id: None,
-            src: Size::new(0., 0.),
-            seen: Vec::new(),
-            geometry: Rectangle::default(),
-            offset: 0.,
-            passes: 0,
-            region: Vec::new(),
-            commit: CommitCounter::default(),
+impl BlurState {
+    /// The state for rect `slot`, created on first use.
+    fn rect_state(&mut self, slot: usize) -> &mut BlurRectState {
+        if self.rects.len() <= slot {
+            self.rects.resize_with(slot + 1, BlurRectState::default);
         }
+        &mut self.rects[slot]
+    }
+}
+
+impl BlurRectState {
+    /// Record what is about to be rendered; advances `commit` only when it
+    /// differs from the previous render, so an unchanged rect emits no damage.
+    fn note_render(
+        &mut self,
+        context_dirty: bool,
+        offset: f64,
+        passes: usize,
+        region: &[Rectangle<i32, Logical>],
+        geometry: Rectangle<f64, Logical>,
+        src: Size<f64, Buffer>,
+    ) -> bool {
+        let dirty = context_dirty
+            || !(self.offset == offset
+                && self.passes == passes
+                && self.region == region
+                && self.geometry == geometry
+                && self.src == src);
+        self.offset = offset;
+        self.passes = passes;
+        if self.region != region {
+            self.region = region.to_vec();
+        }
+        self.geometry = geometry;
+        self.src = src;
+        if dirty {
+            self.commit.increment();
+        }
+        dirty
     }
 }
 
@@ -457,9 +521,10 @@ impl BlurElement {
 
         let region = vec![Rectangle::from_size(geometry.size.to_i32_round())];
 
+        state.rects.truncate(1);
         Self::internal(
             renderer,
-            state,
+            state.rect_state(0),
             geometry,
             &region,
             output_scale,
@@ -577,6 +642,9 @@ impl BlurElement {
         let now = Instant::now();
 
         let mut elements = Vec::with_capacity(region.len());
+        // Counts `internal` calls, not list positions: rects skipped for being
+        // empty consume no slot, so the per-rect states stay dense.
+        let mut slot = 0usize;
         for (idx, rect) in region.iter().enumerate() {
             if rect.size.w <= 0 || rect.size.h <= 0 {
                 continue;
@@ -656,9 +724,9 @@ impl BlurElement {
             seen_now.push((local, first_seen));
             let rect_alpha = alpha * fade_alpha(first_seen);
 
-            if let Some(element) = Self::internal(
+            let element = Self::internal(
                 renderer,
-                &mut state,
+                state.rect_state(slot),
                 rect_geo,
                 &[Rectangle::from_size(rect.size)],
                 output_scale,
@@ -666,11 +734,25 @@ impl BlurElement {
                 strength,
                 rect_alpha,
                 appearance,
-            )? {
-                elements.push(element);
+            );
+            slot += 1;
+            match element {
+                Ok(Some(element)) => elements.push(element),
+                Ok(None) => {}
+                Err(err) => {
+                    // `seen` was taken above; a renderer error must not wipe
+                    // it, or every rect reads as brand-new next frame and the
+                    // fade deadline (with its forced redraws) re-arms on every
+                    // failing frame, forever.
+                    state.seen = previously_seen;
+                    return Err(err);
+                }
             }
         }
 
+        // Drop states for rects the client no longer has, so their `Id`s (and
+        // the capture textures cached under them) go away with them.
+        state.rects.truncate(slot);
         state.seen = seen_now;
 
         Ok(elements)
@@ -678,7 +760,7 @@ impl BlurElement {
 
     fn internal<R: ImportAll + AsGlowRenderer>(
         renderer: &mut R,
-        state: &mut BlurState,
+        state: &mut BlurRectState,
         geometry: Rectangle<f64, Logical>,
         region: &[Rectangle<i32, Logical>],
         output_scale: f64,
@@ -782,25 +864,19 @@ impl BlurElement {
         let src = geometry.size.to_buffer(output_scale, Transform::Normal);
         let params = &BLUR_PARAMS[strength.min(MAX_STEPS - 1)];
 
-        let dirty = !(state
+        let context_dirty = state
             .renderer_id
             .as_ref()
-            .is_some_and(|id| id == &renderer_id)
-            && state.offset == params.offset
-            && state.passes == params.passes
-            && state.region == region
-            && state.geometry == geometry
-            && state.src == src);
-
+            .is_none_or(|id| id != &renderer_id);
         state.renderer_id = Some(renderer_id);
-        state.offset = params.offset;
-        state.passes = params.passes;
-        state.region = region.to_vec();
-        state.geometry = geometry;
-        state.src = src;
-        if dirty {
-            state.commit.increment();
-        }
+        state.note_render(
+            context_dirty,
+            params.offset,
+            params.passes,
+            region,
+            geometry,
+            src,
+        );
 
         Ok(Some(BlurElement {
             id: state.id.clone(),
@@ -1306,8 +1382,73 @@ fn render_blur(
 
 #[cfg(test)]
 mod tests {
-    use super::{BLUR_FADE_IN, fade_alpha, first_seen_for, physical_rect_snapped, surface_local};
-    use smithay::utils::{Logical, Rectangle};
+    use super::{
+        BLUR_FADE_IN, BlurState, fade_alpha, first_seen_for, physical_rect_snapped, surface_local,
+    };
+    use smithay::utils::{Buffer, Logical, Rectangle, Size};
+
+    fn note(
+        state: &mut super::BlurRectState,
+        geometry: Rectangle<f64, Logical>,
+        src: Size<f64, Buffer>,
+    ) -> bool {
+        let region = [Rectangle::from_size(geometry.size.to_i32_round())];
+        state.note_render(false, 1.5, 3, &region, geometry, src)
+    }
+
+    /// The regression behind the weekend leak: rects of one surface shared one
+    /// state, so each rect compared itself against its neighbour's values and
+    /// the commit counter advanced every frame forever -- permanent damage,
+    /// the compositor never idle, and a capture-texture realloc per rect per
+    /// frame. Per-rect state must go clean on the second identical frame.
+    #[test]
+    fn unchanged_rects_stop_emitting_damage() {
+        let mut state = BlurState::default();
+        let card = |x: f64| Rectangle::<f64, Logical>::new((x, 10.).into(), (300., 200.).into());
+        let src = Size::from((300., 200.));
+
+        // Frame 1: both rects are new, both dirty.
+        assert!(note(state.rect_state(0), card(0.), src));
+        assert!(note(state.rect_state(1), card(400.), src));
+        let commits = [state.rects[0].commit, state.rects[1].commit];
+
+        // Frame 2: nothing changed; neither rect may report damage.
+        assert!(!note(state.rect_state(0), card(0.), src));
+        assert!(!note(state.rect_state(1), card(400.), src));
+        assert_eq!(state.rects[0].commit, commits[0]);
+        assert_eq!(state.rects[1].commit, commits[1]);
+    }
+
+    /// Every rect is its own render element, so sharing an `Id` between them
+    /// trips smithay's duplicated-framebuffer-effect path (forced re-capture
+    /// every frame).
+    #[test]
+    fn each_rect_gets_its_own_element_id() {
+        let mut state = BlurState::default();
+        let a = state.rect_state(0).id.clone();
+        let b = state.rect_state(1).id.clone();
+        assert_ne!(a, b);
+        // Stable across frames, so the damage tracker's texture cache stays hot.
+        assert_eq!(state.rect_state(0).id, a);
+        assert_eq!(state.rect_state(1).id, b);
+    }
+
+    /// A genuine change must still advance the commit -- per-rect, without
+    /// disturbing the neighbour.
+    #[test]
+    fn a_moved_rect_is_dirty_alone() {
+        let mut state = BlurState::default();
+        let card = |x: f64| Rectangle::<f64, Logical>::new((x, 10.).into(), (300., 200.).into());
+        let src = Size::from((300., 200.));
+        note(state.rect_state(0), card(0.), src);
+        note(state.rect_state(1), card(400.), src);
+
+        assert!(!note(state.rect_state(0), card(0.), src));
+        assert!(
+            note(state.rect_state(1), card(401.), src),
+            "moved rect redraws"
+        );
+    }
     use std::time::Instant;
 
     /// The far edge is rounded as an edge, not as an independently rounded size
