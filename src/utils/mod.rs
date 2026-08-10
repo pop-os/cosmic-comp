@@ -3,6 +3,7 @@
 pub mod env;
 mod ids;
 pub(crate) use self::ids::id_gen;
+pub mod color_under_cursor;
 pub mod geometry;
 pub mod global;
 pub mod iced;

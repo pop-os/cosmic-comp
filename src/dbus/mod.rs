@@ -14,6 +14,7 @@ use tracing::{error, warn};
 
 pub mod a11y_keyboard_monitor;
 use a11y_keyboard_monitor::A11yKeyboardMonitorState;
+pub mod color_picker;
 #[cfg(feature = "logind")]
 pub mod logind;
 mod name_owners;
@@ -29,10 +30,14 @@ struct DBusStateInner {
     session_conn: zbus::Result<zbus::Connection>,
     system_conn: zbus::Result<zbus::Connection>,
     a11y_keyboard_monitor: RefCell<Option<a11y_keyboard_monitor::A11yKeyboardMonitorState>>,
+    color_picker_tx: calloop::channel::Sender<color_picker::Request>,
 }
 
 impl DBusState {
-    pub fn init(evlh: &LoopHandle<'static, State>) -> Self {
+    pub fn init(
+        evlh: &LoopHandle<'static, State>,
+        color_picker_tx: calloop::channel::Sender<color_picker::Request>,
+    ) -> Self {
         let (source, executor) = calloop::futures::executor().unwrap();
         let session_conn = futures_executor::block_on(zbus::Connection::session());
         let system_conn = futures_executor::block_on(zbus::Connection::system());
@@ -42,6 +47,7 @@ impl DBusState {
             session_conn,
             system_conn,
             a11y_keyboard_monitor: RefCell::new(None),
+            color_picker_tx,
         }));
         evlh.insert_source(source, |_, _, _| {}).unwrap();
         let state_clone = state.clone();
@@ -85,6 +91,7 @@ async fn init_session(state: &DBusState) -> zbus::Result<()> {
     let a11y_keyboard_monitor_state =
         A11yKeyboardMonitorState::new(conn, &name_owners, &state.0.executor).await?;
     *state.0.a11y_keyboard_monitor.borrow_mut() = Some(a11y_keyboard_monitor_state);
+    color_picker::init(conn, &name_owners, state.0.color_picker_tx.clone()).await?;
     Ok(())
 }
 
