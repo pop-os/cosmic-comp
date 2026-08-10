@@ -1289,7 +1289,6 @@ where
                 let corner_radius = get_surface_corner_radius(popup_wl_surface, popup_geo.size);
 
                 // Render shadow behind the popup if enabled via protocol
-                let popup_surface_id = popup_wl_surface.id();
                 if surface_has_shadow(popup_wl_surface) {
                     let shadow_layers = theme.shadow_window();
                     let shadow_radius = corner_radius.map(|r| r.round() as u8);
@@ -1306,7 +1305,7 @@ where
 
                         let shadow_element = ShadowShader::layer_element(
                             renderer,
-                            &popup_surface_id,
+                            popup_wl_surface,
                             0,
                             local_geo,
                             shadow_radius,
@@ -1679,7 +1678,7 @@ where
 
                         let shadow_element = ShadowShader::layer_element(
                             renderer,
-                            &surface_id,
+                            layer.wl_surface(),
                             0,
                             local_geo,
                             shadow_radius,

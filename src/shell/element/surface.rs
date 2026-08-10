@@ -1,6 +1,5 @@
 use iced_core::Shadow;
 use smithay::backend::renderer::gles::element::PixelShaderElement;
-use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_surface;
 
 use smithay::backend::renderer::utils::with_renderer_surface_state;
@@ -1251,12 +1250,11 @@ impl CosmicSurface {
         // in; `Local` is that space tagged as output-relative, which is what
         // the caller has resolved by this point.
         let geo = geometry.to_i32_round().as_local();
-        let surface_id = surface.id();
 
         for (index, layer) in shadow.layers.iter().enumerate() {
             let element = ShadowShader::layer_element(
                 renderer,
-                &surface_id,
+                surface,
                 // Its own cache slot, or each layer would evict the last and
                 // all three would be rebuilt every frame.
                 u8::try_from(index).unwrap_or(u8::MAX),

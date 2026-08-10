@@ -8,6 +8,7 @@ use smithay::{
             GlesPixelProgram, GlesRenderer, Uniform, UniformValue, element::PixelShaderElement,
         },
     },
+    reexports::wayland_server::{self, Resource, protocol::wl_surface::WlSurface},
     utils::{Coordinate, IsAlive, Point, Rectangle, Size},
 };
 use wayland_backend::server::ObjectId;
@@ -39,7 +40,21 @@ type ShadowCache = RefCell<HashMap<CosmicMappedKey, (ShadowParameters, PixelShad
 /// alone would have each call evict the last. Every element would then be
 /// rebuilt every frame with a fresh id, which reads as damage and repaints the
 /// popup continuously.
-type LayerShadowCache = RefCell<HashMap<(ObjectId, u8), (ShadowParameters, PixelShaderElement)>>;
+///
+/// The value carries a `Weak` to the surface so dead entries can be evicted,
+/// like `ShadowCache` does with `alive()` -- `ObjectId`s are unique per
+/// creation, so without that every popup/layer surface ever shadowed left a
+/// permanent entry.
+type LayerShadowCache = RefCell<
+    HashMap<
+        (ObjectId, u8),
+        (
+            wayland_server::Weak<WlSurface>,
+            ShadowParameters,
+            PixelShaderElement,
+        ),
+    >,
+>;
 
 impl ShadowShader {
     pub fn get<R: AsGlowRenderer>(renderer: &R) -> GlesPixelProgram {
@@ -227,7 +242,7 @@ impl ShadowShader {
     /// Create a shadow element for layer surfaces (uses surface ID for caching)
     pub fn layer_element<R: AsGlowRenderer>(
         renderer: &R,
-        surface_id: &ObjectId,
+        surface: &WlSurface,
         // Which layer of a multi-layer shadow this is, so each keeps its own
         // cache slot. Callers drawing a single shadow pass 0.
         layer: u8,
@@ -263,11 +278,12 @@ impl ShadowShader {
 
         user_data.insert_if_missing(|| LayerShadowCache::new(HashMap::new()));
         let mut cache = user_data.get::<LayerShadowCache>().unwrap().borrow_mut();
+        cache.retain(|_, (weak, ..)| weak.upgrade().is_ok());
 
-        let key = (surface_id.clone(), layer);
+        let key = (surface.id(), layer);
         if cache
             .get(&key)
-            .filter(|(old_params, _)| &params == old_params)
+            .filter(|(_, old_params, _)| &params == old_params)
             .is_none()
         {
             let shader = Self::get(renderer);
@@ -391,9 +407,9 @@ impl ShadowShader {
                 Kind::Unspecified,
             );
 
-            cache.insert(key.clone(), (params, element));
+            cache.insert(key.clone(), (surface.downgrade(), params, element));
         }
 
-        cache.get(&key).unwrap().1.clone()
+        cache.get(&key).unwrap().2.clone()
     }
 }
