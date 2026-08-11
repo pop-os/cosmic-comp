@@ -99,7 +99,7 @@ use std::{
     mem,
     sync::{
         Arc, RwLock,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{Receiver, SyncSender},
     },
     thread::JoinHandle,
@@ -137,6 +137,17 @@ pub struct Surface {
 
 /// The outgoing session's frozen scanout, composited over the incoming one until its
 /// own content is ready, then cross-faded out.
+/// Outputs currently covered by an adopted handoff frame, for [`handoff_active`].
+static HANDOFF_OVERLAYS: AtomicUsize = AtomicUsize::new(0);
+
+/// Whether a handoff frame is still covering any output.
+///
+/// The overlay is opaque until the cross-fade ends, so the desktop beneath it is
+/// live but invisible — input must not reach it.
+pub fn handoff_active() -> bool {
+    HANDOFF_OVERLAYS.load(Ordering::Relaxed) > 0
+}
+
 struct AdoptFrame {
     dmabuf: Dmabuf,
     texture: Option<GlesTexture>,
@@ -145,6 +156,27 @@ struct AdoptFrame {
     started: std::time::Instant,
     /// `None` while held opaque; `Some` once the fade-out has begun.
     fade_start: Option<std::time::Instant>,
+}
+
+impl AdoptFrame {
+    fn new(dmabuf: Dmabuf) -> Self {
+        HANDOFF_OVERLAYS.fetch_add(1, Ordering::Relaxed);
+        Self {
+            dmabuf,
+            texture: None,
+            id: smithay::backend::renderer::element::Id::new(),
+            started: std::time::Instant::now(),
+            fade_start: None,
+        }
+    }
+}
+
+impl Drop for AdoptFrame {
+    // Counted here rather than at the assignment sites so every path that drops the
+    // frame — fade done, failed import, surface torn down — releases input.
+    fn drop(&mut self) {
+        HANDOFF_OVERLAYS.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 pub struct SurfaceThreadState {
@@ -693,13 +725,7 @@ fn surface_thread(
                 state.vrr_mode = vrr;
             }
             Event::Msg(ThreadCommand::AdoptFrozenFrame(dmabuf)) => {
-                state.adopt = Some(AdoptFrame {
-                    dmabuf,
-                    texture: None,
-                    id: smithay::backend::renderer::element::Id::new(),
-                    started: std::time::Instant::now(),
-                    fade_start: None,
-                });
+                state.adopt = Some(AdoptFrame::new(dmabuf));
                 // Same guard as ScheduleRender: redraw needs the active seat, which does
                 // not exist until startup completes (panics "No seat?").
                 if startup_done.load(Ordering::SeqCst) {
@@ -1468,6 +1494,11 @@ impl SurfaceThreadState {
                     "handoff: starting cross-fade of frozen frame"
                 );
                 adopt.fade_start = Some(std::time::Instant::now());
+                crate::utils::timing::mark(if content_visible {
+                    "fade-start (content visible)"
+                } else {
+                    "fade-start (hold cap)"
+                });
             }
             if adopt.texture.is_none() {
                 let dmabuf = adopt.dmabuf.clone();
@@ -1492,6 +1523,7 @@ impl SurfaceThreadState {
             };
             if alpha <= 0.0 {
                 debug!("handoff: cross-fade complete, frozen frame released");
+                crate::utils::timing::mark("fade-complete");
                 self.adopt = None;
             } else if let Some(tex) = adopt.texture.clone() {
                 let ctx = renderer.glow_renderer().context_id();

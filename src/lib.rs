@@ -130,6 +130,7 @@ impl State {
 }
 
 pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
+    utils::timing::init();
     let raw_args = RawArgs::from_args();
     let mut cursor = raw_args.cursor();
     raw_args.next_os(&mut cursor);
@@ -167,6 +168,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     // setup logger
     logger::init_logger()?;
     info!("Cosmic starting up!");
+    utils::timing::mark("process-start");
 
     // This thread runs the event loop. Recorded before any iced element exists,
     // so ProgramLoop can tell inline-safe calls from ones that must be deferred.
@@ -210,6 +212,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     );
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;
+    utils::timing::mark("backend-ready");
 
     if let Err(err) = theme::watch_theme(event_loop.handle()) {
         warn!(?err, "Failed to watch theme");
@@ -227,6 +230,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         // shall we shut down?
         if state.common.should_stop {
             info!("Shutting down");
+            utils::timing::mark("shutdown-begin");
             state.common.event_loop_signal.stop();
             state.common.event_loop_signal.wakeup();
             return;
@@ -310,6 +314,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                 // Kiosk child exited with status
                 Ok(Some(exit_status)) => {
                     info!("Command exited with status {:?}", exit_status);
+                    crate::utils::timing::mark("kiosk-child-exited");
                     // Stop cleanly so surface threads are joined before exit() (signal -> 1).
                     state.common.kiosk_exit_code = Some(exit_status.code().unwrap_or(1));
                     state.common.should_stop = true;
@@ -362,6 +367,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                     compositor.lock().unwrap().freeze_scanout();
                 }
             }
+            utils::timing::mark("freeze-complete");
         }
 
         for device in kms.drm_devices.values_mut() {
@@ -369,11 +375,13 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                 surface.drop_and_join();
             }
         }
+        utils::timing::mark("surfaces-joined");
     }
 
     // drop eventloop & state before logger
     std::mem::drop(event_loop);
     std::mem::drop(state);
+    utils::timing::mark("process-exit");
 
     if let Some(code) = kiosk_exit_code {
         process::exit(code);

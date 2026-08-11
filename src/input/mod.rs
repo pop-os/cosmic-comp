@@ -2037,6 +2037,12 @@ impl State {
         handle: KeysymHandle<'_>,
         serial: Serial,
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
+        // Swallow keys while the handoff frame is up, for the same reason as
+        // `surface_under`: the focused window is invisible behind it.
+        if crate::backend::kms::handoff_active() {
+            return FilterResult::Intercept(None);
+        }
+
         // Pre-compute for layout-agnostic shortcut matching
         let raw_syms = handle.raw_syms();
         let latin_sym = handle.raw_latin_sym_or_raw_current_sym();
@@ -3058,6 +3064,13 @@ impl State {
         output: &Output,
         shell: &Shell,
     ) -> Option<(PointerFocusTarget, Point<f64, Global>)> {
+        // The session handoff frame covers everything opaquely while the incoming
+        // desktop paints behind it. It is a render element only, so without this the
+        // pointer would hover and click windows the user cannot see.
+        if crate::backend::kms::handoff_active() {
+            return None;
+        }
+
         let (previous_workspace, workspace) = shell.workspaces.active(output)?;
         let (previous_idx, idx) = shell.workspaces.active_num(output);
         let previous_workspace = previous_workspace

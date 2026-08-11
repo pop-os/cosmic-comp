@@ -60,8 +60,8 @@ mod drm_helpers;
 pub mod render;
 mod surface;
 use device::*;
-pub(crate) use surface::Surface;
 pub use surface::Timings;
+pub(crate) use surface::{Surface, handoff_active};
 
 use super::render::{CLEAR_COLOR, CursorMode, output_elements};
 
@@ -1345,6 +1345,7 @@ impl KmsGuard<'_> {
 
                             let _ = renderer;
 
+                            crate::utils::timing::mark("first-flip");
                             compositor
                         };
 
@@ -1388,6 +1389,7 @@ impl KmsGuard<'_> {
                         // Hand it to the now-running render thread for the cross-fade.
                         if let Some(dmabuf) = adopt_dmabuf {
                             surface.adopt_frozen_frame(dmabuf);
+                            crate::utils::timing::mark("adopt-handed-off");
                         }
 
                         surface.output.set_adaptive_sync_support(vrr_support);

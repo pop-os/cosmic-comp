@@ -16,5 +16,6 @@ pub mod process;
 pub mod quirks;
 pub mod rlimit;
 pub mod screenshot;
+pub mod timing;
 pub mod tween;
 pub mod xdg_icon;
