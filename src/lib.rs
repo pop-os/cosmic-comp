@@ -472,9 +472,13 @@ fn install_termination_handler(handle: calloop::LoopHandle<'static, state::State
     Ok(())
 }
 
-/// Session-handoff freeze opt-in (shared by the exit CLOSEFB and the logout frame hold).
+/// Session-handoff freeze (exit CLOSEFB + the frame hold). On by default; set
+/// `COSMIC_FREEZE_SCANOUT_ON_EXIT=0` to fall back to the plain blank-on-exit.
 pub(crate) fn freeze_on_exit_enabled() -> bool {
-    std::env::var_os("COSMIC_FREEZE_SCANOUT_ON_EXIT").is_some_and(|v| v != "0")
+    !matches!(
+        std::env::var("COSMIC_FREEZE_SCANOUT_ON_EXIT").as_deref(),
+        Ok("0") | Ok("false") | Ok("no") | Ok("off")
+    )
 }
 
 fn init_wayland_display(

@@ -156,18 +156,15 @@ impl WlrLayerShellHandler for State {
             // capture. Desktop: the wallpaper (Background) dies — a wallpaper CHANGE also
             // lands here and is released by the fresh map. Greeter: it has no wallpaper, so
             // an Overlay teardown in a session with no Background layer is the signal.
-            let no_wallpaper_session = || {
-                !shell.outputs().any(|o| {
-                    layer_map_for_output(o)
-                        .layers()
-                        .any(|l| l.layer() == Layer::Background)
-                })
-            };
+            // A kiosk child means this compositor IS the greeter (`cosmic-comp <greeter>`);
+            // a desktop is spawned by cosmic-session with no child. Structural, unlike
+            // "has no wallpaper", which is also true of a desktop whose cosmic-bg is
+            // disabled or has crashed — there, every popup close would arm the hold.
+            let is_kiosk = self.common.kiosk_child.is_some();
             let should_arm = crate::freeze_on_exit_enabled()
                 && !shell.logout_hold
                 && (torn_was_background
-                    || (matches!(torn_layer, Layer::Top | Layer::Overlay)
-                        && no_wallpaper_session()));
+                    || (is_kiosk && matches!(torn_layer, Layer::Top | Layer::Overlay)));
             if should_arm {
                 shell.logout_hold = true;
                 tracing::debug!(
