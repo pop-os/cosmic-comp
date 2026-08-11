@@ -318,6 +318,10 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                     // Stop cleanly so surface threads are joined before exit() (signal -> 1).
                     state.common.kiosk_exit_code = Some(exit_status.code().unwrap_or(1));
                     state.common.should_stop = true;
+                    // should_stop is read at the TOP of this callback, and with the child
+                    // gone nothing else will wake the loop — without this the greeter's
+                    // compositor idles until greetd's 5s SIGTERM.
+                    state.common.event_loop_signal.wakeup();
                 }
                 // Command still running
                 Ok(None) => {}
@@ -326,6 +330,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                     warn!(?err, "Failed to wait for command");
                     state.common.kiosk_exit_code = Some(1);
                     state.common.should_stop = true;
+                    state.common.event_loop_signal.wakeup();
                 }
             }
         }
