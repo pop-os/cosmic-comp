@@ -139,7 +139,63 @@ impl AsMut<GlowRenderer> for RendererRef<'_> {
     }
 }
 
-pub static CLEAR_COLOR: Color32F = Color32F::new(0.153, 0.161, 0.165, 1.0);
+/// The colour behind everything, seen whenever no element covers an output — most
+/// visibly during the session handoff, before the incoming session paints.
+///
+/// Black by default. Override with `COSMIC_CLEAR_COLOR`, accepted as `#RRGGBB`,
+/// `RRGGBB`, or `R,G,B` (floats 0.0-1.0, or 0-255 if any component exceeds 1).
+pub static CLEAR_COLOR: std::sync::LazyLock<Color32F> = std::sync::LazyLock::new(|| {
+    const BLACK: Color32F = Color32F::new(0.0, 0.0, 0.0, 1.0);
+    let Ok(raw) = std::env::var("COSMIC_CLEAR_COLOR") else {
+        return BLACK;
+    };
+    match parse_clear_color(&raw) {
+        Some(color) => {
+            tracing::info!(%raw, "using clear colour from COSMIC_CLEAR_COLOR");
+            color
+        }
+        None => {
+            tracing::warn!(%raw, "COSMIC_CLEAR_COLOR is not #RRGGBB or R,G,B; using black");
+            BLACK
+        }
+    }
+});
+
+fn parse_clear_color(raw: &str) -> Option<Color32F> {
+    let raw = raw.trim();
+    let hex = raw.strip_prefix('#').unwrap_or(raw);
+    if hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+        let (r, g, b) = (channel(0)?, channel(2)?, channel(4)?);
+        return Some(Color32F::new(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            1.0,
+        ));
+    }
+    let parts = raw
+        .split(',')
+        .map(|p| p.trim().parse::<f32>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let [r, g, b] = parts[..] else { return None };
+    if [r, g, b].iter().any(|c| !c.is_finite() || *c < 0.0) {
+        return None;
+    }
+    // A component above 1.0 can only mean 0-255.
+    let scale = if r > 1.0 || g > 1.0 || b > 1.0 {
+        1.0 / 255.0
+    } else {
+        1.0
+    };
+    Some(Color32F::new(
+        (r * scale).min(1.0),
+        (g * scale).min(1.0),
+        (b * scale).min(1.0),
+        1.0,
+    ))
+}
+
 pub static OUTLINE_SHADER: &str = include_str!("./shaders/rounded_outline.frag");
 pub static RECTANGLE_SHADER: &str = include_str!("./shaders/rounded_rectangle.frag");
 pub static POSTPROCESS_SHADER: &str = include_str!("./shaders/offscreen.frag");
@@ -2518,7 +2574,7 @@ where
                 .collect::<Vec<_>>()
             };
 
-            damage_tracker.render_output(renderer, target, age, &elements, CLEAR_COLOR)?;
+            damage_tracker.render_output(renderer, target, age, &elements, *CLEAR_COLOR)?;
         }
 
         result
@@ -2718,8 +2774,47 @@ where
         target,
         age,
         &elements,
-        CLEAR_COLOR, // TODO use a theme neutral color
+        *CLEAR_COLOR, // TODO use a theme neutral color
     );
 
     res.map(|res| (res, elements))
+}
+
+#[cfg(test)]
+mod clear_color_tests {
+    use super::parse_clear_color;
+
+    fn rgb(raw: &str) -> (f32, f32, f32) {
+        let c = parse_clear_color(raw).expect("should parse");
+        (c.r(), c.g(), c.b())
+    }
+
+    #[test]
+    fn hex_parses_with_and_without_the_hash() {
+        assert_eq!(rgb("#000000"), (0.0, 0.0, 0.0));
+        assert_eq!(rgb("ffffff"), (1.0, 1.0, 1.0));
+        assert_eq!(rgb("#ff0000"), (1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_triple_of_floats_is_taken_as_zero_to_one() {
+        assert_eq!(rgb("0,0,0"), (0.0, 0.0, 0.0));
+        assert_eq!(rgb("0.5, 0.25, 1.0"), (0.5, 0.25, 1.0));
+    }
+
+    #[test]
+    fn a_component_above_one_switches_the_triple_to_zero_to_255() {
+        assert_eq!(rgb("255,0,0"), (1.0, 0.0, 0.0));
+        let (r, g, b) = rgb("128,128,128");
+        assert!((r - 0.502).abs() < 1e-3 && r == g && g == b);
+    }
+
+    #[test]
+    fn malformed_input_is_rejected_rather_than_guessed_at() {
+        for raw in [
+            "", "red", "#12345", "#zzzzzz", "1,2", "1,2,3,4", "-1,0,0", "a,b,c",
+        ] {
+            assert!(parse_clear_color(raw).is_none(), "{raw:?} should not parse");
+        }
+    }
 }

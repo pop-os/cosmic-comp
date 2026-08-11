@@ -1721,7 +1721,7 @@ impl SurfaceThreadState {
                         &mut fb,
                         1,
                         &elements,
-                        CLEAR_COLOR,
+                        *CLEAR_COLOR,
                     ) {
                         Ok(res) => res,
                         Err(RenderError::Rendering(err)) => return Err(err),
@@ -1791,13 +1791,11 @@ impl SurfaceThreadState {
             let clear = if game_mode_active && has_active_fullscreen {
                 smithay::backend::renderer::Color32F::new(0.0, 0.0, 0.0, 1.0)
             } else {
-                CLEAR_COLOR // TODO use a theme neutral color
+                *CLEAR_COLOR // TODO use a theme neutral color
             };
-            // Grey-frame diagnosis (bug 1): CLEAR_COLOR is the charcoal grey. During
-            // the launch entrance, if game mode is active but has_active_fullscreen is
-            // still false (fullscreen surface not settled / first buffer not committed),
-            // the output clears to grey behind few/no elements — the grey frames the
-            // user sees. clear_is_black=false + low element_count while entering = that.
+            // Game mode forces black even when COSMIC_CLEAR_COLOR overrides the default:
+            // during the launch entrance has_active_fullscreen can still be false, and
+            // any non-black clear shows through behind the few elements present.
             tracing::trace!(
                 target: GAMING_TARGET,
                 output = %self.output.name(),

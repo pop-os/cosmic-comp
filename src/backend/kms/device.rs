@@ -927,7 +927,7 @@ impl LockedDevice<'_> {
                 };
 
                 let mut compositor = compositor.lock().unwrap();
-                compositor.render_frame(renderer, &elements, CLEAR_COLOR, FrameFlags::empty())?;
+                compositor.render_frame(renderer, &elements, *CLEAR_COLOR, FrameFlags::empty())?;
                 if let Err(err) = compositor.commit_frame()
                     && !matches!(err, FrameError::EmptyFrame)
                 {

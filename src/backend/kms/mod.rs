@@ -1313,7 +1313,7 @@ impl KmsGuard<'_> {
                                     establishing_crtc_covered = true;
                                 }
 
-                                elements.add_output(loop_crtc, CLEAR_COLOR, output_elements);
+                                elements.add_output(loop_crtc, *CLEAR_COLOR, output_elements);
                             }
 
                             // initialize_output flips before any surface-thread redraw, so
@@ -1328,7 +1328,7 @@ impl KmsGuard<'_> {
                                 debug!(
                                     "handoff: adding backdrop directly to establishing crtc (output_map did not cover it)"
                                 );
-                                elements.add_output(crtc, CLEAR_COLOR, vec![elem]);
+                                elements.add_output(crtc, *CLEAR_COLOR, vec![elem]);
                             }
 
                             let compositor = drm
@@ -1446,7 +1446,7 @@ impl KmsGuard<'_> {
                             )
                             .with_context(|| "Failed to render outputs")?;
 
-                            elements.add_output(crtc, CLEAR_COLOR, output_elements);
+                            elements.add_output(crtc, *CLEAR_COLOR, output_elements);
                         }
 
                         drm.use_mode(&surface.crtc, *mode, &mut renderer, &elements)
@@ -1491,7 +1491,7 @@ impl KmsGuard<'_> {
                     )
                     .with_context(|| "Failed to render outputs")?;
 
-                    elements.add_output(crtc, CLEAR_COLOR, output_elements);
+                    elements.add_output(crtc, *CLEAR_COLOR, output_elements);
                 }
 
                 if let Err(err) = device
