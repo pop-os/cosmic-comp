@@ -5589,13 +5589,6 @@ impl Shell {
                 } else {
                     // Ease-out cubic
                     let eased = 1.0 - (1.0 - progress).powi(3);
-                    tracing::debug!(
-                        ?surface_id,
-                        elapsed_ms = elapsed.as_millis(),
-                        progress = format!("{:.3}", progress),
-                        alpha = format!("{:.3}", eased),
-                        "layer_fade_in_alphas: surface fading in"
-                    );
                     Some((surface_id.clone(), eased))
                 }
             })
@@ -5616,12 +5609,6 @@ impl Shell {
         // Surfaces still waiting for their first buffer commit are held at 0.
         for surface_id in self.pending_layer_opens.keys() {
             result.entry(surface_id.clone()).or_insert(0.0);
-        }
-        if !result.is_empty() {
-            tracing::debug!(
-                count = result.len(),
-                "layer_fade_in_alphas: returning fading surfaces"
-            );
         }
         result
     }
