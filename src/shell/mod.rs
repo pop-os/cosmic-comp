@@ -5740,6 +5740,29 @@ impl Shell {
     /// Whether any layer surface is mapped but not yet visible (alpha 0 pending its first
     /// buffer, or mid fade-in). Hidden surfaces are excluded: a start-hidden overlay never
     /// commits a buffer and would keep this permanently true.
+    /// Whether an opaque wallpaper is up on `output`: a Background-layer surface that
+    /// has committed its first buffer and finished its own fade-in.
+    ///
+    /// This is what the session-handoff cross-fade waits for. Panels, docks and the
+    /// rest animate in over the wallpaper afterwards — waiting for them too means
+    /// waiting for a moment when nothing is animating, which a staggered cold start
+    /// never reaches.
+    pub fn background_layer_ready(&self, output: &Output) -> bool {
+        layer_map_for_output(output)
+            .layers()
+            .filter(|l| l.layer() == Layer::Background)
+            .any(|l| {
+                let id = l.wl_surface().id();
+                !self.pending_layer_fade_in.contains_key(&id)
+                    && !self.pending_layer_opens.contains_key(&id)
+                    && !self.layer_fade_in.contains_key(&id)
+                    && !self
+                        .layer_opens
+                        .iter()
+                        .any(|o| o.surface_id == id && o.is_animating())
+            })
+    }
+
     /// Per-bucket counts of what `layer_fade_in_active` is waiting on. Diagnostic
     /// only — a single stuck `pending_*` surface looks very different from the
     /// staggered fades of a cold session start.
