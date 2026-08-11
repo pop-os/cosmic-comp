@@ -1482,10 +1482,16 @@ impl SurfaceThreadState {
             let content_visible = has_content && !still_fading_in;
             let timed_out = adopt.started.elapsed() > ADOPT_HOLD_CAP;
             if adopt.fade_start.is_none() && (content_visible || timed_out) {
+                let (pending_fade, pending_open, fading, opening) =
+                    self.shell.read().layer_fade_in_blockers();
                 debug!(
                     held_ms = adopt.started.elapsed().as_millis(),
                     has_content,
                     still_fading_in,
+                    pending_fade,
+                    pending_open,
+                    fading,
+                    opening,
                     reason = if content_visible {
                         "content visible"
                     } else {

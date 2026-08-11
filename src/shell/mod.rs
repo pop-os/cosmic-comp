@@ -5740,6 +5740,29 @@ impl Shell {
     /// Whether any layer surface is mapped but not yet visible (alpha 0 pending its first
     /// buffer, or mid fade-in). Hidden surfaces are excluded: a start-hidden overlay never
     /// commits a buffer and would keep this permanently true.
+    /// Per-bucket counts of what `layer_fade_in_active` is waiting on. Diagnostic
+    /// only — a single stuck `pending_*` surface looks very different from the
+    /// staggered fades of a cold session start.
+    pub fn layer_fade_in_blockers(&self) -> (usize, usize, usize, usize) {
+        let pending_fade = self
+            .pending_layer_fade_in
+            .keys()
+            .filter(|id| !self.is_surface_hidden(id))
+            .count();
+        let pending_open = self
+            .pending_layer_opens
+            .keys()
+            .filter(|id| !self.is_surface_hidden(id))
+            .count();
+        let opening = self.layer_opens.iter().filter(|o| o.is_animating()).count();
+        (
+            pending_fade,
+            pending_open,
+            self.layer_fade_in.len(),
+            opening,
+        )
+    }
+
     pub fn layer_fade_in_active(&self) -> bool {
         self.pending_layer_fade_in
             .keys()
