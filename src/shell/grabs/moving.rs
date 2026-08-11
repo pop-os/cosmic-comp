@@ -8,6 +8,7 @@ use crate::{
         CosmicMapped, CosmicSurface, Direction, ManagedLayer,
         element::{CosmicMappedRenderElement, stack_hover::StackHover},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
+        grabs::GrabType,
         layout::floating::TiledCorners,
     },
     utils::prelude::*,
@@ -20,7 +21,7 @@ use smallvec::SmallVec;
 use smithay::{
     backend::{
         drm::DrmNode,
-        input::{ButtonState, InputTime},
+        input::{ButtonState, InputTime, TabletToolDescriptor},
         renderer::{
             ImportAll, ImportMem,
             element::{RenderElement, utils::RescaleRenderElement},
@@ -30,13 +31,27 @@ use smithay::{
     input::{
         Seat,
         pointer::{
-            AxisFrame, ButtonEvent, CursorIcon, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent, CursorIcon,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
+            MotionEvent as PointerMotionEvent, PointerGrab, PointerInnerHandle,
             RelativeMotionEvent,
         },
-        touch::{self, GrabStartData as TouchGrabStartData, TouchGrab, TouchInnerHandle},
+        tablet::{
+            TabletSeatHandler,
+            tool::{
+                AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
+                DownEvent as TabletDownEvent, GrabStartData as TabletGrabStartData,
+                MotionEvent as TabletMotionEvent, ProximityInEvent, ProximityOutEvent,
+                TabletToolGrab, TabletToolInnerHandle, UpEvent as TabletUpEvent,
+            },
+        },
+        touch::{
+            DownEvent as TouchDownEvent, GrabStartData as TouchGrabStartData,
+            MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent, TouchGrab,
+            TouchInnerHandle, UpEvent as TouchUpEvent,
+        },
     },
     output::Output,
     utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Scale},
@@ -503,7 +518,7 @@ impl PointerGrab<State> for MoveGrab {
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &MotionEvent,
+        event: &PointerMotionEvent,
     ) {
         self.update_location(state, event.location);
 
@@ -529,7 +544,7 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         handle.button(state, event);
         match self.release {
@@ -550,7 +565,7 @@ impl PointerGrab<State> for MoveGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        details: AxisFrame,
+        details: PointerAxisFrame,
     ) {
         handle.axis(state, details);
     }
@@ -647,7 +662,7 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &touch::DownEvent,
+        event: &TouchDownEvent,
     ) {
         handle.down(data, None, event)
     }
@@ -656,7 +671,7 @@ impl TouchGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::UpEvent,
+        event: &TouchUpEvent,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
             handle.unset_grab(self, data);
@@ -670,7 +685,7 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &touch::MotionEvent,
+        event: &TouchMotionEvent,
     ) {
         if event.slot == <Self as TouchGrab<State>>::start_data(self).slot {
             self.update_location(data, event.location);
@@ -691,7 +706,7 @@ impl TouchGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::ShapeEvent,
+        event: &ShapeEvent,
     ) {
         handle.shape(data, event)
     }
@@ -700,7 +715,7 @@ impl TouchGrab<State> for MoveGrab {
         &mut self,
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
-        event: &touch::OrientationEvent,
+        event: &OrientationEvent,
     ) {
         handle.orientation(data, event)
     }
@@ -710,6 +725,100 @@ impl TouchGrab<State> for MoveGrab {
             GrabStartData::Touch(start_data) => start_data,
             _ => unreachable!(),
         }
+    }
+
+    fn unset(&mut self, _data: &mut State) {}
+}
+
+impl TabletToolGrab<State> for MoveGrab {
+    fn start_data(&self) -> &TabletGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::TabletTool { data, .. } => data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn proximity_out(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &ProximityOutEvent,
+    ) {
+        handle.proximity_out(data, event);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &TabletMotionEvent,
+    ) {
+        handle.motion(data, None, event);
+
+        self.update_location(data, event.location);
+        if !self.window.alive() {
+            handle.unset_grab(self, data, event.serial, event.time, true);
+        }
+    }
+
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletDownEvent,
+    ) {
+        handle.down(data, event)
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletUpEvent,
+    ) {
+        if self.tool().is_some_and(|tool| tool == handle.descriptor()) {
+            handle.unset_grab(self, data, event.serial, event.time, false);
+        }
+
+        handle.up(data, event);
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletButtonEvent,
+    ) {
+        handle.button(data, event)
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        frame: TabletAxisFrame,
+    ) {
+        handle.axis(data, frame)
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        time: InputTime,
+    ) {
+        handle.frame(data, time)
+    }
+
+    fn proximity_in(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &ProximityInEvent,
+    ) {
+        handle.proximity_in(data, focus, event);
     }
 
     fn unset(&mut self, _data: &mut State) {}
@@ -778,10 +887,15 @@ impl MoveGrab {
         self.previous == ManagedLayer::Tiling
     }
 
-    pub fn is_touch_grab(&self) -> bool {
-        match self.start_data {
-            GrabStartData::Touch(_) => true,
-            GrabStartData::Pointer(_) => false,
+    pub fn grab_type(&self) -> GrabType {
+        self.start_data.type_()
+    }
+
+    pub fn tool(&self) -> Option<&TabletToolDescriptor> {
+        if let GrabStartData::TabletTool { tool, .. } = &self.start_data {
+            Some(tool)
+        } else {
+            None
         }
     }
 }
@@ -953,7 +1067,7 @@ impl Drop for MoveGrab {
                                 position.as_logical().to_f64() - window.geometry().loc.to_f64()
                                     + offset,
                             )),
-                            &MotionEvent {
+                            &PointerMotionEvent {
                                 location: pointer.current_location(),
                                 serial,
                                 time: InputTime::now(),

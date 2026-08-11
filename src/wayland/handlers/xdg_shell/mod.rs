@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::{CosmicSurface, PendingWindow, focus::target::KeyboardFocusTarget, grabs::ReleaseMode},
+    shell::{
+        CosmicSurface, PendingWindow,
+        focus::target::KeyboardFocusTarget,
+        grabs::{GrabType, ReleaseMode},
+    },
     utils::prelude::*,
 };
-use smithay::desktop::layer_map_for_output;
 use smithay::{
+    backend::input::InputTime,
     desktop::{
         PopupGrab, PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy,
         WindowSurfaceType, find_popup_root_surface,
@@ -26,6 +30,7 @@ use smithay::{
         },
     },
 };
+use smithay::{desktop::layer_map_for_output, input::tablet::TabletSeatTrait};
 use std::cell::Cell;
 use tracing::warn;
 
@@ -190,12 +195,17 @@ impl XdgShellHandler for State {
             true,
         ) {
             std::mem::drop(shell);
-            if grab.is_touch_grab() {
-                seat.get_touch().unwrap().set_grab(self, grab, serial);
-            } else {
-                seat.get_pointer()
+            match grab.grab_type() {
+                GrabType::Touch => seat.get_touch().unwrap().set_grab(self, grab, serial),
+                GrabType::Pointer => seat
+                    .get_pointer()
                     .unwrap()
-                    .set_grab(self, grab, serial, focus)
+                    .set_grab(self, grab, serial, focus),
+                GrabType::TabletTool => seat
+                    .tablet_seat()
+                    .get_tool(grab.tool().unwrap())
+                    .unwrap()
+                    .set_grab(self, grab, InputTime::now(), serial, focus),
             }
         }
     }
@@ -218,12 +228,17 @@ impl XdgShellHandler for State {
             true,
         ) {
             std::mem::drop(shell);
-            if grab.is_touch_grab() {
-                seat.get_touch().unwrap().set_grab(self, grab, serial)
-            } else {
-                seat.get_pointer()
+            match grab.grab_type() {
+                GrabType::Touch => seat.get_touch().unwrap().set_grab(self, grab, serial),
+                GrabType::Pointer => seat
+                    .get_pointer()
                     .unwrap()
-                    .set_grab(self, grab, serial, focus)
+                    .set_grab(self, grab, serial, focus),
+                GrabType::TabletTool => seat
+                    .tablet_seat()
+                    .get_tool(grab.tool().unwrap())
+                    .unwrap()
+                    .set_grab(self, grab, InputTime::now(), serial, focus),
             }
         }
     }

@@ -32,7 +32,10 @@ use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, Resiz
 use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::{input::TouchSlot, renderer::element::RenderElementStates},
+    backend::{
+        input::{TabletToolDescriptor, TouchSlot},
+        renderer::element::RenderElementStates,
+    },
     desktop::{
         LayerSurface, PopupKind, WindowSurface, WindowSurfaceType, layer_map_for_output,
         space::SpaceElement,
@@ -46,6 +49,7 @@ use smithay::{
         pointer::{
             CursorImageStatus, CursorImageSurfaceData, Focus, GrabStartData as PointerGrabStartData,
         },
+        tablet::tool::GrabTrigger as TabletGrabTrigger,
     },
     output::{Output, WeakOutput},
     reexports::{
@@ -130,6 +134,7 @@ pub enum Trigger {
     KeyboardMove(shortcuts::Modifiers),
     Pointer(u32),
     Touch(TouchSlot),
+    Tool(TabletToolDescriptor, TabletGrabTrigger),
 }
 
 #[derive(Debug, Clone)]
@@ -1755,7 +1760,7 @@ impl Shell {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
                         self.overview_mode.active_trigger(),
-                        Some(Trigger::Pointer(_) | Trigger::Touch(_))
+                        Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
@@ -1806,7 +1811,7 @@ impl Shell {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
                         self.overview_mode.active_trigger(),
-                        Some(Trigger::Pointer(_) | Trigger::Touch(_))
+                        Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
@@ -3840,6 +3845,7 @@ impl Shell {
         let trigger = match &start_data {
             GrabStartData::Pointer(start_data) => Trigger::Pointer(start_data.button),
             GrabStartData::Touch(start_data) => Trigger::Touch(start_data.slot),
+            GrabStartData::TabletTool { tool, data } => Trigger::Tool(tool.clone(), data.trigger),
         };
         let active_hint = if config.cosmic_conf.active_hint {
             self.theme.cosmic().active_hint as u8
