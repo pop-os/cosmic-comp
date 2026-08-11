@@ -1,3 +1,20 @@
+# [1.36.0](https://github.com/playtron-os/cosmic-comp/compare/v1.35.0...v1.36.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* **kms:** shut down as soon as the kiosk child exits ([476c103](https://github.com/playtron-os/cosmic-comp/commit/476c1038e179c09c85b788fc5e5e07658315337c))
+* **logger:** enable handoff timing marks by default ([da95c97](https://github.com/playtron-os/cosmic-comp/commit/da95c97d25ec1c41fcfdf2540787263a4c30e584))
+* **shell:** drop per-frame logging from layer_fade_in_alphas ([12778d9](https://github.com/playtron-os/cosmic-comp/commit/12778d931580023bcc5857c929a36980de1abe71))
+
+
+### Features
+
+* **kms:** gate the handoff cross-fade on the wallpaper ([8c72714](https://github.com/playtron-os/cosmic-comp/commit/8c7271463646ffc0ff0fd79c8c7a78d21f1adade))
+* **kms:** record what blocks the handoff cross-fade ([e771019](https://github.com/playtron-os/cosmic-comp/commit/e771019f416c0aca46574fa3f487e5ff766cead5))
+* **render:** default the clear colour to black, overridable by env ([fe20a73](https://github.com/playtron-os/cosmic-comp/commit/fe20a73dcd7b71457226c8bfc6d72794caaccf3a)), closes [#RRGGBB](https://github.com/playtron-os/cosmic-comp/issues/RRGGBB)
+* suppress input during the session handoff, and time the handoff ([e4f9dad](https://github.com/playtron-os/cosmic-comp/commit/e4f9dad3d374110d65c7fb19f7b0b8114aac13cd))
+
 # [1.35.0](https://github.com/playtron-os/cosmic-comp/compare/v1.34.2...v1.35.0) (2026-08-11)
 
 
