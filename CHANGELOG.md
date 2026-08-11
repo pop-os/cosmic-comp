@@ -1,3 +1,24 @@
+# [1.35.0](https://github.com/playtron-os/cosmic-comp/compare/v1.34.2...v1.35.0) (2026-08-11)
+
+
+### Bug Fixes
+
+* **blur:** give every blur rect its own element state ([9766456](https://github.com/playtron-os/cosmic-comp/commit/9766456d4361688993f28907250a911d3ae881a5))
+* **dnd:** clear the drag icon when a drag is cancelled ([80ba206](https://github.com/playtron-os/cosmic-comp/commit/80ba206d23c98775d36b3f538fb5625c632a21de))
+* **input:** restore focus when hiding a focused surface ([53c519a](https://github.com/playtron-os/cosmic-comp/commit/53c519a59a4e66bec8bfb32ba362b4736b4b9638))
+* **logger:** stop default directives from clobbering RUST_LOG ([549dd9a](https://github.com/playtron-os/cosmic-comp/commit/549dd9aefccedff094ee6fea89ac1cfc54bbdd9a))
+* **render:** evict dead layer surfaces from the shadow cache ([435ec1d](https://github.com/playtron-os/cosmic-comp/commit/435ec1d603090304cd42275e7d0f229c4d1cae68))
+* **shell:** stop re-leaking client toplevel icons on every refresh ([f857431](https://github.com/playtron-os/cosmic-comp/commit/f85743158fe608cc076193f97b3f110eac420a8f))
+* **voice:** never focus an invisible receiver; prune destroyed ones ([7f1c65b](https://github.com/playtron-os/cosmic-comp/commit/7f1c65b94ddbdf6ef747f41a45dc4cd636f9934c))
+
+
+### Features
+
+* **kms:** enable the session handoff by default ([adcc4ad](https://github.com/playtron-os/cosmic-comp/commit/adcc4adf11861c8aef4c22358f79b146187065ea))
+* **kms:** flicker-free session handoff via a frozen scanout frame ([47f70fd](https://github.com/playtron-os/cosmic-comp/commit/47f70fdfae4c70d507995b0fb4b00e97666741a3))
+* **lock:** cross-fade the ext-session-lock cover in and out ([09a62e5](https://github.com/playtron-os/cosmic-comp/commit/09a62e50942bdad00af791ba8a5747c7fd32009d))
+* memory self-report, opt-in heap profiling, smithay leak fixes ([122942c](https://github.com/playtron-os/cosmic-comp/commit/122942c946a023931ffd4a25676acede24fd4a3f))
+
 ## [1.34.2](https://github.com/playtron-os/cosmic-comp/compare/v1.34.1...v1.34.2) (2026-08-05)
 
 
