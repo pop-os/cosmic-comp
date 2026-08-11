@@ -139,6 +139,10 @@ const MOVE_GRAB_Y_OFFSET: f64 = 16.;
 /// When dragging a zone-filling window, shrink it to this fraction of the zone.
 const DRAG_UNMAXIMIZE_FRACTION: (i32, i32) = (2, 3);
 const ACTIVATION_TOKEN_EXPIRE_TIME: Duration = Duration::from_secs(5);
+
+/// Compositor-owned ext-session-lock fade durations (desktop <-> lock cover).
+const UNLOCK_FADE_DURATION: Duration = Duration::from_millis(250);
+const LOCK_FADE_IN_DURATION: Duration = Duration::from_millis(250);
 /// How many entrance-animation durations a layer surface may wait for real
 /// content before it animates in over whatever it has. Expressed against the
 /// animation's own duration so it tracks the motion token, and generous enough
@@ -825,6 +829,13 @@ pub struct Shell {
     /// Stop presenting once the outgoing session's UI dies, so the last real frame stays
     /// latched for the exit freeze. Armed in `layer_destroyed`, released by a fresh
     /// wallpaper map or a 5s timer.
+    /// Per-output capture of the lock cover; what the unlock fade dissolves.
+    unlock_snapshot: Mutex<HashMap<Output, crate::backend::render::UnlockSnapshot>>,
+    /// Start of the unlock fade-out.
+    unlock_fade: Option<Instant>,
+    /// Start of the lock fade-in (desktop -> lock); `started` latches it per lock.
+    lock_fade_in: Option<Instant>,
+    lock_fade_in_started: bool,
     pub logout_hold: bool,
     layer_fade_in: std::collections::HashMap<ObjectId, Instant>,
     /// Layer surfaces waiting for a buffer commit before starting their fade-in,
@@ -2522,6 +2533,10 @@ impl Shell {
 
             // Layer surface fade-in tracking
             layer_fade_in: std::collections::HashMap::new(),
+            unlock_snapshot: Mutex::new(HashMap::new()),
+            unlock_fade: None,
+            lock_fade_in: None,
+            lock_fade_in_started: false,
             logout_hold: false,
             pending_layer_fade_in: std::collections::HashMap::new(),
             layer_fade_out: std::collections::HashMap::new(),
@@ -3472,6 +3487,8 @@ impl Shell {
         let fade_in = !self.layer_fade_in.is_empty();
         let pending_fade = !self.pending_layer_fade_in.is_empty();
         let fade_out = !self.layer_fade_out.is_empty();
+        let unlock_fade = self.any_unlock_fade_in_flight();
+        let lock_fade_in = self.any_lock_fade_in_in_flight();
         let layer_resize = self
             .active_layer_resize_anim
             .as_ref()
@@ -3492,6 +3509,8 @@ impl Shell {
             || fade_in
             || pending_fade
             || fade_out
+            || unlock_fade
+            || lock_fade_in
             || layer_resize
             || crate::backend::render::wayland::blur_effect::blur_fade_in_flight()
     }
@@ -3565,6 +3584,8 @@ impl Shell {
         self.update_layer_resize_animation();
         // Clean up completed layer surface fade-ins
         self.cleanup_layer_fade_ins();
+        self.cleanup_unlock_fade();
+        self.cleanup_lock_fade_in();
         // Clean up completed open animations
         self.cleanup_layer_opens();
         // Complete close animations (moves to hidden_surfaces)
@@ -5603,6 +5624,130 @@ impl Shell {
             );
         }
         result
+    }
+
+    // -----------------------------------------------------------------------
+    // Compositor-owned ext-session-lock fades (desktop <-> lock cover)
+    // -----------------------------------------------------------------------
+
+    /// Called from the render path while locked, hence `&self` + interior `Mutex`.
+    pub fn set_unlock_snapshot(
+        &self,
+        output: &Output,
+        snapshot: crate::backend::render::UnlockSnapshot,
+    ) {
+        self.unlock_snapshot
+            .lock()
+            .unwrap()
+            .insert(output.clone(), snapshot);
+    }
+
+    /// Run `f` with the current unlock snapshot for `output`, if one exists.
+    pub fn with_unlock_snapshot<T>(
+        &self,
+        output: &Output,
+        f: impl FnOnce(&crate::backend::render::UnlockSnapshot) -> T,
+    ) -> Option<T> {
+        self.unlock_snapshot.lock().unwrap().get(output).map(f)
+    }
+
+    /// Begin the unlock fade-out, only if a snapshot exists (else an instant reveal).
+    pub fn start_unlock_fade(&mut self) {
+        if !self.unlock_snapshot.lock().unwrap().is_empty() {
+            self.unlock_fade = Some(Instant::now());
+        }
+    }
+
+    /// Alpha for the unlock fade overlay (the captured lock image), 1.0 → 0.0
+    pub fn unlock_fade_alpha(&self) -> Option<f32> {
+        let start = self.unlock_fade?;
+        let progress =
+            (start.elapsed().as_secs_f32() / UNLOCK_FADE_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+        if progress >= 1.0 {
+            None
+        } else {
+            Some(1.0 - progress.powi(3))
+        }
+    }
+
+    /// Whether an unlock fade is running (drives `animations_going`).
+    pub fn any_unlock_fade_in_flight(&self) -> bool {
+        self.unlock_fade.is_some()
+    }
+
+    /// Drop the unlock fade + all captured lock snapshots (their `GlesTexture`s).
+    pub fn clear_unlock_fade(&mut self) {
+        self.unlock_fade = None;
+        self.unlock_snapshot.lock().unwrap().clear();
+    }
+
+    /// End the fade and free the snapshot textures (else one leaks per lock cycle).
+    fn cleanup_unlock_fade(&mut self) {
+        if let Some(start) = self.unlock_fade
+            && start.elapsed() >= UNLOCK_FADE_DURATION
+        {
+            self.clear_unlock_fade();
+        }
+    }
+
+    /// Begin the lock fade-in on the cover's first buffer.
+    pub fn note_lock_surface_first_buffer(&mut self, surface: &WlSurface) -> bool {
+        if self.lock_fade_in_started {
+            return false;
+        }
+        let Some(session_lock) = self.session_lock.as_ref() else {
+            return false;
+        };
+        let is_lock_surface = session_lock
+            .surfaces
+            .values()
+            .any(|s| s.wl_surface() == surface);
+        if !is_lock_surface {
+            return false;
+        }
+        let ready = smithay::backend::renderer::utils::with_renderer_surface_state(surface, |st| {
+            st.buffer().is_some()
+        })
+        .unwrap_or(false);
+        if !ready {
+            return false;
+        }
+        self.lock_fade_in = Some(Instant::now());
+        self.lock_fade_in_started = true;
+        true
+    }
+
+    /// Alpha for the lock fade-in overlay (the live lock cover), 0.0 → 1.0
+    pub fn lock_fade_in_alpha(&self) -> Option<f32> {
+        let start = self.lock_fade_in?;
+        let progress =
+            (start.elapsed().as_secs_f32() / LOCK_FADE_IN_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+        if progress >= 1.0 {
+            None
+        } else {
+            Some(1.0 - (1.0 - progress).powi(3))
+        }
+    }
+
+    /// Whether a lock fade-in is running (drives `animations_going`).
+    pub fn any_lock_fade_in_in_flight(&self) -> bool {
+        self.lock_fade_in.is_some()
+    }
+
+    /// Reset on lock()/unlock() so the next lock re-fades and no timer leaks.
+    pub fn clear_lock_fade_in(&mut self) {
+        self.lock_fade_in = None;
+        self.lock_fade_in_started = false;
+    }
+
+    /// Null the timer once opaque (keeping `started`) so order.rs resumes its
+    /// lock-only path.
+    fn cleanup_lock_fade_in(&mut self) {
+        if let Some(start) = self.lock_fade_in
+            && start.elapsed() >= LOCK_FADE_IN_DURATION
+        {
+            self.lock_fade_in = None;
+        }
     }
 
     /// Whether any layer surface is mapped but not yet visible (alpha 0 pending its first

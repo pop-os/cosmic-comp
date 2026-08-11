@@ -42,6 +42,8 @@ impl SessionLockHandler for State {
             ext_session_lock,
             surfaces: HashMap::new(),
         });
+        shell.clear_unlock_fade();
+        shell.clear_lock_fade_in();
 
         for output in shell.outputs() {
             self.backend.schedule_render(output);
@@ -51,6 +53,8 @@ impl SessionLockHandler for State {
     fn unlock(&mut self) {
         let mut shell = self.common.shell.write();
         shell.session_lock = None;
+        shell.start_unlock_fade();
+        shell.clear_lock_fade_in();
 
         for output in shell.outputs() {
             self.backend.schedule_render(output);

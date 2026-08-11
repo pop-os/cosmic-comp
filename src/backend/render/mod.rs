@@ -1210,9 +1210,37 @@ where
                 });
             }
             Stage::SessionLock(lock_surface) => {
-                session_lock_elements(renderer, output, lock_surface, blur_strength, &mut |elem| {
-                    elements.extend(crop_to_output(elem.into()).map(Into::into))
-                })
+                session_lock_elements(
+                    renderer,
+                    output,
+                    lock_surface,
+                    1.0,
+                    blur_strength,
+                    &mut |elem| elements.extend(crop_to_output(elem.into()).map(Into::into)),
+                );
+                // Unlock destroys the live surface synchronously, so keep a copy to fade
+                // out afterwards. Throttled — the locked screen is static.
+                if let Some(lock_surface) = lock_surface {
+                    let now = Instant::now();
+                    let due = shell
+                        .with_unlock_snapshot(output, |s| {
+                            now.duration_since(s.captured_at) >= UNLOCK_SNAPSHOT_MIN_INTERVAL
+                        })
+                        .unwrap_or(true);
+                    if due
+                        && let Some((texture, src_size)) =
+                            capture_unlock_snapshot(renderer, output, lock_surface)
+                    {
+                        shell.set_unlock_snapshot(
+                            output,
+                            UnlockSnapshot {
+                                texture,
+                                src_size,
+                                captured_at: now,
+                            },
+                        );
+                    }
+                }
             }
             Stage::LayerPopup {
                 popup,
@@ -1931,6 +1959,53 @@ where
         );
     }
 
+    // Unlock fade-out: draw the captured lock image over the now-live desktop at a
+    // falling alpha. Only while unlocked — never over an active lock.
+    if shell.session_lock.is_none()
+        && let Some(alpha) = shell.unlock_fade_alpha()
+    {
+        let fade_elem = shell.with_unlock_snapshot(output, |snapshot| {
+            TextureRenderElement::from_texture_render_buffer(
+                (0.0, 0.0),
+                &snapshot.texture,
+                Some(alpha),
+                // Explicit src so the overlay scales to the output instead of cropping.
+                Some(Rectangle::from_size(snapshot.src_size)),
+                Some(output.geometry().size.as_logical()),
+                Kind::Unspecified,
+            )
+        });
+        if let Some(fade_elem) = fade_elem {
+            let wre: WorkspaceRenderElement<R> = fade_elem.into();
+            if let Some(cropped) = crop_to_output(wre) {
+                // Front = topmost, so the cover fades over everything including cursor.
+                elements.insert(0, cropped.into());
+            }
+        }
+    }
+
+    // Lock fade-in: order.rs suppresses its lock short-circuit while this runs, so the
+    // live desktop composites below and the cover ramps in on top.
+    if shell.session_lock.is_some()
+        && let Some(alpha) = shell.lock_fade_in_alpha()
+        && let Some(lock_surface) = shell
+            .session_lock
+            .as_ref()
+            .and_then(|sl| sl.surfaces.get(output))
+    {
+        let mut lock_elems: Vec<CosmicElement<R>> = Vec::new();
+        session_lock_elements(
+            renderer,
+            output,
+            Some(lock_surface),
+            alpha,
+            blur_strength,
+            &mut |elem| lock_elems.extend(crop_to_output(elem.into()).map(Into::into)),
+        );
+        // Front of the list = topmost; splice preserves the cover's internal z-order.
+        elements.splice(0..0, lock_elems);
+    }
+
     Ok(elements)
 }
 
@@ -1959,6 +2034,8 @@ fn session_lock_elements<R>(
     renderer: &mut R,
     output: &Output,
     lock_surface: Option<&LockSurface>,
+    // Rising alpha during the lock fade-in; 1.0 when simply locked.
+    alpha: f32,
     blur_strength: usize,
     push: &mut dyn FnMut(SurfaceRenderElement<R>),
 ) where
@@ -1973,7 +2050,7 @@ fn session_lock_elements<R>(
             (0, 0),
             bbox_from_surface_tree(surface.wl_surface(), (0, 0)).to_f64(),
             scale,
-            1.0,
+            alpha,
             false,
             [0; 4],
             None,
@@ -2021,6 +2098,125 @@ fn offscreen_render_format(target_format: Fourcc) -> Fourcc {
         | Fourcc::Xbgr16161616f => Fourcc::Abgr16161616f,
         _ => Fourcc::Abgr8888,
     }
+}
+
+/// while locked, when the machine is idle anyway).
+const UNLOCK_SNAPSHOT_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Stored on `Shell::unlock_snapshot`; drawn by the fade overlay in
+/// `workspace_elements`.
+#[derive(Debug)]
+pub struct UnlockSnapshot {
+    /// The lock image at full output resolution.
+    pub texture: TextureRenderBuffer<GlesTexture>,
+    /// Passed as the explicit `src` so the overlay scales rather than crops.
+    pub src_size: Size<f64, Logical>,
+    /// Throttles the roll-capture (see `UNLOCK_SNAPSHOT_MIN_INTERVAL`).
+    pub captured_at: Instant,
+}
+
+pub(crate) fn make_snapshot_buffer<R>(
+    renderer: &mut R,
+    output: &Output,
+) -> Option<(
+    TextureRenderBuffer<GlesTexture>,
+    Size<i32, smithay::utils::Physical>,
+    Size<f64, Logical>,
+)>
+where
+    R: AsGlowRenderer + Offscreen<GlesTexture>,
+{
+    let output_scale = output.current_scale().fractional_scale();
+    let size_phys: Size<i32, smithay::utils::Physical> = output
+        .geometry()
+        .size
+        .as_logical()
+        .to_physical_precise_round(output_scale);
+    if size_phys.w <= 0 || size_phys.h <= 0 {
+        return None;
+    }
+    let buffer_dims = size_phys.to_logical(1).to_buffer(1, Transform::Normal);
+    // Abgr8888 (NOT an _Srgb format): the renderer's surfaces are LINEAR here and the
+    // fade blends premultiplied.
+    let texture =
+        Offscreen::<GlesTexture>::create_buffer(renderer, Fourcc::Abgr8888, buffer_dims).ok()?;
+    let texture_buffer = TextureRenderBuffer::from_texture(
+        renderer.glow_renderer(),
+        texture,
+        1,
+        Transform::Normal,
+        None,
+    );
+    let src_size = Size::from((size_phys.w as f64, size_phys.h as f64));
+    Some((texture_buffer, size_phys, src_size))
+}
+
+/// Capture the live lock cover into an owned texture for the unlock fade.
+fn capture_unlock_snapshot<R>(
+    renderer: &mut R,
+    output: &Output,
+    lock_surface: &LockSurface,
+) -> Option<(TextureRenderBuffer<GlesTexture>, Size<f64, Logical>)>
+where
+    R: AsGlowRenderer,
+    R::TextureId: Send + Clone + 'static,
+{
+    use smithay::backend::renderer::{
+        Bind as _, Frame as _, Renderer as _,
+        element::surface::{WaylandSurfaceRenderElement, render_elements_from_surface_tree},
+    };
+
+    let output_scale = output.current_scale().fractional_scale();
+    let glow = renderer.glow_renderer_mut();
+    // Rebuild against the glow renderer so elements draw onto its offscreen frame.
+    let elements: Vec<WaylandSurfaceRenderElement<GlowRenderer>> =
+        render_elements_from_surface_tree(
+            glow,
+            lock_surface.wl_surface(),
+            (0, 0),
+            Scale::from(output_scale),
+            1.0,
+            FRAME_TIME_FILTER,
+        );
+    if elements.is_empty() {
+        return None;
+    }
+
+    let (mut texture_buffer, size_phys, src_size) = make_snapshot_buffer(glow, output)?;
+    let buffer_dims = size_phys.to_logical(1).to_buffer(1, Transform::Normal);
+
+    texture_buffer
+        .render()
+        .draw::<_, GlesError>(|tex| {
+            let mut target = glow.bind(tex)?;
+            let mut frame = glow.render(&mut target, size_phys, Transform::Normal)?;
+            let full = [Rectangle::from_size(size_phys)];
+            // Clear to TRANSPARENT black; the lock elements composite on top.
+            frame.clear(Color32F::from([0.0, 0.0, 0.0, 0.0]), &full)?;
+            // Elements are ordered front-to-back; draw back-to-front.
+            for element in elements.iter().rev() {
+                let src = element.src();
+                let dst = element.geometry(output_scale.into());
+                RenderElement::<GlowRenderer>::draw(
+                    element,
+                    &mut frame,
+                    src,
+                    dst,
+                    &full,
+                    &[],
+                    None,
+                )?;
+            }
+            drop(frame);
+            Ok(vec![Rectangle::from_size(buffer_dims)])
+        })
+        .map_err(|err| {
+            tracing::warn!(?err, "Failed to render unlock snapshot");
+            err
+        })
+        .ok()?;
+
+    Some((texture_buffer, src_size))
 }
 
 // Used for mirroring and postprocessing

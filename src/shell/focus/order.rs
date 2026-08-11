@@ -2,6 +2,7 @@ use std::{ops::ControlFlow, time::Instant};
 
 use cosmic_comp_config::workspace::WorkspaceLayout;
 use keyframe::{ease, functions::EaseInOutCubic};
+use smithay::backend::renderer::utils::with_renderer_surface_state;
 use smithay::{
     desktop::{
         LayerSurface, PopupKind, PopupManager, layer_map_for_output, utils::bbox_from_surface_tree,
@@ -213,7 +214,19 @@ fn render_input_order_internal<R: 'static>(
 
     // Session Lock
     if let Some(session_lock) = &shell.session_lock {
-        return callback(Stage::SessionLock(session_lock.surfaces.get(output)));
+        // Only let the lock surface take over the whole output once it has actually
+        // committed a buffer.
+        let lock_ready = session_lock
+            .surfaces
+            .get(output)
+            .map(|s| {
+                with_renderer_surface_state(s.wl_surface(), |st| st.buffer().is_some())
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if lock_ready && shell.lock_fade_in_alpha().is_none() {
+            return callback(Stage::SessionLock(session_lock.surfaces.get(output)));
+        }
     }
 
     // Overlay-level layer shell

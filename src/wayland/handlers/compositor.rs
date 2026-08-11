@@ -320,6 +320,14 @@ impl CompositorHandler for State {
             self.backend.schedule_render(output);
         }
 
+        // Start the lock fade-in on the cover's first buffer. Latched per-lock; render
+        // every output since the cover may not resolve to one visible output.
+        if shell.note_lock_surface_first_buffer(surface) {
+            let outputs = shell.outputs().cloned().collect::<Vec<_>>();
+            for output in &outputs {
+                self.backend.schedule_render(output);
+            }
+        }
         // A wallpaper commit is the one event that invalidates every backdrop
         // reading without anything client-side moving, so re-sample then.
         // Checked before the `mapped` early return below, since a wallpaper that
