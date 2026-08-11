@@ -60,6 +60,9 @@ pub fn init_logger() -> Result<()> {
         ("calloop", "error"),
         ("smithay", level),
         ("cosmic_comp", level),
+        // Session-handoff marks: a few lines per login, and the thing most often
+        // needed on a machine where nobody set RUST_LOG.
+        (crate::utils::timing::HANDOFF_TARGET, "info"),
     ] {
         if unset(target) {
             filter = filter.add_directive(Directive::from_str(&format!("{target}={lvl}")).unwrap());
