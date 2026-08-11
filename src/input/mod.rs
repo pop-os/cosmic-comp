@@ -51,10 +51,11 @@ use smithay::{
         Seat,
         keyboard::{FilterResult, KeyboardSource, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
-            PointerGrab, PointerHandle, RelativeMotionEvent,
+            AxisFrame, ButtonEvent as PointerButtonEvent, GestureHoldBeginEvent,
+            GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
+            GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
+            GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent, PointerGrab, PointerHandle,
+            RelativeMotionEvent,
         },
         tablet::{TabletDescriptor, TabletSeatTrait, tool},
         touch::{DownEvent, MotionEvent as TouchMotionEvent, UpEvent},
@@ -325,7 +326,7 @@ impl State {
             }
 
             InputEvent::PointerMotion { event, .. } => {
-                use smithay::backend::input::PointerMotionEvent;
+                use smithay::backend::input::PointerMotionEvent as _;
 
                 let shell = self.common.shell.write();
                 if let Some(seat) = shell
@@ -635,7 +636,7 @@ impl State {
                     ptr.motion(
                         self,
                         under,
-                        &MotionEvent {
+                        &PointerMotionEvent {
                             location: position.as_logical(),
                             serial,
                             time: event.time(),
@@ -750,7 +751,7 @@ impl State {
                     ptr.motion(
                         self,
                         under,
-                        &MotionEvent {
+                        &PointerMotionEvent {
                             location: position.as_logical(),
                             serial,
                             time: event.time(),
@@ -777,9 +778,8 @@ impl State {
                 }
             }
             InputEvent::PointerButton { event, .. } => {
-                use smithay::backend::input::{ButtonState, PointerButtonEvent};
+                use smithay::backend::input::{ButtonState, PointerButtonEvent as _};
 
-                //
                 let Some(seat) = self
                     .common
                     .shell
@@ -853,7 +853,7 @@ impl State {
                                 && !shortcuts_inhibited
                             {
                                 let seat_clone = seat.clone();
-                                let mouse_button = PointerButtonEvent::button(&event);
+                                let mouse_button = event.button();
 
                                 let mut supress_button = || {
                                     // If the logo is held then the pointer event is
@@ -1013,7 +1013,7 @@ impl State {
                 if pass_event {
                     ptr.button(
                         self,
-                        &ButtonEvent {
+                        &PointerButtonEvent {
                             button,
                             state: event.state(),
                             serial,
@@ -1593,7 +1593,7 @@ impl State {
                     pointer.motion(
                         self,
                         under.clone(),
-                        &MotionEvent {
+                        &PointerMotionEvent {
                             location: position.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
                             time: InputTime::now(),
@@ -1622,8 +1622,7 @@ impl State {
 
                         tool.motion(
                             self,
-                            under
-                                .and_then(|(f, loc)| f.wl_surface().map(|s| (s.into_owned(), loc))),
+                            under,
                             &tool::MotionEvent {
                                 location: position.as_logical(),
                                 serial: SERIAL_COUNTER.next_serial(),
@@ -1662,7 +1661,7 @@ impl State {
                     pointer.motion(
                         self,
                         under.clone(),
-                        &MotionEvent {
+                        &PointerMotionEvent {
                             location: position.as_logical(),
                             serial: SERIAL_COUNTER.next_serial(),
                             time: InputTime::now(),
@@ -1694,22 +1693,17 @@ impl State {
                         };
 
                         match event.state() {
-                            ProximityState::In => {
-                                let under = under.and_then(|(f, loc)| {
-                                    f.wl_surface().map(|s| (s.into_owned(), loc))
-                                });
-                                tool.proximity_in(
-                                    self,
-                                    under,
-                                    tablet,
-                                    &tool::ProximityInEvent {
-                                        location: position.as_logical(),
-                                        axis: Some(frame),
-                                        serial: SERIAL_COUNTER.next_serial(),
-                                        time: event.time(),
-                                    },
-                                )
-                            }
+                            ProximityState::In => tool.proximity_in(
+                                self,
+                                under,
+                                tablet,
+                                &tool::ProximityInEvent {
+                                    location: position.as_logical(),
+                                    axis: Some(frame),
+                                    serial: SERIAL_COUNTER.next_serial(),
+                                    time: event.time(),
+                                },
+                            ),
                             ProximityState::Out => tool.proximity_out(
                                 self,
                                 &tool::ProximityOutEvent {
@@ -1724,6 +1718,18 @@ impl State {
                 }
             }
             InputEvent::TabletToolTip { event, .. } => {
+                {
+                    let mut shell = self.common.shell.write();
+                    if let Some(Trigger::Tool(desc, trigger)) =
+                        shell.overview_mode().0.active_trigger()
+                        && event.tool() == *desc
+                        && matches!(*trigger, tool::GrabTrigger::Tip)
+                        && event.tip_state() == TabletToolTipState::Up
+                    {
+                        shell.set_overview_mode(None, self.common.event_loop_handle.clone());
+                    }
+                }
+
                 let maybe_seat = self
                     .common
                     .shell
@@ -2970,7 +2976,7 @@ impl State {
             pointer.motion(
                 self,
                 under,
-                &MotionEvent {
+                &PointerMotionEvent {
                     location: point.as_logical(),
                     serial,
                     time,
