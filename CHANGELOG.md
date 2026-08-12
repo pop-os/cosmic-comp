@@ -1,3 +1,10 @@
+## [1.37.1](https://github.com/playtron-os/cosmic-comp/compare/v1.37.0...v1.37.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* fullscreen windows crashing due to frame presentation not acknowledged ([8986598](https://github.com/playtron-os/cosmic-comp/commit/8986598ae2e48ab3f753cab93ebcc6d7af03dde8))
+
 # [1.37.0](https://github.com/playtron-os/cosmic-comp/compare/v1.36.0...v1.37.0) (2026-08-12)
 
 
