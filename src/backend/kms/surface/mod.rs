@@ -1545,17 +1545,24 @@ impl SurfaceThreadState {
                 self.adopt = None;
             } else if let Some(tex) = adopt.texture.clone() {
                 let ctx = renderer.glow_renderer().context_id();
-                let scale = self.output.current_scale().integer_scale();
+                // Stretch the whole scanout buffer across the whole output: src = the
+                // entire texture, size = the output in logical coords, scale 1 so the two
+                // agree. Letting the element derive its size instead gives
+                // texture_px / ceil(output_scale), which on a fractional scale is short —
+                // 75% at 1.5x — shrinking the frozen frame and clearing the rest to black.
+                let tex_size = tex.size();
+                let src = Rectangle::from_size((tex_size.w as f64, tex_size.h as f64).into());
+                let logical = self.output.geometry().size.as_logical();
                 let elem = TextureRenderElement::from_static_texture(
                     adopt.id.clone(),
                     ctx,
                     (0., 0.),
                     tex,
-                    scale,
+                    1,
                     Transform::Normal,
                     Some(alpha),
-                    None,
-                    None,
+                    Some(src),
+                    Some(logical),
                     None,
                     smithay::backend::renderer::element::Kind::Unspecified,
                 );

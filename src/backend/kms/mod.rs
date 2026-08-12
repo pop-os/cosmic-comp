@@ -276,7 +276,7 @@ where
         smithay::backend::renderer::element::RenderElement<R>,
 {
     use smithay::backend::renderer::element::{Id, Kind, texture::TextureRenderElement};
-    use smithay::backend::renderer::{ImportDma as _, Renderer as _};
+    use smithay::backend::renderer::{ImportDma as _, Renderer as _, Texture as _};
     use smithay::utils::Transform;
 
     let tex = match renderer.glow_renderer_mut().import_dmabuf(dmabuf, None) {
@@ -292,17 +292,21 @@ where
             return None;
         }
     };
-    let scale = output.current_scale().integer_scale();
+    // Whole buffer -> whole output; see the matching note in surface/mod.rs. Deriving
+    // the size instead leaves the frozen frame short on a fractional output scale.
+    let tex_size = tex.size();
+    let src = smithay::utils::Rectangle::from_size((tex_size.w as f64, tex_size.h as f64).into());
+    let logical = output.geometry().size.as_logical();
     let elem = TextureRenderElement::from_static_texture(
         Id::new(),
         renderer.glow_renderer().context_id(),
         (0., 0.),
         tex,
-        scale,
+        1,
         Transform::Normal,
         Some(1.0),
-        None,
-        None,
+        Some(src),
+        Some(logical),
         None,
         Kind::Unspecified,
     );
