@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    shell::WorkspaceDelta,
     utils::prelude::*,
     wayland::protocols::workspace::{
         Request, State as WState, WorkspaceHandler, WorkspaceState, delegate_workspace,
     },
 };
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
-use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::{reexports::wayland_server::DisplayHandle, utils::SERIAL_COUNTER};
 
 impl WorkspaceHandler for State {
     fn workspace_state(&self) -> &WorkspaceState<Self> {
@@ -22,22 +21,21 @@ impl WorkspaceHandler for State {
         for request in requests.into_iter() {
             match request {
                 Request::Activate(handle) => {
-                    let mut shell = self.common.shell.write();
-                    let maybe = shell.workspaces.iter().find_map(|(o, set)| {
-                        set.workspaces
-                            .iter()
-                            .position(|w| w.handle == handle)
-                            .map(|i| (o.clone(), i))
-                    });
+                    let maybe = {
+                        let shell = self.common.shell.read();
+                        shell.workspaces.iter().find_map(|(o, set)| {
+                            set.workspaces
+                                .iter()
+                                .position(|w| w.handle == handle)
+                                .map(|i| (o.clone(), i))
+                        })
+                    };
 
                     if let Some((output, idx)) = maybe {
-                        let _ = shell.activate(
-                            &output,
-                            idx,
-                            WorkspaceDelta::new_shortcut(),
-                            &mut self.common.workspace_state.update(),
-                        );
-                        // TODO: move cursor?
+                        let seat = self.common.shell.read().seats.last_active().clone();
+                        let serial = SERIAL_COUNTER.next_serial();
+                        let time = self.common.clock.now().as_millis();
+                        self.switch_to_output(&output, Some(idx), &seat, serial, time);
                     }
                 }
                 Request::SetTilingState { workspace, state } => {
