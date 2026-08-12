@@ -9703,7 +9703,72 @@ impl Shell {
     ) -> OutputPresentationFeedback {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
 
+        // The game-mode overlay (the QAM / launcher composited over the game)
+        // lives on its OWN workspace, so the active-space walk below never
+        // reaches it either. `send_frames` drives it explicitly; so must this.
+        if self.game_mode.overlay_active
+            && self.game_mode.output.as_ref() == Some(output)
+            && let Some(overlay) = self.game_mode.overlay_surface.as_ref()
+        {
+            overlay.take_presentation_feedback(
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(
+                        surface,
+                        None,
+                        render_element_states,
+                    )
+                },
+            );
+        }
+
+        // Sticky windows and fullscreen surfaces are NOT in `Workspace::mapped()`
+        // — sticky ones live on the workspace *set*, and going fullscreen unmaps
+        // a window from the floating/tiling layers into `fullscreen_surfaces`.
+        //
+        // Missing them here does not merely skip a frame: their presentation
+        // callbacks are never drained, so `presented()` is called over an empty
+        // list and the client's request sits until its next commit supersedes
+        // it — arriving as `discarded`. A fullscreen client therefore gets
+        // `presented` exactly never, which is enough to wedge one that waits on
+        // presentation timing (Chromium stops retiring callbacks and eventually
+        // aborts on its own buffer limit).
+        //
+        // `Common::send_frames` walks both of these; this must stay in step
+        // with it. Surfaces belonging to another output are filtered inside
+        // smithay by the `surface_primary_scanout_output` check.
+        if let Some(set) = self.workspaces.sets.get(output) {
+            set.sticky_layer.mapped().for_each(|mapped| {
+                mapped.active_window().take_presentation_feedback(
+                    &mut output_presentation_feedback,
+                    surface_primary_scanout_output,
+                    |surface, _| {
+                        surface_presentation_feedback_flags_from_states(
+                            surface,
+                            None,
+                            render_element_states,
+                        )
+                    },
+                );
+            });
+        }
+
         if let Some(active) = self.active_space(output) {
+            for fullscreen in active.get_fullscreen_surfaces() {
+                fullscreen.surface.take_presentation_feedback(
+                    &mut output_presentation_feedback,
+                    surface_primary_scanout_output,
+                    |surface, _| {
+                        surface_presentation_feedback_flags_from_states(
+                            surface,
+                            None,
+                            render_element_states,
+                        )
+                    },
+                );
+            }
+
             active.mapped().for_each(|mapped| {
                 mapped.active_window().take_presentation_feedback(
                     &mut output_presentation_feedback,
