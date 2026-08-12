@@ -1,3 +1,15 @@
+# [1.37.0](https://github.com/playtron-os/cosmic-comp/compare/v1.36.0...v1.37.0) (2026-08-12)
+
+
+### Bug Fixes
+
+* **kms:** draw the frozen handoff frame at the output's real scale ([0ebbbf2](https://github.com/playtron-os/cosmic-comp/commit/0ebbbf24cff35dcb5393204c8a00f7110b6bbee5))
+
+
+### Features
+
+* **shell:** fade a fullscreen window out when its client exits ([7bfb53c](https://github.com/playtron-os/cosmic-comp/commit/7bfb53c9bd90bbb0adfa1213f73f0eb73697a6d3))
+
 # [1.36.0](https://github.com/playtron-os/cosmic-comp/compare/v1.35.0...v1.36.0) (2026-08-11)
 
 
