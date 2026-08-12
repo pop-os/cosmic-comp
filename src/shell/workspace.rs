@@ -37,23 +37,30 @@ use smithay::output::WeakOutput;
 use smithay::utils::user_data::UserDataMap;
 use smithay::{
     backend::renderer::{
+        Renderer,
         element::{
             Element, Id, RenderElement, texture::TextureRenderElement, utils::RescaleRenderElement,
         },
         gles::GlesTexture,
         glow::GlowRenderer,
-        utils::{DamageSet, OpaqueRegions},
+        utils::{DamageSet, OpaqueRegions, RendererSurfaceStateUserData},
     },
     desktop::{WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
     output::Output,
     reexports::wayland_server::Client,
-    utils::{Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
-    wayland::xdg_activation::XdgActivationState,
+    utils::{
+        Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Size,
+        Transform,
+    },
+    wayland::{compositor::with_states, seat::WaylandFocus, xdg_activation::XdgActivationState},
 };
 use std::{
     collections::{HashMap, VecDeque},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Instant,
 };
 use wayland_backend::server::ClientId;
@@ -213,6 +220,36 @@ impl MinimizedWindow {
 /// at native size instead of being stretched across the screen.
 const MIN_UPSCALE_DIM: i32 = 360;
 
+/// The last frame a fullscreen surface imported, kept alive so the window can
+/// still fade out after its client is gone.
+///
+/// It has to be copied out ahead of time. smithay clears a surface's
+/// `RendererSurfaceState` — textures, buffer and view — from a `wl_surface`
+/// destruction hook, and on client exit that hook runs *before* we are told the
+/// toplevel died, so by then there is nothing left to read. `bbox()` is empty
+/// by then too, which is why the geometry is captured here as well.
+///
+/// Cheap to hold: `GlesTexture` is an `Arc<GlesTextureInternal>`, so a clone is
+/// a refcount bump, and the GL texture returns itself to the renderer's cleanup
+/// channel when the last clone drops.
+#[derive(Debug, Clone)]
+struct RetainedFullscreenFrame {
+    texture: GlesTexture,
+    /// Stable across re-captures: the damage tracker keys per-element state on
+    /// it, so minting a fresh one each frame would defeat that.
+    id: Id,
+    /// The glow context that imported this texture. Drawing it against a
+    /// different renderer is a no-op, so we check before building an element.
+    context_id: smithay::backend::renderer::ContextId<GlesTexture>,
+    /// `SurfaceView::src` — passed explicitly so the element scales into its
+    /// destination instead of cropping to it.
+    src: Rectangle<f64, Logical>,
+    buffer_scale: i32,
+    buffer_transform: Transform,
+    /// Where the window was, in local coordinates.
+    geometry: Rectangle<i32, Local>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FullscreenSurface {
     pub surface: CosmicSurface,
@@ -227,6 +264,14 @@ pub struct FullscreenSurface {
     /// and game mode clears this back to `None` (letterbox) so we never composite
     /// a scanout-only buffer to black. `None` = native/letterbox (default).
     pub scale_to: Option<Rectangle<i32, Local>>,
+    /// Last imported frame, refreshed while this surface renders. Shared and
+    /// locked because `Workspace::render` takes `&self` — the same reason
+    /// `FloatingLayout::slide_snapshots` is a `Mutex`. `FullscreenSurface` is
+    /// `Clone`, so the handle is an `Arc`.
+    retained: Arc<Mutex<Option<RetainedFullscreenFrame>>>,
+    /// Whether we have already reported why retention failed. Capture runs
+    /// every frame, so without this a failure is 60 log lines a second.
+    retain_reported: Arc<AtomicBool>,
 }
 
 impl PartialEq for FullscreenSurface {
@@ -239,6 +284,132 @@ impl FullscreenSurface {
     pub fn is_animating(&self) -> bool {
         self.start_at.is_some() || self.ended_at.is_some()
     }
+}
+
+/// Copy the fullscreen root surface's imported texture and view out of the
+/// surface tree, so the window can be replayed once its client is gone.
+///
+/// Cheap enough to do every frame: a `with_states` lookup, an uncontended lock
+/// and an `Arc` bump. No GPU work, no allocation after the first frame.
+fn retain_fullscreen_frame<R>(
+    fullscreen: &FullscreenSurface,
+    renderer: &R,
+    geometry: Rectangle<i32, Local>,
+) where
+    R: AsGlowRenderer,
+    R::TextureId: Send + 'static,
+{
+    let report = |why: &str| {
+        if !fullscreen.retain_reported.swap(true, Ordering::SeqCst) {
+            tracing::debug!(reason = why, "fullscreen frame not retained");
+        }
+    };
+
+    let Some(surface) = fullscreen.surface.wl_surface() else {
+        report("no wl_surface");
+        return;
+    };
+    let glow_context = renderer.glow_renderer().context_id();
+    let context = renderer.context_id();
+
+    let captured = with_states(&surface, |data| {
+        let Some(state) = data.data_map.get::<RendererSurfaceStateUserData>() else {
+            report("no RendererSurfaceState");
+            return None;
+        };
+        let state = state.lock().unwrap();
+        // Down to the concrete GlesTexture: on the multi-GPU path the cached
+        // texture is a MultiTexture, and `RetainedFullscreenFrame` cannot be
+        // generic over the renderer.
+        let Some(imported) = state.texture(context.clone()) else {
+            report("no imported texture for this renderer context");
+            return None;
+        };
+        let Some(texture) = R::tex_to_gl(&glow_context, imported) else {
+            report("texture is not reachable as a GlesTexture");
+            return None;
+        };
+        let Some(view) = state.view() else {
+            report("no surface view");
+            return None;
+        };
+        Some((
+            texture,
+            view,
+            state.buffer_scale(),
+            state.buffer_transform(),
+        ))
+    });
+    let Some((texture, view, buffer_scale, buffer_transform)) = captured else {
+        return;
+    };
+
+    let mut slot = fullscreen.retained.lock().unwrap();
+    // Reuse the id so the damage tracker keeps its per-element state.
+    let id = slot.as_ref().map_or_else(Id::new, |r| r.id.clone());
+    *slot = Some(RetainedFullscreenFrame {
+        texture,
+        id,
+        context_id: glow_context,
+        src: view.src,
+        buffer_scale,
+        buffer_transform,
+        geometry,
+    });
+}
+
+/// Build the fade-out element for a fullscreen window whose client has exited.
+///
+/// `None` — and so no fade, exactly as before — when nothing was retained, the
+/// exit was never armed, or the frame belongs to another output's renderer.
+fn fading_fullscreen_element<R>(
+    fullscreen: &FullscreenSurface,
+    renderer: &R,
+    output_scale: f64,
+    window_alpha: f32,
+    motion: std::time::Duration,
+) -> Option<WorkspaceRenderElement<R>>
+where
+    R: AsGlowRenderer,
+    R::TextureId: Send + 'static,
+{
+    let ended = fullscreen.ended_at?;
+    let retained = fullscreen.retained.lock().unwrap();
+    let retained = retained.as_ref()?;
+
+    // Each output renders on its own thread with its own renderer, and drawing
+    // a texture against one that did not import it is a no-op with a warning.
+    // Skip it here instead, and let that output close without a fade.
+    if retained.context_id != renderer.glow_renderer().context_id() {
+        return None;
+    }
+
+    let progress = Instant::now().duration_since(ended).as_secs_f64() / motion.as_secs_f64();
+    let alpha = ease(EaseInOutCubic, 1.0f32, 0.0, progress) * window_alpha;
+
+    Some(WorkspaceRenderElement::Texture(
+        TextureRenderElement::from_static_texture(
+            retained.id.clone(),
+            retained.context_id.clone(),
+            retained
+                .geometry
+                .loc
+                .as_logical()
+                .to_f64()
+                .to_physical(output_scale),
+            retained.texture.clone(),
+            retained.buffer_scale,
+            retained.buffer_transform,
+            Some(alpha),
+            // Explicit src: with only `size` the element derives src from it
+            // and CROPS the texture instead of scaling it into the rect.
+            Some(retained.src),
+            Some(retained.geometry.size.as_logical()),
+            // Fading, so never opaque.
+            None,
+            Kind::Unspecified,
+        ),
+    ))
 }
 
 impl IsAlive for FullscreenSurface {
@@ -486,7 +657,41 @@ impl Workspace {
     pub fn refresh(&mut self) {
         // seems it removes dead windows
         // self.fullscreen.take_if(|w| !w.alive());
-        self.fullscreen_surfaces.retain(|w| w.alive());
+        // A dead fullscreen surface is not dropped on the spot: its last
+        // imported frame is still fading out. Without this the entry is gone
+        // microseconds after the fade is armed — `toplevel_destroyed` unmaps
+        // the surface and refreshes the active space in the same call — and
+        // the window vanishes in a single frame however good the fade is.
+        //
+        // Bounded by the `ended_at` reap in `update_animations`, which drops
+        // the entry once it is older than `motion.fullscreen`.
+        let dirty = &self.dirty;
+        self.fullscreen_surfaces.retain_mut(|w| {
+            if w.alive() {
+                return true;
+            }
+            if w.retained.lock().unwrap().is_none() {
+                // Nothing to fade (never imported a frame, or a renderer we
+                // cannot replay) — behave exactly as before.
+                tracing::debug!(
+                    capture_failed = w.retain_reported.load(Ordering::SeqCst),
+                    "fullscreen closed with no retained frame; dropping without a fade"
+                );
+                return false;
+            }
+            if w.ended_at.is_none() {
+                tracing::debug!(
+                    app_id = %w.surface.app_id(),
+                    "fullscreen client exited; fading out its last frame"
+                );
+                // Died without going through `remove_fullscreen_at`, which
+                // would already have armed the exit.
+                w.start_at = None;
+                w.ended_at = Some(Instant::now());
+                dirty.store(true, Ordering::SeqCst);
+            }
+            true
+        });
 
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
@@ -1353,6 +1558,8 @@ impl Workspace {
                     start_at: None,
                     ended_at: None,
                     scale_to: None,
+                    retained: Arc::default(),
+                    retain_reported: Arc::default(),
                 });
                 self.dirty.store(true, Ordering::SeqCst);
                 None
@@ -1464,6 +1671,8 @@ impl Workspace {
             start_at: Some(Instant::now()),
             ended_at: None,
             scale_to: None,
+            retained: Arc::default(),
+            retain_reported: Arc::default(),
         });
         // Bug 1: the entrance animation clock starts NOW, before the client has
         // committed a fullscreen-sized buffer — until its first frame lands the
@@ -1950,9 +2159,29 @@ impl Workspace {
         // strict game-mode path below has to emit the game *underneath* its own children
         // before returning early; the buffer is flushed at the equivalent points.
         let mut fullscreen_elements = SmallVec::<[WorkspaceRenderElement<R>; 2]>::new_const();
+        // Not for games: a game's frames are large, often scanout-only, and
+        // `scale_to` means the retained frame would replay at the wrong size.
+        // Game mode also has its own transitions.
+        let retain_frames = game_mode_only.is_none();
         {
             let mut render_fullscreen =
                 |fullscreen: &FullscreenSurface, renderer: &mut R, output_scale: f64| {
+                    if !fullscreen.surface.alive() {
+                        // The client is gone, so its surface tree is already
+                        // reset and `push_render_elements` would emit nothing.
+                        // Replay the retained last frame instead, fading it out.
+                        if let Some(elem) = fading_fullscreen_element(
+                            fullscreen,
+                            renderer,
+                            output_scale,
+                            window_alpha,
+                            self.tiling_layer.theme.motion.fullscreen,
+                        ) {
+                            fullscreen_elements.push(elem);
+                        }
+                        return;
+                    }
+
                     let fullscreen_geo = self.fullscreen_geometry_for(fullscreen);
                     let previous_geo = fullscreen
                         .previous_geometry
@@ -2065,6 +2294,13 @@ impl Workspace {
                         &mut fullscreen_push,
                         None,
                     );
+
+                    // Keep this frame so the window can still fade out if the
+                    // client exits before the next one. Outside the traversal
+                    // above for the same locking reason `src` is resolved early.
+                    if retain_frames {
+                        retain_fullscreen_frame(fullscreen, renderer, target_geo);
+                    }
                 };
 
             // Strict game-mode fullscreen control: on the game-mode output this
@@ -2452,7 +2688,11 @@ where
     Fullscreen(RescaleRenderElement<CosmicWindowRenderElement<R>>),
     FullscreenPopup(CosmicWindowRenderElement<R>),
     Window(CosmicMappedRenderElement<R>),
-    Backdrop(TextureRenderElement<GlesTexture>),
+    /// A bare texture drawn through the glow frame. Carries `GlesTexture`
+    /// directly rather than `R::TextureId`, so the generic `R` never has to
+    /// name the texture type. Used for the fade-out of a fullscreen window
+    /// whose client has already exited.
+    Texture(TextureRenderElement<GlesTexture>),
 }
 
 impl<R> Element for WorkspaceRenderElement<R>
@@ -2467,7 +2707,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.id(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.id(),
             WorkspaceRenderElement::Window(elem) => elem.id(),
-            WorkspaceRenderElement::Backdrop(elem) => elem.id(),
+            WorkspaceRenderElement::Texture(elem) => elem.id(),
         }
     }
 
@@ -2478,7 +2718,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.current_commit(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.current_commit(),
             WorkspaceRenderElement::Window(elem) => elem.current_commit(),
-            WorkspaceRenderElement::Backdrop(elem) => elem.current_commit(),
+            WorkspaceRenderElement::Texture(elem) => elem.current_commit(),
         }
     }
 
@@ -2489,7 +2729,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.src(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.src(),
             WorkspaceRenderElement::Window(elem) => elem.src(),
-            WorkspaceRenderElement::Backdrop(elem) => elem.src(),
+            WorkspaceRenderElement::Texture(elem) => elem.src(),
         }
     }
 
@@ -2500,7 +2740,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.geometry(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.geometry(scale),
             WorkspaceRenderElement::Window(elem) => elem.geometry(scale),
-            WorkspaceRenderElement::Backdrop(elem) => elem.geometry(scale),
+            WorkspaceRenderElement::Texture(elem) => elem.geometry(scale),
         }
     }
 
@@ -2511,7 +2751,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.location(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.location(scale),
             WorkspaceRenderElement::Window(elem) => elem.location(scale),
-            WorkspaceRenderElement::Backdrop(elem) => elem.location(scale),
+            WorkspaceRenderElement::Texture(elem) => elem.location(scale),
         }
     }
 
@@ -2522,7 +2762,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.transform(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.transform(),
             WorkspaceRenderElement::Window(elem) => elem.transform(),
-            WorkspaceRenderElement::Backdrop(elem) => elem.transform(),
+            WorkspaceRenderElement::Texture(elem) => elem.transform(),
         }
     }
 
@@ -2537,7 +2777,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.damage_since(scale, commit),
             WorkspaceRenderElement::Window(elem) => elem.damage_since(scale, commit),
-            WorkspaceRenderElement::Backdrop(elem) => elem.damage_since(scale, commit),
+            WorkspaceRenderElement::Texture(elem) => elem.damage_since(scale, commit),
         }
     }
 
@@ -2548,7 +2788,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.opaque_regions(scale),
             WorkspaceRenderElement::Window(elem) => elem.opaque_regions(scale),
-            WorkspaceRenderElement::Backdrop(elem) => elem.opaque_regions(scale),
+            WorkspaceRenderElement::Texture(elem) => elem.opaque_regions(scale),
         }
     }
 
@@ -2559,7 +2799,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.alpha(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.alpha(),
             WorkspaceRenderElement::Window(elem) => elem.alpha(),
-            WorkspaceRenderElement::Backdrop(elem) => elem.alpha(),
+            WorkspaceRenderElement::Texture(elem) => elem.alpha(),
         }
     }
 
@@ -2570,7 +2810,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.kind(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.kind(),
             WorkspaceRenderElement::Window(elem) => elem.kind(),
-            WorkspaceRenderElement::Backdrop(elem) => elem.kind(),
+            WorkspaceRenderElement::Texture(elem) => elem.kind(),
         }
     }
 
@@ -2581,7 +2821,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.is_framebuffer_effect(),
             WorkspaceRenderElement::Window(elem) => elem.is_framebuffer_effect(),
-            WorkspaceRenderElement::Backdrop(elem) => elem.is_framebuffer_effect(),
+            WorkspaceRenderElement::Texture(elem) => elem.is_framebuffer_effect(),
         }
     }
 }
@@ -2616,7 +2856,7 @@ where
             WorkspaceRenderElement::Window(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
-            WorkspaceRenderElement::Backdrop(elem) => RenderElement::<GlowRenderer>::draw(
+            WorkspaceRenderElement::Texture(elem) => RenderElement::<GlowRenderer>::draw(
                 elem,
                 R::glow_frame_mut(frame),
                 src,
@@ -2639,7 +2879,7 @@ where
             WorkspaceRenderElement::Fullscreen(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::FullscreenPopup(elem) => elem.underlying_storage(renderer),
             WorkspaceRenderElement::Window(elem) => elem.underlying_storage(renderer),
-            WorkspaceRenderElement::Backdrop(elem) => {
+            WorkspaceRenderElement::Texture(elem) => {
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
         }
@@ -2668,7 +2908,7 @@ where
             WorkspaceRenderElement::Window(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
-            WorkspaceRenderElement::Backdrop(elem) => {
+            WorkspaceRenderElement::Texture(elem) => {
                 RenderElement::<GlowRenderer>::capture_framebuffer(
                     elem,
                     R::glow_frame_mut(frame),
@@ -2744,6 +2984,6 @@ where
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
-        WorkspaceRenderElement::Backdrop(elem)
+        WorkspaceRenderElement::Texture(elem)
     }
 }
