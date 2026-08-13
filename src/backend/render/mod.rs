@@ -203,6 +203,7 @@ pub static POSTPROCESS_SHADER: &str = include_str!("./shaders/offscreen.frag");
 // whole `blur` module re-export block are dropped — upstream's `wayland::blur_effect`
 // (`BlurShaders`) replaces them, blitting the region under the element out of the
 // live framebuffer instead of maintaining our own capture/cache pipeline.
+pub mod nis;
 pub mod nis_coefficients;
 
 pub static FSR_EASU_SHADER: &str = include_str!("./shaders/fsr_easu.frag");
@@ -595,7 +596,14 @@ pub fn init_shaders(renderer: &mut GlesRenderer) -> Result<(), GlesError> {
     // `BlurShaders`.
     let blur_shaders = BlurShaders::compile(renderer)?;
 
+    // Optional: needs GLES 3.1, so a failure leaves NIS unavailable rather than
+    // failing renderer init.
+    let nis_shader = nis::NisShader::compile(renderer);
+
     let egl_context = renderer.egl_context();
+    if let Some(shader) = nis_shader {
+        egl_context.user_data().insert_if_missing(|| shader);
+    }
     egl_context
         .user_data()
         .insert_if_missing(|| IndicatorShader(outline_shader));

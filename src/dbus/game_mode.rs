@@ -95,6 +95,10 @@ pub enum ScalingMode {
     Integer,
     /// FSR spatial upscaling.
     Fsr,
+    /// NVIDIA Image Scaling: edge-directed upscaling with adaptive sharpening,
+    /// as a compute pass. Letterboxes like [`ScalingMode::Fit`] and falls back
+    /// to it on a pre-GLES-3.1 context or a ratio beyond 1x..2x.
+    Nis,
     /// Aspect-preserving fit (letterbox).
     Fit,
     /// Aspect-preserving fill (pillarbox / crop).
@@ -109,6 +113,7 @@ impl ScalingMode {
             ScalingMode::Native => "native",
             ScalingMode::Integer => "integer",
             ScalingMode::Fsr => "fsr",
+            ScalingMode::Nis => "nis",
             ScalingMode::Fit => "fit",
             ScalingMode::Fill => "fill",
             ScalingMode::Stretch => "stretch",
@@ -120,11 +125,18 @@ impl ScalingMode {
             "native" => Some(ScalingMode::Native),
             "integer" => Some(ScalingMode::Integer),
             "fsr" => Some(ScalingMode::Fsr),
+            "nis" => Some(ScalingMode::Nis),
             "fit" => Some(ScalingMode::Fit),
             "fill" => Some(ScalingMode::Fill),
             "stretch" => Some(ScalingMode::Stretch),
             _ => None,
         }
+    }
+
+    /// Whether this mode runs a shader upscale. Such a frame must be
+    /// composited, so it can never take direct scanout.
+    pub fn is_filtered(self) -> bool {
+        matches!(self, ScalingMode::Nis)
     }
 }
 
@@ -480,7 +492,7 @@ impl GameModeInterface {
     }
 
     /// Set the game's render resolution + how it scales to the output.
-    /// `mode` is one of `native|integer|fsr|fit|fill|stretch`.
+    /// `mode` is one of `native|integer|fsr|nis|fit|fill|stretch`.
     async fn set_scaling(
         &self,
         width: u32,
@@ -1858,6 +1870,45 @@ fn focus_target_for(shell: &Shell, window: &CosmicSurface) -> Option<KeyboardFoc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `SetScaling` takes a string, so a mode that does not round-trip would
+    /// silently present as something else.
+    #[test]
+    fn scaling_modes_round_trip() {
+        for mode in [
+            ScalingMode::Native,
+            ScalingMode::Integer,
+            ScalingMode::Fsr,
+            ScalingMode::Nis,
+            ScalingMode::Fit,
+            ScalingMode::Fill,
+            ScalingMode::Stretch,
+        ] {
+            assert_eq!(ScalingMode::parse(mode.as_str()), Some(mode));
+        }
+        assert_eq!(ScalingMode::parse("bogus"), None);
+    }
+
+    /// A mode wrongly listed here has the KMS thread read its composited frame
+    /// as a plane scale-reject, permanently letterboxing it.
+    #[test]
+    fn only_nis_is_filtered() {
+        assert!(ScalingMode::Nis.is_filtered());
+        for mode in [
+            ScalingMode::Native,
+            ScalingMode::Integer,
+            ScalingMode::Fsr,
+            ScalingMode::Fit,
+            ScalingMode::Fill,
+            ScalingMode::Stretch,
+        ] {
+            assert!(
+                !mode.is_filtered(),
+                "{} must not be filtered",
+                mode.as_str()
+            );
+        }
+    }
 
     /// End-to-end over a live session bus: own the well-known name, then from a
     /// separate client connection introspect the member surface, read a

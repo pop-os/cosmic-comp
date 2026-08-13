@@ -43,7 +43,7 @@ use smithay::{
         },
         gles::GlesTexture,
         glow::GlowRenderer,
-        utils::{DamageSet, OpaqueRegions, RendererSurfaceStateUserData},
+        utils::{DamageBag, DamageSet, OpaqueRegions, RendererSurfaceStateUserData},
     },
     desktop::{WindowSurfaceType, layer_map_for_output, space::SpaceElement},
     input::Seat,
@@ -272,6 +272,28 @@ pub struct FullscreenSurface {
     /// Whether we have already reported why retention failed. Capture runs
     /// every frame, so without this a failure is 60 log lines a second.
     retain_reported: Arc<AtomicBool>,
+    /// The mode resolved by [`Workspace::set_fullscreen_scale_to`], kept next to
+    /// `scale_to` so the render path can tell a filtered upscale from a plain
+    /// one without reaching into the shell for `game_mode_scaling`.
+    pub scale_mode: crate::dbus::game_mode::ScalingMode,
+    /// Locked for the same reason as `retained`: `Workspace::render` takes
+    /// `&self`.
+    nis: Arc<Mutex<Option<NisUpscale>>>,
+}
+
+/// The NIS pass's destination, and enough context to know when to rebuild it.
+#[derive(Debug)]
+struct NisUpscale {
+    target: GlesTexture,
+    /// Stable, or the damage tracker sees a new element every frame.
+    id: Id,
+    /// A texture is only valid on the renderer that made it, and each output
+    /// has its own.
+    context_id: smithay::backend::renderer::ContextId<GlesTexture>,
+    /// Immutable storage cannot be resized, so a change means reallocating.
+    size: Size<i32, Physical>,
+    /// Always the full rect: the compute pass rewrites every texel.
+    damage: DamageBag<i32, BufferCoords>,
 }
 
 impl PartialEq for FullscreenSurface {
@@ -407,6 +429,113 @@ where
             Some(retained.geometry.size.as_logical()),
             // Fading, so never opaque.
             None,
+            Kind::Unspecified,
+        ),
+    ))
+}
+
+/// Run the NIS pass over the game's imported buffer and return the upscaled
+/// copy, positioned at `target_geo`.
+///
+/// `None` whenever the filter cannot apply this frame — no GLES 3.1, a ratio
+/// outside 1x..2x, another output's renderer, nothing imported yet — and the
+/// caller falls back to the ordinary scaled draw, which lands in the same rect.
+///
+/// Reads the root surface's buffer rather than compositing the tree first, so a
+/// game drawing through subsurfaces would have only its root filtered. Same
+/// assumption `retain_fullscreen_frame` makes.
+fn nis_fullscreen_element<R>(
+    fullscreen: &FullscreenSurface,
+    renderer: &mut R,
+    output_scale: f64,
+    target_geo: Rectangle<i32, Local>,
+    alpha: f32,
+) -> Option<WorkspaceRenderElement<R>>
+where
+    R: AsGlowRenderer,
+    R::TextureId: Send + 'static,
+{
+    use crate::backend::render::nis;
+
+    // Ask before allocating: on a context without compute this is the cheap way
+    // out, taken every frame for the whole session.
+    nis::available(renderer).ok()?;
+
+    let dst_size: Size<i32, Physical> = target_geo
+        .size
+        .as_logical()
+        .to_physical_precise_round(output_scale);
+    if dst_size.w <= 0 || dst_size.h <= 0 {
+        return None;
+    }
+
+    let surface = fullscreen.surface.wl_surface()?;
+    let glow_context = renderer.glow_renderer().context_id();
+    let context = renderer.context_id();
+
+    // Down to the concrete GlesTexture: the compute pass binds a GL texture
+    // name, which a MultiTexture cannot give.
+    let source = with_states(&surface, |data| {
+        let state = data.data_map.get::<RendererSurfaceStateUserData>()?;
+        let state = state.lock().unwrap();
+        let imported = state.texture(context.clone())?;
+        R::tex_to_gl(&glow_context, imported)
+    })?;
+    let flip_y = source.is_y_inverted();
+
+    let mut slot = fullscreen.nis.lock().unwrap();
+    // Reallocate on a size change, or when drawn by a renderer that did not
+    // make the current target.
+    let stale = slot
+        .as_ref()
+        .is_none_or(|n| n.size != dst_size || n.context_id != glow_context);
+    if stale {
+        let target = nis::create_target(renderer, dst_size).ok()?;
+        *slot = Some(NisUpscale {
+            target,
+            id: Id::new(),
+            context_id: glow_context.clone(),
+            size: dst_size,
+            damage: DamageBag::default(),
+        });
+    }
+    let state = slot.as_mut()?;
+
+    nis::upscale(
+        renderer,
+        &source,
+        flip_y,
+        &state.target,
+        nis::NisConfig::default(),
+    )
+    .ok()?;
+
+    let buffer_size = Size::<i32, BufferCoords>::from((dst_size.w, dst_size.h));
+    state.damage.add([Rectangle::from_size(buffer_size)]);
+
+    Some(WorkspaceRenderElement::Texture(
+        TextureRenderElement::from_texture_with_damage(
+            state.id.clone(),
+            state.context_id.clone(),
+            target_geo
+                .loc
+                .as_logical()
+                .to_f64()
+                .to_physical(output_scale),
+            state.target.clone(),
+            1,
+            Transform::Normal,
+            Some(alpha),
+            // Explicit src: with only `size` the element derives src from it and
+            // CROPS instead of scaling, which a fractional output scale would
+            // turn into a dropped row.
+            Some(Rectangle::from_size(
+                (dst_size.w as f64, dst_size.h as f64).into(),
+            )),
+            Some(target_geo.size.as_logical()),
+            // Only opaque once faded in; mid-transition the element is blended.
+            (alpha >= 1.0).then(|| vec![Rectangle::from_size(buffer_size)]),
+            state.damage.snapshot(),
             Kind::Unspecified,
         ),
     ))
@@ -1560,6 +1689,8 @@ impl Workspace {
                     scale_to: None,
                     retained: Arc::default(),
                     retain_reported: Arc::default(),
+                    scale_mode: crate::dbus::game_mode::ScalingMode::Native,
+                    nis: Arc::default(),
                 });
                 self.dirty.store(true, Ordering::SeqCst);
                 None
@@ -1673,6 +1804,8 @@ impl Workspace {
             scale_to: None,
             retained: Arc::default(),
             retain_reported: Arc::default(),
+            scale_mode: crate::dbus::game_mode::ScalingMode::Native,
+            nis: Arc::default(),
         });
         // Bug 1: the entrance animation clock starts NOW, before the client has
         // committed a fullscreen-sized buffer — until its first frame lands the
@@ -1732,9 +1865,10 @@ impl Workspace {
                 let factor = f64::min(ow / sw, oh / sh).floor().max(1.0);
                 centered((sw * factor) as i32, (sh * factor) as i32)
             }
-            // Letterbox: fit entirely, preserving aspect.
-            // FSR is the same geometry until the sharpening pass exists.
-            ScalingMode::Fit | ScalingMode::Fsr => {
+            // Letterbox: fit entirely, preserving aspect. NIS changes only how
+            // the pixels get there, so a context without the filter still places
+            // the image correctly. FSR shares it until its pass exists.
+            ScalingMode::Fit | ScalingMode::Fsr | ScalingMode::Nis => {
                 let ratio = f64::min(ow / sw, oh / sh);
                 centered((sw * ratio).round() as i32, (sh * ratio).round() as i32)
             }
@@ -1783,6 +1917,8 @@ impl Workspace {
                 crate::dbus::game_mode::ScalingMode::Native
             };
             fs.scale_to = Self::scaling_rect(src, out, mode);
+            // The RESOLVED mode, so a surface refused a scale is never filtered.
+            fs.scale_mode = mode;
         }
     }
 
@@ -2277,6 +2413,28 @@ impl Workspace {
                             Into::<WorkspaceRenderElement<_>>::into(elem)
                         }
                     };
+
+                    // A filtered upscale replaces the scaled draw: the pass
+                    // already produced the image at presentation size, so the
+                    // rescale below would resample it twice. Settled only —
+                    // mid-animation the ratio sweeps outside NIS's range.
+                    if scaling
+                        && !is_animating
+                        && fullscreen.scale_mode.is_filtered()
+                        && let Some(elem) = nis_fullscreen_element(
+                            fullscreen,
+                            renderer,
+                            output_scale,
+                            target_geo,
+                            fullscreen_alpha,
+                        )
+                    {
+                        fullscreen_elements.push(elem);
+                        if retain_frames {
+                            retain_fullscreen_frame(fullscreen, renderer, target_geo);
+                        }
+                        return;
+                    }
 
                     let mut fullscreen_push = |elem: SurfaceRenderElement<R>| {
                         fullscreen_elements.push(animation_rescale(elem.into()))
@@ -2985,5 +3143,66 @@ where
 {
     fn from(elem: TextureRenderElement<GlesTexture>) -> Self {
         WorkspaceRenderElement::Texture(elem)
+    }
+}
+
+#[cfg(test)]
+mod scaling_tests {
+    use super::*;
+    use crate::dbus::game_mode::ScalingMode;
+
+    fn src(w: i32, h: i32) -> Size<i32, Logical> {
+        Size::from((w, h))
+    }
+    fn out(w: i32, h: i32) -> Size<i32, Local> {
+        Size::from((w, h))
+    }
+
+    /// NIS changes how pixels are produced, not where they land — if these
+    /// diverged, falling back would visibly move the image.
+    #[test]
+    fn nis_presents_in_the_same_rect_as_fit() {
+        for (sw, sh, ow, oh) in [
+            (1920, 1080, 3840, 2160),
+            (1280, 720, 1920, 1080),
+            (1024, 768, 1920, 1080),
+            (1920, 1080, 2560, 1080),
+        ] {
+            assert_eq!(
+                Workspace::scaling_rect(src(sw, sh), out(ow, oh), ScalingMode::Nis),
+                Workspace::scaling_rect(src(sw, sh), out(ow, oh), ScalingMode::Fit),
+                "{sw}x{sh} -> {ow}x{oh}"
+            );
+        }
+    }
+
+    /// Outside the output, or off-aspect, means a cropped or stretched game.
+    #[test]
+    fn nis_letterboxes_within_the_output() {
+        let rect = Workspace::scaling_rect(src(1024, 768), out(1920, 1080), ScalingMode::Nis)
+            .expect("a smaller source must get a rect");
+        assert!(rect.loc.x >= 0 && rect.loc.y >= 0);
+        assert!(rect.loc.x + rect.size.w <= 1920);
+        assert!(rect.loc.y + rect.size.h <= 1080);
+        // 4:3 into 16:9 is height-limited, so it should fill the height.
+        assert_eq!(rect.size.h, 1080);
+        let aspect = rect.size.w as f64 / rect.size.h as f64;
+        assert!(
+            (aspect - 1024.0 / 768.0).abs() < 0.01,
+            "aspect not preserved"
+        );
+    }
+
+    /// A zero-dimension rect would reach the scaler as a bad dispatch.
+    #[test]
+    fn degenerate_sizes_produce_no_rect() {
+        assert_eq!(
+            Workspace::scaling_rect(src(0, 1080), out(1920, 1080), ScalingMode::Nis),
+            None
+        );
+        assert_eq!(
+            Workspace::scaling_rect(src(1920, 1080), out(0, 0), ScalingMode::Nis),
+            None
+        );
     }
 }

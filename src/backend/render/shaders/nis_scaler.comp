@@ -1,0 +1,340 @@
+#version 310 es
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// NVIDIA Image Scaling (NVScaler), ported from the NIS SDK's NIS_Scaler.h to
+// GLES 3.1 compute. Per destination pixel: estimate the edge direction from a
+// 3x3 luma gradient, resample along that edge rather than across it, blend with
+// a plain separable 6-tap, then add a contrast-limited unsharp-mask term. Only
+// luma is filtered; the result is applied to a bilinear colour tap.
+//
+// Not standalone GLSL: the coefficient placeholder below is substituted from
+// nis_coefficients.rs by `nis::shader_source`. That token must appear exactly
+// once in this file -- substitution is a plain string replace.
+//
+// Unlike the SDK this caches only the luma tile in shared memory, not the edge
+// map: both would exceed the 16 KiB GLES 3.1 guarantees, which the SDK only
+// avoids via fp16. Recomputing the edge map is ALU over shared memory, and the
+// output is identical.
+
+precision highp float;
+precision highp int;
+
+// One workgroup per 8x8 block of destination pixels. Invocations outside the
+// image must reach the barrier before returning, so the bounds check in main()
+// comes after the tile load.
+layout(local_size_x = 8, local_size_y = 8) in;
+
+uniform sampler2D tex;
+layout(rgba8, binding = 0) writeonly uniform highp image2D dst;
+
+uniform vec2 src_size;
+uniform vec2 inv_src_size;
+/// 1 when the source buffer is bottom-up, as an imported dmabuf may be.
+uniform int flip_y;
+uniform ivec2 dst_size;
+/// Source over destination per axis; in [0.5, 1.0], enforced by `nis::ScaleRatio`.
+uniform vec2 scale;
+
+// Derived on the CPU by `NisConfig`; uniforms so sharpness is adjustable
+// without recompiling.
+uniform float k_detect_ratio;
+uniform float k_detect_thres;
+uniform float k_min_contrast_ratio;
+uniform float k_ratio_norm;
+uniform float k_contrast_boost;
+uniform float k_eps;
+uniform float k_sharp_start_y;
+uniform float k_sharp_scale_y;
+uniform float k_sharp_strength_min;
+uniform float k_sharp_strength_scale;
+uniform float k_sharp_limit_min;
+uniform float k_sharp_limit_scale;
+
+const int PHASE_COUNT = 64;
+const int FILTER_SIZE = 6;
+
+// `kCoefScale` and `kCoefUsm`, each PHASE_COUNT * FILTER_SIZE floats indexed as
+// [phase * FILTER_SIZE + tap].
+//_COEFFICIENTS_
+
+const int BLOCK = 8;
+// 8 destination pixels + 1 fractional straddle + the 6-tap support's 2 before
+// and 3 after. Exactly the span the widest in-range ratio needs.
+const int TILE_DIM = 14;
+const int TILE_PAD = 2;
+
+shared float sh_luma[TILE_DIM * TILE_DIM];
+
+float get_y(vec3 c) {
+    return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+}
+
+// Texel-centre coordinate to UV, undoing a bottom-up buffer. Mirroring keeps
+// centres on centres: i maps to src_size.y - i - 0.5.
+vec2 src_uv(vec2 texel) {
+    float y = (flip_y == 1) ? (src_size.y - texel.y) : texel.y;
+    return vec2(texel.x, y) * inv_src_size;
+}
+
+float tile(int row, int col) {
+    return sh_luma[row * TILE_DIM + col];
+}
+
+// Direction weights (0, 90, 45, 135 deg) over the 3x3 luma window at
+// (row0, col0). All-zero means no edge, so the caller uses only the plain
+// resample.
+vec4 get_edge_map(int row0, int col0) {
+    float g_0 = abs(
+        tile(row0 + 0, col0 + 0) + tile(row0 + 0, col0 + 1) + tile(row0 + 0, col0 + 2)
+        - tile(row0 + 2, col0 + 0) - tile(row0 + 2, col0 + 1) - tile(row0 + 2, col0 + 2)
+    );
+    float g_45 = abs(
+        tile(row0 + 1, col0 + 0) + tile(row0 + 0, col0 + 0) + tile(row0 + 0, col0 + 1)
+        - tile(row0 + 2, col0 + 1) - tile(row0 + 2, col0 + 2) - tile(row0 + 1, col0 + 2)
+    );
+    float g_90 = abs(
+        tile(row0 + 0, col0 + 0) + tile(row0 + 1, col0 + 0) + tile(row0 + 2, col0 + 0)
+        - tile(row0 + 0, col0 + 2) - tile(row0 + 1, col0 + 2) - tile(row0 + 2, col0 + 2)
+    );
+    float g_135 = abs(
+        tile(row0 + 1, col0 + 0) + tile(row0 + 2, col0 + 0) + tile(row0 + 2, col0 + 1)
+        - tile(row0 + 0, col0 + 1) - tile(row0 + 0, col0 + 2) - tile(row0 + 1, col0 + 2)
+    );
+
+    float g_0_90_max = max(g_0, g_90);
+    float g_0_90_min = min(g_0, g_90);
+    float g_45_135_max = max(g_45, g_135);
+    float g_45_135_min = min(g_45, g_135);
+
+    if (g_0_90_max + g_45_135_max == 0.0) {
+        return vec4(0.0);
+    }
+
+    float e_0_90 = min(g_0_90_max / (g_0_90_max + g_45_135_max), 1.0);
+    float e_45_135 = 1.0 - e_0_90;
+
+    // All three conditions are needed, or a smooth gradient reads as an edge.
+    bool c_0_90 = (g_0_90_max > (g_0_90_min * k_detect_ratio))
+        && (g_0_90_max > k_detect_thres)
+        && (g_0_90_max > g_45_135_min);
+    bool c_45_135 = (g_45_135_max > (g_45_135_min * k_detect_ratio))
+        && (g_45_135_max > k_detect_thres)
+        && (g_45_135_max > g_0_90_min);
+    bool c_g_0_90 = g_0_90_max == g_0;
+    bool c_g_45_135 = g_45_135_max == g_45;
+
+    // Split only when both pairs fired; otherwise the winner takes it all.
+    float f_e_0_90 = (c_0_90 && c_45_135) ? e_0_90 : 1.0;
+    float f_e_45_135 = (c_0_90 && c_45_135) ? e_45_135 : 1.0;
+
+    float weight_0 = (c_0_90 && c_g_0_90) ? f_e_0_90 : 0.0;
+    float weight_90 = (c_0_90 && !c_g_0_90) ? f_e_0_90 : 0.0;
+    float weight_45 = (c_45_135 && c_g_45_135) ? f_e_45_135 : 0.0;
+    float weight_135 = (c_45_135 && !c_g_45_135) ? f_e_45_135 : 0.0;
+
+    return vec4(weight_0, weight_90, weight_45, weight_135);
+}
+
+// Local Transient Improvement: how much unsharp-mask to keep. Near zero when
+// one half of the run is far busier than the other (a hard edge), which is what
+// stops the sharpener ringing.
+float calc_lti(float p0, float p1, float p2, float p3, float p4, float p5, int phase_index) {
+    bool selector = (phase_index <= PHASE_COUNT / 2);
+    float sel = selector ? p0 : p3;
+    float a_min = min(min(p1, p2), sel);
+    float a_max = max(max(p1, p2), sel);
+    sel = selector ? p2 : p5;
+    float b_min = min(min(p3, p4), sel);
+    float b_max = max(max(p3, p4), sel);
+
+    float a_cont = a_max - a_min;
+    float b_cont = b_max - b_min;
+
+    float cont_ratio = max(a_cont, b_cont) / (min(a_cont, b_cont) + k_eps);
+    return (1.0 - clamp((cont_ratio - k_min_contrast_ratio) * k_ratio_norm, 0.0, 1.0))
+        * k_contrast_boost;
+}
+
+// One 6-tap resample plus its limited unsharp-mask term.
+float eval_poly6(float pxl[FILTER_SIZE], int phase_int) {
+    float y = 0.0;
+    for (int i = 0; i < FILTER_SIZE; ++i) {
+        y += kCoefScale[phase_int * FILTER_SIZE + i] * pxl[i];
+    }
+    float y_usm = 0.0;
+    for (int i = 0; i < FILTER_SIZE; ++i) {
+        y_usm += kCoefUsm[phase_int * FILTER_SIZE + i] * pxl[i];
+    }
+
+    // Ramp sharpening down as luma rises; highlights ring more readily.
+    float y_scale = 1.0 - clamp((y - k_sharp_start_y) * k_sharp_scale_y, 0.0, 1.0);
+    float y_sharpness = y_scale * k_sharp_strength_scale + k_sharp_strength_min;
+    y_usm *= y_sharpness;
+
+    // Cap the correction so it cannot invert a gradient.
+    float y_sharpness_limit = (y_scale * k_sharp_limit_scale + k_sharp_limit_min) * y;
+    y_usm = min(y_sharpness_limit, max(-y_sharpness_limit, y_usm));
+
+    y_usm *= calc_lti(pxl[0], pxl[1], pxl[2], pxl[3], pxl[4], pxl[5], phase_int);
+
+    return y + y_usm;
+}
+
+// The non-directional base: a separable 6x6 resample of the support window.
+float filter_normal(int row0, int col0, int phase_x, int phase_y) {
+    float h_acc = 0.0;
+    for (int j = 0; j < FILTER_SIZE; ++j) {
+        float v_acc = 0.0;
+        for (int i = 0; i < FILTER_SIZE; ++i) {
+            v_acc += tile(row0 + i, col0 + j) * kCoefScale[phase_y * FILTER_SIZE + i];
+        }
+        h_acc += v_acc * kCoefScale[phase_x * FILTER_SIZE + j];
+    }
+    return h_acc;
+}
+
+// For each active direction, interpolate the support onto a 6-tap run along
+// that direction and resample it.
+float add_dir_filters(int row0, int col0, vec2 frac, int phase_x, int phase_y, vec4 w) {
+    float f = 0.0;
+    float run[FILTER_SIZE];
+
+    if (w.x > 0.0) {
+        // 0 deg: interpolate across the two middle columns, resample down.
+        for (int i = 0; i < FILTER_SIZE; ++i) {
+            run[i] = mix(tile(row0 + i, col0 + 2), tile(row0 + i, col0 + 3), frac.x);
+        }
+        f += eval_poly6(run, phase_y) * w.x;
+    }
+    if (w.y > 0.0) {
+        // 90 deg: the transpose.
+        for (int i = 0; i < FILTER_SIZE; ++i) {
+            run[i] = mix(tile(row0 + 2, col0 + i), tile(row0 + 3, col0 + i), frac.y);
+        }
+        f += eval_poly6(run, phase_x) * w.y;
+    }
+    if (w.z > 0.0) {
+        // 45 deg: built along the anti-diagonal, so a 7-tap scratch shifted by
+        // one depending on which side of the diagonal the sample falls.
+        float temp[7];
+        float pphase_b45 = 0.5 + 0.5 * (frac.x - frac.y);
+        temp[1] = mix(tile(row0 + 2, col0 + 1), tile(row0 + 1, col0 + 2), pphase_b45);
+        temp[3] = mix(tile(row0 + 3, col0 + 2), tile(row0 + 2, col0 + 3), pphase_b45);
+        temp[5] = mix(tile(row0 + 4, col0 + 3), tile(row0 + 3, col0 + 4), pphase_b45);
+
+        pphase_b45 = pphase_b45 - 0.5;
+        float a = (pphase_b45 >= 0.0) ? tile(row0 + 0, col0 + 2) : tile(row0 + 2, col0 + 0);
+        float b = (pphase_b45 >= 0.0) ? tile(row0 + 1, col0 + 3) : tile(row0 + 3, col0 + 1);
+        float c = (pphase_b45 >= 0.0) ? tile(row0 + 2, col0 + 4) : tile(row0 + 4, col0 + 2);
+        float d = (pphase_b45 >= 0.0) ? tile(row0 + 3, col0 + 5) : tile(row0 + 5, col0 + 3);
+        temp[0] = mix(tile(row0 + 1, col0 + 1), a, abs(pphase_b45));
+        temp[2] = mix(tile(row0 + 2, col0 + 2), b, abs(pphase_b45));
+        temp[4] = mix(tile(row0 + 3, col0 + 3), c, abs(pphase_b45));
+        temp[6] = mix(tile(row0 + 4, col0 + 4), d, abs(pphase_b45));
+
+        float pphase_p45 = frac.x + frac.y;
+        if (pphase_p45 >= 1.0) {
+            for (int i = 0; i < FILTER_SIZE; ++i) {
+                run[i] = temp[i + 1];
+            }
+            pphase_p45 = pphase_p45 - 1.0;
+        } else {
+            for (int i = 0; i < FILTER_SIZE; ++i) {
+                run[i] = temp[i];
+            }
+        }
+
+        f += eval_poly6(run, int(pphase_p45 * float(PHASE_COUNT))) * w.z;
+    }
+    if (w.w > 0.0) {
+        // 135 deg: the mirror of the 45 deg case.
+        float temp[7];
+        float pphase_b135 = 0.5 * (frac.x + frac.y);
+        temp[1] = mix(tile(row0 + 3, col0 + 1), tile(row0 + 4, col0 + 2), pphase_b135);
+        temp[3] = mix(tile(row0 + 2, col0 + 2), tile(row0 + 3, col0 + 3), pphase_b135);
+        temp[5] = mix(tile(row0 + 1, col0 + 3), tile(row0 + 2, col0 + 4), pphase_b135);
+
+        pphase_b135 = pphase_b135 - 0.5;
+        float a = (pphase_b135 >= 0.0) ? tile(row0 + 5, col0 + 2) : tile(row0 + 3, col0 + 0);
+        float b = (pphase_b135 >= 0.0) ? tile(row0 + 4, col0 + 3) : tile(row0 + 2, col0 + 1);
+        float c = (pphase_b135 >= 0.0) ? tile(row0 + 3, col0 + 4) : tile(row0 + 1, col0 + 2);
+        float d = (pphase_b135 >= 0.0) ? tile(row0 + 2, col0 + 5) : tile(row0 + 0, col0 + 3);
+        temp[0] = mix(tile(row0 + 4, col0 + 1), a, abs(pphase_b135));
+        temp[2] = mix(tile(row0 + 3, col0 + 2), b, abs(pphase_b135));
+        temp[4] = mix(tile(row0 + 2, col0 + 3), c, abs(pphase_b135));
+        temp[6] = mix(tile(row0 + 1, col0 + 4), d, abs(pphase_b135));
+
+        float pphase_p135 = 1.0 + (frac.x - frac.y);
+        if (pphase_p135 >= 1.0) {
+            for (int i = 0; i < FILTER_SIZE; ++i) {
+                run[i] = temp[i + 1];
+            }
+            pphase_p135 = pphase_p135 - 1.0;
+        } else {
+            for (int i = 0; i < FILTER_SIZE; ++i) {
+                run[i] = temp[i];
+            }
+        }
+
+        f += eval_poly6(run, int(pphase_p135 * float(PHASE_COUNT))) * w.w;
+    }
+    return f;
+}
+
+void main() {
+    ivec2 dst_block = ivec2(gl_WorkGroupID.xy) * BLOCK;
+    // Same for every invocation in the group, which is what makes the shared
+    // tile addressable by all of them.
+    ivec2 src_block_start = ivec2(floor((vec2(dst_block) + 0.5) * scale - 0.5));
+
+    // Fill the luma tile, strided across the workgroup. Out-of-range reads get
+    // edge padding from CLAMP_TO_EDGE.
+    int tid = int(gl_LocalInvocationIndex);
+    for (int i = tid; i < TILE_DIM * TILE_DIM; i += BLOCK * BLOCK) {
+        int row = i / TILE_DIM;
+        int col = i - row * TILE_DIM;
+        vec2 texel = vec2(src_block_start + ivec2(col, row) - TILE_PAD) + 0.5;
+        sh_luma[i] = get_y(texture(tex, src_uv(texel)).rgb);
+    }
+    barrier();
+
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    if (coord.x >= dst_size.x || coord.y >= dst_size.y) {
+        return;
+    }
+
+    vec2 src_pos = (vec2(coord) + 0.5) * scale - 0.5;
+    vec2 src_floor = floor(src_pos);
+    vec2 frac = src_pos - src_floor;
+    int phase_x = int(frac.x * float(PHASE_COUNT));
+    int phase_y = int(frac.y * float(PHASE_COUNT));
+
+    // Top-left of the 6x6 support within the tile; TILE_PAD is already folded
+    // into the tile's own offset.
+    ivec2 base = ivec2(src_floor) - src_block_start;
+    int col0 = base.x;
+    int row0 = base.y;
+
+    // Four edge maps around the sample point, bilinearly interpolated to its
+    // sub-texel position.
+    vec4 e00 = get_edge_map(row0 + 1, col0 + 1);
+    vec4 e01 = get_edge_map(row0 + 1, col0 + 2);
+    vec4 e10 = get_edge_map(row0 + 2, col0 + 1);
+    vec4 e11 = get_edge_map(row0 + 2, col0 + 2);
+    vec4 w = mix(mix(e00, e01, frac.x), mix(e10, e11, frac.x), frac.y);
+
+    // Whatever the directional bank does not claim goes to the plain resample.
+    float base_weight = 1.0 - w.x - w.y - w.z - w.w;
+
+    float op_y = filter_normal(row0, col0, phase_x, phase_y) * base_weight;
+    op_y += add_dir_filters(row0, col0, frac, phase_x, phase_y, w);
+
+    // Carry the luma result back as a correction on a bilinear colour tap, so
+    // chroma costs one fetch rather than three more filter banks.
+    vec4 op = texture(tex, src_uv(src_pos + 0.5));
+    float y = get_y(op.rgb);
+    float corr = op_y - y;
+    op.rgb = clamp(op.rgb + corr, 0.0, 1.0);
+
+    imageStore(dst, coord, op);
+}

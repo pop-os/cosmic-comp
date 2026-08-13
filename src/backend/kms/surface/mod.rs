@@ -1949,6 +1949,12 @@ impl SurfaceThreadState {
                                 shell.workspaces.spaces().find_map(|ws| {
                                     ws.get_fullscreen_surfaces()
                                         .find(|f| &f.surface == game && !f.is_animating())
+                                        // A filtered upscale can never scan out
+                                        // — compositing is how it works, not a
+                                        // plane refusing the scale. Latching
+                                        // would clear `scale_to` and letterbox
+                                        // the very mode that asked for it.
+                                        .filter(|f| !f.scale_mode.is_filtered())
                                         .and_then(|f| f.scale_to)
                                         .map(|rect| {
                                             (
