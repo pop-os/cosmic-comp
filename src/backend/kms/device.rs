@@ -138,6 +138,9 @@ pub struct InnerDevice {
     pub leasing_global: Option<DrmLeaseState>,
     pub active_leases: Vec<DrmLease>,
     pub active_clients: HashSet<ClientId>,
+
+    /// Device-wide plane-scanout allowance currently pushed to all surfaces.
+    pub frame_flags: FrameFlags,
 }
 
 impl fmt::Debug for InnerDevice {
@@ -154,6 +157,7 @@ impl fmt::Debug for InnerDevice {
             .field("leasing_global", &self.leasing_global)
             .field("active_leases", &self.active_leases)
             .field("active_clients", &self.active_clients.len())
+            .field("frame_flags", &self.frame_flags)
             .finish()
     }
 }
@@ -806,6 +810,8 @@ impl Device {
                 leasing_global,
                 active_leases: Vec::new(),
                 active_clients,
+
+                frame_flags: FrameFlags::DEFAULT,
             },
 
             texture_formats,
@@ -896,9 +902,27 @@ impl LockedDevice<'_> {
         clock: &Clock<Monotonic>,
         shell: &Arc<parking_lot::RwLock<Shell>>,
     ) -> Result<()> {
+        // Always re-push: a surface created since the last call starts out at
+        // `FrameFlags::DEFAULT` and needs the device-wide allowance applied.
         for surface in self.inner.surfaces.values_mut() {
             surface.allow_frame_flags(flag, flags);
         }
+
+        let new_flags = if flag {
+            self.inner.frame_flags | flags
+        } else {
+            self.inner.frame_flags & !flags
+        };
+        // The synchronous render+commit below exists to take client buffers off the
+        // planes *now*, before a modeset needs the bandwidth. It draws raw output
+        // elements, bypassing the surface thread's postprocess pass, so it flips one
+        // unfiltered frame (night shift/invert visibly blinking off). Callers invoke
+        // this on every output-config apply, so only pay that when the allowance
+        // actually changes - an unchanged allowance has nothing to release.
+        if new_flags == self.inner.frame_flags {
+            return Ok(());
+        }
+        self.inner.frame_flags = new_flags;
 
         if !flag {
             let now = clock.now();
@@ -911,6 +935,18 @@ impl LockedDevice<'_> {
                 .collect::<HashMap<_, _>>();
 
             for (crtc, compositor) in self.drm.compositors().iter() {
+                // A postprocessed surface draws a single offscreen texture we own, so
+                // no client buffer is on its planes and there is nothing to release -
+                // committing here would only flash its unfiltered contents.
+                if self
+                    .inner
+                    .surfaces
+                    .get(crtc)
+                    .is_some_and(|surface| surface.is_postprocessed())
+                {
+                    continue;
+                }
+
                 let elements = match output_map.get(crtc) {
                     Some(output) => output_elements(
                         Some(&self.inner.render_node),

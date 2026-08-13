@@ -160,6 +160,14 @@ impl ScreenFilter {
     pub fn is_noop(&self) -> bool {
         !self.inverted && self.color_filter.is_none() && self.night_shift == 0
     }
+
+    /// What the shader still has to do once the CRTC gamma LUT owns night shift.
+    pub fn without_night_shift(&self) -> Self {
+        Self {
+            night_shift: 0,
+            ..self.clone()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash)]

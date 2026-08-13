@@ -109,7 +109,8 @@ use std::{
 mod timings;
 pub use self::timings::Timings;
 
-use super::{drm_helpers, render::gles::GbmGlowBackend};
+use super::{drm_helpers, gamma, render::gles::GbmGlowBackend};
+use smithay::reexports::drm::control::Device as ControlDevice;
 
 #[cfg(feature = "debug")]
 use smithay_egui::EguiState;
@@ -133,6 +134,13 @@ pub struct Surface {
     pub perf: Arc<crate::perf::OutputPerf>,
 
     dpms: bool,
+    /// The filter as configured. Its night-shift part is handed to the CRTC gamma LUT
+    /// where the driver has one; only the remainder reaches the render thread.
+    screen_filter: ScreenFilter,
+    /// Colour temperature currently programmed into the CRTC gamma LUT. `None` means
+    /// the ramp is unset - either the driver has no LUT, or a suspend dropped it - and
+    /// the shader has to carry night shift instead.
+    gamma_kelvin: Option<u16>,
 }
 
 /// The outgoing session's frozen scanout, composited over the incoming one until its
@@ -342,6 +350,7 @@ impl Surface {
         let output_clone = output.clone();
         let perf = crate::perf::OutputPerf::new();
         let perf_clone = perf.clone();
+        let initial_screen_filter = screen_filter.clone();
 
         let thread = std::thread::Builder::new()
             .name(format!("surface-{}", output.name()))
@@ -439,7 +448,24 @@ impl Surface {
             thread: Some(thread),
             perf,
             dpms: true,
+            screen_filter: initial_screen_filter,
+            gamma_kelvin: None,
         })
+    }
+
+    /// The part of the filter the render thread has to apply in the shader.
+    fn shader_filter(&self) -> ScreenFilter {
+        if self.gamma_kelvin.is_some() {
+            self.screen_filter.without_night_shift()
+        } else {
+            self.screen_filter.clone()
+        }
+    }
+
+    /// Whether this surface renders through the offscreen postprocess pass, which
+    /// means its planes never carry a client buffer.
+    pub fn is_postprocessed(&self) -> bool {
+        !self.shader_filter().is_noop() || self.output.mirroring().is_some()
     }
 
     pub fn known_nodes(&self) -> &HashSet<DrmNode> {
@@ -497,10 +523,47 @@ impl Surface {
             .send(ThreadCommand::UpdateMirroring(output));
     }
 
-    pub fn set_screen_filter(&mut self, config: ScreenFilter) {
+    /// Apply `config`, pushing night shift onto the CRTC gamma LUT when the driver has
+    /// one and leaving only the remainder to the shader.
+    pub fn set_screen_filter(&mut self, device: &impl ControlDevice, config: ScreenFilter) {
+        self.screen_filter = config;
+        self.sync_gamma(device);
+    }
+
+    /// (Re-)program the gamma ramp if it is out of date and hand the render thread
+    /// whatever the hardware could not take.
+    ///
+    /// Must run after anything that can drop CRTC state - a modeset, a session resume -
+    /// because the ramp is not part of the state smithay re-commits.
+    pub fn sync_gamma(&mut self, device: &impl ControlDevice) {
+        let wanted = if self.screen_filter.night_shift >= gamma::NEUTRAL_KELVIN {
+            0
+        } else {
+            self.screen_filter.night_shift
+        };
+
+        if !self.is_active() {
+            // No CRTC to program yet - let the shader carry it, and move it to hardware
+            // when `apply_config_for_outputs` re-syncs after the surface comes up.
+            self.gamma_kelvin = None;
+        } else if self.gamma_kelvin != Some(wanted) {
+            self.gamma_kelvin = match gamma::apply(device, self.crtc, wanted) {
+                Ok(true) => Some(wanted),
+                Ok(false) => None,
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        output = self.output.name(),
+                        "Failed to program night shift into the gamma LUT, falling back to the shader"
+                    );
+                    None
+                }
+            };
+        }
+
         let _ = self
             .thread_command
-            .send(ThreadCommand::UpdateScreenFilter(config));
+            .send(ThreadCommand::UpdateScreenFilter(self.shader_filter()));
     }
 
     pub fn adaptive_sync_support(&self) -> Result<VrrSupport> {
@@ -524,6 +587,9 @@ impl Surface {
     }
 
     pub fn suspend(&mut self) {
+        // The ramp does not survive losing the CRTC; forget it so the next
+        // `sync_gamma` re-programs instead of short-circuiting on an equal value.
+        self.gamma_kelvin = None;
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let _ = self.thread_command.send(ThreadCommand::Suspend(tx));
         let _ = rx.recv();
@@ -2284,6 +2350,12 @@ impl SurfaceThreadState {
     }
 
     fn update_screen_filter(&mut self, filter_config: ScreenFilter) {
+        // Re-sent on every output-config apply; dropping the postprocess textures for an
+        // unchanged filter would re-allocate them for nothing.
+        if self.screen_filter == filter_config {
+            return;
+        }
+
         self.screen_filter = filter_config;
         self.postprocess_textures.clear();
     }

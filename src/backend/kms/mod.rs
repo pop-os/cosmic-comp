@@ -57,6 +57,7 @@ use std::{
 
 mod device;
 mod drm_helpers;
+mod gamma;
 pub mod render;
 mod surface;
 use device::*;
@@ -889,7 +890,7 @@ impl KmsState {
     pub fn update_screen_filter(&mut self, screen_filter: &ScreenFilter) -> Result<()> {
         for device in self.drm_devices.values_mut() {
             for surface in device.inner.surfaces.values_mut() {
-                surface.set_screen_filter(screen_filter.clone());
+                surface.set_screen_filter(device.drm.device(), screen_filter.clone());
             }
         }
 
@@ -1431,36 +1432,49 @@ impl KmsGuard<'_> {
                             surface.output.set_adaptive_sync(vrr);
                         }
 
-                        let mut renderer = self
-                            .api
-                            .single_renderer(&device.inner.render_node)
-                            .with_context(|| "Failed to create renderer")?;
+                        // `use_mode` stages a modeset for the next commit even when the
+                        // mode is identical, so a pure re-arrangement (positions only)
+                        // would blank every screen. Skip the no-op - it also saves
+                        // rendering the fallback element set for every output.
+                        let mode_changed = drm
+                            .compositors()
+                            .get(crtc)
+                            .is_none_or(|c| c.lock().unwrap().surface().pending_mode() != *mode);
 
-                        let mut elements = DrmOutputRenderElements::default();
-                        for (crtc, output) in output_map.iter() {
-                            let output_elements = output_elements(
-                                Some(&device.inner.render_node),
-                                &mut renderer,
-                                &shell,
-                                now,
-                                output,
-                                CursorMode::All,
-                                None,
-                                None,
-                            )
-                            .with_context(|| "Failed to render outputs")?;
+                        if mode_changed {
+                            let mut renderer = self
+                                .api
+                                .single_renderer(&device.inner.render_node)
+                                .with_context(|| "Failed to create renderer")?;
 
-                            elements.add_output(crtc, *CLEAR_COLOR, output_elements);
+                            let mut elements = DrmOutputRenderElements::default();
+                            for (crtc, output) in output_map.iter() {
+                                let output_elements = output_elements(
+                                    Some(&device.inner.render_node),
+                                    &mut renderer,
+                                    &shell,
+                                    now,
+                                    output,
+                                    CursorMode::All,
+                                    None,
+                                    None,
+                                )
+                                .with_context(|| "Failed to render outputs")?;
+
+                                elements.add_output(crtc, *CLEAR_COLOR, output_elements);
+                            }
+
+                            drm.use_mode(&surface.crtc, *mode, &mut renderer, &elements)
+                                .context("Failed to apply new mode")?;
                         }
-
-                        drm.use_mode(&surface.crtc, *mode, &mut renderer, &elements)
-                            .context("Failed to apply new mode")?;
                     }
                 }
             }
 
             // configure primary scanout allowance
-            if !device.inner.surfaces.is_empty() {
+            // (a test-only pass must not commit anything - both calls below can
+            //  render and flip a frame)
+            if !test_only && !device.inner.surfaces.is_empty() {
                 let mut renderer = self
                     .api
                     .single_renderer(&device.inner.render_node)
@@ -1526,6 +1540,17 @@ impl KmsGuard<'_> {
 
                 if !test_only && mirrored_output != surface.output.mirroring() {
                     surface.set_mirroring(mirrored_output.clone());
+                }
+
+                if !test_only && surface.is_active() {
+                    // A surface that just came back from a modeset or a session resume
+                    // lost its gamma ramp, and a brand new one never had it.
+                    surface.sync_gamma(device.drm.device());
+
+                    // `use_mode` above only stages the mode - the flip that applies it
+                    // now comes from the surface thread rather than a forced unfiltered
+                    // commit, so kick a redraw.
+                    surface.schedule_render();
                 }
             }
         }
