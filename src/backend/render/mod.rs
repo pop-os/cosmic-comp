@@ -203,6 +203,7 @@ pub static POSTPROCESS_SHADER: &str = include_str!("./shaders/offscreen.frag");
 // whole `blur` module re-export block are dropped — upstream's `wayland::blur_effect`
 // (`BlurShaders`) replaces them, blitting the region under the element out of the
 // live framebuffer instead of maintaining our own capture/cache pipeline.
+pub mod fsr;
 pub mod nis;
 pub mod nis_coefficients;
 

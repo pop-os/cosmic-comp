@@ -800,6 +800,8 @@ pub struct Shell {
     /// output using `mode`. Zero size keeps the game at output resolution and only
     /// the mode applies (to a game that renders smaller by itself).
     pub game_mode_scaling: (u32, u32, crate::dbus::game_mode::ScalingMode),
+    /// Sharpening strength for the filtered scaling modes, 0.0..=1.0.
+    pub game_mode_sharpness: f32,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
     /// Home mode state for animation (fading in/out of home screen)
@@ -2511,6 +2513,7 @@ impl Shell {
                 false,
             )),
             game_mode_scaling: (0, 0, crate::dbus::game_mode::ScalingMode::Native),
+            game_mode_sharpness: crate::backend::render::nis::DEFAULT_SHARPNESS,
             game_mode_scale_rejected: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
                 false,
             )),

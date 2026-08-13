@@ -35,6 +35,10 @@ const WORKGROUP: i32 = 8;
 
 /// NIS is a 1x..2x upscaler; past that the 6-tap support cannot reach far
 /// enough. Source-over-destination, so 2x is 0.5 and 1:1 is 1.0.
+///
+/// Both bounds are inclusive: a single axis at 1.0 is an ordinary anisotropic
+/// upscale. The wholly degenerate case is rejected separately, by the
+/// `NoUpscale` guard.
 const SCALE_MIN: f64 = 0.5;
 const SCALE_MAX: f64 = 1.0;
 
@@ -59,6 +63,9 @@ pub enum Unavailable {
     NoProgram,
     /// The requested ratio is outside NIS's 1x..2x range.
     OutOfRange,
+    /// Source and destination are the same size, so there is nothing to
+    /// upscale and the unfiltered path keeps direct scanout.
+    NoUpscale,
     /// The source or destination has a zero or negative dimension.
     DegenerateSize,
 }
@@ -77,6 +84,13 @@ impl ScaleRatio {
     pub fn new(src: Size<i32, Physical>, dst: Size<i32, Physical>) -> Result<Self, Unavailable> {
         if src.w <= 0 || src.h <= 0 || dst.w <= 0 || dst.h <= 0 {
             return Err(Unavailable::DegenerateSize);
+        }
+        // Nothing to upscale: at 1:1 NVScaler degenerates to pure sharpening,
+        // which is not worth a compute pass or the loss of direct scanout.
+        // Always-on sharpening is NVSharpen's job, and the SDK is explicit that
+        // the two should not both be integrated.
+        if src.w >= dst.w && src.h >= dst.h {
+            return Err(Unavailable::NoUpscale);
         }
         let x = src.w as f64 / dst.w as f64;
         let y = src.h as f64 / dst.h as f64;
@@ -551,8 +565,8 @@ mod tests {
     fn ratio_accepts_one_to_two_times_and_rejects_the_rest() {
         let ok = ScaleRatio::new(Size::from((1920, 1080)), Size::from((3840, 2160)));
         assert!(ok.is_ok(), "exactly 2x must be accepted");
-        let ok = ScaleRatio::new(Size::from((1920, 1080)), Size::from((1920, 1080)));
-        assert!(ok.is_ok(), "1:1 must be accepted");
+        let ok = ScaleRatio::new(Size::from((1920, 1080)), Size::from((2560, 1440)));
+        assert!(ok.is_ok(), "1.33x must be accepted");
 
         // Past 2x the 6-tap support cannot reach; NIS is not defined there.
         assert_eq!(
@@ -562,12 +576,24 @@ mod tests {
         // Downscaling is not an upscale.
         assert_eq!(
             ScaleRatio::new(Size::from((3840, 2160)), Size::from((1920, 1080))),
-            Err(Unavailable::OutOfRange)
+            Err(Unavailable::NoUpscale)
         );
         assert_eq!(
             ScaleRatio::new(Size::from((0, 1080)), Size::from((1920, 1080))),
             Err(Unavailable::DegenerateSize)
         );
+    }
+
+    /// At 1:1 NVScaler is pure sharpening, which is not worth a compute pass or
+    /// the loss of direct scanout — the unfiltered path must take over.
+    #[test]
+    fn ratio_rejects_one_to_one() {
+        assert_eq!(
+            ScaleRatio::new(Size::from((3840, 2160)), Size::from((3840, 2160))),
+            Err(Unavailable::NoUpscale)
+        );
+        // A single axis already at target size is still a real upscale.
+        assert!(ScaleRatio::new(Size::from((1920, 1080)), Size::from((1920, 1440))).is_ok());
     }
 
     /// One axis being in range does not excuse the other.

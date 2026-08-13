@@ -136,7 +136,7 @@ impl ScalingMode {
     /// Whether this mode runs a shader upscale. Such a frame must be
     /// composited, so it can never take direct scanout.
     pub fn is_filtered(self) -> bool {
-        matches!(self, ScalingMode::Nis)
+        matches!(self, ScalingMode::Nis | ScalingMode::Fsr)
     }
 }
 
@@ -160,6 +160,8 @@ pub struct GameModeShared {
     pub scale_width: u32,
     pub scale_height: u32,
     pub scale_mode: ScalingMode,
+    /// Sharpening strength for the filtered scaling modes, 0.0..=1.0.
+    pub sharpness: f32,
 
     // Capabilities / display
     pub vrr_supported: bool,
@@ -300,6 +302,7 @@ pub enum GameModeCommand {
         height: u32,
         mode: ScalingMode,
     },
+    SetSharpness(f32),
     SetTearing(bool),
     SetVrr(VrrMode),
     SetHdr(bool),
@@ -515,6 +518,18 @@ impl GameModeInterface {
         Ok(())
     }
 
+    /// Sharpening strength for the filtered scaling modes (`nis`, `fsr`),
+    /// clamped to `0.0..=1.0`. Ignored by the unfiltered modes.
+    async fn set_sharpness(
+        &self,
+        sharpness: f64,
+        #[zbus(header)] header: zbus::message::Header<'_>,
+    ) {
+        let sender = header.sender().map(|name| name.to_string());
+        self.io
+            .send_from(GameModeCommand::SetSharpness(sharpness as f32), sender);
+    }
+
     /// Allow tearing (immediate / non-vblank-latched flips) for the game.
     async fn set_tearing(&self, enabled: bool, #[zbus(header)] header: zbus::message::Header<'_>) {
         let sender = header.sender().map(|name| name.to_string());
@@ -607,6 +622,12 @@ impl GameModeInterface {
                 s.scale_mode.as_str().to_string(),
             )
         })
+    }
+
+    /// Sharpening strength used by the filtered scaling modes.
+    #[zbus(property)]
+    async fn sharpness(&self) -> f64 {
+        self.io.with_shared(|s| s.sharpness as f64)
     }
 
     // ── capabilities ──
@@ -818,6 +839,13 @@ impl State {
                     mode = mode.as_str(),
                     "game-mode: set scaling"
                 );
+                bridge.notify_tunables_changed();
+            }
+            GameModeCommand::SetSharpness(sharpness) => {
+                let sharpness = sharpness.clamp(0.0, 1.0);
+                bridge.shared().lock().unwrap().sharpness = sharpness;
+                self.common.shell.write().game_mode_sharpness = sharpness;
+                debug!(sharpness, "game-mode: set sharpness");
                 bridge.notify_tunables_changed();
             }
             GameModeCommand::SetOverlay { visible, blocking } => {
@@ -1045,6 +1073,7 @@ impl State {
                 let want_scale = !scale_rejected && game_app_id != LAUNCHER_APP_ID;
                 let mut shell = self.common.shell.write();
                 let (spoof_w, spoof_h, mode) = shell.game_mode_scaling;
+                let sharpness = shell.game_mode_sharpness;
 
                 // Resolution spoof: tell the game to render at the requested size
                 // instead of the output's, and let the presentation rect scale the
@@ -1081,7 +1110,7 @@ impl State {
                     .spaces_mut()
                     .find(|ws| ws.get_fullscreen_surfaces().any(|f| f.surface == game))
                 {
-                    ws.set_fullscreen_scale_to(&game, want_scale, mode);
+                    ws.set_fullscreen_scale_to(&game, want_scale, mode, sharpness);
                     true
                 } else {
                     false
@@ -1890,14 +1919,15 @@ mod tests {
     }
 
     /// A mode wrongly listed here has the KMS thread read its composited frame
-    /// as a plane scale-reject, permanently letterboxing it.
+    /// as a plane scale-reject, permanently letterboxing it. One wrongly left
+    /// out keeps its buffer on the scanout path, where the shader never runs.
     #[test]
-    fn only_nis_is_filtered() {
+    fn only_shader_upscalers_are_filtered() {
         assert!(ScalingMode::Nis.is_filtered());
+        assert!(ScalingMode::Fsr.is_filtered());
         for mode in [
             ScalingMode::Native,
             ScalingMode::Integer,
-            ScalingMode::Fsr,
             ScalingMode::Fit,
             ScalingMode::Fill,
             ScalingMode::Stretch,

@@ -276,15 +276,19 @@ pub struct FullscreenSurface {
     /// `scale_to` so the render path can tell a filtered upscale from a plain
     /// one without reaching into the shell for `game_mode_scaling`.
     pub scale_mode: crate::dbus::game_mode::ScalingMode,
+    /// Sharpening strength for `scale_mode`, when it is a filtered one.
+    pub scale_sharpness: f32,
     /// Locked for the same reason as `retained`: `Workspace::render` takes
     /// `&self`.
     nis: Arc<Mutex<Option<NisUpscale>>>,
 }
 
-/// The NIS pass's destination, and enough context to know when to rebuild it.
+/// An upscale filter's destination, and enough context to know when to rebuild.
 #[derive(Debug)]
 struct NisUpscale {
     target: GlesTexture,
+    /// EASU's output, FSR only. NIS is a single pass and leaves this `None`.
+    intermediate: Option<GlesTexture>,
     /// Stable, or the damage tracker sees a new element every frame.
     id: Id,
     /// A texture is only valid on the renderer that made it, and each output
@@ -292,7 +296,10 @@ struct NisUpscale {
     context_id: smithay::backend::renderer::ContextId<GlesTexture>,
     /// Immutable storage cannot be resized, so a change means reallocating.
     size: Size<i32, Physical>,
-    /// Always the full rect: the compute pass rewrites every texel.
+    /// The filter these targets were allocated for; the two allocate
+    /// differently, so a mode change has to rebuild.
+    mode: crate::dbus::game_mode::ScalingMode,
+    /// Always the full rect: the pass rewrites every texel.
     damage: DamageBag<i32, BufferCoords>,
 }
 
@@ -434,17 +441,18 @@ where
     ))
 }
 
-/// Run the NIS pass over the game's imported buffer and return the upscaled
-/// copy, positioned at `target_geo`.
+/// Run the requested upscale filter over the game's imported buffer and return
+/// the result, positioned at `target_geo`.
 ///
-/// `None` whenever the filter cannot apply this frame — no GLES 3.1, a ratio
-/// outside 1x..2x, another output's renderer, nothing imported yet — and the
-/// caller falls back to the ordinary scaled draw, which lands in the same rect.
+/// `None` whenever the filter cannot apply this frame — no GLES 3.1 for NIS, a
+/// ratio it is not defined for, nothing to upscale, another output's renderer,
+/// nothing imported yet — and the caller falls back to the ordinary scaled draw,
+/// which lands in the same rect.
 ///
 /// Reads the root surface's buffer rather than compositing the tree first, so a
 /// game drawing through subsurfaces would have only its root filtered. Same
 /// assumption `retain_fullscreen_frame` makes.
-fn nis_fullscreen_element<R>(
+fn upscaled_fullscreen_element<R>(
     fullscreen: &FullscreenSurface,
     renderer: &mut R,
     output_scale: f64,
@@ -455,11 +463,19 @@ where
     R: AsGlowRenderer,
     R::TextureId: Send + 'static,
 {
-    use crate::backend::render::nis;
+    use crate::backend::render::{fsr, nis};
+    use crate::dbus::game_mode::ScalingMode;
 
-    // Ask before allocating: on a context without compute this is the cheap way
-    // out, taken every frame for the whole session.
-    nis::available(renderer).ok()?;
+    let mode = fullscreen.scale_mode;
+    let sharpness = fullscreen.scale_sharpness;
+
+    // Ask before allocating: on a context that cannot run the filter this is the
+    // cheap way out, taken every frame for the whole session.
+    match mode {
+        ScalingMode::Nis => nis::available(renderer).ok()?,
+        ScalingMode::Fsr => fsr::available().ok()?,
+        _ => return None,
+    }
 
     let dst_size: Size<i32, Physical> = target_geo
         .size
@@ -473,8 +489,8 @@ where
     let glow_context = renderer.glow_renderer().context_id();
     let context = renderer.context_id();
 
-    // Down to the concrete GlesTexture: the compute pass binds a GL texture
-    // name, which a MultiTexture cannot give.
+    // Down to the concrete GlesTexture: the passes bind a GL texture name,
+    // which a MultiTexture cannot give.
     let source = with_states(&surface, |data| {
         let state = data.data_map.get::<RendererSurfaceStateUserData>()?;
         let state = state.lock().unwrap();
@@ -484,31 +500,63 @@ where
     let flip_y = source.is_y_inverted();
 
     let mut slot = fullscreen.nis.lock().unwrap();
-    // Reallocate on a size change, or when drawn by a renderer that did not
-    // make the current target.
+    // Reallocate on a size change, a mode change (the two want differently
+    // allocated targets), or when drawn by a renderer that did not make the
+    // current one.
     let stale = slot
         .as_ref()
-        .is_none_or(|n| n.size != dst_size || n.context_id != glow_context);
+        .is_none_or(|n| n.size != dst_size || n.context_id != glow_context || n.mode != mode);
     if stale {
-        let target = nis::create_target(renderer, dst_size).ok()?;
+        let (target, intermediate) = match mode {
+            // Compute writes through an image binding, which needs immutable
+            // storage; FSR renders into a bound framebuffer and needs a second
+            // target for the EASU result.
+            ScalingMode::Nis => (nis::create_target(renderer, dst_size).ok()?, None),
+            _ => (
+                fsr::create_target(renderer, dst_size).ok()?,
+                Some(fsr::create_target(renderer, dst_size).ok()?),
+            ),
+        };
         *slot = Some(NisUpscale {
             target,
+            intermediate,
             id: Id::new(),
             context_id: glow_context.clone(),
             size: dst_size,
+            mode,
             damage: DamageBag::default(),
         });
     }
     let state = slot.as_mut()?;
 
-    nis::upscale(
-        renderer,
-        &source,
-        flip_y,
-        &state.target,
-        nis::NisConfig::default(),
-    )
-    .ok()?;
+    // Split the borrow: FSR needs both targets mutably at once.
+    let NisUpscale {
+        target,
+        intermediate,
+        ..
+    } = state;
+    match mode {
+        // The compute pass samples the texture itself, so it has to undo a
+        // bottom-up buffer; FSR goes through smithay's texture draw, which
+        // already accounts for one.
+        ScalingMode::Nis => nis::upscale(
+            renderer,
+            &source,
+            flip_y,
+            target,
+            nis::NisConfig::new(sharpness),
+        )
+        .ok()?,
+        _ => fsr::upscale(
+            renderer,
+            &source,
+            intermediate.as_mut()?,
+            target,
+            dst_size,
+            sharpness,
+        )
+        .ok()?,
+    }
 
     let buffer_size = Size::<i32, BufferCoords>::from((dst_size.w, dst_size.h));
     state.damage.add([Rectangle::from_size(buffer_size)]);
@@ -1690,6 +1738,7 @@ impl Workspace {
                     retained: Arc::default(),
                     retain_reported: Arc::default(),
                     scale_mode: crate::dbus::game_mode::ScalingMode::Native,
+                    scale_sharpness: crate::backend::render::nis::DEFAULT_SHARPNESS,
                     nis: Arc::default(),
                 });
                 self.dirty.store(true, Ordering::SeqCst);
@@ -1805,6 +1854,7 @@ impl Workspace {
             retained: Arc::default(),
             retain_reported: Arc::default(),
             scale_mode: crate::dbus::game_mode::ScalingMode::Native,
+            scale_sharpness: crate::backend::render::nis::DEFAULT_SHARPNESS,
             nis: Arc::default(),
         });
         // Bug 1: the entrance animation clock starts NOW, before the client has
@@ -1897,6 +1947,7 @@ impl Workspace {
         surface: &S,
         scale: bool,
         mode: crate::dbus::game_mode::ScalingMode,
+        sharpness: f32,
     ) where
         CosmicSurface: PartialEq<S>,
     {
@@ -1919,6 +1970,7 @@ impl Workspace {
             fs.scale_to = Self::scaling_rect(src, out, mode);
             // The RESOLVED mode, so a surface refused a scale is never filtered.
             fs.scale_mode = mode;
+            fs.scale_sharpness = sharpness;
         }
     }
 
@@ -2421,7 +2473,7 @@ impl Workspace {
                     if scaling
                         && !is_animating
                         && fullscreen.scale_mode.is_filtered()
-                        && let Some(elem) = nis_fullscreen_element(
+                        && let Some(elem) = upscaled_fullscreen_element(
                             fullscreen,
                             renderer,
                             output_scale,
