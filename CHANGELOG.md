@@ -1,3 +1,19 @@
+# [1.38.0](https://github.com/playtron-os/cosmic-comp/compare/v1.37.1...v1.38.0) (2026-08-13)
+
+
+### Bug Fixes
+
+* **kms:** stop night shift blinking off during display changes ([9dc2347](https://github.com/playtron-os/cosmic-comp/commit/9dc234740c0790082400c06178c67cea4a8c683f))
+
+
+### Features
+
+* **game-mode:** accept COSMIC_GAME_MODE_ALLOW=* to skip the client check ([bde31b6](https://github.com/playtron-os/cosmic-comp/commit/bde31b6d8d765791e43cd4e0bff8aeefa0f08712))
+* **game-mode:** upscale a game with NVIDIA Image Scaling ([7fdc949](https://github.com/playtron-os/cosmic-comp/commit/7fdc94913c487ff4776046b278cfb7507faec49d))
+* **game-mode:** wire FSR, expose sharpness, skip a 1:1 upscale ([9643174](https://github.com/playtron-os/cosmic-comp/commit/9643174c18137e5e2ff61276dd1fa3ab539cd447))
+* **kms:** apply night shift by CTM where there is no gamma LUT ([4e4aa84](https://github.com/playtron-os/cosmic-comp/commit/4e4aa84fdef80fc7f771ec84df378e3f609a5193))
+* **kms:** fade to black before a reboot or poweroff ([bcad3dc](https://github.com/playtron-os/cosmic-comp/commit/bcad3dc96d26d01710cb055037c44c534d398f78))
+
 ## [1.37.1](https://github.com/playtron-os/cosmic-comp/compare/v1.37.0...v1.37.1) (2026-08-12)
 
 
