@@ -189,6 +189,9 @@ pub struct SurfaceThreadState {
     frame_flags: FrameFlags,
     compositor: Option<GbmDrmOutput>,
     adopt: Option<AdoptFrame>,
+    /// 1x1 black texture stretched over the output for the pre-shutdown fade. Cached so
+    /// the fade does not re-upload it every frame; its `Id` must be stable for damage.
+    shutdown_plate: Option<(GlesTexture, smithay::backend::renderer::element::Id)>,
 
     state: QueueState,
     timings: Timings,
@@ -632,6 +635,7 @@ fn surface_thread(
         active,
         compositor: None,
         adopt: None,
+        shutdown_plate: None,
         frame_flags: FrameFlags::DEFAULT,
         vrr_mode: AdaptiveSync::Disabled,
 
@@ -1234,7 +1238,13 @@ impl SurfaceThreadState {
         // session tears its components down seconds before we exit, and those frames are
         // empty. A still-armed estimated_vblank timer MUST be disarmed before parking in
         // Idle, or it fires into on_estimated_vblank's unreachable!() and wedges output.
-        if self.shell.read().logout_hold {
+        // A pending shutdown overrides the hold: those frames carry the fade to black,
+        // and the black plate is what the exit freeze should latch.
+        let (logout_hold, shutdown_pending) = {
+            let shell = self.shell.read();
+            (shell.logout_hold, shell.shutdown_fade.is_some())
+        };
+        if logout_hold && !shutdown_pending {
             if let QueueState::WaitingForEstimatedVBlankAndQueued {
                 estimated_vblank, ..
             } = std::mem::replace(&mut self.state, QueueState::Idle)
@@ -1569,6 +1579,47 @@ impl SurfaceThreadState {
                 // On TOP (index 0 = highest z here — elements are drawn front-to-back) so
                 // fading it out progressively uncovers the real content, not the reverse.
                 elements.insert(0, CosmicElement::Adopt(elem));
+            }
+        }
+
+        // Pre-shutdown fade: a black plate over everything, ramping to fully opaque. The
+        // exit freeze then latches black rather than the user's desktop, which would
+        // otherwise stay lit for the whole shutdown — nothing repaints after CLOSEFB.
+        if let Some(alpha) = self.shell.read().shutdown_fade_alpha() {
+            if self.shutdown_plate.is_none() {
+                use smithay::backend::renderer::ImportMem as _;
+                match renderer.glow_renderer_mut().import_memory(
+                    &[0, 0, 0, 255],
+                    Fourcc::Abgr8888,
+                    (1, 1).into(),
+                    false,
+                ) {
+                    Ok(tex) => {
+                        self.shutdown_plate =
+                            Some((tex, smithay::backend::renderer::element::Id::new()))
+                    }
+                    Err(err) => warn!(?err, "shutdown fade: black plate upload failed"),
+                }
+            }
+            if let Some((tex, id)) = self.shutdown_plate.clone() {
+                let src = Rectangle::from_size((1.0, 1.0).into());
+                let logical = self.output.geometry().size.as_logical();
+                elements.insert(
+                    0,
+                    CosmicElement::Adopt(TextureRenderElement::from_static_texture(
+                        id,
+                        renderer.glow_renderer().context_id(),
+                        (0., 0.),
+                        tex,
+                        1,
+                        Transform::Normal,
+                        Some(alpha),
+                        Some(src),
+                        Some(logical),
+                        None,
+                        smithay::backend::renderer::element::Kind::Unspecified,
+                    )),
+                );
             }
         }
 

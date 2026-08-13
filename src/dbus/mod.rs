@@ -97,6 +97,82 @@ async fn init_system(state: &DBusState) -> zbus::Result<()> {
             tracing::warn!(?err, "Failed to initialize dbus handlers");
         }
     });
+    let conn = state.system_conn().await?.clone();
+    let evlh = state.0.evlh.clone();
+    state.spawn(async move {
+        if let Err(err) = shutdown_task(conn, evlh).await {
+            tracing::warn!(?err, "Failed to watch logind for shutdown");
+        }
+    });
+    Ok(())
+}
+
+/// logind's shutdown announcement, with the `type` metadata that distinguishes a real
+/// reboot/poweroff from a soft-reboot. `logind-zbus` only exposes the plain signal,
+/// which fires for soft-reboot too — and a soft-reboot keeps the display alive for a
+/// new compositor, so it must stay a normal handoff.
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.Manager",
+    default_service = "org.freedesktop.login1",
+    default_path = "/org/freedesktop/login1"
+)]
+trait ShutdownManager {
+    #[zbus(signal)]
+    fn prepare_for_shutdown_with_metadata(
+        &self,
+        start: bool,
+        metadata: HashMap<String, zbus::zvariant::OwnedValue>,
+    ) -> zbus::Result<()>;
+}
+
+/// Watch for an imminent reboot/poweroff and start the fade to black.
+///
+/// Only the fade is driven from here; the exit path reads `Shell::shutdown_fade`. On a
+/// systemd too old for the metadata signal nothing arrives and the behaviour is
+/// unchanged — the desktop is frozen as before.
+async fn shutdown_task(conn: zbus::Connection, evlh: LoopHandle<'static, State>) -> Result<()> {
+    let proxy = ShutdownManagerProxy::new(&conn)
+        .await
+        .context("no logind manager")?;
+    let stream = proxy
+        .receive_prepare_for_shutdown_with_metadata()
+        .await
+        .context("failed to subscribe to PrepareForShutdownWithMetadata")?;
+
+    let source = StreamSource::new(stream).unwrap();
+    evlh.insert_source(source, |signal, _, state| {
+        let Some(signal) = signal else {
+            return;
+        };
+        let Ok(args) = signal.args() else {
+            return;
+        };
+        if !args.start {
+            // Shutdown cancelled — logind emits this if the job fails. Repaint, or the
+            // screen stays on the black plate with nothing left to damage it.
+            let was_fading = state.common.shell.write().shutdown_fade.take().is_some();
+            if was_fading {
+                tracing::info!("shutdown: cancelled, restoring the desktop");
+                state.schedule_all_outputs();
+            }
+            return;
+        }
+        // A soft-reboot hands the live display to a fresh compositor, so it wants the
+        // normal frozen-frame handoff, not a fade to black.
+        let kind = args
+            .metadata
+            .get("type")
+            .and_then(|v| <String as TryFrom<zbus::zvariant::OwnedValue>>::try_from(v.clone()).ok())
+            .unwrap_or_default();
+        if kind == "soft-reboot" {
+            tracing::debug!("shutdown: soft-reboot, keeping the handoff freeze");
+            return;
+        }
+        tracing::info!(%kind, "shutdown: fading to black before exit");
+        state.begin_shutdown_fade();
+    })
+    .map_err(|InsertError { error, .. }| error)
+    .with_context(|| "Failed to add shutdown signal to event_loop")?;
     Ok(())
 }
 

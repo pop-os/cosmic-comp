@@ -127,6 +127,52 @@ impl State {
             };
         });
     }
+
+    /// Start the pre-shutdown fade to black and keep frames flowing until it finishes.
+    ///
+    /// Driven by a timer rather than the normal damage path: `logout_hold` may already
+    /// have parked rendering, and with the session's clients gone nothing else would
+    /// wake the loop.
+    pub fn begin_shutdown_fade(&mut self) {
+        {
+            let mut shell = self.common.shell.write();
+            if shell.shutdown_fade.is_some() {
+                return;
+            }
+            shell.shutdown_fade = Some(Instant::now());
+        }
+        utils::timing::mark("shutdown-fade-begin");
+        self.schedule_all_outputs();
+        let _ = self.common.event_loop_handle.insert_source(
+            calloop::timer::Timer::immediate(),
+            |_, _, state: &mut State| {
+                let done = state
+                    .common
+                    .shell
+                    .read()
+                    .shutdown_fade_alpha()
+                    .is_none_or(|alpha| alpha >= 1.0);
+                if done {
+                    return calloop::timer::TimeoutAction::Drop;
+                }
+                state.schedule_all_outputs();
+                calloop::timer::TimeoutAction::ToDuration(Duration::from_millis(16))
+            },
+        );
+    }
+
+    fn schedule_all_outputs(&mut self) {
+        let outputs = self
+            .common
+            .shell
+            .read()
+            .outputs()
+            .cloned()
+            .collect::<Vec<_>>();
+        for output in &outputs {
+            self.backend.schedule_render(output);
+        }
+    }
 }
 
 pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
@@ -229,6 +275,20 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         let loop_work_start = crate::perf::is_capturing().then(|| state.common.loop_health.begin());
         // shall we shut down?
         if state.common.should_stop {
+            // Let a pending fade finish so the freeze latches the black plate, not the
+            // desktop. Wall-clock, so a stalled render delays the exit by the fade at most.
+            let fading = state
+                .common
+                .shell
+                .read()
+                .shutdown_fade
+                .is_some_and(|started| {
+                    started.elapsed() < crate::shell::SHUTDOWN_FADE + Duration::from_millis(50)
+                });
+            if fading {
+                state.schedule_all_outputs();
+                return;
+            }
             info!("Shutting down");
             utils::timing::mark("shutdown-begin");
             state.common.event_loop_signal.stop();

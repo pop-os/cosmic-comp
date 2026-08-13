@@ -142,6 +142,8 @@ const ACTIVATION_TOKEN_EXPIRE_TIME: Duration = Duration::from_secs(5);
 
 /// Compositor-owned ext-session-lock fade durations (desktop <-> lock cover).
 const UNLOCK_FADE_DURATION: Duration = Duration::from_millis(250);
+/// Fade to black before a reboot/poweroff. Kept short — it is added to shutdown.
+pub const SHUTDOWN_FADE: Duration = Duration::from_millis(300);
 const LOCK_FADE_IN_DURATION: Duration = Duration::from_millis(250);
 /// How many entrance-animation durations a layer surface may wait for real
 /// content before it animates in over whatever it has. Expressed against the
@@ -839,6 +841,10 @@ pub struct Shell {
     lock_fade_in: Option<Instant>,
     lock_fade_in_started: bool,
     pub logout_hold: bool,
+    /// Start of the fade to black for a pending reboot/poweroff. The exit freeze then
+    /// latches that black plate instead of the user's desktop. `None` for a logout,
+    /// which keeps the live frame so the greeter can cross-fade from it.
+    pub shutdown_fade: Option<Instant>,
     layer_fade_in: std::collections::HashMap<ObjectId, Instant>,
     /// Layer surfaces waiting for a buffer commit before starting their fade-in,
     /// with the instant they started waiting. Moved to `layer_fade_in` when the
@@ -2541,6 +2547,7 @@ impl Shell {
             lock_fade_in: None,
             lock_fade_in_started: false,
             logout_hold: false,
+            shutdown_fade: None,
             pending_layer_fade_in: std::collections::HashMap::new(),
             layer_fade_out: std::collections::HashMap::new(),
 
@@ -5743,6 +5750,14 @@ impl Shell {
     /// Whether any layer surface is mapped but not yet visible (alpha 0 pending its first
     /// buffer, or mid fade-in). Hidden surfaces are excluded: a start-hidden overlay never
     /// commits a buffer and would keep this permanently true.
+    /// Fade-to-black progress for a pending reboot/poweroff, 0.0..=1.0, or `None` when
+    /// no shutdown is in flight.
+    pub fn shutdown_fade_alpha(&self) -> Option<f32> {
+        self.shutdown_fade.map(|start| {
+            (start.elapsed().as_secs_f32() / SHUTDOWN_FADE.as_secs_f32()).clamp(0.0, 1.0)
+        })
+    }
+
     /// Whether an opaque wallpaper is up on `output`: a Background-layer surface that
     /// has committed its first buffer and finished its own fade-in.
     ///
