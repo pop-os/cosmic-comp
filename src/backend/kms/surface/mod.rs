@@ -109,7 +109,7 @@ use std::{
 mod timings;
 pub use self::timings::Timings;
 
-use super::{drm_helpers, gamma, render::gles::GbmGlowBackend};
+use super::{drm_helpers, night_shift, render::gles::GbmGlowBackend};
 use smithay::reexports::drm::control::Device as ControlDevice;
 
 #[cfg(feature = "debug")]
@@ -134,13 +134,22 @@ pub struct Surface {
     pub perf: Arc<crate::perf::OutputPerf>,
 
     dpms: bool,
-    /// The filter as configured. Its night-shift part is handed to the CRTC gamma LUT
-    /// where the driver has one; only the remainder reaches the render thread.
+    /// The filter as configured. Its night-shift part is handed to the CRTC's colour
+    /// hardware where there is any; only the remainder reaches the render thread.
     screen_filter: ScreenFilter,
-    /// Colour temperature currently programmed into the CRTC gamma LUT. `None` means
-    /// the ramp is unset - either the driver has no LUT, or a suspend dropped it - and
-    /// the shader has to carry night shift instead.
-    gamma_kelvin: Option<u16>,
+    /// Where night shift currently lives for this CRTC.
+    hw_night_shift: HwNightShift,
+}
+
+/// Outcome of the last attempt to hand night shift to the CRTC's colour hardware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HwNightShift {
+    /// Nothing is programmed: a fresh surface, or a suspend dropped the CRTC state.
+    Pending,
+    /// The hardware would not take it, so the shader keeps tinting.
+    Unsupported,
+    /// Programmed, and this is what is in there.
+    Applied(night_shift::Applied),
 }
 
 /// The outgoing session's frozen scanout, composited over the incoming one until its
@@ -449,13 +458,13 @@ impl Surface {
             perf,
             dpms: true,
             screen_filter: initial_screen_filter,
-            gamma_kelvin: None,
+            hw_night_shift: HwNightShift::Pending,
         })
     }
 
     /// The part of the filter the render thread has to apply in the shader.
     fn shader_filter(&self) -> ScreenFilter {
-        if self.gamma_kelvin.is_some() {
+        if matches!(self.hw_night_shift, HwNightShift::Applied(_)) {
             self.screen_filter.without_night_shift()
         } else {
             self.screen_filter.clone()
@@ -523,40 +532,70 @@ impl Surface {
             .send(ThreadCommand::UpdateMirroring(output));
     }
 
-    /// Apply `config`, pushing night shift onto the CRTC gamma LUT when the driver has
-    /// one and leaving only the remainder to the shader.
+    /// Apply `config`, pushing night shift onto the CRTC's colour hardware where there
+    /// is any and leaving only the remainder to the shader.
     pub fn set_screen_filter(&mut self, device: &impl ControlDevice, config: ScreenFilter) {
         self.screen_filter = config;
-        self.sync_gamma(device);
+        self.sync_night_shift(device);
     }
 
-    /// (Re-)program the gamma ramp if it is out of date and hand the render thread
-    /// whatever the hardware could not take.
+    /// (Re-)program the CRTC's colour hardware if it is out of date and hand the render
+    /// thread whatever the hardware could not take.
     ///
     /// Must run after anything that can drop CRTC state - a modeset, a session resume -
-    /// because the ramp is not part of the state smithay re-commits.
-    pub fn sync_gamma(&mut self, device: &impl ControlDevice) {
-        let wanted = if self.screen_filter.night_shift >= gamma::NEUTRAL_KELVIN {
+    /// because neither the gamma ramp nor the CTM is part of what smithay re-commits.
+    pub fn sync_night_shift(&mut self, device: &impl ControlDevice) {
+        let wanted = if self.screen_filter.night_shift >= night_shift::NEUTRAL_KELVIN {
             0
         } else {
             self.screen_filter.night_shift
         };
 
+        let up_to_date = match self.hw_night_shift {
+            HwNightShift::Applied(applied) => applied.kelvin == wanted,
+            // A CRTC does not grow colour hardware at runtime, and a driver that
+            // rejected the commit once will reject it again - settle, so we stop
+            // re-probing and re-logging on every output-config apply. A suspend resets
+            // this to `Pending`, so a resume does get a fresh attempt.
+            HwNightShift::Unsupported => true,
+            HwNightShift::Pending => false,
+        };
+
         if !self.is_active() {
             // No CRTC to program yet - let the shader carry it, and move it to hardware
             // when `apply_config_for_outputs` re-syncs after the surface comes up.
-            self.gamma_kelvin = None;
-        } else if self.gamma_kelvin != Some(wanted) {
-            self.gamma_kelvin = match gamma::apply(device, self.crtc, wanted) {
-                Ok(true) => Some(wanted),
-                Ok(false) => None,
+            self.hw_night_shift = HwNightShift::Pending;
+        } else if !up_to_date {
+            self.hw_night_shift = match night_shift::apply(device, self.crtc, wanted) {
+                Ok(Some(mechanism)) => {
+                    // Logged at info: release builds compile out `debug!`, and which
+                    // tier a machine landed on is the first question when night shift
+                    // misbehaves.
+                    info!(
+                        output = self.output.name(),
+                        ?mechanism,
+                        kelvin = wanted,
+                        "Night shift applied by the display controller"
+                    );
+                    HwNightShift::Applied(night_shift::Applied {
+                        kelvin: wanted,
+                        mechanism,
+                    })
+                }
+                Ok(None) => {
+                    info!(
+                        output = self.output.name(),
+                        "CRTC has no gamma LUT and no CTM; night shift stays in the shader"
+                    );
+                    HwNightShift::Unsupported
+                }
                 Err(err) => {
                     warn!(
                         ?err,
                         output = self.output.name(),
-                        "Failed to program night shift into the gamma LUT, falling back to the shader"
+                        "Failed to program night shift in hardware, falling back to the shader"
                     );
-                    None
+                    HwNightShift::Unsupported
                 }
             };
         }
@@ -587,9 +626,9 @@ impl Surface {
     }
 
     pub fn suspend(&mut self) {
-        // The ramp does not survive losing the CRTC; forget it so the next
-        // `sync_gamma` re-programs instead of short-circuiting on an equal value.
-        self.gamma_kelvin = None;
+        // Colour hardware does not survive losing the CRTC; forget it so the next
+        // `sync_night_shift` re-programs instead of short-circuiting on an equal value.
+        self.hw_night_shift = HwNightShift::Pending;
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let _ = self.thread_command.send(ThreadCommand::Suspend(tx));
         let _ = rx.recv();

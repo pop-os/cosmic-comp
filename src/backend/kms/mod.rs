@@ -57,7 +57,7 @@ use std::{
 
 mod device;
 mod drm_helpers;
-mod gamma;
+mod night_shift;
 pub mod render;
 mod surface;
 use device::*;
@@ -1544,8 +1544,8 @@ impl KmsGuard<'_> {
 
                 if !test_only && surface.is_active() {
                     // A surface that just came back from a modeset or a session resume
-                    // lost its gamma ramp, and a brand new one never had it.
-                    surface.sync_gamma(device.drm.device());
+                    // lost its colour-hardware state, and a brand new one never had it.
+                    surface.sync_night_shift(device.drm.device());
 
                     // `use_mode` above only stages the mode - the flip that applies it
                     // now comes from the surface thread rather than a forced unfiltered
