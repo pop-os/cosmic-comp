@@ -190,6 +190,9 @@ pub struct GameModeIo {
     frametime_ns: Arc<AtomicU64>,
 }
 
+/// The entry in `COSMIC_GAME_MODE_ALLOW` that drops the check entirely.
+const ALLOW_ANY: &str = "*";
+
 /// Binaries permitted to drive game mode. Anything else on the session bus is
 /// refused, so a random app cannot fullscreen or minimize windows behind the
 /// user's back.
@@ -200,9 +203,49 @@ pub struct GameModeIo {
 fn allowed_client_binaries() -> Vec<std::path::PathBuf> {
     let mut allowed = vec![std::path::PathBuf::from("/usr/bin/playserve")];
     if let Ok(extra) = std::env::var("COSMIC_GAME_MODE_ALLOW") {
-        allowed.extend(extra.split(':').filter(|p| !p.is_empty()).map(Into::into));
+        allowed.extend(
+            extra
+                .split(':')
+                .map(str::trim)
+                .filter(|p| !p.is_empty() && *p != ALLOW_ANY)
+                .map(Into::into),
+        );
     }
     allowed
+}
+
+/// Whether `value` opens the allowlist to every client.
+///
+/// Split out from the environment lookup so it can be tested without mutating
+/// process-global state.
+fn allowlist_is_open(value: &str) -> bool {
+    value
+        .split(':')
+        .map(str::trim)
+        .any(|entry| entry == ALLOW_ANY)
+}
+
+/// Whether `COSMIC_GAME_MODE_ALLOW` contains `*`, which accepts any client.
+///
+/// Development only: it removes the guard that stops an arbitrary session
+/// client from fullscreening windows and taking over an output. Setting it
+/// already requires control of the compositor's environment -- and so of the
+/// session -- but it is worth a line in the log either way, because a stray one
+/// left in a unit file is invisible otherwise.
+fn allow_any_client() -> bool {
+    static OPEN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *OPEN.get_or_init(|| {
+        let open =
+            std::env::var("COSMIC_GAME_MODE_ALLOW").is_ok_and(|value| allowlist_is_open(&value));
+        if open {
+            warn!(
+                target: GAMING_TARGET,
+                "COSMIC_GAME_MODE_ALLOW=* -- game-mode authorization is DISABLED and any \
+                 session client can drive it. Development only."
+            );
+        }
+        open
+    })
 }
 
 /// Whether `pid`'s executable is one of the allowed binaries.
@@ -213,6 +256,10 @@ fn allowed_client_binaries() -> Vec<std::path::PathBuf> {
 /// without write access to the real binary.
 fn client_binary_allowed(pid: u32) -> bool {
     use std::os::unix::fs::MetadataExt;
+
+    if allow_any_client() {
+        return true;
+    }
 
     let Ok(caller) = std::fs::metadata(format!("/proc/{pid}/exe")) else {
         return false;
@@ -1899,6 +1946,38 @@ fn focus_target_for(shell: &Shell, window: &CosmicSurface) -> Option<KeyboardFoc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `*` anywhere in the list opens it, including alongside real paths and
+    /// with the whitespace a hand-written unit file tends to pick up.
+    #[test]
+    fn wildcard_opens_the_allowlist() {
+        assert!(allowlist_is_open("*"));
+        assert!(allowlist_is_open("/usr/bin/busctl:*"));
+        assert!(allowlist_is_open("*:/usr/bin/busctl"));
+        assert!(allowlist_is_open(" * "));
+    }
+
+    /// Only a bare `*` opens it. A path that merely contains one is a glob the
+    /// caller expected the shell to expand, not a request to disable the check.
+    #[test]
+    fn only_a_bare_wildcard_opens_the_allowlist() {
+        assert!(!allowlist_is_open(""));
+        assert!(!allowlist_is_open("/usr/bin/busctl"));
+        assert!(!allowlist_is_open("/usr/bin/*"));
+        assert!(!allowlist_is_open("/opt/*/bin/playserve"));
+        assert!(!allowlist_is_open("**"));
+    }
+
+    /// The wildcard is a mode, not a path: leaving it in the list would have
+    /// the matcher stat a file called `*`.
+    #[test]
+    fn wildcard_is_not_kept_as_a_path() {
+        assert!(
+            !allowed_client_binaries()
+                .iter()
+                .any(|p| p.as_os_str() == ALLOW_ANY)
+        );
+    }
 
     /// `SetScaling` takes a string, so a mode that does not round-trip would
     /// silently present as something else.
