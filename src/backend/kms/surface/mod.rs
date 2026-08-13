@@ -568,10 +568,8 @@ impl Surface {
         } else if !up_to_date {
             self.hw_night_shift = match night_shift::apply(device, self.crtc, wanted) {
                 Ok(Some(mechanism)) => {
-                    // Logged at info: release builds compile out `debug!`, and which
-                    // tier a machine landed on is the first question when night shift
-                    // misbehaves.
                     info!(
+                        target: night_shift::LOG_TARGET,
                         output = self.output.name(),
                         ?mechanism,
                         kelvin = wanted,
@@ -584,6 +582,7 @@ impl Surface {
                 }
                 Ok(None) => {
                     info!(
+                        target: night_shift::LOG_TARGET,
                         output = self.output.name(),
                         "CRTC has no gamma LUT and no CTM; night shift stays in the shader"
                     );

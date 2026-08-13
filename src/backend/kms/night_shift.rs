@@ -28,6 +28,13 @@ use smithay::reexports::drm::control::{
 /// At or above this the tint is the identity; `offscreen.frag` uses the same cutoff.
 pub const NEUTRAL_KELVIN: u16 = 6500;
 
+/// Tracing target for which tier a CRTC landed on. Enabled by default in
+/// `logger::init_logger` - the base filter is `warn` in release, and "did this machine
+/// get hardware or the shader?" is the first question when night shift misbehaves, on
+/// exactly the machines where nobody set RUST_LOG. One line per output per change;
+/// silence with `RUST_LOG=night-shift=off`.
+pub const LOG_TARGET: &str = "night-shift";
+
 /// The display-controller feature carrying the tint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mechanism {

@@ -58,6 +58,7 @@ use std::{
 mod device;
 mod drm_helpers;
 mod night_shift;
+pub use night_shift::LOG_TARGET as NIGHT_SHIFT_LOG_TARGET;
 pub mod render;
 mod surface;
 use device::*;

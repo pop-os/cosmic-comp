@@ -63,6 +63,9 @@ pub fn init_logger() -> Result<()> {
         // Session-handoff marks: a few lines per login, and the thing most often
         // needed on a machine where nobody set RUST_LOG.
         (crate::utils::timing::HANDOFF_TARGET, "info"),
+        // Which tier night shift landed on per output. One line per change, and
+        // otherwise invisible in release, where the base filter is `warn`.
+        (crate::backend::kms::NIGHT_SHIFT_LOG_TARGET, "info"),
     ] {
         if unset(target) {
             filter = filter.add_directive(Directive::from_str(&format!("{target}={lvl}")).unwrap());
