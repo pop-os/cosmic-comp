@@ -23,6 +23,14 @@ endif
 
 TARGET_BIN="$(DESTDIR)$(bindir)/$(BINARY)"
 
+# The bare-session .desktop and systemd unit cannot use a relative command:
+# neither a display manager's Exec= nor systemd's ExecStart= resolves one the way
+# $$PATH does. They are templates instead, substituted at install time so the
+# baked paths follow $(prefix) rather than assuming /usr.
+GENDIR = $(CARGO_TARGET_DIR)/gen
+SYSTEMCTL ?= $(shell command -v systemctl 2>/dev/null || echo /usr/bin/systemctl)
+SUBST = sed -e 's|@bindir@|$(bindir)|g' -e 's|@systemctl@|$(SYSTEMCTL)|g'
+
 KEYBINDINGS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults"
 TILING_EXCEPTIONS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults"
 VOICE_MODE_DIR="$(DESTDIR)$(sharedir)/cosmic/com.playtron.VoiceMode/v1/defaults"
@@ -72,10 +80,13 @@ uninstall-voice-mode-local:
 	rm -rf "$(LOCAL_VOICE_MODE_DIR)"
 
 install-bare-session: install
-	install -Dm0644 "data/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
+	mkdir -p "$(GENDIR)"
+	$(SUBST) "data/cosmic.desktop.in" > "$(GENDIR)/cosmic.desktop"
+	$(SUBST) "data/cosmic-comp.service.in" > "$(GENDIR)/cosmic-comp.service"
+	install -Dm0644 "$(GENDIR)/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
 	install -Dm0644 "data/cosmic-session.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-session.target"
 	install -Dm0644 "data/cosmic-session-pre.target" "$(DESTDIR)$(libdir)/systemd/user/cosmic-session-pre.target"
-	install -Dm0644 "data/cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp.service"
+	install -Dm0644 "$(GENDIR)/cosmic-comp.service" "$(DESTDIR)$(libdir)/systemd/user/cosmic-comp.service"
 	install -Dm0755 "data/cosmic-service" "$(DESTDIR)/$(bindir)/cosmic-service"
 
 uninstall:

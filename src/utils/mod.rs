@@ -18,4 +18,5 @@ pub mod rlimit;
 pub mod screenshot;
 pub mod timing;
 pub mod tween;
+pub mod xdg_dirs;
 pub mod xdg_icon;

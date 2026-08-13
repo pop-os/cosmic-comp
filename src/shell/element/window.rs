@@ -256,13 +256,13 @@ const ICON_PRESCALE_SIZE: u32 = 36;
 /// Lookup order:
 ///   1. XDG icon theme via resolved path (exact match)
 ///   2. XDG icon theme via resolved path (case-insensitive)
-///   3. `/usr/share/pixmaps/{name}.{ext}` for common extensions
+///   3. `<datadir>/pixmaps/{name}.{ext}` for common extensions, over every XDG
+///      data directory (`/usr/local/share:/usr/share` by default)
 ///
 /// For ALL raster icons (PNG from theme or pixmaps), the image is pre-scaled
 /// to ICON_PRESCALE_SIZE using Lanczos3 filtering.
 fn resolve_app_icon(app_id: &str) -> Option<super::header_bar::AppIcon> {
     use crate::utils::xdg_icon::resolve_icon_path;
-    use std::path::Path;
 
     let size = ICON_PRESCALE_SIZE as f32;
 
@@ -280,10 +280,12 @@ fn resolve_app_icon(app_id: &str) -> Option<super::header_bar::AppIcon> {
     }
 
     // 3. Direct pixmap lookup
-    for ext in &["png", "svg", "xpm"] {
-        let pixmap = format!("/usr/share/pixmaps/{lower}.{ext}");
-        if Path::new(&pixmap).exists() {
-            return Some(prescale_icon_from_path(&pixmap));
+    for dir in crate::utils::xdg_dirs::data_dirs("pixmaps") {
+        for ext in &["png", "svg", "xpm"] {
+            let pixmap = dir.join(format!("{lower}.{ext}"));
+            if pixmap.exists() {
+                return Some(prescale_icon_from_path(&pixmap.to_string_lossy()));
+            }
         }
     }
 
@@ -466,25 +468,10 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 /// `X-Cosmic-AppIdMatch` glob matches `app_id`, returning any
 /// `X-Cosmic-ForcedTitle` / `X-Cosmic-ForcedIcon` overrides.
 fn find_desktop_override(app_id: &str) -> Option<DesktopOverride> {
-    use std::path::PathBuf;
-
     if app_id.is_empty() {
         return None;
     }
-    let mut search_dirs = Vec::new();
-    if let Ok(home) = std::env::var("XDG_DATA_HOME") {
-        search_dirs.push(PathBuf::from(home).join("applications"));
-    } else if let Ok(home) = std::env::var("HOME") {
-        search_dirs.push(PathBuf::from(home).join(".local/share/applications"));
-    }
-    if let Ok(dirs) = std::env::var("XDG_DATA_DIRS") {
-        for dir in dirs.split(':') {
-            search_dirs.push(PathBuf::from(dir).join("applications"));
-        }
-    } else {
-        search_dirs.push(PathBuf::from("/usr/local/share/applications"));
-        search_dirs.push(PathBuf::from("/usr/share/applications"));
-    }
+    let search_dirs = crate::utils::xdg_dirs::data_dirs("applications");
     for dir in &search_dirs {
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,

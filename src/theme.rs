@@ -111,8 +111,13 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), Box<dyn std::err
 }
 
 /// Resolve the active theme's installed directory by following the brand symlink
-/// (e.g. `~/.config/icetron/current-theme -> /usr/share/icetron/themes/playtron`),
+/// (e.g. `~/.config/icetron/current-theme -> <datadir>/icetron/themes/playtron`),
 /// falling back to the system-wide symlink.
+///
+/// The system-wide candidates come from the XDG data directories rather than a
+/// hardcoded `/usr/share`, so an installation outside the FHS layout resolves
+/// too; `/usr/local/share:/usr/share` is the spec default, so FHS systems keep
+/// finding exactly what they found before.
 ///
 /// Watching this directory makes installed RON *content* updates (e.g. a
 /// `go-task install` of a rebuilt theme) trigger a live reload. Brand switches
@@ -120,13 +125,10 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), Box<dyn std::err
 /// directory keeps being watched until the next compositor start, which is
 /// acceptable for this dev/install-time convenience.
 fn resolve_active_theme_dir() -> Option<PathBuf> {
-    let candidates = [
-        dirs::config_dir().map(|d| d.join("icetron/current-theme")),
-        Some(PathBuf::from("/usr/share/icetron/current-theme")),
-    ];
-    candidates
+    dirs::config_dir()
+        .map(|d| d.join("icetron/current-theme"))
         .into_iter()
-        .flatten()
+        .chain(crate::utils::xdg_dirs::data_dirs("icetron/current-theme"))
         .find_map(|cand| std::fs::canonicalize(cand).ok().filter(|p| p.is_dir()))
 }
 
