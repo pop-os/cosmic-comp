@@ -14,7 +14,7 @@ use smithay::utils::{HookId, Logical, Point, Rectangle};
 use smithay::wayland::compositor::Cacheable;
 use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::compositor::with_states;
-use smithay::wayland::shell::wlr_layer::WlrLayerShellHandler;
+use smithay::wayland::shell::wlr_layer::{LayerSurfaceCachedState, WlrLayerShellHandler};
 use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgShellSurfaceUserData};
 use smithay::{
     reexports::{
@@ -665,8 +665,24 @@ fn layer_radius_hook<D: 'static>(_state: &mut D, _dh: &DisplayHandle, surface: &
             .cached_state
             .get::<CacheablePadding>()
             .pending();
+        // `bbox` covers the previously committed buffer, so it is still empty on the commit
+        // that maps the surface; measure against the configure the client acked instead.
+        let size = surface_data
+            .cached_state
+            .get::<LayerSurfaceCachedState>()
+            .pending()
+            .last_acked
+            .and_then(|configure| configure.state.size)
+            .filter(|size| size.w > 0 && size.h > 0)
+            .unwrap_or(bbox.size);
+        if size.w <= 0 || size.h <= 0 {
+            // Unmapped; the pending radius outlives this commit, so a later one re-checks.
+            return;
+        }
+        let rect = Rectangle::new(bbox.loc, size);
+
         let empty = Padding::default();
-        let Some(padded_box) = pad_rect(bbox, padding.0.as_ref().unwrap_or(&empty)) else {
+        let Some(padded_box) = pad_rect(rect, padding.0.as_ref().unwrap_or(&empty)) else {
             if let Some(hook) = surface_data.data_map.get::<LayerHookId>() {
                 let hook_ref = hook.lock().unwrap();
                 if let Some((_, obj)) = hook_ref.as_ref()
