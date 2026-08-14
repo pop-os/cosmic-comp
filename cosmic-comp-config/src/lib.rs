@@ -66,6 +66,13 @@ impl Default for AppearanceConfig {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DecorationPreference {
+    #[default]
+    ClientSide,
+    ServerSide,
+}
+
 #[derive(Clone, Debug, PartialEq, CosmicConfigEntry)]
 #[version = 1]
 pub struct CosmicCompConfig {
@@ -104,6 +111,7 @@ pub struct CosmicCompConfig {
     /// Briefly magnify the cursor when the pointer is shaken, to help locate it
     pub cursor_shake_to_find: bool,
     pub activation_policy: ActivationPolicy,
+    pub decoration_preference: DecorationPreference,
 }
 
 impl Default for CosmicCompConfig {
@@ -143,6 +151,7 @@ impl Default for CosmicCompConfig {
             cursor_hide_timeout: None,
             cursor_shake_to_find: true,
             activation_policy: ActivationPolicy::default(),
+            decoration_preference: DecorationPreference::default(),
         }
     }
 }

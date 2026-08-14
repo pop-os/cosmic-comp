@@ -49,8 +49,8 @@ mod types;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    ActivationPolicy, AppearanceConfig, CosmicCompConfig, KeyboardConfig, TileBehavior, XkbConfig,
-    XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
+    ActivationPolicy, AppearanceConfig, CosmicCompConfig, DecorationPreference, KeyboardConfig,
+    TileBehavior, XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
     output::comp::{
         OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef, load_outputs,
@@ -998,6 +998,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<ActivationPolicy>(&config, "activation_policy");
                 if new != state.common.config.cosmic_conf.activation_policy {
                     state.common.config.cosmic_conf.activation_policy = new;
+                }
+            }
+            "decoration_preference" => {
+                let new = get_config::<DecorationPreference>(&config, "decoration_preference");
+                if new != state.common.config.cosmic_conf.decoration_preference {
+                    state.common.config.cosmic_conf.decoration_preference = new;
+                    state.update_decorations();
                 }
             }
             _ => {}
