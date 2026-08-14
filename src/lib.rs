@@ -411,6 +411,12 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     // Mesa's atexit handlers run and corrupt the heap (issue #2375). Safe here
     // because the event loop has stopped; an unconditional join in Surface::Drop
     // would instead deadlock against apply_config_for_outputs.
+    // Nothing takes over the display on a reboot/poweroff, so anything still scanning
+    // out stays lit. Freezing latches EVERY plane, not just the primary — the cursor
+    // and any directly-scanned-out window survive on their own planes even once the
+    // primary has faded to black. Drop the lot instead and let the planes go dark.
+    let shutting_down = state.common.shell.read().shutdown_fade.is_some();
+
     if let BackendData::Kms(kms) = &mut state.backend {
         // Release master first so the surface drop path skips its blocking commit.
         for device in kms.drm_devices.values_mut() {
@@ -420,7 +426,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         // Keep the last frame scanning out after we exit, so the next compositor can adopt
         // it. Ordering is load-bearing: AFTER pause() (buffer can no longer change) and
         // BEFORE the drain (which drops each DrmOutput, removing it from the manager map).
-        if freeze_on_exit_enabled() {
+        if freeze_on_exit_enabled() && !shutting_down {
             for device in kms.drm_devices.values_mut() {
                 let mut drm = device.drm.lock();
                 let compositors = drm.compositors();
