@@ -209,6 +209,9 @@ pub struct SurfaceThreadState {
     /// 1x1 black texture stretched over the output for the pre-shutdown fade. Cached so
     /// the fade does not re-upload it every frame; its `Id` must be stable for damage.
     shutdown_plate: Option<(GlesTexture, smithay::backend::renderer::element::Id)>,
+    /// Frames composited during the shutdown fade. Diagnostic — the fade has stalled
+    /// twice now, and per-frame logging is not an option on this path.
+    shutdown_frames: u32,
 
     state: QueueState,
     timings: Timings,
@@ -740,6 +743,7 @@ fn surface_thread(
         compositor: None,
         adopt: None,
         shutdown_plate: None,
+        shutdown_frames: 0,
         frame_flags: FrameFlags::DEFAULT,
         vrr_mode: AdaptiveSync::Disabled,
 
@@ -1719,6 +1723,13 @@ impl SurfaceThreadState {
                 // is EmptyFrame — the fade stalls wherever the dying session's own damage
                 // happened to leave it, with windows and cursor still on screen.
                 elements.push(DamageElement::new(Rectangle::from_size(logical)).into());
+                self.shutdown_frames += 1;
+                if self.shutdown_frames == 1 || alpha >= 1.0 {
+                    debug!(
+                        frames = self.shutdown_frames,
+                        alpha, "shutdown fade: compositing black plate"
+                    );
+                }
                 elements.insert(
                     0,
                     CosmicElement::Adopt(TextureRenderElement::from_static_texture(

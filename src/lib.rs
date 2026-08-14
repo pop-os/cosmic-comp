@@ -418,6 +418,22 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     let shutting_down = state.common.shell.read().shutdown_fade.is_some();
 
     if let BackendData::Kms(kms) = &mut state.backend {
+        // Blank explicitly, while we still hold master. pause() below sets the surface
+        // inactive, and AtomicDrmSurface::drop then returns WITHOUT clearing state, so
+        // nothing else disables the CRTC — whatever is on the planes would keep scanning
+        // out. clear() sets DPMS off and disables every plane.
+        if shutting_down {
+            for device in kms.drm_devices.values_mut() {
+                let mut drm = device.drm.lock();
+                for compositor in drm.compositors().values() {
+                    if let Err(err) = compositor.lock().unwrap().surface().clear() {
+                        warn!(?err, "shutdown: failed to blank output");
+                    }
+                }
+            }
+            utils::timing::mark("outputs-blanked");
+        }
+
         // Release master first so the surface drop path skips its blocking commit.
         for device in kms.drm_devices.values_mut() {
             device.drm.pause();
