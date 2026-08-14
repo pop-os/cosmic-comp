@@ -66,6 +66,13 @@ impl Default for AppearanceConfig {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DecorationPreference {
+    #[default]
+    ClientSide,
+    ServerSide,
+}
+
 #[derive(Clone, Debug, PartialEq, CosmicConfigEntry)]
 #[version = 1]
 pub struct CosmicCompConfig {
@@ -102,6 +109,7 @@ pub struct CosmicCompConfig {
     /// Hide the cursor after this many seconds of pointer inactivity (None disables)
     pub cursor_hide_timeout: Option<u32>,
     pub activation_policy: ActivationPolicy,
+    pub decoration_preference: DecorationPreference,
 }
 
 impl Default for CosmicCompConfig {
@@ -140,6 +148,7 @@ impl Default for CosmicCompConfig {
             appearance_settings: AppearanceConfig::default(),
             cursor_hide_timeout: None,
             activation_policy: ActivationPolicy::default(),
+            decoration_preference: DecorationPreference::default(),
         }
     }
 }
