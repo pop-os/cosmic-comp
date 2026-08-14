@@ -2073,6 +2073,56 @@ impl State {
         }
     }
 
+    /// Reconcile keyboard focus to the window under the pointer on the active workspace.
+    ///
+    /// Does nothing unless focus-follows-cursor is enabled and the pointer is
+    /// ungrabbed, and never clears focus when the pointer is over empty space.
+    pub fn reconcile_focus_to_pointer(&mut self, seat: &Seat<State>) {
+        if !self.common.config.cosmic_conf.focus_follows_cursor {
+            return;
+        }
+
+        let Some(ptr) = seat.get_pointer() else {
+            return;
+        };
+        if ptr.is_grabbed() {
+            return;
+        }
+
+        let position = ptr.current_location().as_global();
+        let target = {
+            let shell = self.common.shell.read();
+            let Some(output) = shell
+                .outputs()
+                .find(|output| output.geometry().to_f64().contains(position))
+                .cloned()
+            else {
+                return;
+            };
+            shell
+                .active_space(&output)
+                .and_then(|workspace| workspace.toplevel_element_under(position, seat))
+        };
+
+        let Some(target) = target else {
+            return;
+        };
+
+        if let Some(pointer_focus_state) = self.common.pointer_focus_state.take() {
+            self.common
+                .event_loop_handle
+                .remove(pointer_focus_state.token);
+        }
+
+        Shell::set_focus(
+            self,
+            Some(&target),
+            seat,
+            Some(SERIAL_COUNTER.next_serial()),
+            false,
+        );
+    }
+
     #[profiling::function]
     pub fn element_under(
         global_pos: Point<f64, Global>,
