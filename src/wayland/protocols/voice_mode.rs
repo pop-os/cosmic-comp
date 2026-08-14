@@ -135,6 +135,21 @@ pub const WILL_STOP_TIMEOUT_MS: u128 = 200;
 /// If key is held longer, it's a hold (voice mode)
 pub const TAP_THRESHOLD_MS: u128 = 250;
 
+/// Was the voice key released quickly enough to count as a tap?
+///
+/// `pressed_at` of `None` means there is no gesture in flight — either the key
+/// was never pressed, or the press was cancelled because it turned out to be a
+/// modifier for a global shortcut. A cancelled gesture is neither a tap nor a
+/// hold, so both predicates must say no.
+fn is_tap(pressed_at: Option<Instant>, now: Instant) -> bool {
+    pressed_at.is_some_and(|at| now.duration_since(at).as_millis() < TAP_THRESHOLD_MS)
+}
+
+/// Has the voice key been held long enough to activate voice mode?
+fn is_hold(pressed_at: Option<Instant>, now: Instant) -> bool {
+    pressed_at.is_some_and(|at| now.duration_since(at).as_millis() >= TAP_THRESHOLD_MS)
+}
+
 /// State for the voice mode manager protocol
 pub struct VoiceModeState {
     global: GlobalId,
@@ -230,36 +245,19 @@ impl VoiceModeState {
             return false;
         }
 
-        if let Some(pressed_at) = press_time {
-            let duration = Instant::now().duration_since(pressed_at).as_millis();
-            if duration < TAP_THRESHOLD_MS {
-                debug!(
-                    "Voice key tap detected ({}ms < {}ms threshold)",
-                    duration, TAP_THRESHOLD_MS
-                );
-                return true;
-            }
-        }
-        false
+        is_tap(press_time, Instant::now())
     }
 
     /// Check if this is a tap without clearing the press time
     /// Returns true if key was pressed and released within TAP_THRESHOLD_MS
     pub fn check_tap_without_clearing(&self) -> bool {
-        let press_time = self.key_press_time.lock().unwrap();
-        if let Some(pressed_at) = *press_time {
-            let duration = Instant::now().duration_since(pressed_at).as_millis();
-            let is_tap = duration < TAP_THRESHOLD_MS;
-            debug!(
-                duration_ms = duration,
-                threshold_ms = TAP_THRESHOLD_MS,
-                is_tap,
-                "check_tap_without_clearing"
-            );
-            is_tap
-        } else {
-            false
-        }
+        let press_time = *self.key_press_time.lock().unwrap();
+        let is_tap = is_tap(press_time, Instant::now());
+        debug!(
+            threshold_ms = TAP_THRESHOLD_MS,
+            is_tap, "check_tap_without_clearing"
+        );
+        is_tap
     }
 
     /// Clear the recorded key press time
@@ -271,13 +269,8 @@ impl VoiceModeState {
     /// Check if enough time has passed since key press to activate voice mode
     /// Returns true if key has been held for >= TAP_THRESHOLD_MS
     pub fn should_activate_voice(&self) -> bool {
-        let press_time = self.key_press_time.lock().unwrap();
-        if let Some(pressed_at) = *press_time {
-            let duration = Instant::now().duration_since(pressed_at).as_millis();
-            duration >= TAP_THRESHOLD_MS
-        } else {
-            false
-        }
+        let press_time = *self.key_press_time.lock().unwrap();
+        is_hold(press_time, Instant::now())
     }
 
     /// Mark that voice mode was activated on demand (e.g., button click)
@@ -833,3 +826,38 @@ macro_rules! delegate_voice_mode {
 }
 
 pub use delegate_voice_mode;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// A shortcut firing mid-chord clears the recorded press. The Super release
+    /// that follows must then be inert: not a tap (which would steal focus and
+    /// minimize every window), and not a hold (which would open the orb).
+    #[test]
+    fn a_cancelled_gesture_is_neither_tap_nor_hold() {
+        let now = Instant::now();
+
+        assert!(!is_tap(None, now));
+        assert!(!is_hold(None, now));
+    }
+
+    #[test]
+    fn a_quick_release_is_a_tap() {
+        let now = Instant::now();
+        let pressed_at = now - Duration::from_millis(TAP_THRESHOLD_MS as u64 - 1);
+
+        assert!(is_tap(Some(pressed_at), now));
+        assert!(!is_hold(Some(pressed_at), now));
+    }
+
+    #[test]
+    fn holding_past_the_threshold_is_a_hold() {
+        let now = Instant::now();
+        let pressed_at = now - Duration::from_millis(TAP_THRESHOLD_MS as u64);
+
+        assert!(!is_tap(Some(pressed_at), now));
+        assert!(is_hold(Some(pressed_at), now));
+    }
+}

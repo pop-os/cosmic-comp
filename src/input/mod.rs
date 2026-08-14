@@ -2761,6 +2761,7 @@ impl State {
                     && key_matches(binding.key.unwrap())
                     && cosmic_modifiers_eq_smithay(&binding.modifiers, modifiers)
                 {
+                    self.common.voice_mode_state.clear_key_press();
                     modifiers_queue.clear();
                     seat.supressed_keys().add(&handle, None);
                     return FilterResult::Intercept(Some((
