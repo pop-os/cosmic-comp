@@ -5101,7 +5101,7 @@ fn render_old_tree_popups<R>(
                 scanout_node,
                 push,
                 Some(PopupShadow {
-                    layers: &shadow_layers,
+                    layers: shadow_layers,
                     push: &mut |element| shadows.push(element),
                 }),
             );
@@ -5373,7 +5373,7 @@ fn render_new_tree_popups<R>(
                     scanout_node,
                     push,
                     Some(PopupShadow {
-                        layers: &shadow_layers,
+                        layers: shadow_layers,
                         push: &mut |element| shadows.push(element),
                     }),
                 );
