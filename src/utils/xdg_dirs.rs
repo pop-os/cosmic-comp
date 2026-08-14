@@ -14,24 +14,12 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-/// Spec default for `XDG_DATA_DIRS`, used when it is unset or empty.
-const DEFAULT_DATA_DIRS: &str = "/usr/local/share:/usr/share";
-
-/// The prefix `exe` was installed into: `<prefix>/bin/foo` gives `<prefix>`.
-///
-/// `None` when the executable does not sit in a `bin` directory, which is the
-/// case for a cargo target directory -- there is no install tree to search.
-fn prefix_of_exe(exe: &Path) -> Option<PathBuf> {
-    let bin = exe.parent()?;
-    (bin.file_name()? == "bin")
-        .then(|| bin.parent())?
-        .map(Path::to_path_buf)
-}
-
-/// The prefix the running executable was installed into.
-pub fn install_prefix() -> Option<PathBuf> {
-    prefix_of_exe(&std::env::current_exe().ok()?)
-}
+// The prefix rule and the XDG spec default come from `icetron-paths`, shared with every
+// other application. The *ordering* below stays here: icetron-paths puts the install prefix
+// directly after the user data home, whereas this appends it as a final fallback so an
+// admin's XDG_DATA_DIRS entry still wins over the compositor's own tree.
+use icetron_paths::DATA_DIRS_DEFAULT as DEFAULT_DATA_DIRS;
+use icetron_paths::install_prefix;
 
 /// Directories to search for the data sub-path `rel` (e.g. `"pixmaps"`),
 /// most specific first and deduplicated.
@@ -102,6 +90,7 @@ fn data_dirs_from(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use icetron_paths::prefix_of as prefix_of_exe;
 
     fn dirs(paths: &[&str]) -> Vec<PathBuf> {
         paths.iter().map(PathBuf::from).collect()

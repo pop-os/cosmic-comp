@@ -1002,6 +1002,7 @@ dependencies = [
  "iced_tiny_skia",
  "iced_widget",
  "icetron-p",
+ "icetron-paths",
  "icetron-themes",
  "id_tree",
  "image",
@@ -2989,6 +2990,11 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-time",
 ]
+
+[[package]]
+name = "icetron-paths"
+version = "0.1.0"
+source = "git+ssh://git@github.com/playtron-os/icetron.git?rev=488b9fe8c84f183efef97ed3d9be0e934a598491#488b9fe8c84f183efef97ed3d9be0e934a598491"
 
 [[package]]
 name = "icetron-themes"
