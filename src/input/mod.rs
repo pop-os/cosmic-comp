@@ -2628,6 +2628,9 @@ impl State {
             && modifiers.shift
         {
             if handle.raw_syms().contains(&Keysym::F12) {
+                // Same as the shortcut handler below: the Super in this chord is
+                // a modifier, not a voice gesture.
+                self.common.voice_mode_state.clear_key_press();
                 seat.supressed_keys().add(&handle, None);
                 return FilterResult::Intercept(Some((
                     Action::Private(PrivateAction::PerfReport),
@@ -2635,6 +2638,7 @@ impl State {
                 )));
             }
             if handle.raw_syms().contains(&Keysym::F11) {
+                self.common.voice_mode_state.clear_key_press();
                 seat.supressed_keys().add(&handle, None);
                 return FilterResult::Intercept(Some((
                     Action::Private(PrivateAction::ColdStartBench),
