@@ -153,6 +153,11 @@ impl State {
                     .shutdown_fade_alpha()
                     .is_none_or(|alpha| alpha >= 1.0);
                 if done {
+                    // Only now let logind continue: it has been waiting on our delay
+                    // inhibitor, which is what kept the session alive long enough to
+                    // render the fade at all.
+                    utils::timing::mark("shutdown-fade-complete");
+                    crate::dbus::release_shutdown_inhibitor();
                     return calloop::timer::TimeoutAction::Drop;
                 }
                 state.schedule_all_outputs();

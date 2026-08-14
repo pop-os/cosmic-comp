@@ -123,6 +123,28 @@ trait ShutdownManager {
         start: bool,
         metadata: HashMap<String, zbus::zvariant::OwnedValue>,
     ) -> zbus::Result<()>;
+
+    fn inhibit(
+        &self,
+        what: &str,
+        who: &str,
+        why: &str,
+        mode: &str,
+    ) -> zbus::Result<zbus::zvariant::OwnedFd>;
+}
+
+/// A held `delay` inhibitor for shutdown. logind waits on this — up to
+/// InhibitDelayMaxUSec — between announcing the shutdown and tearing the session down,
+/// which is the only window in which we can still render. Dropped as soon as the fade
+/// finishes, so it costs the fade's duration and nothing more.
+static SHUTDOWN_INHIBITOR: std::sync::Mutex<Option<zbus::zvariant::OwnedFd>> =
+    std::sync::Mutex::new(None);
+
+/// Release the inhibitor and let logind proceed.
+pub fn release_shutdown_inhibitor() {
+    if SHUTDOWN_INHIBITOR.lock().unwrap().take().is_some() {
+        tracing::debug!("shutdown: inhibitor released, letting logind proceed");
+    }
 }
 
 /// Watch for an imminent reboot/poweroff and start the fade to black.
@@ -138,6 +160,27 @@ async fn shutdown_task(conn: zbus::Connection, evlh: LoopHandle<'static, State>)
         .receive_prepare_for_shutdown_with_metadata()
         .await
         .context("failed to subscribe to PrepareForShutdownWithMetadata")?;
+
+    // Without this logind tears the session down ~40ms after announcing the shutdown —
+    // device access is revoked and nothing can render, so the fade never gets a frame.
+    match proxy
+        .inhibit(
+            "shutdown",
+            "cosmic-comp",
+            "Fade the display out before shutting down",
+            "delay",
+        )
+        .await
+    {
+        Ok(fd) => {
+            *SHUTDOWN_INHIBITOR.lock().unwrap() = Some(fd);
+            tracing::debug!("shutdown: delay inhibitor held");
+        }
+        Err(err) => tracing::warn!(
+            ?err,
+            "shutdown: could not inhibit; the fade will be skipped"
+        ),
+    }
 
     let source = StreamSource::new(stream).unwrap();
     evlh.insert_source(source, |signal, _, state| {
