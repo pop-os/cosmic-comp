@@ -1714,6 +1714,11 @@ impl SurfaceThreadState {
             if let Some((tex, id)) = self.shutdown_plate.clone() {
                 let src = Rectangle::from_size((1.0, 1.0).into());
                 let logical = self.output.geometry().size.as_logical();
+                // Alpha is not part of an element's damage, and the plate's texture never
+                // changes, so without this the ramp composites once and every later frame
+                // is EmptyFrame — the fade stalls wherever the dying session's own damage
+                // happened to leave it, with windows and cursor still on screen.
+                elements.push(DamageElement::new(Rectangle::from_size(logical)).into());
                 elements.insert(
                     0,
                     CosmicElement::Adopt(TextureRenderElement::from_static_texture(
