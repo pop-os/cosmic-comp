@@ -1,3 +1,25 @@
+# [1.39.0](https://github.com/playtron-os/cosmic-comp/compare/v1.38.0...v1.39.0) (2026-08-14)
+
+
+### Bug Fixes
+
+* clear keypress on F12 and F11 keys combos too ([6ff1006](https://github.com/playtron-os/cosmic-comp/commit/6ff100611cdecebb5eba621b14f028ca2c52d854))
+* **corner_radius:** size layer surfaces by the acked configure ([4dad632](https://github.com/playtron-os/cosmic-comp/commit/4dad6329de2cd2000abfe7d5131ab8ba9d4a1605))
+* hide cursor during shutdown as well ([7cca967](https://github.com/playtron-os/cosmic-comp/commit/7cca967efa222211c449ef34c22654650e6f2e4d))
+* insert hardware matrix at start for night shift without black screen ([8af4de6](https://github.com/playtron-os/cosmic-comp/commit/8af4de6ee2139634719a225ddadc84b1875895ff))
+* **kms:** blank the outputs explicitly on reboot or poweroff ([ba13c8f](https://github.com/playtron-os/cosmic-comp/commit/ba13c8f2e827eb67ff60ca04c9beb03ea3d9a1d6))
+* **kms:** do not freeze the scanout on reboot or poweroff ([d923804](https://github.com/playtron-os/cosmic-comp/commit/d923804fcc601364b6678e498715ee15136a3fbc))
+* **kms:** force damage so the shutdown fade actually advances ([3f3693c](https://github.com/playtron-os/cosmic-comp/commit/3f3693c1ad3f080982a6988b965d45a5cf710fa3))
+* **kms:** hold a logind delay inhibitor so the fade has time to render ([6e06dec](https://github.com/playtron-os/cosmic-comp/commit/6e06dece4db4a7c8e32008806f3d2f4d7e5bff94))
+* **kms:** keep the CTM attached so toggling night shift does not blank ([bfc9162](https://github.com/playtron-os/cosmic-comp/commit/bfc9162178f9f62356fbf129c5e6f65c7af03429))
+* meta shortcuts triggering voice app focus ([b6f15b7](https://github.com/playtron-os/cosmic-comp/commit/b6f15b79fd567c415c2370f77836564af3e0f42c))
+
+
+### Features
+
+* support display toggle, settings, and lockscreen hotkeys for windows laptops F keys shorcuts ([d06224a](https://github.com/playtron-os/cosmic-comp/commit/d06224aed2c5d66166b5aedb1a46f6c2587b5a2e))
+* update cosmic-settings config to support calculator action ([17c1fb5](https://github.com/playtron-os/cosmic-comp/commit/17c1fb5a6f4428ebb1834064a12dbeaafcf2009f))
+
 # [1.38.0](https://github.com/playtron-os/cosmic-comp/compare/v1.37.1...v1.38.0) (2026-08-13)
 
 
