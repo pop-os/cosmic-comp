@@ -1690,6 +1690,12 @@ impl SurfaceThreadState {
         // exit freeze then latches black rather than the user's desktop, which would
         // otherwise stay lit for the whole shutdown — nothing repaints after CLOSEFB.
         if let Some(alpha) = self.shell.read().shutdown_fade_alpha() {
+            // Cursor and overlay planes scan out ABOVE the primary, so a plate composited
+            // into the primary framebuffer cannot cover them — the cursor would sit on a
+            // faded-out desktop and then freeze there. Force both through composition for
+            // the fade; the plate is topmost, so it covers them.
+            remove_frame_flags |=
+                FrameFlags::ALLOW_CURSOR_PLANE_SCANOUT | FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT;
             if self.shutdown_plate.is_none() {
                 use smithay::backend::renderer::ImportMem as _;
                 match renderer.glow_renderer_mut().import_memory(
