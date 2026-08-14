@@ -13,9 +13,8 @@
     (modifiers: [Super], key: "h"): Focus(Left),
     (modifiers: [Super], key: "j"): Focus(Down),
     (modifiers: [Super], key: "k"): Focus(Up),
-    (modifiers: [Super], key: "l"): Focus(Right),
     (modifiers: [Super], key: "u"): Focus(Out),
-    (modifiers: [Super], key: "i"): Focus(In),
+    (modifiers: [Super, Shift], key: "u"): Focus(In),
     (modifiers: [Super, Shift], key: "Left"): Move(Left),
     (modifiers: [Super, Shift], key: "Right"): Move(Right),
     (modifiers: [Super, Shift], key: "Up"): Move(Up),
@@ -112,6 +111,11 @@
     (modifiers: [Alt, Shift], key: "Tab"): System(WindowSwitcherPrevious),
     (modifiers: [Super], key: "Tab"): System(WindowSwitcher),
     (modifiers: [Super, Shift], key: "Tab"): System(WindowSwitcherPrevious),
+
+    (modifiers: [Super], key: "p"): System(DisplayToggle),
+    (modifiers: [Super], key: "i"): System(Settings),
+    (modifiers: [Super], key: "l"): System(LockScreen),
+    (modifiers: [], key: "XF86Calculator"): System(Calculator),
 
     (modifiers: [], key: "Print"): System(Screenshot),
     (modifiers: [Super], key: "F23"): System(Screenshot),
