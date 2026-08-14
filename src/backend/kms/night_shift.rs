@@ -164,23 +164,22 @@ fn s31_32(value: f32) -> u64 {
     (f64::from(value) * 4294967296.0) as u64
 }
 
-/// The handle of `crtc`'s property called `name` and its current value, if it has one.
+/// The handle of `crtc`'s property called `name`, if it has one.
 fn find_property(
     device: &impl ControlDevice,
     crtc: crtc::Handle,
     name: &str,
-) -> Result<Option<(property::Handle, property::RawValue)>> {
+) -> Result<Option<property::Handle>> {
     let properties = device
         .get_properties(crtc)
         .context("Failed to read crtc properties")?;
 
-    let (handles, values) = properties.as_props_and_values();
-    for (handle, value) in handles.iter().zip(values) {
+    for handle in properties.as_props_and_values().0 {
         let info = device
             .get_property(*handle)
             .context("Failed to read crtc property")?;
         if info.name().to_bytes() == name.as_bytes() {
-            return Ok(Some((*handle, *value)));
+            return Ok(Some(*handle));
         }
     }
 
@@ -192,22 +191,20 @@ fn apply_ctm(
     crtc: crtc::Handle,
     multipliers: [f32; 3],
 ) -> Result<bool> {
-    let Some((property, current)) = find_property(device, crtc, "CTM")? else {
+    let Some(property) = find_property(device, crtc, "CTM")? else {
         return Ok(false);
     };
 
-    // Nothing attached and nothing to say: leave the colour block out of the pipeline
-    // rather than inserting it to hold an identity. This is the boot-with-night-shift-off
-    // case, and skipping it keeps the insertion cost off the login path.
-    if current == 0 && multipliers == [1.0; 3] {
-        return Ok(true);
-    }
-
-    // Otherwise always keep a matrix attached, the identity one when neutral, rather
-    // than clearing the property back to blob id 0. Detaching makes the driver tear the
-    // colour block out of the pipeline (and re-insert it on the way back), which on msm
-    // blanks the panel for the reconfiguration. Staying attached turns a toggle into a
-    // coefficient change, double-buffered to the next vblank like any register write.
+    // Always attach a matrix, the identity one when neutral, and never clear the
+    // property back to blob id 0. Detaching makes the driver tear the colour block out
+    // of the pipeline (and re-insert it on the way back), which on msm blanks the panel
+    // for the reconfiguration. Staying attached turns a toggle into a coefficient
+    // change, double-buffered to the next vblank like any register write.
+    //
+    // That includes the neutral case at startup, which is deliberate: it puts the one
+    // insertion in the greeter's compositor, whose first modeset is reconfiguring the
+    // pipeline anyway, and the session that adopts its frozen frame then inherits a
+    // block that is already in place.
     //
     // Row-major 3x3; a per-channel scale only touches the diagonal.
     let mut matrix = [0u64; 9];
