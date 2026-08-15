@@ -79,6 +79,7 @@ pub struct KmsState {
 
     pub syncobj_state: Option<DrmSyncobjState>,
     pub dmabuf_global: Option<DmabufGlobal>,
+    pending_renderer_cleanup: bool,
 }
 
 pub struct KmsGuard<'a> {
@@ -137,6 +138,7 @@ pub fn init_backend(
 
         syncobj_state: None,
         dmabuf_global: None,
+        pending_renderer_cleanup: false,
     });
 
     // manually add already present gpus
@@ -698,6 +700,27 @@ impl KmsState {
         }
 
         Ok(node)
+    }
+
+    /// Request a drain of the main-thread renderers' destruction queues on the next refresh.
+    ///
+    /// Destroying a surface or buffer drops the textures these renderers imported from it,
+    /// which only *queues* the GL deletions on their contexts; the queues are flushed by
+    /// rendering or an explicit drain. Those renderers may not draw again for a long time,
+    /// so until the drain runs the dead client's buffers stay pinned in VRAM.
+    pub fn schedule_renderer_cleanup(&mut self) {
+        self.pending_renderer_cleanup = true;
+    }
+
+    /// Drain the GL destruction queues of the main-thread renderers, if scheduled.
+    pub fn run_scheduled_renderer_cleanup(&mut self) {
+        if !self.pending_renderer_cleanup || !self.session.is_active() {
+            return;
+        }
+        self.pending_renderer_cleanup = false;
+        if let Err(err) = self.api.cleanup_texture_cache() {
+            debug!(?err, "Failed to drain main-thread renderer cleanup queue");
+        }
     }
 
     pub fn schedule_render(&mut self, output: &Output) {
@@ -1285,6 +1308,25 @@ impl KmsGuard<'_> {
             }
         }
 
+        self.invalidate_renderer_caches();
+
         Ok(())
+    }
+
+    /// Drop all cached imports held by the main-thread renderers, along with the
+    /// framebuffers cached for copying between a render and a target node.
+    ///
+    /// Unlike the per-output render threads (which draw every frame), these renderers
+    /// only draw during output (re-)configuration. Between those infrequent draws their
+    /// import caches provide no benefit yet keep live clients' buffers pinned in VRAM;
+    /// the next render re-imports what it needs. Imports belonging to clients that have
+    /// already exited are released by the destruction-scheduled drain.
+    fn invalidate_renderer_caches(&mut self) {
+        if !self.session.is_active() {
+            return;
+        }
+        if let Err(err) = self.api.invalidate_caches() {
+            debug!(?err, "Failed to invalidate main-thread renderer caches");
+        }
     }
 }

@@ -105,8 +105,19 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             })
             .with_context(|| "Failed to get renderer for screenshot")
             .and_then(|renderer| match renderer {
+                // No invalidation for Glow: the winit/X11 dev backends redraw every
+                // frame, so their caches stay useful, and the KMS software fallback
+                // holds no VRAM.
                 RendererRef::Glow(renderer) => render_window(renderer, surface),
-                RendererRef::GlMulti(mut renderer) => render_window(&mut renderer, surface),
+                RendererRef::GlMulti(mut renderer) => {
+                    let render_result = render_window(&mut renderer, surface);
+                    // This main-thread renderer draws only on demand; its cached imports
+                    // would pin client buffers in VRAM until it next draws.
+                    if let Err(err) = renderer.invalidate_caches() {
+                        warn!(?err, "Failed to invalidate renderer caches");
+                    }
+                    render_result
+                }
             });
         if let Err(err) = res {
             warn!(?err, "Failed to take screenshot")
