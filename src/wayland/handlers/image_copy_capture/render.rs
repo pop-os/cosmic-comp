@@ -273,25 +273,36 @@ where
         .as_mut()
         .map(|(_, tex)| renderer.bind(tex).map_err(DTError::Rendering))
         .transpose()?;
-    let (result, buffers) = render_fn(
+    let submit_result = match render_fn(
         &frame.buffer(),
         renderer,
         fb.as_mut(),
         dt,
         age,
         frame.damage(),
-    )?;
+    ) {
+        Ok((result, buffers)) => submit_buffer(
+            frame,
+            renderer,
+            fb.as_mut(),
+            transform,
+            result.damage.map(|x| x.as_slice()),
+            result.sync,
+            buffers,
+        )
+        .map_err(DTError::Rendering),
+        Err(err) => Err(err),
+    };
 
-    submit_buffer(
-        frame,
-        renderer,
-        fb.as_mut(),
-        transform,
-        result.damage.map(|x| x.as_slice()),
-        result.sync,
-        buffers,
-    )
-    .map_err(DTError::Rendering)
+    std::mem::drop(fb);
+    // Rendering flushes only the device it drew on, so drain the rest here: this
+    // main-thread renderer may not run again for a long time, and until it does the
+    // imports dropped since the last capture stay pinned in VRAM.
+    if let Err(err) = renderer.cleanup_texture_cache() {
+        warn!(?err, "Failed to drain renderer cleanup queue");
+    }
+
+    submit_result
 }
 
 pub fn render_workspace_to_buffer(

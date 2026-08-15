@@ -106,7 +106,13 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             .with_context(|| "Failed to get renderer for screenshot")
             .and_then(|renderer| match renderer {
                 RendererRef::Glow(renderer) => render_window(renderer, surface),
-                RendererRef::GlMulti(mut renderer) => render_window(&mut renderer, surface),
+                RendererRef::GlMulti(mut renderer) => {
+                    let render_result = render_window(&mut renderer, surface);
+                    if let Err(err) = renderer.invalidate_caches() {
+                        warn!(?err, "Failed to invalidate renderer caches");
+                    }
+                    render_result
+                }
             });
         if let Err(err) = res {
             warn!(?err, "Failed to take screenshot")

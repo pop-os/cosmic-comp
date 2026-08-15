@@ -54,7 +54,7 @@ use smithay::{
                 GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform, element::TextureShaderElement,
             },
             glow::GlowRenderer,
-            multigpu::{ApiDevice, Error as MultiError, GpuManager},
+            multigpu::{Error as MultiError, GpuManager},
             sync::SyncPoint,
             utils::with_renderer_surface_state,
         },
@@ -1409,9 +1409,7 @@ impl SurfaceThreadState {
             }
         }
 
-        for device in self.api.devices_mut()? {
-            device.renderer_mut().cleanup_texture_cache()?;
-        }
+        self.api.cleanup_texture_cache()?;
 
         Ok(())
     }
