@@ -376,7 +376,7 @@ fn update_focus_state(
         {
             with_pointer_constraint(&surface, &pointer, |constraint| {
                 if let Some(constraint) = constraint {
-                    constraint.deactivate();
+                    constraint.deactivate(state, &surface, &pointer);
                 }
             });
         }
