@@ -550,7 +550,7 @@ impl State {
                             WorkspaceDelta::new_shortcut(),
                             &mut workspace_guard,
                         );
-                        seat.set_active_output(&next_output);
+                        seat.set_active_output(&next_output, false);
                         res
                     };
 

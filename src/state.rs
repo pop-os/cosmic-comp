@@ -499,6 +499,20 @@ impl LockedBackend<'_> {
     ) -> Result<(), anyhow::Error> {
         let all_outputs = self.all_outputs();
 
+        // Save the positions of the cursor relative to the output
+        let saved_cursor_positions = {
+            let guard = shell.read();
+            guard
+                .seats
+                .iter()
+                .filter_map(|seat| {
+                    let rel_pos = seat.get_pointer_position_relative_to_active_output()?;
+                    let active_output = seat.active_output();
+                    Some((seat.clone(), active_output, rel_pos))
+                })
+                .collect::<Vec<_>>()
+        };
+
         // update outputs, so that `OutputModeSource`s are correct
         for output in &all_outputs {
             // apply to Output
@@ -526,6 +540,13 @@ impl LockedBackend<'_> {
             output.change_current_state(mode, transform, scale.map(Scale::Fractional), location);
 
             output.set_adaptive_sync(final_config.0.vrr);
+        }
+
+        // Restore cursor position relative to active output
+        for (seat, saved_output, rel_pos) in &saved_cursor_positions {
+            if &seat.active_output() == saved_output {
+                seat.set_pointer_position_relative_to_active_output(*rel_pos);
+            }
         }
 
         match self {
