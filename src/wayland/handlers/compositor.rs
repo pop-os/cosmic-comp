@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
+use crate::{
+    shell::grabs::SeatMoveGrabState,
+    state::{BackendData, ClientState},
+    utils::prelude::*,
+};
 use calloop::Interest;
 use smithay::{
     backend::renderer::{
@@ -368,6 +372,12 @@ impl CompositorHandler for State {
             if changed {
                 shell.workspaces.recalculate();
             }
+        }
+    }
+
+    fn destroyed(&mut self, _surface: &WlSurface) {
+        if let BackendData::Kms(kms) = &mut self.backend {
+            kms.schedule_renderer_cleanup();
         }
     }
 }

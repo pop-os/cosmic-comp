@@ -27,7 +27,7 @@ use smithay::{
             output::{DrmOutputManager, LockedDrmOutputManager},
         },
         egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
-        renderer::glow::GlowRenderer,
+        renderer::{Renderer, glow::GlowRenderer},
         session::{Session, libseat::LibSeatSession},
     },
     desktop::utils::OutputPresentationFeedback,
@@ -45,7 +45,7 @@ use smithay::{
         drm_syncobj::supports_syncobj_eventfd,
     },
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use wayland_backend::server::ClientId;
 
 use std::{
@@ -322,7 +322,7 @@ impl State {
                         .find_map(|(crtc, surface)| (surface.connector == conn).then_some(crtc))
                         .cloned()
                     {
-                        device.inner.surfaces.remove(&crtc).unwrap();
+                        device.inner.surfaces.remove(&crtc).unwrap().drop_and_join();
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
@@ -928,6 +928,12 @@ impl LockedDevice<'_> {
                 {
                     return Err(err.into());
                 }
+            }
+
+            // This renderer draws only infrequently; drop the imports it just
+            // cached so they don't pin client buffers in VRAM until its next draw.
+            if let Err(err) = renderer.invalidate_caches() {
+                debug!(?err, "Failed to invalidate main-thread renderer caches");
             }
         }
 
