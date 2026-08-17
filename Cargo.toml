@@ -14,33 +14,33 @@ anyhow = { version = "1.0.102", features = ["backtrace"] }
 bitflags = "2.11.0"
 calloop = { version = "0.14.4", features = ["executor", "stream"] }
 cosmic-comp-config = { path = "cosmic-comp-config", features = [
-    "libdisplay-info",
-    "output",
+  "libdisplay-info",
+  "output",
 ] }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic", features = [
-    "calloop",
-    "macro",
+  "calloop",
+  "macro",
 ] }
 cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "160b086", default-features = false, features = [
-    "server",
+  "server",
 ] }
 cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daemon" }
 cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
-    "greeter",
+  "greeter",
 ] }
-cosmic-text = { version = "0.19", features = [
-    "shape-run-cache",
-] }
+cosmic-text = { version = "0.19", features = ["shape-run-cache"] }
 libdisplay-info = "0.3.0"
 egui = { version = "0.31.1", optional = true }
 egui_plot = { version = "0.31.0", optional = true }
 i18n-embed = { version = "0.16", features = [
-    "fluent-system",
-    "desktop-requester",
+  "fluent-system",
+  "desktop-requester",
 ] }
 i18n-embed-fl = "0.10"
 iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic" }
-iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = ["geometry"] }
+iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = [
+  "geometry",
+] }
 indexmap = "2.13"
 keyframe = "1.1.1"
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
@@ -58,13 +58,13 @@ thiserror = "2.0.18"
 jiff = "0.2"
 tiny-skia = "0.11"
 tracing = { version = "0.1.44", features = [
-    "max_level_debug",
-    "release_max_level_info",
+  "max_level_debug",
+  "release_max_level_info",
 ] }
-tracing-journald = "0.3.2"
+tracing-journald = { version = "0.3.2", optional = true }
 tracing-subscriber = { version = "0.3.22", features = [
-    "env-filter",
-    "tracing-log",
+  "env-filter",
+  "tracing-log",
 ] }
 tracy-client = { version = "0.18.4", default-features = false }
 wayland-backend = "0.3.12"
@@ -94,21 +94,21 @@ git = "https://github.com/Drakulix/id-tree.git"
 version = "0.7.0"
 default-features = false
 features = [
-    "backend_drm",
-    "backend_gbm",
-    "backend_egl",
-    "backend_libinput",
-    "backend_session_libseat",
-    "backend_udev",
-    "backend_winit",
-    "backend_vulkan",
-    "backend_x11",
-    "desktop",
-    "renderer_glow",
-    "renderer_multi",
-    "renderer_pixman",
-    "wayland_frontend",
-    "xwayland",
+  "backend_drm",
+  "backend_gbm",
+  "backend_egl",
+  "backend_libinput",
+  "backend_session_libseat",
+  "backend_udev",
+  "backend_winit",
+  "backend_vulkan",
+  "backend_x11",
+  "desktop",
+  "renderer_glow",
+  "renderer_multi",
+  "renderer_pixman",
+  "wayland_frontend",
+  "xwayland",
 ]
 
 [dependencies.smithay-egui]
@@ -120,7 +120,7 @@ optional = true
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
 logind = ["logind-zbus"]
-systemd = ["libsystemd", "logind"]
+systemd = ["libsystemd", "logind", "tracing-journald"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
 profile-with-tracy-gpu = ["profile-with-tracy", "smithay/tracy_gpu_profiling"]
 
