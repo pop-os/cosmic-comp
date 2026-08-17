@@ -161,6 +161,7 @@ where
                     handle.with_xkb_state(state, |mut context| {
                         context.set_layout(Layout(group));
                     });
+                    KeyboardLayoutState::refresh(state);
                 }
             }
             zcosmic_keyboard_layout_v1::Request::Destroy => {}
