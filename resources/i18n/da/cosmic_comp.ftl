@@ -22,3 +22,6 @@ window-menu-resize-edge-top = Top
 window-menu-resize-edge-left = Venstre
 window-menu-resize-edge-right = Højre
 window-menu-resize-edge-bottom = Bund
+window-menu-minimize = Minimér
+window-menu-maximize = Maksimér
+window-menu-fullscreen = Fuld skærm
