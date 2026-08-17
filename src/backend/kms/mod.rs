@@ -986,6 +986,17 @@ impl KmsState {
                 "Failed to tear down graphics contexts during GPU-reset recovery"
             );
         }
+        // Fresh gbm handles before re-init: re-creating EGL on the old
+        // `gbm_device` can silently reuse a display poisoned by the reset (see
+        // `Device::recreate_gbm`), which fails recovery forever.
+        for device in self.drm_devices.values_mut() {
+            if let Err(err) = device.recreate_gbm() {
+                warn!(
+                    ?err,
+                    "Failed to recreate gbm device during GPU-reset recovery"
+                );
+            }
+        }
         if let Err(err) = self.refresh_used_devices() {
             warn!(
                 ?err,

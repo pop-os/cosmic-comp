@@ -872,6 +872,20 @@ impl Device {
         }
     }
 
+    /// Replace the gbm handle with a fresh `gbm_device` on the same DRM fd.
+    ///
+    /// Mesa keys EGL displays on the native `gbm_device` pointer, and stale
+    /// contexts (e.g. surface threads mid-teardown) can pin the old display in
+    /// a dead state (`EGL_DEVICE_EXT` = `EGL_NO_DEVICE_EXT`) where
+    /// re-initialization is a no-op, wedging GPU-reset recovery permanently. A
+    /// new `gbm_device` guarantees the next `init_egl` gets a fresh, fully
+    /// initialized display.
+    pub fn recreate_gbm(&mut self) -> Result<()> {
+        self.inner.gbm = GbmDevice::new(self.drm.device().device_fd().clone())
+            .context("Failed to recreate GBM device")?;
+        Ok(())
+    }
+
     fn reuse(self) -> (ReusableDevice, OldDeviceState) {
         let device = ReusableDevice {
             leasing_global: self.inner.leasing_global,
