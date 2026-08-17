@@ -197,11 +197,18 @@ const ALLOW_ANY: &str = "*";
 /// refused, so a random app cannot fullscreen or minimize windows behind the
 /// user's back.
 ///
+/// `playserve` is located through `PATH` rather than assumed to be at
+/// `/usr/bin/playserve`: the same compositor binary has to authorize it where
+/// programs live in `/usr/bin` and where each package lives in its own prefix.
+/// This does not loosen the check -- every hit still has to match the caller by
+/// (device, inode) in [`client_binary_allowed`], so an unrelated file that
+/// happens to share the name is not accepted.
+///
 /// `COSMIC_GAME_MODE_ALLOW` appends `:`-separated paths for development builds
 /// running outside the installed location. Setting it requires control of the
 /// compositor's own environment, which already implies control of the session.
 fn allowed_client_binaries() -> Vec<std::path::PathBuf> {
-    let mut allowed = vec![std::path::PathBuf::from("/usr/bin/playserve")];
+    let mut allowed = crate::utils::process::which("playserve");
     if let Ok(extra) = std::env::var("COSMIC_GAME_MODE_ALLOW") {
         allowed.extend(
             extra

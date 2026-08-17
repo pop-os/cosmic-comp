@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # From: https://people.debian.org/~mpitt/systemd.conf-2016-graphical-session.pdf
 
