@@ -1938,7 +1938,17 @@ impl TabletToolTarget<State> for CosmicStack {
         data: &mut State,
         tool_descriptor: &TabletToolDescriptor,
     ) {
-        TabletToolTarget::proximity_out(&self.0, seat, data, tool_descriptor)
+        self.0.with_program(|p| {
+            let mut cursor_state = seat
+                .user_data()
+                .get::<CursorState>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            cursor_state.unset_shape();
+            let _previous = p.swap_focus(None);
+        });
+        TabletToolTarget::proximity_out(&self.0, seat, data, tool_descriptor);
     }
 
     fn down(
@@ -1948,7 +1958,50 @@ impl TabletToolTarget<State> for CosmicStack {
         tool_descriptor: &TabletToolDescriptor,
         event: &ToolDownEvent,
     ) {
-        TabletToolTarget::down(&self.0, seat, data, tool_descriptor, event)
+        match self.0.with_program(|p| p.current_focus()) {
+            Some(Focus::Header) => {
+                TabletToolTarget::down(&self.0, seat, data, tool_descriptor, event)
+            }
+            Some(x) => {
+                let serial = event.serial;
+                let seat = seat.clone();
+                let Some(surface) = self.0.with_program(|p| {
+                    let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                    window.wl_surface().map(Cow::into_owned)
+                }) else {
+                    return;
+                };
+                self.0.loop_handle().insert_idle(move |state| {
+                    let res = state.common.shell.write().resize_request(
+                        &surface,
+                        &seat,
+                        serial,
+                        match x {
+                            Focus::ResizeTop => ResizeEdge::TOP,
+                            Focus::ResizeTopLeft => ResizeEdge::TOP_LEFT,
+                            Focus::ResizeTopRight => ResizeEdge::TOP_RIGHT,
+                            Focus::ResizeBottom => ResizeEdge::BOTTOM,
+                            Focus::ResizeBottomLeft => ResizeEdge::BOTTOM_LEFT,
+                            Focus::ResizeBottomRight => ResizeEdge::BOTTOM_RIGHT,
+                            Focus::ResizeLeft => ResizeEdge::LEFT,
+                            Focus::ResizeRight => ResizeEdge::RIGHT,
+                            Focus::Header => unreachable!(),
+                        },
+                        state.common.config.cosmic_conf.edge_snap_threshold,
+                        false,
+                    );
+                    if let Some((grab, focus)) = res {
+                        if let GrabType::TabletTool = grab.grab_type() {
+                            seat.tablet_seat()
+                                .get_tool(grab.tool().unwrap())
+                                .unwrap()
+                                .set_grab(state, grab, InputTime::now(), serial, focus);
+                        }
+                    }
+                });
+            }
+            None => {}
+        }
     }
 
     fn up(
@@ -1969,12 +2022,30 @@ impl TabletToolTarget<State> for CosmicStack {
         event: &ToolMotionEvent,
     ) {
         let mut event = event.clone();
+        self.0.with_program(|p| {
+            let active = p.active.load(Ordering::SeqCst);
+            let active_window = &p.windows.lock().unwrap()[active];
+            let Some(next) = Focus::under(active_window, TAB_HEIGHT, event.location) else {
+                return;
+            };
+            let _previous = p.swap_focus(Some(next));
+
+            let mut cursor_state = seat
+                .user_data()
+                .get::<CursorState>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            cursor_state.set_shape(next.cursor_shape());
+            seat.set_cursor_image_status(CursorImageStatus::default_named());
+        });
+
         let active_window_geo = self.0.with_program(|p| {
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
         });
         event.location -= active_window_geo.loc.to_f64();
-        TabletToolTarget::motion(&self.0, seat, data, tool_descriptor, &event);
 
+        TabletToolTarget::motion(&self.0, seat, data, tool_descriptor, &event);
         if event.location.y < 0.0
             || event.location.y > TAB_HEIGHT as f64
             || event.location.x < 64.0
