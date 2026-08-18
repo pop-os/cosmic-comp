@@ -1,3 +1,12 @@
+## [1.39.1](https://github.com/playtron-os/cosmic-comp/compare/v1.39.0...v1.39.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **image-copy-capture:** never leave a capture frame unanswered ([070b9c4](https://github.com/playtron-os/cosmic-comp/commit/070b9c4180a816a2aa4fda043cbb6bccbe628c93))
+* **kms:** recreate gbm devices during GPU-reset recovery ([af87e2b](https://github.com/playtron-os/cosmic-comp/commit/af87e2b2386883db2089e02e6e780f1810b58dd8))
+* resolve data dirs and playserve through XDG/PATH instead of /usr ([10c1cbb](https://github.com/playtron-os/cosmic-comp/commit/10c1cbb092c7006ebcdd9fd1488d1ce236a5095d))
+
 # [1.39.0](https://github.com/playtron-os/cosmic-comp/compare/v1.38.0...v1.39.0) (2026-08-14)
 
 
