@@ -1830,6 +1830,21 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
+
+                    let serial = SERIAL_COUNTER.next_serial();
+                    let output = seat.active_output();
+                    let shell = self.common.shell.write();
+                    let position =
+                        transform_output_mapped_position(&output, &event, shell.zoom_state());
+                    let under = State::element_under(position, &output, &shell, &seat);
+                    drop(shell);
+
+                    if event.tip_state() == TabletToolTipState::Down
+                        && let Some(target) = under.as_ref()
+                    {
+                        Shell::set_focus(self, Some(target), &seat, Some(serial), false);
+                    }
+
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         let serial = SERIAL_COUNTER.next_serial();
                         match event.tip_state() {
