@@ -611,28 +611,7 @@ impl State {
                     if let Some((under, surface_location)) = new_under
                         .and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), loc)))
                     {
-                        let shell = self.common.shell.read();
-                        let is_focused = seat
-                            .get_keyboard()
-                            .and_then(|k| k.current_focus())
-                            .is_some_and(|f| f.has_surface(&shell, &under));
-
-                        if is_focused {
-                            with_pointer_constraint(&under, &ptr, |constraint| match constraint {
-                                Some(constraint) if !constraint.is_active() => {
-                                    let region = match &*constraint {
-                                        PointerConstraint::Locked(locked) => locked.region(),
-                                        PointerConstraint::Confined(confined) => confined.region(),
-                                    };
-                                    let point =
-                                        (ptr.current_location() - surface_location).to_i32_floor();
-                                    if region.is_none_or(|region| region.contains(point)) {
-                                        constraint.activate();
-                                    }
-                                }
-                                _ => {}
-                            });
-                        }
+                        self.maybe_activate_pointer_constraint(&seat, &under, surface_location);
                     }
 
                     let mut shell = self.common.shell.write();

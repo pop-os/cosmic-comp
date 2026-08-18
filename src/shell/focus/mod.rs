@@ -374,11 +374,27 @@ fn update_focus_state(
             && let Some(surface) = old_target.wl_surface()
             && let Some(pointer) = seat.get_pointer()
         {
-            with_pointer_constraint(&surface, &pointer, |constraint| {
-                if let Some(constraint) = constraint {
-                    constraint.deactivate();
-                }
+            // Constraints are oneshot in the common case (Xwayland), so only
+            // deactivate if the surface actually lost focus eligibility. An
+            // `Element` to `Fullscreen` transition of the same window — a game
+            // entering fullscreen — must not destroy its active constraint.
+            let shell = state.common.shell.read(); // Grabs a read lock on the shell
+            let still_eligible = target.is_some_and(|new_target| {
+                new_target.has_surface(&shell, &surface)
+                    || state
+                        .common
+                        .xwayland_constraint_focus_override(new_target, &surface)
             });
+            drop(shell); // Drops the read lock on the shell as early as possible
+
+            if !still_eligible {
+                // Sirface is not eligible for constraints anymore, let's deactivate it
+                with_pointer_constraint(&surface, &pointer, |constraint| {
+                    if let Some(constraint) = constraint {
+                        constraint.deactivate();
+                    }
+                });
+            }
         }
 
         if should_update_cursor
@@ -762,6 +778,10 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
         drop(shell);
 
         if pointer.current_focus().as_ref() != under.as_ref().map(|(target, _)| target) {
+            let entered = under
+                .as_ref()
+                .and_then(|(target, loc)| Some((target.wl_surface()?.into_owned(), *loc)));
+
             pointer.motion(
                 state,
                 under,
@@ -771,6 +791,10 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
                     time: state.common.clock.now().as_millis(),
                 },
             );
+
+            if let Some((surface, location)) = entered {
+                state.maybe_activate_pointer_constraint(seat, &surface, location);
+            }
         }
     }
 }

@@ -33,7 +33,10 @@ use smithay::{
     },
     desktop::space::SpaceElement,
     input::{keyboard::ModifiersState, pointer::CursorIcon},
-    reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
+    reexports::{
+        wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
+        x11rb::protocol::xproto::Window as X11Window,
+    },
     utils::{
         Buffer as BufferCoords, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform,
     },
@@ -290,6 +293,31 @@ impl XWaylandState {
 }
 
 impl Common {
+    /// Whether `surface` should be considered keyboard-focused for the purpose
+    /// of activating pointer constraints, even though it is not part of the
+    /// focused element's surface tree.
+    ///
+    /// X11 clients share a single input domain: Xwayland routes keyboard input
+    /// to the right window internally (following X input focus), independent of
+    /// which of its surfaces holds the Wayland keyboard focus. Games commonly
+    /// grab the pointer on a different X window than the focused one — e.g. an
+    /// override-redirect fullscreen window, which can never take our keyboard
+    /// focus. Refusing to activate the constraint in that case leaves such
+    /// games without any relative pointer motion.
+    pub fn xwayland_constraint_focus_override(
+        &self,
+        focus: &KeyboardFocusTarget,
+        surface: &WlSurface,
+    ) -> bool {
+        self.xwayland_state
+            .as_ref()
+            .and_then(|xstate| Some((&xstate.client, xstate.xwm.as_ref()?)))
+            .is_some_and(|(x_client, xwm)| {
+                focus.is_xwm(xwm.id())
+                    && surface.client().is_some_and(|client| client == *x_client)
+            })
+    }
+
     pub fn has_x_keyboard_focus(&self, xwmid: XwmId) -> bool {
         let keyboard = self
             .shell

@@ -30,7 +30,10 @@ use smithay::{
         winit::event_loop::pump_events::PumpStatus,
     },
     utils::Transform,
-    wayland::{dmabuf::DmabufFeedbackBuilder, presentation::Refresh},
+    wayland::{
+        dmabuf::DmabufFeedbackBuilder, presentation::Refresh,
+        relative_pointer::RelativePointerManagerState,
+    },
 };
 use std::{borrow::BorrowMut, cell::RefCell, time::Duration};
 use tracing::{error, info, warn};
@@ -242,6 +245,11 @@ pub fn init_backend(
         }
         state.common.refresh();
     }
+
+    // Create relative pointer global.
+    // Without it Xwayland disables pointer warp emulation entirely, so games
+    // relying on relative motion get none when running nested.
+    RelativePointerManagerState::new::<State>(dh);
 
     if state.common.with_xwayland {
         state.launch_xwayland(None);
