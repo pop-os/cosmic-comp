@@ -7579,8 +7579,11 @@ impl Shell {
                 None
             };
 
-            if let Some(surface) = surface {
+            if let Some(mut surface) = surface {
                 toplevel_info.remove_toplevel(&surface);
+                crate::wayland::handlers::image_copy_capture::stop_sessions_for_toplevel(
+                    &mut surface,
+                );
                 // Re-evaluate auto-hide — the unmapped window may have been
                 // the last maximized/fullscreen window on its output.
                 self.refresh_auto_hide();

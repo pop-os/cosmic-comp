@@ -288,9 +288,12 @@ impl ImageCopyCaptureHandler for State {
     }
 
     fn frame(&mut self, session: &SessionRef, frame: Frame) {
+        // A frame that is neither succeeded nor failed leaves the client's
+        // buffer permanently in flight, so a vanished source must still answer.
         match ImageCaptureSourceKind::from_source(&session.source()) {
             ImageCaptureSourceKind::Output(weak) => {
                 let Some(mut output) = weak.upgrade() else {
+                    frame.fail(CaptureFailureReason::Stopped);
                     return;
                 };
 
@@ -302,6 +305,7 @@ impl ImageCopyCaptureHandler for State {
             }
             ImageCaptureSourceKind::Toplevel(toplevel) => {
                 let Some(toplevel) = toplevel.upgrade() else {
+                    frame.fail(CaptureFailureReason::Stopped);
                     return;
                 };
 
@@ -403,6 +407,17 @@ fn constraints_for_output(output: &Output, backend: &mut BackendData) -> Option<
         })
         .unwrap();
     Some(constraints_for_renderer(mode, renderer.as_mut()))
+}
+
+/// Stop every capture session bound to a toplevel that is going away, so that
+/// clients are told rather than left waiting on a window that will never render.
+pub fn stop_sessions_for_toplevel(surface: &mut CosmicSurface) {
+    for session in surface.sessions() {
+        surface.remove_session(&session);
+    }
+    for session in surface.cursor_sessions() {
+        surface.remove_cursor_session(&session);
+    }
 }
 
 fn constraints_for_toplevel(
