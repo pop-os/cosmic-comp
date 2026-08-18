@@ -678,19 +678,6 @@ impl State {
                             &self.common.event_loop_handle,
                         );
 
-                        if is_move_action
-                            && propagate
-                            && let Some((_, prev_output, prev_idx)) =
-                                shell.previous_workspace_idx.take()
-                            && prev_output == focused_output
-                        {
-                            let _ = shell.activate(
-                                &focused_output,
-                                prev_idx,
-                                WorkspaceDelta::new_shortcut(),
-                                &mut workspace_guard,
-                            );
-                        }
                         res
                     };
 
@@ -880,23 +867,6 @@ impl State {
                     .move_current_element(direction, seat);
                 match res {
                     MoveResult::MoveFurther(_move_further) => {
-                        if let Some(last_mod_serial) = seat.last_modifier_change_for(backend_id) {
-                            let mut shell = self.common.shell.write();
-                            if !shell
-                                .previous_workspace_idx
-                                .as_ref()
-                                .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
-                            {
-                                let current_output = seat.active_output();
-                                let workspace_idx = shell.workspaces.active_num(&current_output).1;
-                                shell.previous_workspace_idx = Some((
-                                    last_mod_serial,
-                                    current_output.downgrade(),
-                                    workspace_idx,
-                                ));
-                            }
-                        }
-
                         let action = match self.common.config.cosmic_conf.workspaces.edge_navigation
                         {
                             EdgeNavigation::LockedSpaces => Action::MoveToOutput(direction),
