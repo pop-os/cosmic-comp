@@ -25,3 +25,4 @@ window-menu-resize-edge-bottom = Bund
 window-menu-minimize = Minimér
 window-menu-maximize = Maksimér
 window-menu-fullscreen = Fuld skærm
+unknown-keybinding = <uangiven>
