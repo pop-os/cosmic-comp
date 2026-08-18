@@ -49,7 +49,7 @@ use smithay::{
         pointer::{
             CursorImageStatus, CursorImageSurfaceData, Focus, GrabStartData as PointerGrabStartData,
         },
-        tablet::tool::GrabTrigger as TabletGrabTrigger,
+        tablet::{TabletSeatTrait, tool::GrabTrigger as TabletGrabTrigger},
     },
     output::{Output, WeakOutput},
     reexports::{
@@ -5164,10 +5164,19 @@ pub fn check_grab_preconditions(
 
     let pointer = seat.get_pointer().unwrap();
     let touch = seat.get_touch().unwrap();
+    let tablet = seat.tablet_seat();
+    let tools = tablet.get_tools();
 
     let start_data =
         if serial.is_some_and(|serial| touch.has_grab(serial)) {
             GrabStartData::Touch(touch.grab_start_data().unwrap())
+        } else if let Some((desc, tool)) =
+            serial.and_then(|serial| tools.iter().find(|(_, tool)| tool.has_grab(serial)))
+        {
+            GrabStartData::TabletTool {
+                tool: desc.clone(),
+                data: tool.grab_start_data().unwrap(),
+            }
         } else {
             GrabStartData::Pointer(pointer.grab_start_data().unwrap_or_else(|| {
                 PointerGrabStartData {
