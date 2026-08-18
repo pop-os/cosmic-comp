@@ -14,7 +14,9 @@ pub struct WorkspaceConfig {
     #[serde(default = "default_wraparound")]
     pub workspace_wraparound: bool,
     #[serde(default)]
-    pub edge_navigation: EdgeNavigation,
+    pub focus_edge_navigation: EdgeNavigation,
+    #[serde(default)]
+    pub move_edge_navigation: EdgeNavigation,
 }
 
 fn default_wraparound() -> bool {
@@ -28,7 +30,8 @@ impl Default for WorkspaceConfig {
             workspace_layout: WorkspaceLayout::default(),
             action_on_typing: Action::default(),
             workspace_wraparound: default_wraparound(),
-            edge_navigation: EdgeNavigation::default(),
+            focus_edge_navigation: EdgeNavigation::default(),
+            move_edge_navigation: EdgeNavigation::default(),
         }
     }
 }

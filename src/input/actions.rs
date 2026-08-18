@@ -809,7 +809,7 @@ impl State {
                                 .config
                                 .cosmic_conf
                                 .workspaces
-                                .edge_navigation
+                                .focus_edge_navigation
                             {
                                 EdgeNavigation::LockedSpaces => Action::SwitchOutput(direction),
                                 EdgeNavigation::SwitchWorkspace => {
@@ -867,7 +867,12 @@ impl State {
                     .move_current_element(direction, seat);
                 match res {
                     MoveResult::MoveFurther(_move_further) => {
-                        let action = match self.common.config.cosmic_conf.workspaces.edge_navigation
+                        let action = match self
+                            .common
+                            .config
+                            .cosmic_conf
+                            .workspaces
+                            .move_edge_navigation
                         {
                             EdgeNavigation::LockedSpaces => Action::MoveToOutput(direction),
                             EdgeNavigation::SwitchWorkspace => {
