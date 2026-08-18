@@ -1594,15 +1594,7 @@ impl State {
                     std::mem::drop(shell);
 
                     let pointer = seat.get_pointer().unwrap();
-                    pointer.motion(
-                        self,
-                        under.clone(),
-                        &PointerMotionEvent {
-                            location: position.as_logical(),
-                            serial: SERIAL_COUNTER.next_serial(),
-                            time: InputTime::now(),
-                        },
-                    );
+                    pointer.set_location(position.as_logical());
 
                     let tablet_seat = seat.tablet_seat();
 
@@ -1682,15 +1674,7 @@ impl State {
                     std::mem::drop(shell);
 
                     let pointer = seat.get_pointer().unwrap();
-                    pointer.motion(
-                        self,
-                        under.clone(),
-                        &PointerMotionEvent {
-                            location: position.as_logical(),
-                            serial: SERIAL_COUNTER.next_serial(),
-                            time: InputTime::now(),
-                        },
-                    );
+                    pointer.set_location(position.as_logical());
 
                     let tablet_seat = seat.tablet_seat();
 
