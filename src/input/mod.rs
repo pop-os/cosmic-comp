@@ -9,7 +9,10 @@ use crate::{
             cosmic_modifiers_from_smithay,
         },
     },
-    input::gestures::{GestureState, SwipeAction},
+    input::{
+        gestures::{GestureState, SwipeAction},
+        tablet_emu::PointerEmulationGrab,
+    },
     shell::{
         SeatExt, Trigger,
         focus::{
@@ -52,7 +55,7 @@ use smithay::{
         keyboard::KeyboardHandle,
         keyboard::{FilterResult, KeyboardSource, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent as PointerButtonEvent, GestureHoldBeginEvent,
+            AxisFrame, ButtonEvent as PointerButtonEvent, Focus, GestureHoldBeginEvent,
             GestureHoldEndEvent, GesturePinchBeginEvent, GesturePinchEndEvent,
             GesturePinchUpdateEvent, GestureSwipeBeginEvent, GestureSwipeEndEvent,
             GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent, PointerGrab, PointerHandle,
@@ -89,6 +92,7 @@ use std::{
 
 pub mod actions;
 pub mod gestures;
+pub mod tablet_emu;
 
 /// Identifies the input backend instance an event came from, used to disambiguate device ids
 /// (which are only unique within a single backend instance, see
@@ -1609,6 +1613,26 @@ impl State {
                     let tool = tablet_seat.get_tool(&event.tool());
 
                     if let Some(tool) = tool {
+                        let serial = SERIAL_COUNTER.next_serial();
+                        if !tool.is_grabbed()
+                            && under
+                                .as_ref()
+                                .is_some_and(|(target, _)| !target.supports_tool(&tool))
+                        {
+                            let start_data = tool::GrabStartData {
+                                focus: under.clone(),
+                                trigger: tool::GrabTrigger::Proximity,
+                                location: position.as_logical(),
+                            };
+                            tool.set_grab(
+                                self,
+                                PointerEmulationGrab::new(start_data, seat.clone()),
+                                event.time(),
+                                serial,
+                                Focus::Keep,
+                            );
+                        }
+
                         let frame = tool::AxisFrame {
                             pressure: event.pressure_has_changed().then(|| event.pressure()),
                             distance: event.distance_has_changed().then(|| event.distance()),
@@ -1629,7 +1653,7 @@ impl State {
                             under,
                             &tool::MotionEvent {
                                 location: position.as_logical(),
-                                serial: SERIAL_COUNTER.next_serial(),
+                                serial,
                                 time: event.time(),
                             },
                         );
@@ -1683,6 +1707,25 @@ impl State {
                     if let Some(tablet) = tablet {
                         let serial = SERIAL_COUNTER.next_serial();
 
+                        if !tool.is_grabbed()
+                            && under
+                                .as_ref()
+                                .is_some_and(|(target, _)| !target.supports_tool(&tool))
+                        {
+                            let start_data = tool::GrabStartData {
+                                focus: under.clone(),
+                                trigger: tool::GrabTrigger::Proximity,
+                                location: position.as_logical(),
+                            };
+                            tool.set_grab(
+                                self,
+                                PointerEmulationGrab::new(start_data, seat.clone()),
+                                event.time(),
+                                serial,
+                                Focus::Keep,
+                            );
+                        }
+
                         let frame = tool::AxisFrame {
                             pressure: event.pressure_has_changed().then(|| event.pressure()),
                             distance: event.distance_has_changed().then(|| event.distance()),
@@ -1697,24 +1740,39 @@ impl State {
                         };
 
                         match event.state() {
-                            ProximityState::In => tool.proximity_in(
-                                self,
-                                under,
-                                tablet,
-                                &tool::ProximityInEvent {
-                                    location: position.as_logical(),
-                                    axis: Some(frame),
-                                    serial: SERIAL_COUNTER.next_serial(),
-                                    time: event.time(),
-                                },
-                            ),
-                            ProximityState::Out => tool.proximity_out(
-                                self,
-                                &tool::ProximityOutEvent {
-                                    serial,
-                                    time: event.time(),
-                                },
-                            ),
+                            ProximityState::In => {
+                                tool.proximity_in(
+                                    self,
+                                    under,
+                                    tablet,
+                                    &tool::ProximityInEvent {
+                                        location: position.as_logical(),
+                                        axis: Some(frame),
+                                        serial,
+                                        time: event.time(),
+                                    },
+                                );
+                            }
+                            ProximityState::Out => {
+                                tool.proximity_out(
+                                    self,
+                                    &tool::ProximityOutEvent {
+                                        serial,
+                                        time: event.time(),
+                                    },
+                                );
+                                if let Some(pointer) = seat.get_pointer() {
+                                    pointer.motion(
+                                        self,
+                                        None,
+                                        &PointerMotionEvent {
+                                            location: position.as_logical(),
+                                            serial,
+                                            time: event.time(),
+                                        },
+                                    );
+                                }
+                            }
                         }
 
                         tool.frame(self, event.time());

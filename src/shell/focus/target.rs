@@ -33,8 +33,8 @@ use smithay::{
             Tablet,
             tool::{
                 AxisFrame as ToolAxisFrame, ButtonEvent as ToolButtonEvent,
-                DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolTarget,
-                UpEvent as ToolUpEvent,
+                DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolHandle,
+                TabletToolTarget, UpEvent as ToolUpEvent,
             },
         },
         touch::{
@@ -304,6 +304,16 @@ impl PointerFocusTarget {
         for session in cursor_sessions {
             session.set_cursor_pos(cursor_pos);
             session.set_cursor_hotspot(cursor_hotspot);
+        }
+    }
+
+    pub fn supports_tool(&self, tool_handle: &TabletToolHandle<State>) -> bool {
+        match self {
+            Self::WlSurface { surface, .. } if surface.client().is_some() => tool_handle
+                .client_tools(&surface.client().unwrap())
+                .next()
+                .is_some(),
+            _ => true,
         }
     }
 }
