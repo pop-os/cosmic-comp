@@ -745,6 +745,7 @@ impl TabletToolGrab<State> for MoveGrab {
         event: &ProximityOutEvent,
     ) {
         handle.proximity_out(data, event);
+        handle.unset_grab(self, data, event.serial, event.time, false);
     }
 
     fn motion(
@@ -777,11 +778,8 @@ impl TabletToolGrab<State> for MoveGrab {
         handle: &mut TabletToolInnerHandle<'_, State>,
         event: &TabletUpEvent,
     ) {
-        if self.tool().is_some_and(|tool| tool == handle.descriptor()) {
-            handle.unset_grab(self, data, event.serial, event.time, false);
-        }
-
         handle.up(data, event);
+        handle.unset_grab(self, data, event.serial, event.time, false);
     }
 
     fn button(
