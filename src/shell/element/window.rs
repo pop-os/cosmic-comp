@@ -1114,19 +1114,10 @@ impl PointerTarget<State> for CosmicWindow {
                     );
 
                     if let Some((grab, focus)) = res {
-                        match grab.grab_type() {
-                            GrabType::Touch => {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial)
-                            }
-                            GrabType::Pointer => seat
-                                .get_pointer()
+                        if let GrabType::Pointer = grab.grab_type() {
+                            seat.get_pointer()
                                 .unwrap()
-                                .set_grab(state, grab, serial, focus),
-                            GrabType::TabletTool => seat
-                                .tablet_seat()
-                                .get_tool(grab.tool().unwrap())
-                                .unwrap()
-                                .set_grab(state, grab, InputTime::now(), serial, focus),
+                                .set_grab(state, grab, serial, focus)
                         }
                     }
                 });
