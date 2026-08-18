@@ -1586,6 +1586,7 @@ impl State {
                         return;
                     };
 
+                    let current_output = seat.active_output();
                     let position =
                         transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &shell)
@@ -1648,6 +1649,29 @@ impl State {
 
                         tool.frame(self, event.time());
                     }
+
+                    let mut shell = self.common.shell.write();
+                    shell.update_pointer_position(position.to_local(&output), &output);
+                    shell.update_focal_point(
+                        &seat,
+                        position,
+                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                    );
+
+                    if output != current_output {
+                        for session in cursor_sessions_for_output(&shell, &current_output) {
+                            session.set_cursor_pos(None);
+                        }
+                        seat.set_active_output(&output);
+                    }
+
+                    update_output_image_copy_cursor_position(
+                        &shell,
+                        &self.common.clock,
+                        &output,
+                        &seat,
+                        position,
+                    );
                 }
             }
             InputEvent::TabletToolProximity { event, .. } => {
@@ -1666,6 +1690,7 @@ impl State {
                         return;
                     };
 
+                    let current_output = seat.active_output();
                     let position =
                         transform_output_mapped_position(&output, &event, shell.zoom_state());
                     let under = State::surface_under(position, &output, &shell)
@@ -1757,6 +1782,29 @@ impl State {
 
                         tool.frame(self, event.time());
                     }
+
+                    let mut shell = self.common.shell.write();
+                    shell.update_pointer_position(position.to_local(&output), &output);
+                    shell.update_focal_point(
+                        &seat,
+                        position,
+                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                    );
+
+                    if output != current_output {
+                        for session in cursor_sessions_for_output(&shell, &current_output) {
+                            session.set_cursor_pos(None);
+                        }
+                        seat.set_active_output(&output);
+                    }
+
+                    update_output_image_copy_cursor_position(
+                        &shell,
+                        &self.common.clock,
+                        &output,
+                        &seat,
+                        position,
+                    );
                 }
             }
             InputEvent::TabletToolTip { event, .. } => {
