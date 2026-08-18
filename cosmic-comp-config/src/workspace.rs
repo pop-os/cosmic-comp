@@ -13,6 +13,8 @@ pub struct WorkspaceConfig {
     pub action_on_typing: Action,
     #[serde(default = "default_wraparound")]
     pub workspace_wraparound: bool,
+    #[serde(default)]
+    pub edge_navigation: EdgeNavigation,
 }
 
 fn default_wraparound() -> bool {
@@ -26,8 +28,16 @@ impl Default for WorkspaceConfig {
             workspace_layout: WorkspaceLayout::default(),
             action_on_typing: Action::default(),
             workspace_wraparound: default_wraparound(),
+            edge_navigation: EdgeNavigation::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EdgeNavigation {
+    #[default]
+    SwitchWorkspace,
+    LockedSpaces,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

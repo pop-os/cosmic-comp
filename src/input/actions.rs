@@ -13,7 +13,10 @@ use crate::{
         handlers::xdg_activation::ActivationContext, protocols::workspace::WorkspaceUpdateGuard,
     },
 };
-use cosmic_comp_config::{TileBehavior, workspace::WorkspaceLayout};
+use cosmic_comp_config::{
+    TileBehavior,
+    workspace::{EdgeNavigation, WorkspaceLayout},
+};
 use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
@@ -772,19 +775,40 @@ impl State {
                                 }
                             }
 
-                            let action = match (
-                                direction,
-                                self.common.config.cosmic_conf.workspaces.workspace_layout,
-                            ) {
-                                (Direction::Left, WorkspaceLayout::Horizontal)
-                                | (Direction::Up, WorkspaceLayout::Vertical) => {
-                                    Action::PreviousWorkspace
+                            let action = match self
+                                .common
+                                .config
+                                .cosmic_conf
+                                .workspaces
+                                .edge_navigation
+                            {
+                                EdgeNavigation::LockedSpaces => Action::SwitchOutput(direction),
+                                EdgeNavigation::SwitchWorkspace => {
+                                    let output_in_direction_has_windows = {
+                                        let shell = self.common.shell.read();
+                                        let current_output = seat.active_output();
+                                        shell
+                                            .next_output(&current_output, direction)
+                                            .and_then(|output| shell.active_space(output))
+                                            .is_some_and(|workspace| !workspace.is_empty())
+                                    };
+
+                                    match (
+                                        direction,
+                                        self.common.config.cosmic_conf.workspaces.workspace_layout,
+                                        output_in_direction_has_windows,
+                                    ) {
+                                        (Direction::Left, WorkspaceLayout::Horizontal, false)
+                                        | (Direction::Up, WorkspaceLayout::Vertical, false) => {
+                                            Action::PreviousWorkspace
+                                        }
+                                        (Direction::Right, WorkspaceLayout::Horizontal, false)
+                                        | (Direction::Down, WorkspaceLayout::Vertical, false) => {
+                                            Action::NextWorkspace
+                                        }
+                                        _ => Action::SwitchOutput(direction),
+                                    }
                                 }
-                                (Direction::Right, WorkspaceLayout::Horizontal)
-                                | (Direction::Down, WorkspaceLayout::Vertical) => {
-                                    Action::NextWorkspace
-                                }
-                                _ => Action::SwitchOutput(direction),
                             };
 
                             self.handle_shortcut_action(
@@ -831,19 +855,35 @@ impl State {
                             }
                         }
 
-                        let action = match (
-                            direction,
-                            self.common.config.cosmic_conf.workspaces.workspace_layout,
-                        ) {
-                            (Direction::Left, WorkspaceLayout::Horizontal)
-                            | (Direction::Up, WorkspaceLayout::Vertical) => {
-                                Action::MoveToPreviousWorkspace
+                        let action = match self.common.config.cosmic_conf.workspaces.edge_navigation
+                        {
+                            EdgeNavigation::LockedSpaces => Action::MoveToOutput(direction),
+                            EdgeNavigation::SwitchWorkspace => {
+                                let output_exists_in_direction =
+                                    seat.focused_output().is_some_and(|output| {
+                                        self.common
+                                            .shell
+                                            .read()
+                                            .next_output(&output, direction)
+                                            .is_some()
+                                    });
+
+                                match (
+                                    direction,
+                                    self.common.config.cosmic_conf.workspaces.workspace_layout,
+                                    output_exists_in_direction,
+                                ) {
+                                    (Direction::Left, WorkspaceLayout::Horizontal, false)
+                                    | (Direction::Up, WorkspaceLayout::Vertical, false) => {
+                                        Action::MoveToPreviousWorkspace
+                                    }
+                                    (Direction::Right, WorkspaceLayout::Horizontal, false)
+                                    | (Direction::Down, WorkspaceLayout::Vertical, false) => {
+                                        Action::MoveToNextWorkspace
+                                    }
+                                    _ => Action::MoveToOutput(direction),
+                                }
                             }
-                            (Direction::Right, WorkspaceLayout::Horizontal)
-                            | (Direction::Down, WorkspaceLayout::Vertical) => {
-                                Action::MoveToNextWorkspace
-                            }
-                            _ => Action::MoveToOutput(direction),
                         };
 
                         self.handle_shortcut_action(
