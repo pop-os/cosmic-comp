@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::cell::Cell;
-
 use crate::{
     backend::render::cursor::CursorState,
     shell::{
@@ -52,7 +50,6 @@ pub struct ResizeForkTarget {
     pub output: WeakOutput,
     pub left_up_idx: usize,
     pub orientation: Orientation,
-    pub last_tablet_location: Cell<Option<Point<f64, Global>>>,
 }
 
 impl IsAlive for ResizeForkTarget {
@@ -193,10 +190,9 @@ impl TabletToolTarget<State> for ResizeForkTarget {
         let serial = event.serial;
         let time = event.time;
         let tool = tool_descriptor.clone();
-        let Some(location) = self.last_tablet_location.take() else {
-            return;
-        };
         data.common.event_loop_handle.insert_idle(move |state| {
+            let pointer = seat.get_pointer().unwrap();
+            let location = pointer.current_location();
             let tablet = seat.tablet_seat().get_tool(&tool).unwrap();
             tablet.set_grab(
                 state,
@@ -205,11 +201,11 @@ impl TabletToolTarget<State> for ResizeForkTarget {
                         tool,
                         data: TabletToolGrabStartData {
                             focus: None,
-                            location: location.as_logical(),
+                            location: location,
                             trigger: TabletToolGrabTrigger::Tip,
                         },
                     },
-                    location,
+                    location.as_global(),
                     node,
                     left_up_idx,
                     orientation,
@@ -227,10 +223,8 @@ impl TabletToolTarget<State> for ResizeForkTarget {
         _seat: &Seat<State>,
         _data: &mut State,
         _tool_descriptor: &TabletToolDescriptor,
-        event: &TabletMotionEvent,
+        _event: &TabletMotionEvent,
     ) {
-        self.last_tablet_location
-            .set(Some(event.location.as_global()))
     }
     fn proximity_out(
         &self,
@@ -238,7 +232,6 @@ impl TabletToolTarget<State> for ResizeForkTarget {
         _data: &mut State,
         _tool_descriptor: &TabletToolDescriptor,
     ) {
-        self.last_tablet_location.set(None);
     }
 
     fn proximity_in(

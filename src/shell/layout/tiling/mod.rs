@@ -67,7 +67,6 @@ use smithay::{
     wayland::{compositor::add_blocker, seat::WaylandFocus},
 };
 use std::{
-    cell::Cell,
     collections::{HashMap, VecDeque},
     sync::{Arc, Weak},
     time::{Duration, Instant},
@@ -3349,7 +3348,6 @@ impl TilingLayout {
                             output: self.output.downgrade(),
                             left_up_idx: idx,
                             orientation,
-                            last_tablet_location: Cell::new(None),
                         }
                         .into(),
                         (last_geometry.loc
