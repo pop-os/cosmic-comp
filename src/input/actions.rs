@@ -15,7 +15,7 @@ use crate::{
 };
 use cosmic_comp_config::{
     TileBehavior,
-    workspace::{EdgeNavigation, WorkspaceLayout},
+    workspace::{EdgeNavigation, WorkspaceLayout, WorkspaceMode},
 };
 use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
@@ -360,6 +360,27 @@ impl State {
                     return;
                 };
 
+                let entry_output = if propagate
+                    && self.common.config.cosmic_conf.workspaces.workspace_mode
+                        == WorkspaceMode::Global
+                    && let Some(pressed) = pattern.inferred_direction()
+                {
+                    let entry_direction = match pressed {
+                        Direction::Left => Direction::Right,
+                        Direction::Right => Direction::Left,
+                        Direction::Up => Direction::Down,
+                        Direction::Down => Direction::Up,
+                    };
+                    let shell = self.common.shell.read();
+                    let mut output = focused_output.clone();
+                    while let Some(next) = shell.next_output(&output, entry_direction) {
+                        output = next.clone();
+                    }
+                    output
+                } else {
+                    focused_output.clone()
+                };
+
                 let res = {
                     let mut shell = self.common.shell.write();
                     shell
@@ -371,7 +392,7 @@ impl State {
                         .and_then(|workspace| {
                             shell.move_current(
                                 seat,
-                                (&focused_output, Some(workspace)),
+                                (&entry_output, Some(workspace)),
                                 matches!(x, Action::MoveToNextWorkspace),
                                 direction,
                                 &mut self.common.workspace_state.update(),
@@ -454,6 +475,27 @@ impl State {
                     return;
                 };
 
+                let entry_output = if propagate
+                    && self.common.config.cosmic_conf.workspaces.workspace_mode
+                        == WorkspaceMode::Global
+                    && let Some(pressed) = pattern.inferred_direction()
+                {
+                    let entry_direction = match pressed {
+                        Direction::Left => Direction::Right,
+                        Direction::Right => Direction::Left,
+                        Direction::Up => Direction::Down,
+                        Direction::Down => Direction::Up,
+                    };
+                    let shell = self.common.shell.read();
+                    let mut output = focused_output.clone();
+                    while let Some(next) = shell.next_output(&output, entry_direction) {
+                        output = next.clone();
+                    }
+                    output
+                } else {
+                    focused_output.clone()
+                };
+
                 let res = {
                     let mut shell = self.common.shell.write();
                     shell
@@ -465,7 +507,7 @@ impl State {
                         .and_then(|workspace| {
                             shell.move_current(
                                 seat,
-                                (&focused_output, Some(workspace)),
+                                (&entry_output, Some(workspace)),
                                 matches!(x, Action::MoveToPreviousWorkspace),
                                 direction,
                                 &mut self.common.workspace_state.update(),
