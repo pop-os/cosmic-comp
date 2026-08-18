@@ -228,20 +228,32 @@ impl TabletToolTarget<State> for ResizeForkTarget {
     }
     fn proximity_out(
         &self,
-        _seat: &Seat<State>,
+        seat: &Seat<State>,
         _data: &mut State,
         _tool_descriptor: &TabletToolDescriptor,
     ) {
+        let user_data = seat.user_data();
+        let cursor_state = user_data.get::<CursorState>().unwrap();
+        cursor_state.lock().unwrap().unset_shape();
     }
 
     fn proximity_in(
         &self,
-        _seat: &Seat<State>,
+        seat: &Seat<State>,
         _data: &mut State,
         _tool_descriptor: &TabletToolDescriptor,
         _tablet: &Tablet,
         _serial: Serial,
     ) {
+        let user_data = seat.user_data();
+        let cursor_state = user_data.get::<CursorState>().unwrap();
+        cursor_state
+            .lock()
+            .unwrap()
+            .set_shape(match self.orientation {
+                Orientation::Horizontal => CursorIcon::RowResize,
+                Orientation::Vertical => CursorIcon::ColResize,
+            });
     }
     fn up(
         &self,
