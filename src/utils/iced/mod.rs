@@ -497,16 +497,18 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
 impl<P: Program + Send + 'static> TabletToolTarget<crate::state::State> for IcedElement<P> {
     fn proximity_in(
         &self,
-        _seat: &Seat<crate::state::State>,
+        seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         _tool_descriptor: &TabletToolDescriptor,
         _tablet: &Tablet,
-        _serial: Serial,
+        serial: Serial,
     ) {
         let mut internal = self.0.lock().unwrap();
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorEntered));
+        internal.last_tablet_serial = Some(serial);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), serial));
         internal.update(false);
     }
 
@@ -578,7 +580,8 @@ impl<P: Program + Send + 'static> TabletToolTarget<crate::state::State> for Iced
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
         internal.cursor_pos = Some(event_location);
-        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        *internal.last_seat.lock().unwrap() =
+            Some((seat.clone(), internal.last_tablet_serial.unwrap()));
         internal.update(false);
     }
 
@@ -600,10 +603,9 @@ impl<P: Program + Send + 'static> TabletToolTarget<crate::state::State> for Iced
     ) {
         let mut internal = self.0.lock().unwrap();
         let button = match event.button {
-            0x110 => MouseButton::Left,
-            0x111 => MouseButton::Right,
-            0x112 => MouseButton::Middle,
-            x => MouseButton::Other(x as u16),
+            0x14b => MouseButton::Right,
+            0x14c => MouseButton::Middle,
+            _ => return,
         };
         internal.state.queue_event(Event::Mouse(match event.state {
             ButtonState::Pressed => MouseEvent::ButtonPressed(button),
