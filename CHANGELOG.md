@@ -1,3 +1,11 @@
+## [1.39.2](https://github.com/playtron-os/cosmic-comp/compare/v1.39.1...v1.39.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* show fullcolor header icons when they have color ([276da53](https://github.com/playtron-os/cosmic-comp/commit/276da538d447a03e55914f8858697f0ef01c03c2))
+* use svg_declares_current_color to check if svg is symbolic ([ae1abef](https://github.com/playtron-os/cosmic-comp/commit/ae1abeffa052b204bbed0aa5db301ad5982abd9e))
+
 ## [1.39.1](https://github.com/playtron-os/cosmic-comp/compare/v1.39.0...v1.39.1) (2026-08-18)
 
 
