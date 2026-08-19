@@ -121,6 +121,7 @@ pub struct CosmicStackInternal {
     previous_keyboard: AtomicUsize,
     pointer_entered: AtomicU8,
     touch_serial: AtomicU32,
+    tablet_serial: AtomicU32,
     reenter: AtomicBool,
     potential_drag: Mutex<Option<usize>>,
     override_alive: AtomicBool,
@@ -180,6 +181,7 @@ impl CosmicStack {
                 previous_keyboard: AtomicUsize::new(0),
                 pointer_entered: AtomicU8::new(0),
                 touch_serial: AtomicU32::new(0),
+                tablet_serial: AtomicU32::new(0),
                 reenter: AtomicBool::new(false),
                 potential_drag: Mutex::new(None),
                 override_alive: AtomicBool::new(true),
@@ -1958,12 +1960,19 @@ impl TabletToolTarget<State> for CosmicStack {
         tool_descriptor: &TabletToolDescriptor,
         event: &ToolDownEvent,
     ) {
+        self.0.with_program(|p| {
+            p.tablet_serial
+                .store(event.serial.into(), Ordering::Release)
+        });
         match self.0.with_program(|p| p.current_focus()) {
             Some(Focus::Header) => {
                 TabletToolTarget::down(&self.0, seat, data, tool_descriptor, event)
             }
             Some(x) => {
-                let serial = event.serial;
+                let serial = self
+                    .0
+                    .with_program(|p| p.tablet_serial.load(Ordering::Acquire))
+                    .into();
                 let seat = seat.clone();
                 let Some(surface) = self.0.with_program(|p| {
                     let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
@@ -2051,7 +2060,13 @@ impl TabletToolTarget<State> for CosmicStack {
             || event.location.x < 64.0
             || event.location.x > (active_window_geo.size.w as f64 - 64.0)
         {
-            self.start_drag(data, seat, event.serial);
+            self.start_drag(
+                data,
+                seat,
+                self.0
+                    .with_program(|p| p.tablet_serial.load(Ordering::Acquire))
+                    .into(),
+            );
         }
     }
 
