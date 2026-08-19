@@ -5190,8 +5190,16 @@ pub fn check_grab_preconditions(
     if let Some(surface) = client_initiated {
         // Check that this surface has a click or touch down grab.
         if !match serial {
-            Some(serial) => pointer.has_grab(serial) || touch.has_grab(serial),
-            None => pointer.is_grabbed() | touch.is_grabbed(),
+            Some(serial) => {
+                pointer.has_grab(serial)
+                    || touch.has_grab(serial)
+                    || tools.values().any(|tool| tool.has_grab(serial))
+            }
+            None => {
+                pointer.is_grabbed()
+                    || touch.is_grabbed()
+                    || tools.values().any(|tool| tool.is_grabbed())
+            }
         } {
             return None;
         }
