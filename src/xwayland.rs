@@ -20,7 +20,7 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         drm::DrmNode,
-        input::{ButtonState, KeyState, Keycode},
+        input::{ButtonState, InputTime, KeyState, Keycode},
         renderer::{
             Bind, Frame, Offscreen, Renderer,
             element::{
@@ -396,7 +396,7 @@ impl Common {
         state: KeyState,
         modifiers: ModifiersState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         let config = self.config.cosmic_conf.xwayland_eavesdropping.keyboard;
         if config == EavesdroppingKeyboardMode::None {
@@ -458,7 +458,7 @@ impl Common {
 
         tracing::trace!("Forwaring key {} {:?} to xwayland", code.raw() - 8, state);
         for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
-            wl_keyboard.key(serial.into(), time, code.raw() - 8, state.into());
+            wl_keyboard.key(serial.into(), time.millis(), code.raw() - 8, state.into());
             if xstate.last_modifier_state != Some(modifiers) {
                 xstate.last_modifier_state = Some(modifiers);
                 wl_keyboard.modifiers(
@@ -478,7 +478,7 @@ impl Common {
         button: u32,
         state: ButtonState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         if !self.config.cosmic_conf.xwayland_eavesdropping.pointer {
             return;
@@ -518,7 +518,7 @@ impl Common {
 
         tracing::trace!("Forwaring ptr button {} {:?} to Xwayland", button, state);
         for wl_pointer in pointer.client_pointers(&xstate.client) {
-            wl_pointer.button(serial.into(), time, button, state.into());
+            wl_pointer.button(serial.into(), time.millis(), button, state.into());
         }
     }
 

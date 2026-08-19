@@ -11,7 +11,7 @@ use crate::{
 };
 use id_tree::{NodeId, Tree};
 use smithay::{
-    backend::input::ButtonState,
+    backend::input::{ButtonState, InputTime},
     input::{
         Seat,
         pointer::{
@@ -65,7 +65,7 @@ impl PointerTarget<State> for ResizeForkTarget {
         seat: &Seat<State>,
         _data: &mut State,
         _serial: smithay::utils::Serial,
-        _time: u32,
+        _time: InputTime,
     ) {
         let user_data = seat.user_data();
         let cursor_state = user_data.get::<CursorState>().unwrap();

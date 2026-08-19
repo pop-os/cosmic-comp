@@ -18,6 +18,7 @@ use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
+    backend::input::InputTime,
     input::{Seat, pointer::MotionEvent},
     utils::{Point, Serial},
 };
@@ -45,7 +46,7 @@ impl State {
         backend_id: &InputBackendId,
         seat: &Seat<State>,
         serial: Serial,
-        time: u32,
+        time: InputTime,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
     ) {
@@ -150,7 +151,7 @@ impl State {
         backend_id: &InputBackendId,
         seat: &Seat<State>,
         serial: Serial,
-        time: u32,
+        time: InputTime,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
         propagate: bool,
