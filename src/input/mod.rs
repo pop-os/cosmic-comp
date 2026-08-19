@@ -767,15 +767,25 @@ impl State {
                     );
                     ptr.frame(self);
 
+                    let mut shell = self.common.shell.write();
                     // Keep the seat's active output following the pointer. Click-to-
                     // focus (PointerButton) resolves its target via
                     // `seat.active_output()`
                     let previous_output = seat.active_output();
                     if previous_output != output {
+                        for session in cursor_sessions_for_output(&shell, &previous_output) {
+                            session.set_cursor_pos(None);
+                        }
                         seat.set_active_output(&output);
                     }
 
-                    let shell = self.common.shell.read();
+                    shell.update_pointer_position(position.to_local(&output), &output);
+                    shell.update_focal_point(
+                        &seat,
+                        position,
+                        self.common.config.cosmic_conf.accessibility_zoom.view_moves,
+                    );
+
                     update_output_image_copy_cursor_position(
                         &shell,
                         &self.common.clock,
