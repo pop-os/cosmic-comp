@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
+    backend::input::InputTime,
     desktop::{WindowSurfaceType, layer_map_for_output},
     input::{Seat, pointer::MotionEvent},
     output::Output,
@@ -124,7 +125,7 @@ impl ToplevelManagementHandler for State {
                         &MotionEvent {
                             location: new_pos.to_f64().as_logical(),
                             serial,
-                            time: self.common.clock.now().as_millis(),
+                            time: InputTime::now(),
                         },
                     );
                     ptr.frame(self);

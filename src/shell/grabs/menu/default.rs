@@ -1,7 +1,8 @@
 use cosmic_settings_config::shortcuts::Action;
 use smithay::{
-    input::pointer::MotionEvent, reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::SERIAL_COUNTER, wayland::seat::WaylandFocus,
+    backend::input::InputTime, input::pointer::MotionEvent,
+    reexports::wayland_server::protocol::wl_surface::WlSurface, utils::SERIAL_COUNTER,
+    wayland::seat::WaylandFocus,
 };
 
 use crate::{
@@ -398,7 +399,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: state.common.clock.now().as_millis(),
+                                        time: InputTime::now(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -433,7 +434,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: state.common.clock.now().as_millis(),
+                                        time: InputTime::now(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -468,7 +469,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: state.common.clock.now().as_millis(),
+                                        time: InputTime::now(),
                                     },
                                 );
                                 pointer.frame(state);
@@ -503,7 +504,7 @@ pub fn window_items(
                                     &MotionEvent {
                                         location: loc.as_logical().to_f64(),
                                         serial,
-                                        time: state.common.clock.now().as_millis(),
+                                        time: InputTime::now(),
                                     },
                                 );
                                 pointer.frame(state);
