@@ -309,7 +309,10 @@ fn prescale_icon_from_path(path: &str) -> super::header_bar::AppIcon {
                 .map(|bytes| &*Box::leak(bytes.into_boxed_slice()))
                 .unwrap_or(&[])
         });
-        return super::header_bar::AppIcon::Svg(bytes);
+        // The freedesktop convention: a `-symbolic` icon is a single-colour
+        // glyph meant to be tinted, anything else is artwork to leave alone.
+        let symbolic = path.ends_with("-symbolic.svg") || path.ends_with("-symbolic.svgz");
+        return super::header_bar::AppIcon::Svg { bytes, symbolic };
     }
 
     // Raster image: pre-scale with Lanczos3 for crisp rendering

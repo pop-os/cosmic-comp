@@ -24,7 +24,15 @@ pub fn ssd_header_height(theme: &CompTheme) -> u32 {
 #[derive(Clone, Debug)]
 pub enum AppIcon {
     /// Leaked SVG bytes — can be passed directly to `title_icon()`.
-    Svg(&'static [u8]),
+    ///
+    /// `symbolic` marks a single-colour glyph that should take the title
+    /// colour. A full-colour app mark must not: iced's `svg::Style::color` is
+    /// an RGB *replacement* filter, so tinting one flattens the whole mark into
+    /// a solid block of that colour, keeping only its alpha silhouette.
+    Svg {
+        bytes: &'static [u8],
+        symbolic: bool,
+    },
     /// Pre-scaled RGBA raster image (not usable with title_icon, ignored for now).
     Image(iced_core::image::Handle),
 }
@@ -155,9 +163,19 @@ impl<'a, Message: Clone + 'static> HeaderBar<'a, Message> {
                         iced_core::Theme,
                         iced_tiny_skia::Renderer,
                     > = match icon {
-                        AppIcon::Svg(bytes) => {
+                        AppIcon::Svg { bytes, symbolic } => {
                             let handle = iced_core::svg::Handle::from_memory(*bytes);
-                            let icon_tint = title_color;
+                            // A fully transparent tint is this iced fork's
+                            // opt-out from the colour filter. `None` does *not*
+                            // mean "leave the artwork alone" here — the fork
+                            // reads it as "inherit the parent's text colour",
+                            // which is what painted full-colour app marks flat
+                            // title-grey. Only a symbolic glyph is recoloured.
+                            let icon_tint = if *symbolic {
+                                title_color
+                            } else {
+                                iced_core::Color::TRANSPARENT
+                            };
                             Svg::new(handle)
                                 .width(icon_size)
                                 .height(icon_size)
