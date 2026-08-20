@@ -142,7 +142,7 @@ pub struct CosmicWindowInternal {
     /// over `cached_icon`. Tuple: (fingerprint of the committed icon, resolved
     /// icon). Refreshed when the fingerprint changes.
     client_icon: Mutex<(String, Option<super::header_bar::AppIcon>)>,
-    /// Desktop override from .desktop file with X-Cosmic-AppIdMatch.
+    /// Desktop override from .desktop file with `X-Playtron-AppIdMatch`.
     /// Tuple: (app_id used for lookup, optional override).
     desktop_override: Mutex<(String, Option<DesktopOverride>)>,
     tiled: AtomicBool,
@@ -433,7 +433,7 @@ fn shm_buffer_to_app_icon(
     .flatten()
 }
 
-/// Override properties parsed from a .desktop file with `X-Cosmic-AppIdMatch`.
+/// Override properties parsed from a .desktop file with `X-Playtron-AppIdMatch`.
 #[derive(Debug, Clone, Default)]
 struct DesktopOverride {
     forced_title: Option<String>,
@@ -468,8 +468,8 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 }
 
 /// Scan XDG application directories for a .desktop file whose
-/// `X-Cosmic-AppIdMatch` glob matches `app_id`, returning any
-/// `X-Cosmic-ForcedTitle` / `X-Cosmic-ForcedIcon` overrides.
+/// `X-Playtron-AppIdMatch` glob matches `app_id`, returning any
+/// `X-Playtron-ForcedTitle` / `X-Playtron-ForcedIcon` overrides.
 fn find_desktop_override(app_id: &str) -> Option<DesktopOverride> {
     if app_id.is_empty() {
         return None;
@@ -493,7 +493,21 @@ fn find_desktop_override(app_id: &str) -> Option<DesktopOverride> {
     None
 }
 
-/// Parse a single .desktop file for X-Cosmic override keys.
+/// Strip an `X-Playtron-<key>=` / `X-Cosmic-<key>=` prefix, returning the value.
+///
+/// `X-Playtron-*` is the AgentOS shells' vocabulary — the namespace
+/// `agentos-panel` and `agentos-launcher` already read `X-Playtron-IconStyle` /
+/// `X-Playtron-IconColor` from — and is what new entries should use.
+/// `X-Cosmic-*` stays accepted for the entries already shipping it.
+fn strip_override_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    ["X-Playtron-", "X-Cosmic-"].into_iter().find_map(|ns| {
+        line.strip_prefix(ns)
+            .and_then(|rest| rest.strip_prefix(key))
+            .and_then(|rest| rest.strip_prefix('='))
+    })
+}
+
+/// Parse a single .desktop file for the override keys.
 fn parse_desktop_override(path: &std::path::Path, app_id: &str) -> Option<DesktopOverride> {
     let content = std::fs::read_to_string(path).ok()?;
     let mut in_desktop_entry = false;
@@ -512,11 +526,11 @@ fn parse_desktop_override(path: &std::path::Path, app_id: &str) -> Option<Deskto
         if !in_desktop_entry {
             continue;
         }
-        if let Some(val) = line.strip_prefix("X-Cosmic-AppIdMatch=") {
+        if let Some(val) = strip_override_key(line, "AppIdMatch") {
             match_pattern = Some(val.to_string());
-        } else if let Some(val) = line.strip_prefix("X-Cosmic-ForcedTitle=") {
+        } else if let Some(val) = strip_override_key(line, "ForcedTitle") {
             forced_title = Some(val.to_string());
-        } else if let Some(val) = line.strip_prefix("X-Cosmic-ForcedIcon=") {
+        } else if let Some(val) = strip_override_key(line, "ForcedIcon") {
             forced_icon = Some(val.to_string());
         }
     }
@@ -1411,15 +1425,28 @@ impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
             )
             .theme(theme);
 
-        // Pass the application icon if resolved — a client-set toplevel icon
-        // (xdg-toplevel-icon) takes priority over the app_id-based icon.
-        let icon = win
-            .client_icon
+        // Pass the application icon if resolved. A client-set toplevel icon
+        // (xdg-toplevel-icon) takes priority over the app_id-based icon —
+        // except when the matched .desktop forces one. Chromium app windows
+        // set the page favicon on every toplevel, which would otherwise always
+        // beat the packaged icon a `ForcedIcon` entry explicitly asked for.
+        let forced_icon = win
+            .desktop_override
             .lock()
             .unwrap()
             .1
-            .clone()
-            .or_else(|| win.cached_icon.lock().unwrap().1.clone());
+            .as_ref()
+            .is_some_and(|o| o.forced_icon.is_some());
+        let icon = if forced_icon {
+            win.cached_icon.lock().unwrap().1.clone()
+        } else {
+            win.client_icon
+                .lock()
+                .unwrap()
+                .1
+                .clone()
+                .or_else(|| win.cached_icon.lock().unwrap().1.clone())
+        };
         if let Some(icon) = icon {
             header = header.app_icon(icon);
         }
@@ -2100,5 +2127,73 @@ where
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glob_match_handles_the_chromium_app_id_shape() {
+        // Chromium app windows report `chrome-<url host>__-<profile directory>`.
+        assert!(glob_match(
+            "*-humainos-chat",
+            "chrome-one.humain.com__-humainos-chat"
+        ));
+        assert!(!glob_match(
+            "*-humainos-chat",
+            "chrome-one.humain.com__-humainos-connect"
+        ));
+        // No `-` separator ahead of the name, so the pattern must not match.
+        assert!(!glob_match("*-humainos-chat", "humainos-chat"));
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("humainos-?hat", "humainos-chat"));
+    }
+
+    #[test]
+    fn override_keys_accept_both_namespaces() {
+        assert_eq!(
+            strip_override_key("X-Playtron-ForcedTitle=Enterprise Chat", "ForcedTitle"),
+            Some("Enterprise Chat")
+        );
+        assert_eq!(
+            strip_override_key("X-Cosmic-ForcedTitle=HUMAIN Connect", "ForcedTitle"),
+            Some("HUMAIN Connect")
+        );
+        assert_eq!(
+            strip_override_key("X-Playtron-ForcedIcon=humainos-chat", "ForcedTitle"),
+            None
+        );
+        assert_eq!(strip_override_key("ForcedTitle=x", "ForcedTitle"), None);
+        // A longer key that merely starts the same must not match.
+        assert_eq!(
+            strip_override_key("X-Playtron-ForcedTitleExtra=x", "ForcedTitle"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_desktop_override_reads_playtron_keys() {
+        let dir = std::env::temp_dir().join(format!("cosmic-comp-ovr-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("humainos-chat.desktop");
+        std::fs::write(
+            &path,
+            "[Desktop Entry]\n\
+             Name=Enterprise Chat\n\
+             X-Playtron-AppIdMatch=*-humainos-chat\n\
+             X-Playtron-ForcedTitle=Enterprise Chat\n\
+             X-Playtron-ForcedIcon=humainos-chat\n",
+        )
+        .unwrap();
+
+        let ovr = parse_desktop_override(&path, "chrome-one.humain.com__-humainos-chat").unwrap();
+        assert_eq!(ovr.forced_title.as_deref(), Some("Enterprise Chat"));
+        assert_eq!(ovr.forced_icon.as_deref(), Some("humainos-chat"));
+
+        assert!(parse_desktop_override(&path, "chrome-example.com__-other").is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
