@@ -846,6 +846,13 @@ pub struct Shell {
     /// which keeps the live frame so the greeter can cross-fade from it.
     pub shutdown_fade: Option<Instant>,
     layer_fade_in: std::collections::HashMap<ObjectId, Instant>,
+    /// Outstanding `cosmic_session_hold_v1` objects. While any exist, the
+    /// session-handoff cross-fade waits — see [`Shell::handoff_hold_active`].
+    handoff_holds: usize,
+    /// Whether any client has ever claimed a hold this session. Once one has,
+    /// the arming grace stops mattering: the question it exists to answer —
+    /// "is anything going to claim?" — has been answered.
+    handoff_hold_seen: bool,
     /// Layer surfaces waiting for a buffer commit before starting their fade-in,
     /// with the instant they started waiting. Moved to `layer_fade_in` when the
     /// surface commits a buffer with real content (see
@@ -2548,6 +2555,8 @@ impl Shell {
             lock_fade_in_started: false,
             logout_hold: false,
             shutdown_fade: None,
+            handoff_holds: 0,
+            handoff_hold_seen: false,
             pending_layer_fade_in: std::collections::HashMap::new(),
             layer_fade_out: std::collections::HashMap::new(),
 
@@ -5756,6 +5765,42 @@ impl Shell {
         self.shutdown_fade.map(|start| {
             (start.elapsed().as_secs_f32() / SHUTDOWN_FADE.as_secs_f32()).clamp(0.0, 1.0)
         })
+    }
+
+    /// Take a hold on revealing the session (`cosmic_session_hold_v1`).
+    ///
+    /// The client's `timeout_ms` is its own estimate of how long it needs. It
+    /// is recorded for diagnostics only — the cap the compositor applies is its
+    /// own, so a client cannot keep the previous session's frame up by asking
+    /// for a large number.
+    pub fn take_handoff_hold(&mut self, timeout_ms: u32) {
+        self.handoff_holds = self.handoff_holds.saturating_add(1);
+        self.handoff_hold_seen = true;
+        tracing::debug!(
+            target: "handoff",
+            holds = self.handoff_holds,
+            client_timeout_ms = timeout_ms,
+            "session hold taken"
+        );
+    }
+
+    /// Release a hold, whether the client asked or simply went away.
+    pub fn release_handoff_hold(&mut self) {
+        self.handoff_holds = self.handoff_holds.saturating_sub(1);
+        tracing::debug!(target: "handoff", holds = self.handoff_holds, "session hold released");
+    }
+
+    /// Whether the handoff cross-fade should keep waiting.
+    ///
+    /// Two reasons to wait, and the second is the awkward one: a client that
+    /// means to claim a hold does not exist yet when the compositor first wants
+    /// to fade — the session's units have not been started. So until the grace
+    /// has elapsed we wait to see whether anyone claims at all. The moment one
+    /// client has, that question is answered and only real holds matter, which
+    /// is what keeps the grace off the critical path for a user whose first-run
+    /// app claims and immediately releases because it has nothing to show.
+    pub fn handoff_hold_active(&self, grace_expired: bool) -> bool {
+        self.handoff_holds > 0 || (!self.handoff_hold_seen && !grace_expired)
     }
 
     /// Whether an opaque wallpaper is up on `output`: a Background-layer surface that

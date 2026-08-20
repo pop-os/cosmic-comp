@@ -46,6 +46,7 @@ pub mod primary_selection;
 pub mod seat;
 pub mod security_context;
 pub mod selection;
+pub mod session_hold;
 pub mod session_lock;
 pub mod shm;
 pub mod surface_embed;

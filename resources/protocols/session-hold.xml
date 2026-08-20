@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="session_hold">
+  <copyright>
+    Copyright 2026 Playtron
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+  </copyright>
+
+  <interface name="cosmic_session_hold_manager_v1" version="1">
+    <description summary="hold back the reveal of a newly started session">
+      When a session starts, the compositor briefly keeps the previous
+      session's last frame on screen and cross-fades out of it once there is
+      something to show. A client that intends to cover the session before the
+      user sees it — a first-run experience, for instance — can use this to
+      keep that frame up until it actually has pixels on screen.
+
+      The compositor never needs to know which client that is. Any client may
+      claim a hold, and a client that decides it has nothing to show simply
+      never claims one, so no configuration names any application.
+
+      Holds are only meaningful while a session is being revealed. Claiming one
+      at any other time is harmless and does nothing.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Destroying the manager does not release holds already taken through it;
+        each cosmic_session_hold_v1 keeps its own hold until it is released or
+        its client disconnects.
+      </description>
+    </request>
+
+    <request name="hold">
+      <description summary="keep the session hidden for now">
+        Ask the compositor not to reveal the session yet, because this client
+        is about to put something on screen.
+
+        The reply to this is not an event: the caller should get on with
+        showing whatever it intends to show, and release the hold once it is
+        genuinely visible.
+
+        timeout_ms is how long the client believes it needs, as a hint. The
+        compositor clamps it to its own limit, so a client cannot keep the
+        session hidden indefinitely by asking for a large value, and a client
+        that dies takes its hold with it.
+      </description>
+      <arg name="id" type="new_id" interface="cosmic_session_hold_v1"/>
+      <arg name="timeout_ms" type="uint" summary="how long the client expects to need"/>
+    </request>
+  </interface>
+
+  <interface name="cosmic_session_hold_v1" version="1">
+    <description summary="an outstanding hold on revealing the session">
+      While this object is alive the compositor does not begin revealing the
+      session. Destroying it, or disconnecting, releases the hold.
+    </description>
+
+    <request name="release" type="destructor">
+      <description summary="release the hold">
+        The client now has something on screen, or has given up trying. The
+        compositor reveals the session unless another hold is outstanding.
+      </description>
+    </request>
+
+    <event name="expired">
+      <description summary="the compositor stopped waiting">
+        The compositor waited as long as it is willing to and has revealed the
+        session. The hold no longer has any effect; the client should expect
+        whatever it shows from now on to appear over an already-visible
+        session. The object remains valid and should still be released.
+      </description>
+    </event>
+  </interface>
+</protocol>

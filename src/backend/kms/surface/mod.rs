@@ -1583,9 +1583,6 @@ impl SurfaceThreadState {
 
         // Hold the frozen frame opaque over the starting session, then ease it out to
         // reveal the real content.
-        // Safety cap so a session that never paints can't strand a stale frame. A slow cold
-        // start can exceed this, in which case the fade lands on the grey clear.
-        const ADOPT_HOLD_CAP: std::time::Duration = std::time::Duration::from_secs(3);
         const ADOPT_FADE: std::time::Duration = std::time::Duration::from_millis(400);
 
         if let Some(adopt) = self.adopt.as_mut() {
@@ -1596,11 +1593,17 @@ impl SurfaceThreadState {
             let has_content = elements
                 .iter()
                 .any(|e| !matches!(e, CosmicElement::Cursor(_) | CosmicElement::Dnd(_)));
-            let (still_fading_in, background_ready) = {
+            // A client can ask for the reveal to wait because it is about to
+            // cover the session (`cosmic_session_hold_v1`). Until the grace
+            // elapses we also wait to find out whether anyone is going to ask
+            // at all — the claimant's process does not exist yet at this point.
+            let grace_expired = adopt.started.elapsed() > crate::handoff_hold_grace();
+            let (still_fading_in, background_ready, hold) = {
                 let shell = self.shell.read();
                 (
                     shell.layer_fade_in_active(),
                     shell.background_layer_ready(&self.output),
+                    shell.handoff_hold_active(grace_expired),
                 )
             };
             // The wallpaper alone is enough: it fills the output, so once it is opaque
@@ -1608,8 +1611,13 @@ impl SurfaceThreadState {
             // over it. Sessions with no Background layer at all — the greeter draws its
             // own gradient in an Overlay — still fall back to "everything has settled",
             // which they reach quickly because they map one surface.
-            let content_visible = background_ready || (has_content && !still_fading_in);
-            let timed_out = adopt.started.elapsed() > ADOPT_HOLD_CAP;
+            //
+            // `!hold` has to gate the whole thing, not just the settled branch:
+            // `background_ready ||` short-circuits, so a session with a wallpaper
+            // would otherwise reveal the moment cosmic-bg goes opaque no matter
+            // who is holding.
+            let content_visible = !hold && (background_ready || (has_content && !still_fading_in));
+            let timed_out = adopt.started.elapsed() > crate::handoff_hold_cap();
             if adopt.fade_start.is_none() && (content_visible || timed_out) {
                 let (pending_fade, pending_open, fading, opening) =
                     self.shell.read().layer_fade_in_blockers();
@@ -1622,18 +1630,22 @@ impl SurfaceThreadState {
                     fading,
                     opening,
                     background_ready,
-                    reason = match (content_visible, background_ready) {
-                        (true, true) => "wallpaper ready",
-                        (true, false) => "all surfaces settled",
-                        _ => "hold cap",
+                    hold,
+                    grace_expired,
+                    reason = match (content_visible, background_ready, timed_out) {
+                        (true, true, _) => "wallpaper ready",
+                        (true, false, _) => "all surfaces settled",
+                        (false, _, true) => "hold cap",
+                        _ => "hold released",
                     },
                     "handoff: starting cross-fade of frozen frame"
                 );
                 adopt.fade_start = Some(std::time::Instant::now());
-                crate::utils::timing::mark(match (content_visible, background_ready) {
-                    (true, true) => "fade-start (wallpaper ready)",
-                    (true, false) => "fade-start (all surfaces settled)",
-                    _ => "fade-start (hold cap)",
+                crate::utils::timing::mark(match (content_visible, background_ready, timed_out) {
+                    (true, true, _) => "fade-start (wallpaper ready)",
+                    (true, false, _) => "fade-start (all surfaces settled)",
+                    (false, _, true) => "fade-start (hold cap)",
+                    _ => "fade-start (hold released)",
                 });
             }
             if adopt.texture.is_none() {

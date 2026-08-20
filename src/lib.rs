@@ -574,6 +574,47 @@ fn install_termination_handler(handle: calloop::LoopHandle<'static, state::State
 
 /// Session-handoff freeze (exit CLOSEFB + the frame hold). On by default; set
 /// `COSMIC_FREEZE_SCANOUT_ON_EXIT=0` to fall back to the plain blank-on-exit.
+/// How long to wait, at session start, to see whether any client is going to
+/// claim a hold on revealing the session (`cosmic_session_hold_v1`).
+///
+/// Zero — the default — means this build has no first-run experience to wait
+/// for, and the handoff behaves exactly as it did before the protocol existed.
+/// An integrator that ships one sets this to roughly how long that app takes to
+/// get from `graphical-session.target` to its first Wayland connection; it does
+/// not need to cover the app's rendering, which the hold itself covers.
+///
+/// Deliberately a duration and not an application name: the compositor has no
+/// business knowing which program is meant to appear, and a client that decides
+/// it has nothing to show simply never claims.
+pub(crate) fn handoff_hold_grace() -> Duration {
+    static GRACE: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *GRACE.get_or_init(|| {
+        Duration::from_millis(
+            std::env::var("COSMIC_HANDOFF_HOLD_GRACE_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+        )
+    })
+}
+
+/// The longest the previous session's frame is kept up, whatever anyone asks.
+///
+/// A first-boot machine sitting on a stale frame because a client claimed a
+/// hold and never released it is far worse than a brief flash of desktop, so
+/// this is a backstop that no client can raise.
+pub(crate) fn handoff_hold_cap() -> Duration {
+    static CAP: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        Duration::from_millis(
+            std::env::var("COSMIC_HANDOFF_HOLD_CAP_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3000),
+        )
+    })
+}
+
 pub(crate) fn freeze_on_exit_enabled() -> bool {
     !matches!(
         std::env::var("COSMIC_FREEZE_SCANOUT_ON_EXIT").as_deref(),

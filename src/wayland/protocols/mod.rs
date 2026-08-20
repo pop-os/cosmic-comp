@@ -27,6 +27,7 @@ pub mod layer_usable_area;
 pub mod output_configuration;
 pub mod output_power;
 pub mod overlap_notify;
+pub mod session_hold;
 pub mod surface_embed;
 pub mod tooltip;
 pub mod toplevel_info;

@@ -38,6 +38,7 @@ use crate::{
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
+            session_hold::SessionHoldState,
             surface_embed::SurfaceEmbedManagerState,
             tooltip::TooltipManagerState,
             toplevel_info::ToplevelInfoState,
@@ -300,6 +301,7 @@ pub struct Common {
     pub layer_auto_hide_state: LayerAutoHideState,
     pub usable_area_state: UsableAreaState,
     pub edge_resize_state: EdgeResizeState,
+    pub session_hold_state: SessionHoldState,
     pub layer_surface_placement_state: LayerSurfacePlacementState,
     pub tooltip_state: TooltipManagerState,
     pub data_device_state: DataDeviceState,
@@ -723,6 +725,7 @@ impl State {
         let layer_auto_hide_state = LayerAutoHideState::new::<Self>(dh);
         let usable_area_state = UsableAreaState::new::<Self>(dh);
         let edge_resize_state = EdgeResizeState::new::<Self>(dh);
+        let session_hold_state = SessionHoldState::new::<Self>(dh);
         let layer_surface_placement_state = LayerSurfacePlacementState::new::<Self>(dh);
         let tooltip_state = TooltipManagerState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
@@ -881,6 +884,7 @@ impl State {
                 layer_auto_hide_state,
                 usable_area_state,
                 edge_resize_state,
+                session_hold_state,
                 layer_surface_placement_state,
                 tooltip_state,
                 data_device_state,
