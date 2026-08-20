@@ -25,6 +25,7 @@ TARGET_BIN="$(DESTDIR)$(bindir)/$(BINARY)"
 
 KEYBINDINGS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults"
 TILING_EXCEPTIONS_CONF="$(DESTDIR)$(sharedir)/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults"
+EI_CLIENTS_EXAMPLE="$(DESTDIR)$(sharedir)/doc/cosmic-comp/ei-clients.toml.example"
 
 all: extract-vendor
 	cargo build $(ARGS)
@@ -52,6 +53,7 @@ install:
 	install -Dm0755 "$(CARGO_TARGET_DIR)/$(TARGET)/$(BINARY)" "$(TARGET_BIN)"
 	install -Dm0644 "data/keybindings.ron" "$(KEYBINDINGS_CONF)"
 	install -Dm0644 "data/tiling-exceptions.ron" "$(TILING_EXCEPTIONS_CONF)"
+	install -Dm0644 "data/ei-clients.toml.example" "$(EI_CLIENTS_EXAMPLE)"
 
 install-bare-session: install
 	install -Dm0644 "data/cosmic.desktop" "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
@@ -61,7 +63,7 @@ install-bare-session: install
 	install -Dm0755 "data/cosmic-service" "$(DESTDIR)/$(bindir)/cosmic-service"
 
 uninstall:
-	rm "$(TARGET_BIN)" "$(KEYBINDINGS_CONF)"
+	rm "$(TARGET_BIN)" "$(KEYBINDINGS_CONF)" "$(EI_CLIENTS_EXAMPLE)"
 
 uninstall-bare-session:
 	rm "$(DESTDIR)$(sharedir)/wayland-sessions/cosmic.desktop"
