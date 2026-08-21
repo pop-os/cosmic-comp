@@ -2908,6 +2908,21 @@ fn postprocess_elements<'a>(
         ],
     ));
 
+    // The frame is rendered at `output`'s scale (the compositor tracks the
+    // destination via `OutputModeSource::Auto`), so the elements' physical size is
+    // `source_mode / source_scale * dest_scale` — only equal to the source's mode
+    // size when both outputs share a scale. Referencing the source mode size instead
+    // scales a mirror between differently-scaled outputs by `dest_scale /
+    // source_scale` and, because the reference then appears to fill the constrain
+    // exactly, aligns it to the top-left rather than centering it.
+    let output_scale = output.current_scale().fractional_scale();
+    let reference = elements[1]
+        .as_ref()
+        .map(|elem| elem.geometry(output_scale.into()))
+        .unwrap_or_else(|| {
+            Rectangle::new(Point::from((0, 0)), postprocess_state.output_config.size)
+        });
+
     constrain_render_elements(
         elements.into_iter().flatten(),
         (0, 0),
@@ -2916,12 +2931,12 @@ fn postprocess_elements<'a>(
                 .geometry()
                 .size
                 .as_logical()
-                .to_physical_precise_round(output.current_scale().fractional_scale()),
+                .to_physical_precise_round(output_scale),
         ),
-        Rectangle::new(Point::from((0, 0)), postprocess_state.output_config.size),
+        reference,
         ConstrainScaleBehavior::Fit,
         ConstrainAlign::CENTER,
-        postprocess_state.output_config.fractional_scale,
+        output_scale,
     )
     .map(CosmicElement::<GlMultiRenderer>::Postprocess)
     .collect::<Vec<_>>()
