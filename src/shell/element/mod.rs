@@ -109,6 +109,10 @@ pub struct CosmicMapped {
     pub(super) resize_state: Arc<Mutex<Option<ResizeState>>>,
     pub last_geometry: Arc<Mutex<Option<Rectangle<i32, Local>>>>,
     pub moved_since_mapped: Arc<AtomicBool>,
+    /// The user dropped this window (partly) outside the output's non-exclusive
+    /// zone. Layout passes that re-contain windows must leave it where it is.
+    /// Cleared by any derived placement (see `ClampPolicy::Zone`).
+    pub user_positioned: Arc<AtomicBool>,
     /// Set once the client has been sent an xdg `close` request but before its
     /// surface is actually destroyed. Closing a window is asynchronous: during
     /// that gap the window is still `alive()` and mapped, so without this flag it
@@ -133,6 +137,7 @@ impl fmt::Debug for CosmicMapped {
             .field("resize_state", &self.resize_state)
             .field("last_geometry", &self.last_geometry)
             .field("moved_since_mapped", &self.moved_since_mapped)
+            .field("user_positioned", &self.user_positioned)
             .field("closing", &self.closing)
             .field("floating_tiled", &self.floating_tiled)
             .finish()
@@ -1138,6 +1143,7 @@ impl From<CosmicWindow> for CosmicMapped {
             resize_state: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
+            user_positioned: Arc::new(AtomicBool::new(false)),
             closing: Arc::new(AtomicBool::new(false)),
             floating_tiled: Arc::new(Mutex::new(None)),
             previous_layer: Arc::new(Mutex::new(None)),
@@ -1156,6 +1162,7 @@ impl From<CosmicStack> for CosmicMapped {
             resize_state: Arc::new(Mutex::new(None)),
             last_geometry: Arc::new(Mutex::new(None)),
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
+            user_positioned: Arc::new(AtomicBool::new(false)),
             closing: Arc::new(AtomicBool::new(false)),
             floating_tiled: Arc::new(Mutex::new(None)),
             previous_layer: Arc::new(Mutex::new(None)),

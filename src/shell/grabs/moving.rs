@@ -1145,6 +1145,18 @@ impl Drop for MoveGrab {
                         .unwrap_or(window_location);
                     shell.remap_x11_transient_children(remap_pos, &tc);
 
+                    // Children share the parent's off-zone exemption — otherwise
+                    // the next `recalculate()` pulls only the child back inside
+                    // the zone, detaching it from an overhanging parent.
+                    if let Some((window, _)) = drop_result.as_ref() {
+                        let user_positioned = window.user_positioned.load(Ordering::SeqCst);
+                        for (child, _) in &tc {
+                            child
+                                .user_positioned
+                                .store(user_positioned, Ordering::SeqCst);
+                        }
+                    }
+
                     // If the window was unmaximized during the drag, send a fresh
                     // configure now that it is stably mapped at its drop location.
                     // The unmaximize configure was emitted earlier while the element

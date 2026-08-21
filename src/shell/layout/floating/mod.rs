@@ -66,6 +66,44 @@ use crate::{
 mod grabs;
 pub use self::grabs::*;
 
+/// How much of a window must stay inside the non-exclusive zone after the user
+/// drops it, so there is always titlebar left to grab it back with.
+const MIN_VISIBLE_ON_DROP: i32 = 64;
+
+/// Bound a user-chosen drop position, leaving `MIN_VISIBLE_ON_DROP` of the
+/// window inside `zone` on each axis. The top edge is held at the zone top so
+/// the titlebar never slides behind a top layer-shell panel.
+fn grabbable_position(
+    position: Point<i32, Local>,
+    win_size: Size<i32, Local>,
+    zone: Rectangle<i32, Local>,
+) -> Point<i32, Local> {
+    // `.min` against both keeps lo <= hi, so `clamp` cannot panic.
+    let margin_w = MIN_VISIBLE_ON_DROP.min(win_size.w).min(zone.size.w);
+    let margin_h = MIN_VISIBLE_ON_DROP.min(win_size.h).min(zone.size.h);
+    Point::from((
+        position.x.clamp(
+            zone.loc.x + margin_w - win_size.w,
+            zone.loc.x + zone.size.w - margin_w,
+        ),
+        position
+            .y
+            .clamp(zone.loc.y, zone.loc.y + (zone.size.h - margin_h).max(0)),
+    ))
+}
+
+/// How `map_internal` bounds an incoming position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClampPolicy {
+    /// Force the whole window inside the non-exclusive zone. Used by every
+    /// *derived* placement: new windows, `last_geometry` restore, spawn
+    /// cascade, output hotplug, workspace merge, off-output rescue.
+    Zone,
+    /// Honour the user's chosen position, guaranteeing only that
+    /// `MIN_VISIBLE_ON_DROP` stays reachable. Move-grab drop only.
+    Grabbable,
+}
+
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
     pub(crate) space: Space<CosmicMapped>,
@@ -1039,6 +1077,19 @@ impl FloatingLayout {
         size: Option<Size<i32, Logical>>,
         prev: Option<Rectangle<i32, Local>>,
     ) {
+        let _ = self.map_internal_with_clamp(mapped, position, size, prev, ClampPolicy::Zone);
+    }
+
+    /// Like [`Self::map_internal`], but lets the caller pick how the position is
+    /// bounded, and returns where the window actually landed.
+    pub(crate) fn map_internal_with_clamp(
+        &mut self,
+        mapped: CosmicMapped,
+        position: Option<Point<i32, Local>>,
+        size: Option<Size<i32, Logical>>,
+        prev: Option<Rectangle<i32, Local>>,
+        clamp: ClampPolicy,
+    ) -> Point<i32, Local> {
         let already_mapped = self.space.element_geometry(&mapped).map(RectExt::as_local);
         // (Re)mapping means this window is an active layout participant again, so it
         // is no longer "closing" — clear any stale flag left by an ignored close.
@@ -1100,13 +1151,9 @@ impl FloatingLayout {
             win_geo.size.h = std::cmp::min(win_geo.size.h, output_geometry.size.h);
         }
 
+        // No clamping here — every branch feeds the single policy-aware clamp
+        // below, which subsumes the old top-left `.max` for `ClampPolicy::Zone`.
         let position = position
-            .map(|pos| {
-                // Clamp the position so the window stays within the non-exclusive zone.
-                // This prevents windows from being dropped behind layer-shell panels.
-                let geo = output_geometry.as_local();
-                Point::from((pos.x.max(geo.loc.x), pos.y.max(geo.loc.y)))
-            })
             .or_else(|| last_geometry.map(|g| g.loc))
             .unwrap_or_else(|| {
                 // cleanup moved windows
@@ -1258,21 +1305,39 @@ impl FloatingLayout {
         }
         let zone = output_geometry.as_local();
 
-        // Keep newly-placed windows fully on-screen. The branches above clamp only the
-        // top-left edge (`.max`), and the `last_geometry` restore is unclamped — so a
-        // position/size carried over from a wider or differently-scaled output can push
-        // the window past the right/bottom edge. Clamp against the non-exclusive zone.
-        let clamped_position: Point<i32, Local> = Point::from((
-            position.x.clamp(
-                zone.loc.x,
-                zone.loc.x + (zone.size.w - win_geo.size.w).max(0),
-            ),
-            position.y.clamp(
-                zone.loc.y,
-                zone.loc.y + (zone.size.h - win_geo.size.h).max(0),
-            ),
-        ));
-        let position = clamped_position;
+        let position: Point<i32, Local> = match clamp {
+            // Keep derived placement fully on-screen: the branches above are
+            // unclamped, so a position/size carried over from a wider or
+            // differently-scaled output can push the window past the edge.
+            ClampPolicy::Zone => Point::from((
+                position.x.clamp(
+                    zone.loc.x,
+                    zone.loc.x + (zone.size.w - win_geo.size.w).max(0),
+                ),
+                position.y.clamp(
+                    zone.loc.y,
+                    zone.loc.y + (zone.size.h - win_geo.size.h).max(0),
+                ),
+            )),
+            // A user drop may hang off the left/right/bottom edge. Two
+            // invariants remain: `MIN_VISIBLE_ON_DROP` stays inside the zone on
+            // each axis, and the top edge never rises above it — that would
+            // park the titlebar behind a top layer-shell panel.
+            ClampPolicy::Grabbable => grabbable_position(position, win_geo.size, zone),
+        };
+
+        // Remember an explicit off-zone drop so the layout passes that
+        // re-contain windows skip it. `Zone` always clears the flag, so derived
+        // placement re-establishes normal containment.
+        let user_positioned = clamp == ClampPolicy::Grabbable
+            && !zone.contains_rect(Rectangle::new(position, win_geo.size));
+        mapped
+            .user_positioned
+            .store(user_positioned, Ordering::SeqCst);
+        if user_positioned {
+            // Stale panel-slide bookkeeping would fight the new position.
+            self.pre_slide_positions.remove(&mapped);
+        }
 
         mapped.set_fills_output_zone(
             position.x == zone.loc.x
@@ -1304,6 +1369,8 @@ impl FloatingLayout {
         }
         self.space.map_element(mapped, position.as_logical(), false);
         self.space.refresh();
+
+        position
     }
 
     pub fn remap_minimized(
@@ -1431,7 +1498,16 @@ impl FloatingLayout {
             // the stale last_geometry saved during unmap (which may be larger
             // if the window was resized during the grab).
             let size = Some(geo.size.as_logical());
-            self.map_internal(window.clone(), Some(position), size, Some(geo));
+            // A drop is an explicit user position — keep it, off-screen and all.
+            // Return where it actually landed: the caller feeds this to X11
+            // transient-child remapping and post-drop pointer focus.
+            let position = self.map_internal_with_clamp(
+                window.clone(),
+                Some(position),
+                size,
+                Some(geo),
+                ClampPolicy::Grabbable,
+            );
             (window, position)
         }
     }
@@ -2004,7 +2080,15 @@ impl FloatingLayout {
 
         geo.size.w = min_width.max(geo.size.w).min(max_width);
         geo.size.h = min_height.max(geo.size.h).min(max_height);
-        geo = geo.intersection(bounding_box).unwrap();
+        // Bound the position only — not `intersection`, which would either
+        // truncate an (intentionally) overhanging window below its just-enforced
+        // min size, or panic once it no longer overlaps the output at all.
+        geo.loc = grabbable_position(
+            geo.loc.as_local(),
+            geo.size.as_local(),
+            bounding_box.as_local(),
+        )
+        .as_logical();
 
         *mapped.resize_state.lock().unwrap() = Some(ResizeState::Resizing(ResizeData {
             edges: edge,
@@ -2371,6 +2455,9 @@ impl FloatingLayout {
             } else {
                 prev.map(|mut rect| {
                     if let Some(old_size) = old_output_size {
+                        // Resolution/scale/orientation changed — the user's
+                        // off-screen offset is meaningless in the new geometry.
+                        mapped.user_positioned.store(false, Ordering::SeqCst);
                         rect = Rectangle::new(
                             Point::new(
                                 (rect.loc.x as f64 + rect.size.w as f64 / 2.) / old_size.w as f64
@@ -2613,6 +2700,17 @@ impl FloatingLayout {
         base: Rectangle<i32, Local>,
         zone: Rectangle<i32, Local>,
     ) -> Rectangle<i32, Local> {
+        // A window the user dropped outside the zone keeps its overhang, but
+        // the drop-time margin/top-edge invariant is re-asserted against the
+        // CURRENT zone — not skipped outright. Without this, a panel/dock that
+        // grows or slides in after the drop (`recalculate()` runs on every
+        // layer-shell arrange, panel slide/resize, theme reload) could bury
+        // the window's only remaining reachable strip behind it for good.
+        if mapped.user_positioned.load(Ordering::SeqCst) {
+            self.pre_slide_positions.remove(mapped);
+            return Rectangle::new(grabbable_position(base.loc, base.size, zone), base.size);
+        }
+
         let mut result = base;
         let zone_right = zone.loc.x + zone.size.w;
         let zone_bottom = zone.loc.y + zone.size.h;
@@ -3777,5 +3875,106 @@ impl FloatingLayout {
     fn gaps(&self) -> (i32, i32) {
         let g = self.theme.gaps;
         (g.0 as i32, g.1 as i32)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 1920x1080 zone inset by a 48px top panel, matching a normal desktop.
+    fn zone() -> Rectangle<i32, Local> {
+        Rectangle::new(at(0, 48), size(1920, 1032))
+    }
+
+    fn size(w: i32, h: i32) -> Size<i32, Local> {
+        Size::<i32, Local>::from((w, h))
+    }
+
+    fn at(x: i32, y: i32) -> Point<i32, Local> {
+        Point::<i32, Local>::from((x, y))
+    }
+
+    fn win() -> Size<i32, Local> {
+        size(800, 600)
+    }
+
+    #[test]
+    fn a_position_inside_the_zone_is_untouched() {
+        assert_eq!(
+            grabbable_position(at(300, 200), win(), zone()),
+            at(300, 200)
+        );
+    }
+
+    /// The whole point of the change: overhang past the right/bottom edge sticks.
+    #[test]
+    fn a_window_may_hang_off_the_right_and_bottom_edges() {
+        assert_eq!(
+            grabbable_position(at(1500, 900), win(), zone()),
+            at(1500, 900)
+        );
+    }
+
+    #[test]
+    fn the_margin_is_the_only_remaining_bound() {
+        let far = grabbable_position(at(9999, 9999), win(), zone());
+        assert_eq!(far.x, 1920 - MIN_VISIBLE_ON_DROP);
+        assert_eq!(far.y, 48 + 1032 - MIN_VISIBLE_ON_DROP);
+
+        let far_left = grabbable_position(at(-9999, 0), win(), zone());
+        assert_eq!(far_left.x, MIN_VISIBLE_ON_DROP - 800);
+    }
+
+    /// The titlebar must never end up behind a top layer-shell panel.
+    #[test]
+    fn the_top_edge_never_rises_above_the_zone() {
+        assert_eq!(grabbable_position(at(300, -500), win(), zone()).y, 48);
+        assert_eq!(grabbable_position(at(300, 47), win(), zone()).y, 48);
+    }
+
+    /// Windows larger than the zone, and degenerate zones, must not trip the
+    /// `clamp` lo > hi panic — the margin is capped by both window and zone.
+    #[test]
+    fn oversized_windows_and_tiny_zones_do_not_panic() {
+        let p = grabbable_position(at(-2000, -2000), size(4000, 3000), zone());
+        assert_eq!(p.y, 48);
+        assert!(p.x >= MIN_VISIBLE_ON_DROP - 4000);
+
+        let tiny = Rectangle::new(at(0, 0), size(10, 10));
+        let _ = grabbable_position(at(999, 999), win(), tiny);
+        let _ = grabbable_position(at(-999, -999), size(1, 1), tiny);
+    }
+
+    /// `constrain_to_zone` re-applies this bound (rather than skipping
+    /// containment outright) so a panel that grows after the drop can't bury
+    /// the window's last reachable margin — regression from an earlier
+    /// version of this change that returned `base` unconditionally.
+    #[test]
+    fn a_shrinking_zone_re_pins_an_already_dropped_window() {
+        // Dropped with the top panel hidden (zone starts at y=0).
+        let wide_zone = Rectangle::new(at(0, 0), size(1920, 1080));
+        let dropped = grabbable_position(at(1856, 0), win(), wide_zone);
+        assert_eq!(dropped.y, 0);
+
+        // Panel reappears: the zone's top moves down to 48. Re-running the
+        // same bound against the new zone must lift the window back to it,
+        // not leave it parked at the stale y=0 behind the panel.
+        let repinned = grabbable_position(dropped, win(), zone());
+        assert_eq!(repinned.y, 48);
+    }
+
+    /// `FloatingLayout::resize` used to clamp with `Rectangle::intersection(..)
+    /// .unwrap()`, which panics once the rect no longer overlaps the output at
+    /// all, or silently shrinks it below `min_size`. `grabbable_position`
+    /// bounds only `loc`, so the size a caller passed in survives untouched
+    /// and there is nothing here that can fail to overlap.
+    #[test]
+    fn resize_style_clamping_never_panics_when_fully_off_output() {
+        let output = Rectangle::new(at(0, 0), size(1920, 1080));
+        // Old code: `Rectangle::intersection(geo, output)` is `None` here,
+        // and `.unwrap()` on that panics.
+        let far_off = grabbable_position(at(5000, 400), win(), output);
+        assert!(output.overlaps(Rectangle::new(far_off, win())));
     }
 }
