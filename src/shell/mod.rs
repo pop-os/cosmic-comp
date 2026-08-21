@@ -9868,15 +9868,22 @@ impl Shell {
         });
 
         let map = smithay::desktop::layer_map_for_output(output);
+        // Mirroring drops the output from `sets` while its surface thread may still be
+        // mid-redraw with `mirroring` unset, so the set can be gone here too.
+        let namespace = self
+            .workspaces
+            .sets
+            .get(output)
+            .or(self.workspaces.backup_set.as_ref())
+            .map(|set| set.active);
         for layer_surface in map.layers() {
-            let namespace = self.workspaces.active_num(output).1;
             layer_surface.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
                 |surface, _| {
                     surface_presentation_feedback_flags_from_states(
                         surface,
-                        Some(namespace),
+                        namespace,
                         render_element_states,
                     )
                 },
