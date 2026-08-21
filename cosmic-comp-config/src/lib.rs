@@ -101,6 +101,8 @@ pub struct CosmicCompConfig {
     pub appearance_settings: AppearanceConfig,
     /// Hide the cursor after this many seconds of pointer inactivity (None disables)
     pub cursor_hide_timeout: Option<u32>,
+    /// Briefly magnify the cursor when the pointer is shaken, to help locate it
+    pub cursor_shake_to_find: bool,
     pub activation_policy: ActivationPolicy,
 }
 
@@ -139,6 +141,7 @@ impl Default for CosmicCompConfig {
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
             cursor_hide_timeout: None,
+            cursor_shake_to_find: true,
             activation_policy: ActivationPolicy::default(),
         }
     }

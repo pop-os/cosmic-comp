@@ -510,22 +510,35 @@ pub fn cursor_elements<'a, 'frame, R>(
         };
         let location = pointer.current_location() - output.current_location().to_f64();
 
+        // Shake-to-find magnification, applied around the pointer tip.
+        let cursor_magnification = seat
+            .user_data()
+            .get::<cursor::CursorState>()
+            .map_or(1.0, |s| {
+                s.lock().unwrap().animated_magnification(Instant::now())
+            });
+        let cursor_center = location.to_physical(scale).to_i32_round();
+
         if mode != CursorMode::None {
             cursor::draw_cursor(
                 renderer,
                 seat,
                 location,
                 scale.into(),
-                zoom_scale,
+                zoom_scale * cursor_magnification as f64,
                 now,
                 blur_strength,
                 mode != CursorMode::NotDefault,
                 &mut |elem, hotspot| {
                     push(CosmicElement::Cursor(RescaleRenderElement::from_element(
-                        RelocateRenderElement::from_element(
-                            elem,
-                            Point::from((-hotspot.x, -hotspot.y)),
-                            Relocate::Relative,
+                        RescaleRenderElement::from_element(
+                            RelocateRenderElement::from_element(
+                                elem,
+                                Point::from((-hotspot.x, -hotspot.y)),
+                                Relocate::Relative,
+                            ),
+                            cursor_center,
+                            cursor_magnification as f64,
                         ),
                         focal_point
                             .as_logical()
