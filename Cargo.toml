@@ -97,6 +97,7 @@ features = [
     "backend_drm",
     "backend_gbm",
     "backend_egl",
+    "backend_libei",
     "backend_libinput",
     "backend_session_libseat",
     "backend_udev",
@@ -144,4 +145,4 @@ lto = "fat"
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "cdc03f7" }
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "5fb12b8" }

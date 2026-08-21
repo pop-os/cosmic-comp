@@ -1275,7 +1275,7 @@ checksum = "80bc8c5c6c2941f70a55c15f8d9f00f9710ebda3ffda98075f996a0e6c92756f"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
- "drm-ffi 0.9.0",
+ "drm-ffi 0.9.1",
  "drm-fourcc",
  "libc",
  "rustix 0.38.44",
@@ -1293,12 +1293,12 @@ dependencies = [
 
 [[package]]
 name = "drm-ffi"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8e41459d99a9b529845f6d2c909eb9adf3b6d2f82635ae40be8de0601726e8b"
+checksum = "51a91c9b32ac4e8105dec255e849e0d66e27d7c34d184364fb93e469db08f690"
 dependencies = [
- "drm-sys 0.8.0",
- "rustix 0.38.44",
+ "drm-sys 0.8.1",
+ "rustix 1.1.4",
 ]
 
 [[package]]
@@ -1319,12 +1319,12 @@ dependencies = [
 
 [[package]]
 name = "drm-sys"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bafb66c8dbc944d69e15cfcc661df7e703beffbaec8bd63151368b06c5f9858c"
+checksum = "ecc8e1361066d91f5ffccff060a3c3be9c3ecde15be2959c1937595f7a82a9f8"
 dependencies = [
  "libc",
- "linux-raw-sys 0.6.5",
+ "linux-raw-sys 0.9.4",
 ]
 
 [[package]]
@@ -1502,7 +1502,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2689,7 +2689,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3059,6 +3059,12 @@ name = "linux-raw-sys"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a385b1be4e5c3e362ad2ffa73c392e53f031eaa5b7d648e64cd87f27f6063d7"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd945864f07fe9f5371a27ad7b52a172b4b499999f1d97574c9fa68373937e12"
 
 [[package]]
 name = "linux-raw-sys"
@@ -4348,9 +4354,9 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "reis"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81f3fedd2777cde52c1be5e572efbec485eac7b801c47820eda388d4f13b9c4b"
+checksum = "4b967ec6489a42067a20724f11987bb96178ea796873cbe1afd25fb93ee6f85f"
 dependencies = [
  "calloop",
  "enumflags2",
@@ -4518,7 +4524,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4813,7 +4819,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 [[package]]
 name = "smithay"
 version = "0.7.0"
-source = "git+https://github.com/smithay/smithay.git?rev=cdc03f7#cdc03f73ce57d3352c0c57a69971e3e16544051c"
+source = "git+https://github.com/smithay/smithay.git?rev=5fb12b8#5fb12b87407b3680135c45d94214c5f1b1d0fbea"
 dependencies = [
  "aliasable",
  "appendlist",
@@ -4824,8 +4830,9 @@ dependencies = [
  "cursor-icon",
  "downcast-rs",
  "drm 0.14.1",
- "drm-ffi 0.9.0",
+ "drm-ffi 0.9.1",
  "drm-fourcc",
+ "drm-sys 0.8.1",
  "encoding_rs",
  "errno",
  "gbm",
@@ -5107,7 +5114,7 @@ dependencies = [
  "getrandom 0.4.1",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5406,7 +5413,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5f7c95348f20c1c913d72157b3c6dee6ea3e30b3d19502c5a7f6d3f160dacbf"
 dependencies = [
  "cc",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]

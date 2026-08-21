@@ -211,7 +211,7 @@ fn init_libinput(
             state.backend.kms().input_devices.remove(&*device.name());
         }
 
-        state.process_input_event(event);
+        state.process_input_event(event, crate::input::InputBackendId::Normal);
 
         for output in state.common.shell.read().outputs() {
             state.backend.kms().schedule_render(output);

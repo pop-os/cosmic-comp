@@ -115,7 +115,7 @@ impl State {
             &self.common.display_handle,
             None,
             std::iter::empty::<(OsString, OsString)>(),
-            std::iter::empty::<OsString>(),
+            ["-enable-ei-portal"],
             true,
             Stdio::null(),
             Stdio::null(),
@@ -394,6 +394,7 @@ impl Common {
         sym: Keysym,
         code: Keycode,
         state: KeyState,
+        modifiers: ModifiersState,
         serial: Serial,
         time: u32,
     ) {
@@ -418,7 +419,6 @@ impl Common {
             .last_active()
             .get_keyboard()
             .unwrap();
-        let modifiers = keyboard.modifier_state();
         let is_modifier = sym.is_modifier_key();
 
         let xstate = self.xwayland_state.as_mut().unwrap();
