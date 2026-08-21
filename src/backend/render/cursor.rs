@@ -497,6 +497,8 @@ const SHAKE_SAME_SIGN_TOLERANCE: f64 = 1.0;
 const SHAKE_HOLD: Duration = Duration::from_millis(2000);
 /// Extra magnification added by each shake, growing from the normal cursor size.
 const OVER_MAGNIFICATION: f32 = 1.0;
+/// Upper bound on the nominal size (in px) a cursor frame is rasterized at.
+const MAX_RASTER_SIZE: u32 = 512;
 /// Duration of the grow/shrink animation.
 const MAGNIFICATION_ANIM: Duration = Duration::from_millis(200);
 
@@ -682,6 +684,21 @@ impl Default for CursorStateInner {
     }
 }
 
+/// Pick the size a cursor frame is rasterized at, given the size the output wants
+/// (`needed`) and the size it would want unmagnified (`base`).
+///
+/// Rasterizations are restricted to `base * 2^n`, rounded up, and clamped to
+/// [`MAX_RASTER_SIZE`].
+fn raster_size(needed: u32, base: u32) -> u32 {
+    let base = base.max(1);
+    let cap = MAX_RASTER_SIZE.max(base);
+    let mut rung = base;
+    while rung < needed && rung.saturating_mul(2) <= cap {
+        rung *= 2;
+    }
+    rung
+}
+
 #[profiling::function]
 pub fn draw_cursor<R>(
     renderer: &mut R,
@@ -717,8 +734,10 @@ pub fn draw_cursor<R>(
             return;
         }
 
-        let integer_scale = (scale.x.max(scale.y) * buffer_scale).ceil() as u32;
-        let size_px = state.size() * integer_scale;
+        let output_scale = scale.x.max(scale.y);
+        let integer_scale = (output_scale * buffer_scale).ceil() as u32;
+        let unmagnified_px = state.size() * (output_scale.ceil() as u32);
+        let size_px = raster_size(state.size() * integer_scale, unmagnified_px);
 
         // Pick the frame to display without rasterizing, so a cache hit avoids
         // any SVG rendering. The `&Cursor` borrow is scoped to this block.
