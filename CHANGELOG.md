@@ -1,3 +1,16 @@
+# [1.40.0](https://github.com/playtron-os/cosmic-comp/compare/v1.39.2...v1.40.0) (2026-08-21)
+
+
+### Bug Fixes
+
+* support overriding app icon with X-Playtron-ForcedIcon ([a1fb7e2](https://github.com/playtron-os/cosmic-comp/commit/a1fb7e21fb493fae230c4c32a2dc6d55532489d4))
+
+
+### Features
+
+* allow user to drag windows offscreen ([d1d094b](https://github.com/playtron-os/cosmic-comp/commit/d1d094b31682cbd44a6f0643fff94db27fa3b148))
+* let a client hold back the reveal of a new session ([8ab5dc9](https://github.com/playtron-os/cosmic-comp/commit/8ab5dc9d01f8bcba0d4c3561b1fcb3c019f0748c))
+
 ## [1.39.2](https://github.com/playtron-os/cosmic-comp/compare/v1.39.1...v1.39.2) (2026-08-19)
 
 
