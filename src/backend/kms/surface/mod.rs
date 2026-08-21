@@ -947,7 +947,7 @@ impl SurfaceThreadState {
         };
 
         let is_fullscreen_skip_other = *FULLSCREEN_SKIP_OTHER_SURFACE
-            && self.timings.vrr()
+            && (self.timings.vrr() || *FULLSCREEN_SKIP_OTHER_SURFACE_ALWAYS)
             && self.output.is_foreground_fullscreen_occupied().is_some()
             && !force
             && !is_fullscreen;
