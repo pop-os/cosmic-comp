@@ -70,6 +70,16 @@ impl GrabStartData {
         }
     }
 
+    /// Where the grab is being driven from right now: the pointer's live position for a
+    /// pointer grab, the touch-down point for a touch grab. Reading the pointer for a
+    /// touch grab yields wherever the cursor was last left, not the finger.
+    pub fn current_location(&self, seat: &Seat<State>) -> Point<f64, Logical> {
+        match self {
+            Self::Touch(touch) => touch.location,
+            Self::Pointer(_) => seat.get_pointer().unwrap().current_location(),
+        }
+    }
+
     pub fn distance(&self, cursor_location: Point<f64, Logical>) -> f64 {
         let old = self.location();
         let new = cursor_location;

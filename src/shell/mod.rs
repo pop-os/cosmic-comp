@@ -8302,9 +8302,9 @@ impl Shell {
         let mut start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
 
-        if client_initiated
-            && start_data.distance(seat.get_pointer().unwrap().current_location()) < 1.
-        {
+        // "Has the input moved yet?" — ask the device that started the grab. The pointer
+        // sits wherever it was last left, which for a touch grab is the wrong device.
+        if client_initiated && start_data.distance(start_data.current_location(seat)) < 1. {
             return Some((
                 MoveGrab::delayed(
                     start_data,
@@ -8389,8 +8389,10 @@ impl Shell {
         } else {
             0
         };
-        let pointer = seat.get_pointer().unwrap();
-        let pos = pointer.current_location().as_global();
+        // Must come from the grab's own start point: `MoveGrab` derives window_offset
+        // against `start_data.location()`, so any other source bakes a permanent drift
+        // into the drag — for a touch grab, the whole distance to the stale cursor.
+        let pos = start_data.location().as_global();
 
         let cursor_output = if let Some(output) = self
             .outputs()
@@ -9245,9 +9247,10 @@ impl Shell {
             let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
             let (node, left_up_idx, orientation) =
                 ws.tiling_layer.resize_request(node_id, edges)?;
+            let grab_location = start_data.current_location(seat).as_global();
             ResizeForkGrab::new(
                 start_data,
-                seat.get_pointer().unwrap().current_location().as_global(),
+                grab_location,
                 node,
                 left_up_idx,
                 orientation,
