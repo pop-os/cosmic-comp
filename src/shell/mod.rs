@@ -1614,6 +1614,29 @@ impl Common {
             a11y_keyboard_monitor.refresh();
         }
         self.image_copy_capture_state.cleanup();
+        self.cleanup_cursor_images();
+    }
+
+    /// Release the enlarged cursor frames a finished shake or zoom left behind.
+    fn cleanup_cursor_images(&mut self) {
+        let shell = self.shell.read();
+        let zoomed = shell.zoom_state.as_ref().is_some_and(|zoom_state| {
+            shell
+                .outputs()
+                .any(|output| zoom_state.animating_level(output) > 1.0)
+        });
+        let now = Instant::now();
+        for seat in shell.seats.iter() {
+            if let Some(cursor_state) = seat
+                .user_data()
+                .get::<crate::backend::render::cursor::CursorState>()
+            {
+                cursor_state
+                    .lock()
+                    .unwrap()
+                    .drop_magnified_frames(now, zoomed);
+            }
+        }
     }
 
     pub fn refresh_idle_inhibit(&mut self) {
