@@ -460,9 +460,7 @@ pub struct CursorStateInner {
 
     cursors: HashMap<CursorIcon, Cursor>,
     current_image: Option<Image>,
-    /// Rasterized cursor frames keyed by `(shape, pixel size, frame index)` so
-    /// each SVG frame is rasterized (and uploaded) at most once per size.
-    image_cache: Vec<((CursorIcon, u32, usize), Image, MemoryRenderBuffer)>,
+    image_cache: Vec<CachedFrame>,
 
     hidden: bool,
     idle_timer: Option<RegistrationToken>,
@@ -476,6 +474,15 @@ pub struct CursorStateInner {
     magnification: f32,
     anim_from: f32,
     anim_start: Option<Instant>,
+    rest_started: Option<Instant>,
+}
+
+/// A rasterized cursor frame, keyed by `(shape, pixel size, frame index)`.
+struct CachedFrame {
+    key: (CursorIcon, u32, usize),
+    image: Image,
+    buffer: MemoryRenderBuffer,
+    unmagnified: bool,
 }
 
 /// One sampled pointer position on the recent motion path.
@@ -484,6 +491,9 @@ struct PathSample {
     position: Point<f64, Logical>,
     time: Instant,
 }
+
+/// How long everything must stay unmagnified before the enlarged frames go.
+const MAGNIFIED_FRAME_GRACE: Duration = Duration::from_secs(10);
 
 /// How far back the motion path is considered when looking for a shake.
 const SHAKE_INTERVAL: Duration = Duration::from_millis(1000);
@@ -527,6 +537,21 @@ impl CursorStateInner {
 
     pub fn size(&self) -> u32 {
         self.cursor_size
+    }
+
+    /// Drop the rasterizations only a magnified cursor needed, once nothing has
+    /// magnified it for [`MAGNIFIED_FRAME_GRACE`].
+    pub fn drop_magnified_frames(&mut self, now: Instant, zoomed: bool) {
+        if zoomed || self.is_magnifying() {
+            self.rest_started = None;
+            return;
+        }
+        let rest_started = *self.rest_started.get_or_insert(now);
+        if now.duration_since(rest_started) < MAGNIFIED_FRAME_GRACE {
+            return;
+        }
+
+        self.image_cache.retain(|frame| frame.unmagnified);
     }
 
     /// Feed one relative-motion event into the shake detector.
@@ -680,6 +705,7 @@ impl Default for CursorStateInner {
             magnification: 1.0,
             anim_from: 1.0,
             anim_start: None,
+            rest_started: None,
         }
     }
 }
@@ -748,34 +774,36 @@ pub fn draw_cursor<R>(
         let key = (current_cursor, size_px, frame_idx);
 
         // Rasterize and upload this (shape, size, frame) only if not cached.
-        if !state
-            .image_cache
-            .iter()
-            .any(|(cached, _, _)| *cached == key)
-        {
-            let frame = {
-                let cursor = state.get_named_cursor(current_cursor);
-                cursor.render_frame(size_px, frame_idx)
-            };
-            let actual_scale = (frame.size / state.size()).max(1);
-            let buffer = MemoryRenderBuffer::from_slice(
-                &frame.pixels_rgba,
-                Fourcc::Argb8888,
-                (frame.width as i32, frame.height as i32),
-                actual_scale as i32,
-                Transform::Normal,
-                None,
-            );
-            state.image_cache.push((key, frame, buffer));
-        }
+        let index = match state.image_cache.iter().position(|frame| frame.key == key) {
+            Some(index) => index,
+            None => {
+                let image = {
+                    let cursor = state.get_named_cursor(current_cursor);
+                    cursor.render_frame(size_px, frame_idx)
+                };
+                let actual_scale = (image.size / state.size()).max(1);
+                let buffer = MemoryRenderBuffer::from_slice(
+                    &image.pixels_rgba,
+                    Fourcc::Argb8888,
+                    (image.width as i32, image.height as i32),
+                    actual_scale as i32,
+                    Transform::Normal,
+                    None,
+                );
+                state.image_cache.push(CachedFrame {
+                    key,
+                    image,
+                    buffer,
+                    unmagnified: size_px == unmagnified_px,
+                });
+                state.image_cache.len() - 1
+            }
+        };
 
         let (frame, pointer_image) = {
-            let (_, frame, buffer) = state
-                .image_cache
-                .iter()
-                .find(|(cached, _, _)| *cached == key)
-                .unwrap();
-            (frame.clone(), buffer.clone())
+            let entry = &mut state.image_cache[index];
+            entry.unmagnified |= size_px == unmagnified_px;
+            (entry.image.clone(), entry.buffer.clone())
         };
         let actual_scale = (frame.size / state.size()).max(1);
 
