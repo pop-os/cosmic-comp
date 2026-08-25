@@ -77,7 +77,7 @@ impl WlrLayerShellHandler for State {
 
             shell.workspaces.recalculate();
 
-            self.backend.schedule_render(&output);
+            self.backend.schedule_render(&output, false);
         }
     }
 }

@@ -906,7 +906,7 @@ impl XwmHandler for State {
         }
 
         for output in outputs.into_iter() {
-            self.backend.schedule_render(&output);
+            self.backend.schedule_render(&output, false);
         }
     }
 

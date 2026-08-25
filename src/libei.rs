@@ -142,7 +142,7 @@ pub fn setup_ei(
                                 data.process_input_event(other, backend_id);
                                 if matches!(data.backend, BackendData::Kms(_)) {
                                     for output in data.common.shell.read().outputs() {
-                                        data.backend.kms().schedule_render(output);
+                                        data.backend.kms().schedule_render(output, false);
                                     }
                                 }
                             }

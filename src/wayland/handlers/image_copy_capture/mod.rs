@@ -295,7 +295,7 @@ impl ImageCopyCaptureHandler for State {
                 };
 
                 output.add_frame(session.clone(), frame);
-                self.backend.schedule_render(&output);
+                self.backend.schedule_render(&output, false);
             }
             ImageCaptureSourceKind::Workspace(handle) => {
                 render_workspace_to_buffer(self, session, frame, handle)
