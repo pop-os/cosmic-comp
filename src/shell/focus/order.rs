@@ -17,11 +17,7 @@ use crate::{
         focus::target::KeyboardFocusTarget,
         layout::{floating::FloatingLayout, tiling::ANIMATION_DURATION},
     },
-    utils::{
-        geometry::*,
-        prelude::OutputExt,
-        quirks::{WORKSPACE_OVERVIEW_NAMESPACE, workspace_overview_is_open},
-    },
+    utils::{geometry::*, prelude::OutputExt, quirks::workspace_overview_is_open},
     wayland::protocols::workspace::WorkspaceHandle,
 };
 
@@ -218,7 +214,7 @@ fn render_input_order_internal<R: 'static>(
         }
     }
 
-    if element_filter != ElementFilter::LayerShellOnly {
+    if !element_filter.layer_shell_only {
         // overlay redirect windows
         // they need to be over sticky windows, because they could be popups of sticky windows,
         // and we can't differenciate that.
@@ -242,7 +238,7 @@ fn render_input_order_internal<R: 'static>(
         callback(Stage::StickyPopups(&set.sticky_layer))?;
     }
 
-    if element_filter != ElementFilter::LayerShellOnly {
+    if !element_filter.layer_shell_only {
         // previous workspace popups
         if let Some((previous_handle, _, _, offset)) = previous.as_ref() {
             let Some(workspace) = shell.workspaces.space_for_handle(previous_handle) else {
@@ -330,11 +326,11 @@ fn render_input_order_internal<R: 'static>(
     }
 
     // sticky windows
-    if element_filter != ElementFilter::LayerShellOnly {
+    if !element_filter.layer_shell_only {
         callback(Stage::Sticky(&set.sticky_layer))?;
     }
 
-    if element_filter != ElementFilter::LayerShellOnly {
+    if !element_filter.layer_shell_only {
         // workspace windows
         callback(Stage::Workspace {
             workspace,
@@ -440,9 +436,6 @@ fn layer_surfaces(
 
     layers
         .into_iter()
-        .filter(move |(s, _)| {
-            !(element_filter == ElementFilter::ExcludeWorkspaceOverview
-                && s.namespace() == WORKSPACE_OVERVIEW_NAMESPACE)
-        })
+        .filter(move |(s, _)| !element_filter.excludes_namespace(s.namespace()))
         .map(|(surface, geometry)| (surface, geometry.loc.as_local().to_global(output)))
 }
