@@ -2,7 +2,10 @@
 
 use crate::{
     backend::{
-        kms::render::gles::GbmGlowBackend,
+        kms::{
+            fallback_modes::{KmsMode, ModeSource, fallback_modes},
+            render::gles::GbmGlowBackend,
+        },
         render::{CLEAR_COLOR, CursorMode, GlMultiRenderer, init_shaders, output_elements},
     },
     config::{CompTransformDef, EdidProduct, ScreenFilter},
@@ -34,7 +37,7 @@ use smithay::{
     output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
-        drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
+        drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc, property},
         gbm::BufferObjectFlags as GbmBufferFlags,
         rustix::fs::{Dev as dev_t, OFlags},
         wayland_server::DisplayHandle,
@@ -60,6 +63,103 @@ use std::{
 };
 
 use super::{drm_helpers, surface::Surface};
+
+/// Complete DRM modes advertised for one connector. Driver modes and generated
+/// panel-fit modes share this registry so a protocol selection is always
+/// resolved to the exact timing submitted to KMS.
+#[derive(Debug, Default)]
+pub(crate) struct ConnectorModes(pub Vec<KmsMode>);
+
+impl ConnectorModes {
+    pub(crate) fn resolve(&self, size: (i32, i32), refresh: Option<u32>) -> Option<KmsMode> {
+        self.0
+            .iter()
+            .copied()
+            .filter(|entry| {
+                let (width, height) = entry.mode.size();
+                (width as i32, height as i32) == size
+            })
+            .min_by_key(|entry| {
+                refresh
+                    .unwrap_or_default()
+                    .abs_diff(drm_helpers::calculate_refresh_rate(entry.mode))
+            })
+    }
+}
+
+fn connector_has_tile(device: &impl ControlDevice, connector: connector::Handle) -> bool {
+    drm_helpers::get_property_val(device, connector, "TILE")
+        .ok()
+        .is_some_and(|(_, value)| value != 0)
+}
+
+fn connector_supports_scaling(device: &impl ControlDevice, connector: connector::Handle) -> bool {
+    let Ok(prop) = drm_helpers::get_prop(device, connector, "scaling mode") else {
+        return false;
+    };
+    let Ok(info) = device.get_property(prop) else {
+        return false;
+    };
+    match info.value_type() {
+        property::ValueType::Enum(values) => values
+            .values()
+            .1
+            .iter()
+            .any(|value| value.name().to_str().ok() == Some("Full aspect")),
+        _ => false,
+    }
+}
+
+fn connector_modes(device: &impl ControlDevice, info: &connector::Info) -> Vec<KmsMode> {
+    let real_modes = info
+        .modes()
+        .iter()
+        .copied()
+        .map(|mode| KmsMode {
+            preferred: mode.mode_type().contains(ModeTypeFlags::PREFERRED),
+            mode,
+            source: ModeSource::Driver,
+        })
+        .collect::<Vec<_>>();
+    let edp_has_mixed_sizes = info.interface() == connector::Interface::EmbeddedDisplayPort
+        && real_modes.first().is_some_and(|first| {
+            real_modes
+                .iter()
+                .any(|mode| mode.mode.size() != first.mode.size())
+        });
+    let mut modes = real_modes.clone();
+    if !edp_has_mixed_sizes {
+        modes.extend(fallback_modes(
+            &real_modes,
+            connector_supports_scaling(device, info.handle()),
+            connector_has_tile(device, info.handle()),
+        ));
+    }
+    modes
+}
+
+/// Set aspect-preserving panel fitting before a synthetic modeset. We only do
+/// this when the connector explicitly exposes that enum value; otherwise the
+/// generated mode was never advertised.
+pub(crate) fn set_fallback_scaling(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+) -> Result<()> {
+    let prop = drm_helpers::get_prop(device, connector, "scaling mode")?;
+    let info = device.get_property(prop)?;
+    let property::ValueType::Enum(values) = info.value_type() else {
+        anyhow::bail!("scaling mode property is not an enum");
+    };
+    let value = values
+        .values()
+        .1
+        .iter()
+        .find(|value| value.name().to_str().ok() == Some("Full aspect"))
+        .ok_or_else(|| anyhow::anyhow!("scaling mode lacks Full aspect"))?
+        .value();
+    device.set_property(connector, prop, value)?;
+    Ok(())
+}
 
 #[derive(Debug)]
 pub struct EGLInternals {
@@ -1257,16 +1357,26 @@ fn populate_modes(
         refresh: refresh_rate as i32,
     };
 
+    let connector_modes = connector_modes(drm, &conn_info);
     let mut modes = Vec::new();
-    for mode in conn_info.modes() {
-        let refresh_rate = drm_helpers::calculate_refresh_rate(*mode);
+    for entry in &connector_modes {
+        let refresh_rate = drm_helpers::calculate_refresh_rate(entry.mode);
         let mode = OutputMode {
-            size: (mode.size().0 as i32, mode.size().1 as i32).into(),
+            size: (entry.mode.size().0 as i32, entry.mode.size().1 as i32).into(),
             refresh: refresh_rate as i32,
         };
         modes.push(mode);
         output.add_mode(mode);
     }
+    output
+        .user_data()
+        .insert_if_missing(|| RefCell::new(ConnectorModes::default()));
+    output
+        .user_data()
+        .get::<RefCell<ConnectorModes>>()
+        .unwrap()
+        .borrow_mut()
+        .0 = connector_modes;
     for mode in output
         .modes()
         .into_iter()
@@ -1383,7 +1493,17 @@ pub fn scale_from_dpi(dpi: f64, step_size: u32, shorter_px: u16) -> f64 {
 
 #[cfg(test)]
 mod test {
-    use super::{calculate_scale, connector::Interface};
+    use super::{ConnectorModes, calculate_scale, connector::Interface};
+    use crate::backend::kms::fallback_modes::fallback_catalog;
+
+    #[test]
+    fn persisted_synthetic_mode_resolves_after_reconstruction() {
+        let mode = fallback_catalog()
+            .find(|entry| entry.mode.size() == (1920, 1200))
+            .unwrap();
+        let registry = ConnectorModes(vec![mode]);
+        assert!(registry.resolve((1920, 1200), Some(59_950)).is_some());
+    }
 
     #[test]
     fn test_scale() {
