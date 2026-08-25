@@ -318,6 +318,18 @@ pub struct Common {
     pub workspace_state: WorkspaceState<State>,
     pub xwayland_scale: Option<f64>,
     pub xwayland_state: Option<XWaylandState>,
+    /// Render node the running Xwayland was launched with, remembered so an automatic
+    /// respawn after a crash can reuse it (see `XwmHandler::disconnected`).
+    pub xwayland_render_node: Option<DrmNode>,
+    /// Event-loop token of the current `XWayland` source, so a respawn can drop the old
+    /// (already `Disable`d, since smithay disables it once it emits `Ready`) source instead
+    /// of leaving one behind per restart.
+    pub xwayland_source_token: Option<RegistrationToken>,
+    /// Timestamps of recent automatic Xwayland respawns, used as a sliding window to stop
+    /// restarting an Xwayland that crashes immediately every time (see
+    /// `XWAYLAND_RESPAWN_LIMIT`/`XWAYLAND_RESPAWN_WINDOW`). A plain counter would instead
+    /// permanently give up on a long session that saw a few unrelated crashes hours apart.
+    pub xwayland_respawns: Vec<Instant>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
 
@@ -826,6 +838,9 @@ impl State {
                 a11y_state,
                 xwayland_scale: None,
                 xwayland_state: None,
+                xwayland_render_node: None,
+                xwayland_source_token: None,
+                xwayland_respawns: Vec::new(),
                 xwayland_shell_state,
                 pointer_focus_state: None,
                 dbus_state,

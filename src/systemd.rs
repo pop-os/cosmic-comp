@@ -6,6 +6,18 @@ use std::process::Command;
 use tracing::{error, warn};
 
 pub fn ready(common: &Common) {
+    import_env(common);
+
+    if let Err(err) = notify(false, &[NotifyState::Ready]) {
+        error!(?err, "Failed to notify systemd");
+    }
+}
+
+/// Pushes the current `WAYLAND_DISPLAY`/`DISPLAY` into systemd's user environment.
+///
+/// Split out of [`ready`] so it can be re-run on its own when Xwayland is respawned onto a
+/// different display number - [`ready`] itself runs only once per session.
+pub fn import_env(common: &Common) {
     if booted() {
         match Command::new("systemctl")
             .args(["--user", "import-environment", "WAYLAND_DISPLAY", "DISPLAY"])
@@ -27,9 +39,5 @@ pub fn ready(common: &Common) {
             ),
             Err(err) => error!(?err, "Failed to run systemctl although booted with systemd",),
         };
-    }
-
-    if let Err(err) = notify(false, &[NotifyState::Ready]) {
-        error!(?err, "Failed to notify systemd");
     }
 }

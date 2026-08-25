@@ -4,7 +4,10 @@ use std::{
     os::unix::io::OwnedFd,
     process::Stdio,
     sync::mpsc::{self, Receiver, Sender},
+    time::{Duration, Instant},
 };
+
+use calloop::timer::{TimeoutAction, Timer};
 
 use crate::{
     backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
@@ -56,9 +59,20 @@ use smithay::{
         xwm::{Reorder, XwmId},
     },
 };
-use tracing::{error, trace, warn};
+use tracing::{error, info, trace, warn};
 use xcursor::parser::Image;
 use xkbcommon::xkb::Keysym;
+
+/// How many times Xwayland may be automatically respawned within
+/// `XWAYLAND_RESPAWN_WINDOW` before the compositor stops trying. Xwayland dying is
+/// normally recoverable (a GPU reset kills it outright, for example), but one that
+/// crashes immediately on every start would otherwise be restarted forever.
+const XWAYLAND_RESPAWN_LIMIT: usize = 3;
+/// Sliding window over which `XWAYLAND_RESPAWN_LIMIT` is counted.
+const XWAYLAND_RESPAWN_WINDOW: Duration = Duration::from_secs(60);
+/// Delay before respawning, so a crash-on-start Xwayland cannot spin the event loop, and
+/// so the dying server's resources are released before its replacement claims the socket.
+const XWAYLAND_RESPAWN_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug)]
 pub struct XWaylandState {
@@ -111,6 +125,9 @@ impl State {
             return;
         }
 
+        // Remembered so `XwmHandler::disconnected` can respawn on the same render node.
+        self.common.xwayland_render_node = render_node;
+
         let (xwayland, client) = match XWayland::spawn(
             &self.common.display_handle,
             None,
@@ -132,6 +149,10 @@ impl State {
                 return;
             }
         };
+
+        // Any launch after the first one is a restart of a crashed server (see
+        // `respawn_xwayland`); the Ready arm below needs to know to re-publish DISPLAY.
+        let is_respawn = !self.common.xwayland_respawns.is_empty();
 
         match self
             .common
@@ -176,6 +197,24 @@ impl State {
 
                     data.common.update_xwayland_settings();
                     data.common.update_xwayland_primary_output();
+
+                    // `notify_ready` is what publishes DISPLAY to the systemd/D-Bus
+                    // activation environments, but it only ever runs once per session
+                    // (`call_once`). A respawned Xwayland usually reclaims the same display
+                    // number, but it is not guaranteed to - and if it does not, both
+                    // environments would keep handing newly launched X11 apps the dead
+                    // server's number. Re-publish it on any respawn.
+                    if is_respawn && let crate::state::BackendData::Kms(_) = &data.backend {
+                        #[cfg(feature = "systemd")]
+                        crate::systemd::import_env(&data.common);
+                        if let Err(err) = crate::dbus::ready(&data.common) {
+                            error!(
+                                ?err,
+                                "Failed to update the D-Bus activation environment after \
+                                 restarting Xwayland"
+                            );
+                        }
+                    }
                 }
                 XWaylandEvent::Error => {
                     if let Some(mut xwayland_state) = data.common.xwayland_state.take() {
@@ -184,11 +223,65 @@ impl State {
                     data.notify_ready();
                 }
             }) {
-            Ok(_token) => {}
+            Ok(token) => {
+                self.common.xwayland_source_token = Some(token);
+            }
             Err(err) => {
                 error!(?err, "Failed to listen for Xwayland");
                 self.notify_ready();
             }
+        }
+    }
+
+    /// Tears down the state of an Xwayland that just died and schedules a replacement.
+    ///
+    /// Xwayland exiting at runtime is *not* reported via `XWaylandEvent::Error`: smithay's
+    /// `XWayland` event source returns `PostAction::Disable` as soon as it has emitted
+    /// `Ready`, so `Error` can only ever fire during startup. The sole runtime notification
+    /// is the X11 connection dropping, i.e. `XwmHandler::disconnected` - which is why this
+    /// hangs off that hook.
+    ///
+    /// Without this, a single Xwayland crash left the session with no X11 support at all:
+    /// every running X11 application was gone and no new one could start, for the rest of
+    /// the session. A GPU reset reliably causes exactly that, since the reset destroys
+    /// Xwayland's GL context and it aborts.
+    fn respawn_xwayland(&mut self) {
+        // The old source is already disabled (see above), but dropping its token keeps a
+        // dead source from being left behind on every restart.
+        if let Some(token) = self.common.xwayland_source_token.take() {
+            self.common.event_loop_handle.remove(token);
+        }
+        self.common.xwayland_state = None;
+
+        if !self.common.with_xwayland {
+            return;
+        }
+
+        let now = Instant::now();
+        self.common
+            .xwayland_respawns
+            .retain(|at| now.duration_since(*at) < XWAYLAND_RESPAWN_WINDOW);
+        if self.common.xwayland_respawns.len() >= XWAYLAND_RESPAWN_LIMIT {
+            error!(
+                "Xwayland died {} times within {:?}, not restarting it again. X11 \
+                 applications will not work for the rest of this session.",
+                self.common.xwayland_respawns.len(),
+                XWAYLAND_RESPAWN_WINDOW,
+            );
+            return;
+        }
+        self.common.xwayland_respawns.push(now);
+
+        let render_node = self.common.xwayland_render_node;
+        if let Err(err) = self.common.event_loop_handle.insert_source(
+            Timer::from_duration(XWAYLAND_RESPAWN_DELAY),
+            move |_, _, state| {
+                info!("Restarting Xwayland after it terminated");
+                state.launch_xwayland(render_node);
+                TimeoutAction::Drop
+            },
+        ) {
+            error!(?err, "Failed to schedule Xwayland restart");
         }
     }
 }
@@ -1292,7 +1385,11 @@ impl XwmHandler for State {
     }
 
     fn disconnected(&mut self, _xwm: XwmId) {
-        let xwayland_state = self.common.xwayland_state.as_mut().unwrap();
-        xwayland_state.xwm = None;
+        // Previously this only cleared `xwm` and kept `xwayland_state` alive, which left
+        // `launch_xwayland`'s `is_some()` guard permanently closed - so a dead Xwayland was
+        // never replaced. (It also `unwrap()`ed the state, which would panic if the X11
+        // connection ever dropped after the state had already been taken.)
+        warn!("Xwayland connection lost, restarting Xwayland");
+        self.respawn_xwayland();
     }
 }
