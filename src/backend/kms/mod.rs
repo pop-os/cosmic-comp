@@ -79,6 +79,14 @@ pub struct KmsState {
 
     pub syncobj_state: Option<DrmSyncobjState>,
     pub dmabuf_global: Option<DmabufGlobal>,
+
+    /// Physical DRM devices (keyed the same way as `drm_devices`) currently being reopened in
+    /// response to a lost GPU context (see `SurfaceCommand::ContextLost`). Prevents firing a
+    /// second, redundant `reopen_device()` for the same physical device if multiple outputs on
+    /// that GPU report context loss concurrently - `reopen_device()` already tears down and
+    /// rebuilds every output on the device, so a second concurrent call would just race the
+    /// first one over the same DRM/EGL state.
+    pub recovering_devices: HashSet<DrmNode>,
 }
 
 pub struct KmsGuard<'a> {
@@ -137,6 +145,7 @@ pub fn init_backend(
 
         syncobj_state: None,
         dmabuf_global: None,
+        recovering_devices: HashSet::new(),
     });
 
     // manually add already present gpus

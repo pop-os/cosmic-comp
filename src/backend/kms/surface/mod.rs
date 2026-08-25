@@ -28,7 +28,7 @@ use smithay::{
             gbm::{GbmAllocator, GbmBuffer},
         },
         drm::{
-            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
+            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, NodeType, VrrSupport,
             compositor::{
                 BlitFrameResultError, FrameError, FrameFlags, PrimaryPlaneElement,
                 RenderFrameResult,
@@ -51,7 +51,8 @@ use smithay::{
                 },
             },
             gles::{
-                GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform, element::TextureShaderElement,
+                GlesError, GlesRenderbuffer, GlesRenderer, GlesTexture, Uniform,
+                element::TextureShaderElement,
             },
             glow::GlowRenderer,
             multigpu::{ApiDevice, Error as MultiError, GpuManager},
@@ -128,6 +129,14 @@ pub struct Surface {
     dpms: bool,
 }
 
+/// Cap on consecutive redraw failures before an output gives up retrying
+/// entirely, rather than retrying forever against a GPU/driver that never
+/// recovers (e.g. EGL context recreation failing deterministically after a
+/// GPU reset with VRAM loss). Bounds both the retry loop itself and, since
+/// no further redraw attempts are made once this is hit, the associated
+/// per-attempt log volume.
+const MAX_CONSECUTIVE_RENDER_FAILURES: u32 = 5;
+
 pub struct SurfaceThreadState {
     // rendering
     api: GpuManager<GbmGlowBackend<DrmDeviceFd>>,
@@ -142,6 +151,22 @@ pub struct SurfaceThreadState {
     timings: Timings,
     frame_callback_seq: usize,
     thread_sender: Sender<SurfaceCommand>,
+    /// Number of consecutive failed redraw attempts, used to back off retries
+    /// instead of hammering a broken GPU/driver in a tight loop.
+    consecutive_render_failures: u32,
+    /// Set once `consecutive_render_failures` exceeds `MAX_CONSECUTIVE_RENDER_FAILURES`,
+    /// so this output stops scheduling further redraws. A GPU/driver that fails every
+    /// retry (e.g. EGL context recreation impossible after VRAM loss) would otherwise
+    /// retry forever, which floods the log and clients reconnecting against a
+    /// never-rendering compositor without ever making progress.
+    render_permanently_failed: bool,
+    /// Set after this output has sent a `SurfaceCommand::ContextLost` for the current
+    /// loss event and is awaiting `reopen_device()` on the main thread. While set, further
+    /// context-lost redraw failures do NOT re-increment `consecutive_render_failures` or
+    /// re-send the recovery request: `reopen_device()` tears down and rebuilds this very
+    /// thread (`drop_and_join`), so any retries issued here before that happens would only
+    /// race the in-flight recovery and can spuriously trip the `give_up_and_exit` cap.
+    context_lost_reported: bool,
 
     output: Output,
     mirroring: Option<Output>,
@@ -227,6 +252,56 @@ pub enum ThreadCommand {
 pub enum SurfaceCommand {
     SendFrames(usize),
     RenderStates(RenderElementStates),
+    ContextLost(DrmNode),
+}
+
+/// Sentinel status used for `context_lost_status()`'s `EGL_CONTEXT_LOST` case, where no
+/// `glGetGraphicsResetStatus` code is available (the failure surfaced via `eglMakeCurrent`
+/// instead). Matches the raw `EGL_CONTEXT_LOST` enum value so it reads unambiguously in logs
+/// next to the `GL_*_CONTEXT_RESET` codes (0x8252-0x8254) `GlesError::ContextLost` carries.
+const EGL_CONTEXT_LOST_STATUS: u32 = 0x300e;
+
+/// Walks an error's `source()` chain looking for a `GlesError::ContextLost` (context loss
+/// detected via a GL reset-status query), or a `GlesError::ContextActivationError` wrapping
+/// `EGL_CONTEXT_LOST` (context loss surfaced via `eglMakeCurrent` failing instead) — either
+/// indicates the GPU was reset (e.g. VRAM lost) and the EGL context is dead.
+fn context_lost_status(err: &(dyn std::error::Error + 'static)) -> Option<u32> {
+    let mut source = Some(err);
+    while let Some(err) = source {
+        if let Some(gles_err) = err.downcast_ref::<GlesError>() {
+            match gles_err {
+                GlesError::ContextLost(status) => return Some(*status),
+                GlesError::ContextActivationError(make_current_err)
+                    if make_current_err.is_context_lost() =>
+                {
+                    return Some(EGL_CONTEXT_LOST_STATUS);
+                }
+                _ => {}
+            }
+        }
+        source = err.source();
+    }
+    None
+}
+
+/// How many times to retry reopening the DRM device after a GPU context loss before giving up
+/// and exiting the compositor (which closes every client app - see `give_up_and_exit`).
+const REOPEN_DEVICE_ATTEMPTS: u32 = 3;
+/// Base delay between reopen attempts, multiplied by the attempt number.
+const REOPEN_DEVICE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Gives up on recovering after repeated redraw failures and exits the whole compositor
+/// process, rather than leaving it running with a permanently-blank output.
+///
+/// `cosmic-session` already supervises and restarts `cosmic-comp` on any exit (observed:
+/// restarts within milliseconds). A fresh process re-establishes EGL/DRM state from scratch,
+/// which has proven far more reliable than in-process recovery: `recreate_node()` deterministically
+/// fails to reacquire an EGL context after a hard GPU reset with VRAM loss (`Unable to find
+/// matching egl device for ...`), so retrying it forever just wastes ~2s per attempt while the
+/// output stays dead anyway. Uses `std::process::exit` rather than `panic!`: a panic in a
+/// surface thread only unwinds that thread and would not bring down the rest of the compositor.
+fn give_up_and_exit() -> ! {
+    std::process::exit(1)
 }
 
 #[derive(Debug, Default)]
@@ -328,6 +403,92 @@ impl Surface {
                                 Some(feedback)
                             }
                         });
+                }
+                Event::Msg(SurfaceCommand::ContextLost(node)) => {
+                    // `update_egl()`-only recreation (the previous approach here) fails
+                    // deterministically after a hard GPU reset with VRAM loss ("Unable to
+                    // find matching egl device for ..."): it only rebuilds the EGL context,
+                    // not the underlying DRM device fd, and the latter is what's actually
+                    // unusable post-reset. `reopen_device()` is the primitive that already
+                    // solves this exact error for udev hotplug (`device_changed`'s retry
+                    // path below) - reuse it here instead of a second, narrower mechanism.
+                    if !state.backend.kms().recovering_devices.insert(dev_node) {
+                        // A recovery for this physical device (there may be several outputs
+                        // on it) is already in flight from another output's ContextLost
+                        // message; reopen_device() already rebuilds every output on the
+                        // device, so let that attempt finish rather than racing a second
+                        // concurrent teardown/rebuild over the same DRM/EGL state.
+                        trace!(?node, ?dev_node, "GPU context lost, recovery already in flight");
+                        return;
+                    }
+                    warn!(?node, ?dev_node, "GPU context lost, reopening DRM device");
+                    let path = dev_node
+                        .dev_path_with_type(NodeType::Primary)
+                        .or_else(|| dev_node.dev_path());
+                    let result = match path {
+                        Some(path) => {
+                            let dh = state.common.display_handle.clone();
+                            // Retry a couple of times before giving up: failing here exits the
+                            // compositor, which closes every client app, so a single transient
+                            // failure (the device still settling right after a reset) is worth
+                            // a second chance. Bounded and short so an actually-dead device
+                            // still gives up quickly instead of hanging on a black screen.
+                            let mut attempt = 1;
+                            loop {
+                                match state.reopen_device(dev_node.dev_id(), &path, &dh) {
+                                    Ok(outputs) => break Ok(outputs),
+                                    Err(err) if attempt < REOPEN_DEVICE_ATTEMPTS => {
+                                        warn!(
+                                            ?dev_node,
+                                            "Reopening DRM device failed (attempt {}/{}): {:#}",
+                                            attempt,
+                                            REOPEN_DEVICE_ATTEMPTS,
+                                            err
+                                        );
+                                        std::thread::sleep(REOPEN_DEVICE_RETRY_DELAY * attempt);
+                                        attempt += 1;
+                                    }
+                                    Err(err) => break Err(err),
+                                }
+                            }
+                        }
+                        None => Err(anyhow::anyhow!(
+                            "Could not determine device path for {}",
+                            dev_node
+                        )),
+                    };
+                    state.backend.kms().recovering_devices.remove(&dev_node);
+                    match result {
+                        Ok(_outputs) => {
+                            info!(?dev_node, "Recovered DRM device after GPU context loss");
+                            if let Err(err) = state.refresh_output_config() {
+                                warn!(
+                                    "Unable to refresh output config after device recovery: {}",
+                                    err
+                                );
+                            }
+                            state.common.refresh();
+                        }
+                        Err(err) => {
+                            // `reopen_device()` already retries master-lock acquisition
+                            // internally (see `DrmDeviceFd::new`'s bounded backoff); a failure
+                            // here means that retry budget is exhausted. There is no further
+                            // recovery path on this thread, and continuing to run leaves the
+                            // device silently unprivileged/broken (no modesetting, clients
+                            // failing to import textures, eventual wgpu/Vulkan panics in
+                            // clients) with nothing left to trigger a retry - previously
+                            // observed live as an indefinite broken-but-alive session. Exit so
+                            // cosmic-session's already-proven-fast respawn (~ms) takes over
+                            // with fresh DRM/EGL state instead.
+                            error!(
+                                ?dev_node,
+                                "Failed to reopen DRM device after GPU context loss: {:#}. \
+                                 Exiting so cosmic-session can restart the compositor cleanly.",
+                                err
+                            );
+                            give_up_and_exit();
+                        }
+                    }
                 }
                 Event::Closed => {}
             })
@@ -541,6 +702,9 @@ fn surface_thread(
         timings: Timings::new(None, None, false, target_node),
         frame_callback_seq: 0,
         thread_sender,
+        consecutive_render_failures: 0,
+        render_permanently_failed: false,
+        context_lost_reported: false,
 
         output,
         mirroring: None,
@@ -918,6 +1082,10 @@ impl SurfaceThreadState {
             return;
         };
 
+        if self.render_permanently_failed {
+            return;
+        };
+
         if let QueueState::WaitingForVBlank { .. } = &self.state {
             // We're waiting for VBlank, request a redraw afterwards.
             self.state = QueueState::WaitingForVBlank {
@@ -941,12 +1109,21 @@ impl SurfaceThreadState {
         let estimated_presentation = self.timings.next_presentation_time(&self.clock);
         let render_start = self.timings.next_render_time(&self.clock);
 
+        // Back off after repeated failures, so a persistently broken GPU/driver
+        // (e.g. a context that keeps failing to recover) doesn't spin retrying
+        // at zero delay, which pegs a CPU core and floods the log.
+        let failure_backoff = Duration::from_millis(
+            (self.consecutive_render_failures as u64 * 100).min(2000),
+        );
+
         let timer = if render_start.is_zero() {
-            trace!("Running late for frame.");
+            if failure_backoff.is_zero() {
+                trace!("Running late for frame.");
+            }
             // TODO triple buffering
-            Timer::immediate()
+            Timer::from_duration(failure_backoff)
         } else {
-            Timer::from_duration(render_start)
+            Timer::from_duration(render_start + failure_backoff)
         };
 
         let token = self
@@ -954,8 +1131,27 @@ impl SurfaceThreadState {
             .insert_source(timer, move |_time, _, state| {
                 if let Err(err) = state.redraw(estimated_presentation) {
                     let name = state.output.name();
-                    warn!(?name, "Failed to submit rendering: {:?}", err);
-                    state.queue_redraw(true);
+                    state.consecutive_render_failures =
+                        state.consecutive_render_failures.saturating_add(1);
+                    if state.consecutive_render_failures > MAX_CONSECUTIVE_RENDER_FAILURES {
+                        state.render_permanently_failed = true;
+                        error!(
+                            ?name,
+                            failures = state.consecutive_render_failures,
+                            "Giving up after {} consecutive redraw failures: {:#}. \
+                             Exiting so cosmic-session can restart the compositor cleanly.",
+                            state.consecutive_render_failures, err
+                        );
+                        give_up_and_exit();
+                    } else {
+                        warn!(
+                            ?name,
+                            failures = state.consecutive_render_failures,
+                            "Failed to submit rendering: {:#}",
+                            err
+                        );
+                        state.queue_redraw(true);
+                    }
                 }
                 TimeoutAction::Drop
             })
@@ -1377,6 +1573,8 @@ impl SurfaceThreadState {
                             self.send_dmabuf_feedback(states);
                         }
 
+                        self.consecutive_render_failures = 0;
+
                         if x.is_ok() {
                             if self.mirroring.is_none() {
                                 self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
@@ -1404,7 +1602,53 @@ impl SurfaceThreadState {
             }
             Err(err) => {
                 compositor.reset_buffers();
-                anyhow::bail!("Rendering failed: {}", err);
+                if let Some(status) = context_lost_status(&err) {
+                    if self.context_lost_reported {
+                        // A recovery for this node is already in flight on the main
+                        // thread (`reopen_device` will `drop_and_join` this very thread).
+                        // Do not re-increment the failure counter or re-send the recovery
+                        // request: those redraw retries issued in the meantime would race
+                        // the in-flight teardown/rebuild and can spuriously trip the
+                        // `give_up_and_exit` cap while recovery is actually progressing.
+                        trace!(
+                            status,
+                            "GPU context lost on {} but recovery already in flight",
+                            self.output.name()
+                        );
+                        return Ok(());
+                    }
+
+                    self.context_lost_reported = true;
+                    self.consecutive_render_failures =
+                        self.consecutive_render_failures.saturating_add(1);
+                    if self.consecutive_render_failures > MAX_CONSECUTIVE_RENDER_FAILURES {
+                        self.render_permanently_failed = true;
+                        error!(
+                            status,
+                            failures = self.consecutive_render_failures,
+                            "Giving up on GPU context recreation after {} consecutive attempts. \
+                             Exiting so cosmic-session can restart the compositor cleanly.",
+                            self.consecutive_render_failures
+                        );
+                        give_up_and_exit();
+                    }
+                    warn!(
+                        status,
+                        failures = self.consecutive_render_failures,
+                        "GPU context lost while rendering, requesting renderer recreation"
+                    );
+                    let _ = self
+                        .thread_sender
+                        .send(SurfaceCommand::ContextLost(self.target_node));
+                    // Recreation happens asynchronously on the main thread; queue a
+                    // backed-off retry rather than leaving this output stalled forever.
+                    // `context_lost_reported` is left set so those retries don't re-count
+                    // the same loss event; `reopen_device` tears this thread down and
+                    // rebuilds it fresh, resetting the flag.
+                    self.queue_redraw(true);
+                    return Ok(());
+                }
+                anyhow::bail!("Rendering failed: {:#}", err);
             }
         }
 

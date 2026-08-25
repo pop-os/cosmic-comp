@@ -456,6 +456,17 @@ impl State {
                 Some(reusable),
             )?;
 
+            // NOTE: deliberately *not* treating `!device_fd().is_privileged()` as a failure
+            // here. On a libseat/logind session the compositor never acquires the master lock
+            // via `drmSetMaster` itself - logind owns the device and hands out an fd that is
+            // already usable for modesetting, so `DrmDeviceFd::new`'s acquisition attempt is
+            // expected to fail and `privileged` is `false` during completely healthy operation
+            // (verified live: every cosmic-comp start on this session logs "assuming
+            // unprivileged mode" and drives the display fine). Bailing on it turned every GPU
+            // context-loss recovery into an unconditional failure, which then exited the
+            // compositor and tore down the whole session - closing every client app and leaving
+            // a long black screen - instead of recovering in place.
+
             if let Some(guard) = syncobj_guard {
                 let import_device = new_device.drm.device().device_fd().clone();
                 if supports_syncobj_eventfd(&import_device) {
