@@ -32,6 +32,8 @@ use std::{os::unix::process::CommandExt, thread};
 
 use super::gestures;
 
+const MAX_ZOOM: f64 = 256.0;
+
 fn propagate_by_default(action: &shortcuts::Action) -> bool {
     matches!(
         action,
@@ -1173,7 +1175,14 @@ impl State {
         }
 
         if zoom_seat == *seat {
-            let new_level = (current_level + change).max(1.0);
+            let factor = 1.0 + change.abs();
+            let new_level = if change < 0. {
+                current_level / factor
+            } else {
+                current_level * factor
+            }
+            .clamp(1.0, MAX_ZOOM);
+            let new_level = if new_level < 1.01 { 1.0 } else { new_level };
             shell.trigger_zoom(
                 seat,
                 Some(&output),
