@@ -387,24 +387,17 @@ impl TouchGrab<State> for ResizeGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &DownEvent,
-        seq: Serial,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::down(grab, data, handle, focus, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::down(grab, data, handle, focus, event),
         }
     }
 
-    fn up(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        event: &UpEvent,
-        seq: Serial,
-    ) {
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::up(grab, data, handle, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::up(grab, data, handle, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::up(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::up(grab, data, handle, event),
         }
     }
 
@@ -414,25 +407,24 @@ impl TouchGrab<State> for ResizeGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
-        seq: Serial,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::motion(grab, data, handle, focus, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::motion(grab, data, handle, focus, event),
         }
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::frame(grab, data, handle, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::frame(grab, data, handle, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::frame(grab, data, handle),
+            ResizeGrab::Tiling(grab) => TouchGrab::frame(grab, data, handle),
         }
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::cancel(grab, data, handle, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::cancel(grab, data, handle, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::cancel(grab, data, handle),
+            ResizeGrab::Tiling(grab) => TouchGrab::cancel(grab, data, handle),
         }
     }
 
@@ -441,11 +433,10 @@ impl TouchGrab<State> for ResizeGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &ShapeEvent,
-        seq: Serial,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::shape(grab, data, handle, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::shape(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::shape(grab, data, handle, event),
         }
     }
 
@@ -454,11 +445,10 @@ impl TouchGrab<State> for ResizeGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &OrientationEvent,
-        seq: Serial,
     ) {
         match self {
-            ResizeGrab::Floating(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
-            ResizeGrab::Tiling(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+            ResizeGrab::Floating(grab) => TouchGrab::orientation(grab, data, handle, event),
+            ResizeGrab::Tiling(grab) => TouchGrab::orientation(grab, data, handle, event),
         }
     }
 
@@ -729,24 +719,17 @@ impl TouchGrab<State> for MoveGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &DownEvent,
-        seq: Serial,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::down(grab, data, handle, focus, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::down(grab, data, handle, focus, event),
+            MoveGrab::Delayed(grab) => TouchGrab::down(grab, data, handle, focus, event),
         }
     }
 
-    fn up(
-        &mut self,
-        data: &mut State,
-        handle: &mut TouchInnerHandle<'_, State>,
-        event: &UpEvent,
-        seq: Serial,
-    ) {
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::up(grab, data, handle, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::up(grab, data, handle, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::up(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TouchGrab::up(grab, data, handle, event),
         }
     }
 
@@ -756,25 +739,24 @@ impl TouchGrab<State> for MoveGrab {
         handle: &mut TouchInnerHandle<'_, State>,
         focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
         event: &TouchMotionEvent,
-        seq: Serial,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::motion(grab, data, handle, focus, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::motion(grab, data, handle, focus, event),
+            MoveGrab::Delayed(grab) => TouchGrab::motion(grab, data, handle, focus, event),
         }
     }
 
-    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::frame(grab, data, handle, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::frame(grab, data, handle, seq),
+            MoveGrab::Move(grab) => TouchGrab::frame(grab, data, handle),
+            MoveGrab::Delayed(grab) => TouchGrab::frame(grab, data, handle),
         }
     }
 
-    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, seq: Serial) {
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::cancel(grab, data, handle, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::cancel(grab, data, handle, seq),
+            MoveGrab::Move(grab) => TouchGrab::cancel(grab, data, handle),
+            MoveGrab::Delayed(grab) => TouchGrab::cancel(grab, data, handle),
         }
     }
 
@@ -783,11 +765,10 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &ShapeEvent,
-        seq: Serial,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::shape(grab, data, handle, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::shape(grab, data, handle, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::shape(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TouchGrab::shape(grab, data, handle, event),
         }
     }
 
@@ -796,11 +777,10 @@ impl TouchGrab<State> for MoveGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         event: &OrientationEvent,
-        seq: Serial,
     ) {
         match self {
-            MoveGrab::Move(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
-            MoveGrab::Delayed(grab) => TouchGrab::orientation(grab, data, handle, event, seq),
+            MoveGrab::Move(grab) => TouchGrab::orientation(grab, data, handle, event),
+            MoveGrab::Delayed(grab) => TouchGrab::orientation(grab, data, handle, event),
         }
     }
 

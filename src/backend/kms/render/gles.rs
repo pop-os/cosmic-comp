@@ -1,29 +1,35 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use smithay::backend::{
-    SwapBuffersError,
-    allocator::{
-        Allocator,
-        dmabuf::{AnyError, Dmabuf, DmabufAllocator},
-        gbm::GbmAllocator,
+use clap_lex::OsStrExt;
+use rustix::path::Arg;
+use smithay::{
+    backend::{
+        SwapBuffersError,
+        allocator::{
+            Allocator,
+            dmabuf::{AnyError, Dmabuf, DmabufAllocator},
+            gbm::GbmAllocator,
+        },
+        drm::{CreateDrmNodeError, DrmNode},
+        renderer::{
+            gles::{GlesError, GlesRenderer, ffi},
+            glow::GlowRenderer,
+            multigpu::{ApiDevice, GraphicsApi},
+        },
     },
-    drm::{CreateDrmNodeError, DrmNode},
-    renderer::{
-        RendererSuper,
-        gles::{GlesError, GlesRenderer},
-        glow::GlowRenderer,
-        multigpu::{ApiDevice, Error as MultiError, GraphicsApi},
-    },
+    reexports::drm::control::Device,
 };
-use std::{borrow::Borrow, cell::Cell};
+use std::{
+    borrow::{Borrow, BorrowMut},
+    cell::Cell,
+    ffi::{CStr, c_char},
+};
 use std::{
     collections::HashMap,
     fmt,
     os::unix::prelude::AsFd,
     sync::atomic::{AtomicBool, Ordering},
 };
-
-use crate::backend::render::element::FromGlesError;
 
 /// Errors raised by the [`GbmGlesBackend`]
 #[derive(Debug, thiserror::Error)]
@@ -98,7 +104,7 @@ impl<A: AsFd + Clone + Send + 'static> GbmGlowBackend<A> {
     }
 }
 
-impl<A: AsFd + Clone + 'static> GraphicsApi for GbmGlowBackend<A> {
+impl<A: AsFd + Device + Clone + 'static> GraphicsApi for GbmGlowBackend<A> {
     type Device = GbmGlowDevice;
     type Error = Error;
 
@@ -123,11 +129,29 @@ impl<A: AsFd + Clone + 'static> GraphicsApi for GbmGlowBackend<A> {
                     .any(|renderer| renderer.node.dev_id() == node.dev_id())
             })
             .flat_map(|(node, (allocator, renderer))| {
-                let renderer = renderer.replace(None)?;
+                let mut renderer = renderer.replace(None)?;
+                let is_intel = allocator
+                    .as_ref()
+                    .get_driver()
+                    .is_ok_and(|drv| drv.name().contains("i915"));
+                let intel_export_quirk = is_intel
+                    && BorrowMut::<GlesRenderer>::borrow_mut(&mut renderer)
+                        .with_context(|gl| unsafe {
+                            CStr::from_ptr(gl.GetString(ffi::RENDERER) as *const c_char)
+                        })
+                        .is_ok_and(|name| {
+                            name.as_str().is_ok_and(|name| {
+                                name.contains("TGL")
+                                    || name.contains("MTL")
+                                    || name.contains("ARL")
+                                    || name.contains("LNL")
+                            })
+                        });
 
                 Some(GbmGlowDevice {
                     node: *node,
                     renderer,
+                    intel_export_quirk,
                     allocator: Box::new(DmabufAllocator(allocator.clone())),
                 })
             })
@@ -150,6 +174,7 @@ impl<A: AsFd + Clone + 'static> GraphicsApi for GbmGlowBackend<A> {
 pub struct GbmGlowDevice {
     node: DrmNode,
     renderer: GlowRenderer,
+    intel_export_quirk: bool,
     allocator: Box<dyn Allocator<Buffer = Dmabuf, Error = AnyError>>,
 }
 
@@ -180,15 +205,8 @@ impl ApiDevice for GbmGlowDevice {
     fn can_do_cross_device_imports(&self) -> bool {
         !Borrow::<GlesRenderer>::borrow(&self.renderer).is_software()
     }
-}
 
-impl<T: GraphicsApi, A: AsFd + Clone + 'static> FromGlesError for MultiError<GbmGlowBackend<A>, T>
-where
-    T::Error: 'static,
-    <<T::Device as ApiDevice>::Renderer as RendererSuper>::Error: 'static,
-{
-    #[inline]
-    fn from_gles_error(err: GlesError) -> MultiError<GbmGlowBackend<A>, T> {
-        MultiError::Render(err)
+    fn should_do_cross_device_exports(&self) -> bool {
+        !self.intel_export_quirk
     }
 }

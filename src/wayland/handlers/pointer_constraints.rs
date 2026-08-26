@@ -63,7 +63,7 @@ impl PointerConstraintsHandler for State {
                     if let Some(region) = constraint.region() {
                         if let Some(surface_location) = surface_location
                             && let position = pointer.current_location()
-                            && let point = (position - surface_location.as_logical()).to_i32_round()
+                            && let point = (position - surface_location.as_logical()).to_i32_floor()
                             && region.contains(point)
                         {
                             constraint.activate();

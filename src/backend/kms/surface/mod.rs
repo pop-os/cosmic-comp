@@ -1006,12 +1006,16 @@ impl SurfaceThreadState {
             &self.shell.read(),
         );
 
+        // Acquiring a renderer can fail transiently when the underlying DRM
+        // device is lost (e.g. after a GPU reset).
         let mut renderer = if render_node != self.target_node {
             self.api
                 .renderer(&render_node, &self.target_node, compositor.format())
-                .unwrap()
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?
         } else {
-            self.api.single_renderer(&self.target_node).unwrap()
+            self.api
+                .single_renderer(&self.target_node)
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?
         };
 
         self.timings.start_render(&self.clock);
@@ -1068,6 +1072,7 @@ impl SurfaceThreadState {
             None,
             #[cfg(feature = "debug")]
             Some((&self.egui, &self.timings)),
+            Some(self.target_node),
         )
         .map_err(|err| {
             anyhow::format_err!("Failed to accumulate elements for rendering: {:?}", err)
@@ -1266,7 +1271,10 @@ impl SurfaceThreadState {
                 })
                 .context("Failed to draw to offscreen render target")?;
 
-            renderer = self.api.single_renderer(&self.target_node).unwrap();
+            renderer = self
+                .api
+                .single_renderer(&self.target_node)
+                .map_err(|err| anyhow::format_err!("Failed to create renderer: {:?}", err))?;
 
             elements = postprocess_elements(
                 &mut renderer,
@@ -1521,7 +1529,7 @@ fn get_surface_dmabuf_feedback(
     render_node: DrmNode,
     target_node: DrmNode,
     render_formats: FormatSet,
-    _target_formats: FormatSet,
+    target_formats: FormatSet,
     primary_plane_formats: FormatSet,
     overlay_plane_formats: Option<FormatSet>,
 ) -> SurfaceDmabufFeedback {
@@ -1539,60 +1547,40 @@ fn get_surface_dmabuf_feedback(
             .cloned()
             .collect::<FormatSet>()
     });
-    let builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats);
 
-    /*
-    // Sadly no implementation would pick this up as a preferred render tranche,
-    // where the combined formats would increase our chances of doing a dmabuf copy.
-    // .. So we should probably not advertise this on the off-chance it actually triggers bugs.
-    //
+    let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats.clone());
 
-    let combined_formats = render_formats.intersection(&target_formats).cloned().collect::<FormatSet>();
-    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
-        builder = builder.add_preference_tranche(
-            render_node.dev_id(),
-            None,
-            combined_formats,
-        );
-    };
-
-    // We also can't advertise scan out tranches for the actual display device,
-    // as e.g. the nvidia driver might then send us dmabufs, that makes e.g. the iris hangs on import...
-    if target_node != render_node.dev_id() && !combined_formats.is_empty() {
+    if target_node != render_node {
         builder = builder.add_preference_tranche(
             target_node.dev_id(),
-            Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-            combined_formats,
+            zwp_linux_dmabuf_feedback_v1::TrancheFlags::Sampling,
+            target_formats,
+            6..=6,
         );
     };
-
-    // So no fun combinations, we gotta wait for dmabuf-v6
-    */
-
     let render_feedback = builder.clone().build().unwrap();
-    let primary_scanout_feedback = (target_node == render_node).then(|| {
+
+    let primary_scanout_feedback = builder
+        .clone()
+        .add_preference_tranche(
+            target_node.dev_id(),
+            zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout,
+            primary_plane_formats,
+            4..=6,
+        )
+        .build()
+        .unwrap();
+    let overlay_scanout_feedback = overlay_plane_formats.map(|formats| {
         builder
-            .clone()
             .add_preference_tranche(
-                render_node.dev_id(),
-                Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                primary_plane_formats,
+                target_node.dev_id(),
+                zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout,
+                formats,
+                4..=6,
             )
             .build()
             .unwrap()
     });
-    let overlay_scanout_feedback = overlay_plane_formats
-        .filter(|_| target_node == render_node)
-        .map(|formats| {
-            builder
-                .add_preference_tranche(
-                    render_node.dev_id(),
-                    Some(zwp_linux_dmabuf_feedback_v1::TrancheFlags::Scanout),
-                    formats,
-                )
-                .build()
-                .unwrap()
-        });
 
     SurfaceDmabufFeedback {
         render_feedback,
@@ -1673,7 +1661,7 @@ fn send_screencopy_result<'a>(
     pre_postprocess_data: &mut PrePostprocessData,
     tx: &std::sync::mpsc::Sender<PendingImageCopyData>,
     frame_result: &RenderFrameResult<GbmBuffer, GbmFramebuffer, CosmicElement<GlMultiRenderer<'a>>>,
-    elements: &[CosmicElement<GlMultiRenderer>],
+    elements: &[CosmicElement<GlMultiRenderer<'a>>],
     (session, frame, res): (
         &ScreencopySessionRef,
         ScreencopyFrame,
@@ -1854,6 +1842,8 @@ fn send_screencopy_result<'a>(
         transform,
         damage.as_deref(),
         sync,
+        // Don't reference `Buffer`s since we blit from framebuffer/postprocess buffer
+        vec![],
     )? {
         if frame_result.is_empty {
             data.frame

@@ -25,6 +25,7 @@ uniform float tint;
 uniform vec2 geo_size;
 uniform vec4 corner_radius;
 uniform mat3 input_to_geo;
+uniform float noise;
 
 float rounding_alpha(vec2 coords, vec2 size) {
     vec2 center;
@@ -51,15 +52,26 @@ float rounding_alpha(vec2 coords, vec2 size) {
     return 1.0 - smoothstep(radius - half_px, radius + half_px, dist);
 }
 
-void main() {
-    vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
+float hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 727.727);
+    p3 += dot(p3, p3.xyz + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
 
-    // Sample the texture.
+void main() {
+    if (alpha <= 0.0) {
+        discard;
+    }
+
     vec4 color = texture2D(tex, v_coords);
     #if defined(NO_ALPHA)
     color = vec4(color.rgb, 1.0);
     #endif
+    if (color.a <= 0.0) {
+        discard;
+    }
 
+    vec3 coords_geo = input_to_geo * vec3(v_coords, 1.0);
     if (coords_geo.x < 0.0 || 1.0 < coords_geo.x || coords_geo.y < 0.0 || 1.0 < coords_geo.y) {
         // Clip outside geometry.
         color = vec4(0.0);
@@ -68,8 +80,20 @@ void main() {
         color = color * rounding_alpha(coords_geo.xy * geo_size, geo_size);
     }
 
+    if (color.a <= 0.0) {
+        discard;
+    }
+
+    if (noise > 0.0) {
+        // Add noise fx
+        // This can be used to achieve a glass look
+        float noiseHash = hash(v_coords);
+        float noiseAmount = (mod(noiseHash, 1.0) - 0.5);
+        color.rgb += noiseAmount * noise;
+    }
+
     // Apply final alpha and tint.
-    color = color * alpha;
+    color *= alpha;
 
     #if defined(DEBUG_FLAGS)
     if (tint == 1.0)

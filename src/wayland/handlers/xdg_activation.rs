@@ -21,6 +21,10 @@ pub enum ActivationContext {
     Workspace(WorkspaceHandle),
 }
 
+// It may happen that we get activation-requests, while all outputs are disabled.
+// In these cases we won't be able to determine workspaces for windows and thus
+// need to handle the corresponding code paths defensively.
+
 impl XdgActivationHandler for State {
     fn activation_state(&mut self) -> &mut XdgActivationState {
         &mut self.common.xdg_activation_state
@@ -52,7 +56,12 @@ impl XdgActivationHandler for State {
                 });
             let output = seat.active_output();
             let mut shell = self.common.shell.write();
-            let workspace = shell.active_space_mut(&output).unwrap();
+            let Some(workspace) = shell.active_space_mut(&output) else {
+                debug!(?token, "created urgent token for privileged client");
+                data.user_data
+                    .insert_if_missing(move || ActivationContext::UrgentOnly);
+                return true;
+            };
             let handle = workspace.handle;
             data.user_data
                 .insert_if_missing(move || ActivationContext::Workspace(handle));
@@ -86,7 +95,11 @@ impl XdgActivationHandler for State {
         if valid {
             let output = seat.active_output();
             let mut shell = self.common.shell.write();
-            let workspace = shell.active_space_mut(&output).unwrap();
+            let Some(workspace) = shell.active_space_mut(&output) else {
+                data.user_data
+                    .insert_if_missing(|| ActivationContext::UrgentOnly);
+                return true;
+            };
             let handle = workspace.handle;
             data.user_data
                 .insert_if_missing(move || ActivationContext::Workspace(handle));
@@ -128,7 +141,6 @@ impl XdgActivationHandler for State {
 
                         let Some((target_workspace, _)) = shell.workspace_for_surface(&surface)
                         else {
-                            // surface not found, maybe log warning?
                             return;
                         };
 

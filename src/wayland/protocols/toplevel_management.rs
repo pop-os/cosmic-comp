@@ -237,11 +237,10 @@ where
                     window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel).unwrap();
                 if let Some(toplevel_state) = window.user_data().get::<ToplevelState>() {
                     let mut toplevel_state = toplevel_state.lock().unwrap();
-                    if width == 0 && height == 0 {
-                        toplevel_state
-                            .rectangles
-                            .retain(|(s, _)| s.id() != surface.id());
-                    } else {
+                    toplevel_state
+                        .rectangles
+                        .retain(|(s, _)| s.id() != surface.id());
+                    if width != 0 || height != 0 {
                         toplevel_state.rectangles.push((
                             surface.downgrade(),
                             Rectangle::new((x, y).into(), (width, height).into()),

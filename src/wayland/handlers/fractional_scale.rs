@@ -49,7 +49,10 @@ impl FractionalScaleHandler for State {
 
         with_states(&surface, |states| {
             with_fractional_scale(states, |fractional_scale| {
-                fractional_scale.set_preferred_scale(output.current_scale().fractional_scale());
+                // The 1.0 clamp is a workaround for Chromium
+                // TODO: remove if Chromium ever gets fixed
+                fractional_scale
+                    .set_preferred_scale(output.current_scale().fractional_scale().max(1.0));
             });
         });
     }

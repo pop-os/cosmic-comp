@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
+    input::InputBackendId,
     shell::Shell,
     state::{BackendData, State},
     utils::prelude::OutputExt,
@@ -820,6 +821,27 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         }
                     }
                 }
+                let ei_connections = state
+                    .common
+                    .ei_keyboard_source
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for conn in &ei_connections {
+                    state.release_ei_keyboard(conn);
+                    state.clear_input_source_state(&InputBackendId::Ei(conn.clone()));
+                }
+                for ei_seat in state.common.ei_seats.values() {
+                    if let Err(err) =
+                        ei_seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&value))
+                    {
+                        warn!(?err, "Failed to update libei keyboard keymap");
+                    }
+                }
+                if !state.common.ei_seats.is_empty() {
+                    let seat = state.common.shell.read().seats.last_active().clone();
+                    state.broadcast_ei_keyboard_modifiers(&seat);
+                }
                 state.common.config.cosmic_conf.xkb_config = value;
             }
             "keyboard_config" => {
@@ -951,6 +973,10 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             | "first_h_split_ratio" | "first_v_split_ratio" => {
                 state.common.config.cosmic_conf.update_keys(&config, &[key]);
                 state.common.update_config();
+            }
+            "cursor_shake_to_find" => {
+                let new = get_config::<bool>(&config, "cursor_shake_to_find");
+                state.common.config.cosmic_conf.cursor_shake_to_find = new;
             }
             "cursor_hide_timeout" => {
                 let new = get_config::<Option<u32>>(&config, "cursor_hide_timeout");

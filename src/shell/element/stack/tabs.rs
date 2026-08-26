@@ -1,24 +1,30 @@
 use super::tab::{MIN_ACTIVE_TAB_WIDTH, Tab, TabBackgroundTheme, TabMessage, TabRuleTheme};
 use cosmic::{
     Apply,
-    iced::{Element, id::Id, widget},
-    iced_core::{
-        Background, Border, Clipboard, Color, Length, Point, Rectangle, Renderer, Shell, Size,
-        Vector, event,
-        layout::{Layout, Limits, Node},
-        mouse, overlay, renderer,
-        widget::{
-            Widget,
-            operation::{
-                Operation, Scrollable,
-                scrollable::{AbsoluteOffset, RelativeOffset},
+    iced::{
+        Element,
+        core::{
+            Background, Border, Clipboard, Color, Length, Point, Rectangle, Renderer, Shell, Size,
+            Vector, event,
+            layout::{Layout, Limits, Node},
+            mouse, overlay, renderer,
+            widget::{
+                Widget,
+                operation::{
+                    Operation, Scrollable,
+                    scrollable::{AbsoluteOffset, RelativeOffset},
+                },
+                tree::{self, Tree},
             },
-            tree::{self, Tree},
+        },
+        id::Id,
+        widget::{
+            self,
+            container::{Catalog, draw_background},
         },
     },
-    iced_widget::container::draw_background,
     theme,
-    widget::{container::Catalog, icon::from_name},
+    widget::icon::from_name,
 };
 use keyframe::{
     ease,
@@ -379,8 +385,8 @@ where
                 >= MIN_ACTIVE_TAB_WIDTH
             {
                 // just use a flex layout
-                cosmic::iced_core::layout::flex::resolve(
-                    cosmic::iced_core::layout::flex::Axis::Horizontal,
+                cosmic::iced::core::layout::flex::resolve(
+                    cosmic::iced::core::layout::flex::Axis::Horizontal,
                     renderer,
                     &limits,
                     self.width,
@@ -513,13 +519,11 @@ where
 
         let background_style = Catalog::style(
             theme,
-            &theme::Container::custom(|theme| widget::container::Style {
+            &theme::Container::custom(|_theme| widget::container::Style {
                 snap: true,
                 icon_color: None,
                 text_color: None,
-                background: Some(Background::Color(
-                    theme.cosmic().primary_container_color().into(),
-                )),
+                background: Some(Background::Color(Color::TRANSPARENT)),
                 border: Border {
                     radius: 0.0.into(),
                     width: 0.0,

@@ -63,5 +63,5 @@ pub struct PinnedWorkspace {
     pub output: OutputMatch,
     pub tiling_enabled: bool,
     pub id: Option<String>,
-    // TODO: name
+    pub name: Option<String>,
 }

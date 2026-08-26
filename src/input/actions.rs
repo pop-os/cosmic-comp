@@ -2,6 +2,7 @@
 
 use crate::{
     config::{Action, PrivateAction},
+    input::InputBackendId,
     shell::{
         FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
         focus::{FocusTarget, target::KeyboardFocusTarget},
@@ -28,6 +29,8 @@ use std::{os::unix::process::CommandExt, thread};
 
 use super::gestures;
 
+const MAX_ZOOM: f64 = 256.0;
+
 fn propagate_by_default(action: &shortcuts::Action) -> bool {
     matches!(
         action,
@@ -39,6 +42,7 @@ impl State {
     pub fn handle_action(
         &mut self,
         action: Action,
+        backend_id: &InputBackendId,
         seat: &Seat<State>,
         serial: Serial,
         time: u32,
@@ -69,7 +73,7 @@ impl State {
             Action::Shortcut(action) => {
                 let propagate = propagate_by_default(&action);
                 self.handle_shortcut_action(
-                    action, seat, serial, time, pattern, direction, propagate,
+                    action, backend_id, seat, serial, time, pattern, direction, propagate,
                 )
             }
             Action::Private(PrivateAction::Escape) => {
@@ -143,6 +147,7 @@ impl State {
     pub fn handle_shortcut_action(
         &mut self,
         action: shortcuts::Action,
+        backend_id: &InputBackendId,
         seat: &Seat<State>,
         serial: Serial,
         time: u32,
@@ -232,6 +237,7 @@ impl State {
                 {
                     self.handle_shortcut_action(
                         Action::SwitchOutput(inferred),
+                        backend_id,
                         seat,
                         serial,
                         time,
@@ -271,6 +277,7 @@ impl State {
                 {
                     self.handle_shortcut_action(
                         Action::SwitchOutput(inferred),
+                        backend_id,
                         seat,
                         serial,
                         time,
@@ -392,6 +399,7 @@ impl State {
                                 } else {
                                     Action::SendToOutput(inferred)
                                 },
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -417,6 +425,7 @@ impl State {
                                 } else {
                                     Action::SendToWorkspace(1)
                                 },
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -483,6 +492,7 @@ impl State {
                                 } else {
                                     Action::SendToOutput(inferred)
                                 },
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -508,6 +518,7 @@ impl State {
                                 } else {
                                     Action::SendToLastWorkspace
                                 },
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -532,7 +543,9 @@ impl State {
                         if propagate
                             && let Some((serial, prev_output, prev_idx)) =
                                 shell.previous_workspace_idx.take()
-                            && seat.last_modifier_change().is_some_and(|s| s == serial)
+                            && seat
+                                .last_modifier_change_for(backend_id)
+                                .is_some_and(|s| s == serial)
                             && prev_output == current_output
                         {
                             let _ = shell.activate(
@@ -705,6 +718,7 @@ impl State {
                         if res.is_ok() {
                             self.handle_shortcut_action(
                                 Action::SwitchOutput(direction),
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -741,7 +755,8 @@ impl State {
                         };
 
                         if let Some(direction) = dir {
-                            if let Some(last_mod_serial) = seat.last_modifier_change() {
+                            if let Some(last_mod_serial) = seat.last_modifier_change_for(backend_id)
+                            {
                                 let mut shell = self.common.shell.write();
                                 if !shell
                                     .previous_workspace_idx
@@ -776,6 +791,7 @@ impl State {
 
                             self.handle_shortcut_action(
                                 action,
+                                backend_id,
                                 seat,
                                 serial,
                                 time,
@@ -800,7 +816,7 @@ impl State {
                     .move_current_element(direction, seat);
                 match res {
                     MoveResult::MoveFurther(_move_further) => {
-                        if let Some(last_mod_serial) = seat.last_modifier_change() {
+                        if let Some(last_mod_serial) = seat.last_modifier_change_for(backend_id) {
                             let mut shell = self.common.shell.write();
                             if !shell
                                 .previous_workspace_idx
@@ -834,6 +850,7 @@ impl State {
 
                         self.handle_shortcut_action(
                             action,
+                            backend_id,
                             seat,
                             serial,
                             time,
@@ -1101,7 +1118,14 @@ impl State {
         }
 
         if zoom_seat == *seat {
-            let new_level = (current_level + change).max(1.0);
+            let factor = 1.0 + change.abs();
+            let new_level = if change < 0. {
+                current_level / factor
+            } else {
+                current_level * factor
+            }
+            .clamp(1.0, MAX_ZOOM);
+            let new_level = if new_level < 1.01 { 1.0 } else { new_level };
             shell.trigger_zoom(
                 seat,
                 Some(&output),
