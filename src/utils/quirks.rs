@@ -48,10 +48,5 @@ pub fn namespace_is_capture_excluded(namespace: &str) -> bool {
 pub fn output_has_capture_excluded_surface(output: &Output) -> bool {
     layer_map_for_output(output)
         .layers()
-        .filter(|s| namespace_is_capture_excluded(s.namespace()))
-        // Same rationale as `workspace_overview_is_open`.
-        .any(|s| {
-            with_renderer_surface_state(s.wl_surface(), |state| state.buffer().is_some())
-                .unwrap_or(false)
-        })
+        .any(|s| namespace_is_capture_excluded(s.namespace()))
 }
