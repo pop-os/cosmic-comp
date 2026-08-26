@@ -21,7 +21,7 @@ use cosmic_comp_config::AppearanceConfig;
 use smithay::{
     backend::{
         drm::DrmNode,
-        input::KeyState,
+        input::{InputTime, KeyState},
         renderer::{
             ImportAll, ImportMem, Renderer,
             element::{Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage},
@@ -985,7 +985,7 @@ impl KeyboardTarget<State> for CosmicWindow {
         key: KeysymHandle<'_>,
         state: KeyState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         self.0
             .with_program(|p| KeyboardTarget::key(&p.window, seat, data, key, state, serial, time))
@@ -1124,7 +1124,7 @@ impl PointerTarget<State> for CosmicWindow {
         }
     }
 
-    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
+    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: InputTime) {
         self.0.with_program(|p| {
             let cursor_state = seat.user_data().get::<CursorState>().unwrap();
             cursor_state.lock().unwrap().unset_shape();

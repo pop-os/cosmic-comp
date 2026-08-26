@@ -6,13 +6,16 @@ use crate::{
 };
 use indexmap::IndexSet;
 use smithay::{
+    backend::input::InputTime,
     desktop::{PopupUngrabStrategy, layer_map_for_output},
     input::{Seat, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     utils::{IsAlive, Point, SERIAL_COUNTER, Serial},
     wayland::{
-        pointer_constraints::with_pointer_constraint,
+        pointer_constraints::{
+            ConstraintRemove, PointerConstraintsHandler, with_pointer_constraint,
+        },
         seat::WaylandFocus,
         selection::{data_device::set_data_device_focus, primary_selection::set_primary_focus},
         shell::wlr_layer::{KeyboardInteractivity, Layer},
@@ -373,12 +376,19 @@ fn update_focus_state(
             && target != Some(&old_target)
             && let Some(surface) = old_target.wl_surface()
             && let Some(pointer) = seat.get_pointer()
-        {
-            with_pointer_constraint(&surface, &pointer, |constraint| {
-                if let Some(constraint) = constraint {
+            && let Some(region) = with_pointer_constraint(&surface, &pointer, |constraint| {
+                if let Some(constraint) = constraint
+                    && constraint.is_active()
+                {
+                    let region = constraint.region().cloned();
                     constraint.deactivate();
+                    Some(region)
+                } else {
+                    None
                 }
-            });
+            })
+        {
+            state.remove_constraint(&surface, &pointer, ConstraintRemove::PointerLeave(region));
         }
 
         if should_update_cursor
@@ -403,7 +413,7 @@ fn update_focus_state(
 
                 crate::input::update_output_image_copy_cursor_position(
                     &shell,
-                    &state.common.clock,
+                    InputTime::now(),
                     &output,
                     seat,
                     new_pos,
@@ -419,7 +429,7 @@ fn update_focus_state(
                     &MotionEvent {
                         location: new_pos.as_logical(),
                         serial: SERIAL_COUNTER.next_serial(),
-                        time: 0,
+                        time: InputTime::now(),
                     },
                 );
             }
@@ -768,7 +778,7 @@ fn update_pointer_focus(state: &mut State, seat: &Seat<State>) {
                 &MotionEvent {
                     location: pointer.current_location(),
                     serial: SERIAL_COUNTER.next_serial(),
-                    time: state.common.clock.now().as_millis(),
+                    time: InputTime::now(),
                 },
             );
         }

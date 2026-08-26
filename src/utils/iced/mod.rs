@@ -31,7 +31,7 @@ use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
         allocator::Fourcc,
-        input::{ButtonState, KeyState},
+        input::{ButtonState, InputTime, KeyState},
         renderer::{
             ImportMem,
             element::{
@@ -581,7 +581,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         _seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         _serial: Serial,
-        _time: u32,
+        _time: InputTime,
     ) {
         let mut internal = self.0.lock().unwrap();
         internal
@@ -784,7 +784,7 @@ impl<P: Program + Send + 'static> KeyboardTarget<crate::state::State> for IcedEl
         _key: KeysymHandle<'_>,
         _state: KeyState,
         _serial: Serial,
-        _time: u32,
+        _time: InputTime,
     ) {
         // TODO convert keys
     }

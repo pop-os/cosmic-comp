@@ -9,7 +9,7 @@ use crate::{
     state::State,
 };
 use smithay::{
-    backend::input::{Device, DeviceCapability},
+    backend::input::{Device, DeviceCapability, InputTime},
     desktop::utils::bbox_from_surface_tree,
     input::{
         Seat, SeatState,
@@ -21,7 +21,7 @@ use smithay::{
         input::Device as InputDevice,
         wayland_server::{DisplayHandle, protocol::wl_surface::WlSurface},
     },
-    utils::{Buffer, IsAlive, Logical, Monotonic, Point, Rectangle, Serial, Time, Transform},
+    utils::{Buffer, IsAlive, Logical, Point, Rectangle, Serial, Transform},
     wayland::compositor::with_states,
 };
 use tracing::warn;
@@ -296,7 +296,7 @@ pub trait SeatExt {
     fn cursor_geometry(
         &self,
         loc: impl Into<Point<f64, Buffer>>,
-        time: Time<Monotonic>,
+        time: InputTime,
     ) -> Option<CursorGeometry>;
     fn cursor_image_status(&self) -> CursorImageStatus;
     fn set_cursor_image_status(&self, status: CursorImageStatus);
@@ -432,7 +432,7 @@ impl SeatExt for Seat<State> {
     fn cursor_geometry(
         &self,
         loc: impl Into<Point<f64, Buffer>>,
-        time: Time<Monotonic>,
+        time: InputTime,
     ) -> Option<CursorGeometry> {
         let location = loc.into().to_i32_round();
 
@@ -465,7 +465,7 @@ impl SeatExt for Seat<State> {
                     .lock()
                     .unwrap()
                     .get_named_cursor(cursor_icon)
-                    .get_image(1, time.as_millis());
+                    .get_image(1, time.millis());
 
                 Some(CursorGeometry {
                     geometry: Rectangle::new(

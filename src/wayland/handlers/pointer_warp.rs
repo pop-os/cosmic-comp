@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::State;
+use crate::{input::CursorHintState, state::State};
 use smithay::{
     input::pointer::PointerHandle,
     reexports::wayland_server::protocol::{wl_pointer::WlPointer, wl_surface::WlSurface},
@@ -38,7 +38,7 @@ impl PointerWarpHandler for State {
         drop(shell);
 
         if let Some(pointer_handle) = pointer_handle {
-            self.apply_cursor_hint(&surface, &pointer_handle, pos);
+            self.apply_cursor_hint(&surface, &pointer_handle, pos, CursorHintState::PointerWarp);
         }
     }
 }

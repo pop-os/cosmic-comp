@@ -6,6 +6,7 @@ use smithay::{
     backend::{
         allocator::{Fourcc, Modifier},
         egl::EGLDevice,
+        input::InputTime,
         renderer::{
             damage::OutputDamageTracker,
             gles::{Capability, GlesRenderer},
@@ -108,7 +109,7 @@ impl ImageCopyCaptureHandler for State {
     ) -> Option<BufferConstraints> {
         let shell = self.common.shell.read();
         let seat = seat_for_wl_pointer(&shell, pointer)?;
-        let cursor_geometry = seat.cursor_geometry((0.0, 0.0), self.common.clock.now());
+        let cursor_geometry = seat.cursor_geometry((0.0, 0.0), InputTime::now());
         Some(cursor_capture_constraints(cursor_geometry))
     }
 
@@ -172,7 +173,7 @@ impl ImageCopyCaptureHandler for State {
                 let pointer_loc = pointer.current_location().to_i32_round().as_global();
 
                 let (pointer_size, hotspot) = if let Some(CursorGeometry { geometry, hotspot }) =
-                    seat.cursor_geometry((0.0, 0.0), self.common.clock.now())
+                    seat.cursor_geometry((0.0, 0.0), InputTime::now())
                 {
                     (geometry.size, hotspot)
                 } else {

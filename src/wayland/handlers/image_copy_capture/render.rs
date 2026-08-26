@@ -4,6 +4,7 @@ use calloop::LoopHandle;
 use smithay::{
     backend::{
         allocator::{Buffer, Fourcc, format::get_transparent},
+        input::InputTime,
         renderer::{
             BufferType, Color32F, ExportMem, ImportAll, ImportMem, Offscreen, Renderer,
             buffer_dimensions, buffer_type,
@@ -807,7 +808,7 @@ pub fn render_cursor_to_buffer(
     seat: &Seat<State>,
 ) {
     let buffer = frame.buffer();
-    let cursor_geometry = seat.cursor_geometry((0.0, 0.0), state.common.clock.now());
+    let cursor_geometry = seat.cursor_geometry((0.0, 0.0), InputTime::now());
     let constraints = cursor_capture_constraints(cursor_geometry);
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if buffer_size != constraints.size {

@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{shell::CosmicSurface, state::State, utils::prelude::*};
+use crate::{input::CursorHintState, shell::CosmicSurface, state::State, utils::prelude::*};
 use smithay::{
     input::pointer::PointerHandle,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point},
-    wayland::{pointer_constraints::PointerConstraintsHandler, seat::WaylandFocus},
+    wayland::{
+        pointer_constraints::{ConstraintRemove, PointerConstraintsHandler},
+        seat::WaylandFocus,
+    },
 };
 
 pub use smithay::wayland::pointer_constraints::{PointerConstraintRef, with_pointer_constraint};
@@ -76,7 +79,12 @@ impl PointerConstraintsHandler for State {
         }
     }
 
-    fn remove_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
+    fn remove_constraint(
+        &mut self,
+        surface: &WlSurface,
+        pointer: &PointerHandle<Self>,
+        constraint_remove: ConstraintRemove,
+    ) {
         if with_pointer_constraint(surface, pointer, |constraint| constraint.is_none()) {
             let seat = self
                 .common
@@ -91,7 +99,12 @@ impl PointerConstraintsHandler for State {
                 && let Some((hint_surface, hint_location)) = seat.pointer_constraint_hint()
                 && hint_surface == *surface
             {
-                self.apply_cursor_hint(surface, pointer, hint_location);
+                self.apply_cursor_hint(
+                    surface,
+                    pointer,
+                    hint_location,
+                    CursorHintState::ConstraintRemove(constraint_remove),
+                );
                 seat.set_pointer_constraint_hint(None);
             }
         }
