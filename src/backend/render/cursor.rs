@@ -9,6 +9,8 @@ use crate::{
     wayland::handlers::compositor::FRAME_TIME_FILTER,
 };
 use keyframe::{ease, functions::EaseInOutCubic};
+use resvg::{tiny_skia, usvg};
+use serde::Deserialize;
 use smithay::{
     backend::{
         allocator::Fourcc,
@@ -52,14 +54,43 @@ use xcursor::{
 
 static FALLBACK_CURSOR_DATA: &[u8] = include_bytes!("../../../resources/cursor.rgba");
 
+/// A single frame of a scalable SVG cursor: the parsed SVG plus its metadata.
+#[derive(Debug, Clone)]
+struct SvgFrame {
+    tree: usvg::Tree,
+    /// The nominal (logical) size the SVG is authored for.
+    nominal_size: f32,
+    /// Hotspot coordinates, in the SVG's own (nominal) coordinate space.
+    hotspot_x: f32,
+    hotspot_y: f32,
+    /// Delay to the next frame in milliseconds (0 for static cursors).
+    delay: u32,
+}
+
+#[derive(Debug, Clone)]
+enum CursorKind {
+    /// Legacy raster XCursor frames.
+    Xcursor(Vec<Image>),
+    /// Scalable SVG frames, rasterized on demand.
+    Svg(Vec<SvgFrame>),
+}
+
 #[derive(Debug, Clone)]
 pub struct Cursor {
-    icons: Vec<Image>,
+    kind: CursorKind,
     size: u32,
 }
 
 impl Cursor {
     pub fn load(theme: &CursorTheme, shape: CursorIcon, size: u32) -> Cursor {
+        // Prefer a scalable SVG cursor when the theme provides one.
+        if let Some(frames) = load_svg_icon(theme, shape) {
+            return Cursor {
+                kind: CursorKind::Svg(frames),
+                size,
+            };
+        }
+
         let icons = load_icon(theme, shape)
             .map_err(|err| warn!(?err, "Unable to load xcursor, using fallback cursor"))
             .or_else(|_| load_icon(theme, CursorIcon::Default))
@@ -76,44 +107,134 @@ impl Cursor {
                 }]
             });
 
-        Cursor { icons, size }
+        Cursor {
+            kind: CursorKind::Xcursor(icons),
+            size,
+        }
     }
 
     pub fn get_image(&self, scale: u32, millis: u32) -> Image {
         let size = self.size * scale;
-        frame(millis, size, &self.icons)
+        let idx = self.frame_index(size, millis);
+        self.render_frame(size, idx)
+    }
+
+    /// Selects the index of the frame to display at nominal size `size` (in px)
+    /// and elapsed `millis`.
+    fn frame_index(&self, size: u32, millis: u32) -> usize {
+        match &self.kind {
+            CursorKind::Xcursor(images) => xcursor_frame_index(millis, size, images),
+            CursorKind::Svg(frames) => svg_frame_index(millis, frames),
+        }
+    }
+
+    /// Produces the RGBA image for frame `idx`, rasterizing SVG cursors at the
+    /// requested nominal size `size` (in px).
+    fn render_frame(&self, size: u32, idx: usize) -> Image {
+        match &self.kind {
+            CursorKind::Xcursor(images) => images[idx].clone(),
+            CursorKind::Svg(frames) => rasterize_svg_frame(&frames[idx], size),
+        }
     }
 }
 
-fn nearest_images(size: u32, images: &[Image]) -> impl Iterator<Item = &Image> {
-    // Follow the nominal size of the cursor to choose the nearest
+/// Rasterize a scalable cursor frame at nominal pixel size `size`. Per the KDE
+/// SVG cursor format, the SVG canvas and hotspot are scaled by
+/// `size / nominal_size`. The returned [`Image`] uses the same premultiplied
+/// byte order (BGRA / little-endian ARGB) as xcursor images.
+fn rasterize_svg_frame(frame: &SvgFrame, size: u32) -> Image {
+    let factor = size as f32 / frame.nominal_size;
+    let svg_size = frame.tree.size();
+    let width = ((svg_size.width() * factor).floor() as u32).max(1);
+    let height = ((svg_size.height() * factor).floor() as u32).max(1);
+
+    let mut image = Image {
+        size,
+        width,
+        height,
+        xhot: (frame.hotspot_x * factor).floor() as u32,
+        yhot: (frame.hotspot_y * factor).floor() as u32,
+        delay: frame.delay,
+        pixels_rgba: Vec::new(),
+        pixels_argb: Vec::new(), // unused
+    };
+
+    match tiny_skia::Pixmap::new(width, height) {
+        Some(mut pixmap) => {
+            resvg::render(
+                &frame.tree,
+                tiny_skia::Transform::from_scale(factor, factor),
+                &mut pixmap.as_mut(),
+            );
+            // tiny-skia produces premultiplied RGBA; xcursor images consume the
+            // raw little-endian ARGB byte order (premultiplied BGRA). Swap R<->B.
+            let mut pixels = pixmap.take();
+            for px in pixels.as_chunks_mut::<4>().0 {
+                px.swap(0, 2);
+            }
+            image.pixels_rgba = pixels;
+        }
+        None => {
+            warn!(width, height, "Failed to allocate cursor pixmap");
+            image.pixels_rgba = vec![0; (width as usize) * (height as usize) * 4];
+        }
+    }
+
+    image
+}
+
+/// Indices (into `images`) of all frames sharing the resolution nearest to `size`.
+fn nearest_image_indices(size: u32, images: &[Image]) -> Vec<usize> {
+    // Follow the nominal size of the cursor to choose the nearest.
     let nearest_image = images
         .iter()
         .min_by_key(|image| u32::abs_diff(size, image.size))
         .unwrap();
+    let (width, height) = (nearest_image.width, nearest_image.height);
 
-    images.iter().filter(move |image| {
-        image.width == nearest_image.width && image.height == nearest_image.height
-    })
+    images
+        .iter()
+        .enumerate()
+        .filter(|(_, image)| image.width == width && image.height == height)
+        .map(|(i, _)| i)
+        .collect()
 }
 
-fn frame(mut millis: u32, size: u32, images: &[Image]) -> Image {
-    let total = nearest_images(size, images).fold(0, |acc, image| acc + image.delay);
+fn xcursor_frame_index(mut millis: u32, size: u32, images: &[Image]) -> usize {
+    let indices = nearest_image_indices(size, images);
+    let total: u32 = indices.iter().map(|&i| images[i].delay).sum();
 
     if total == 0 {
-        millis = 0;
-    } else {
-        millis %= total;
+        return indices[0];
     }
+    millis %= total;
 
-    for img in nearest_images(size, images) {
-        if millis <= img.delay {
-            return img.clone();
+    for &i in &indices {
+        if millis <= images[i].delay {
+            return i;
         }
-        millis -= img.delay;
+        millis -= images[i].delay;
     }
 
-    unreachable!()
+    *indices.last().unwrap()
+}
+
+fn svg_frame_index(mut millis: u32, frames: &[SvgFrame]) -> usize {
+    let total: u32 = frames.iter().map(|frame| frame.delay).sum();
+
+    if total == 0 {
+        return 0;
+    }
+    millis %= total;
+
+    for (i, frame) in frames.iter().enumerate() {
+        if millis <= frame.delay {
+            return i;
+        }
+        millis -= frame.delay;
+    }
+
+    frames.len() - 1
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -173,6 +294,79 @@ fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error
     }
 
     Err(Error::NoDefaultCursor)
+}
+
+/// A frame entry in a `cursors_scalable/<shape>/metadata.json` file, per the
+/// KDE SVG cursor format specification.
+#[derive(Debug, Clone, Deserialize)]
+struct SvgCursorMeta {
+    filename: String,
+    nominal_size: f32,
+    hotspot_x: f32,
+    hotspot_y: f32,
+    /// Only present for animated cursors; defaults to 0 for static ones.
+    #[serde(default)]
+    delay: u32,
+}
+
+/// Resolves a scalable (SVG) cursor for `shape`
+fn load_svg_icon(theme: &CursorTheme, shape: CursorIcon) -> Option<Vec<SvgFrame>> {
+    let shape_name = shape.to_string();
+    let options = usvg::Options::default();
+    for name in cursor_aliases(&shape_name)
+        .iter()
+        .copied()
+        .chain(std::iter::once(shape_name.as_str()))
+    {
+        if let Some(dir) = theme.load_scalable(name)
+            && let Some(frames) = parse_svg_dir(&dir, &options)
+        {
+            return Some(frames);
+        }
+    }
+
+    None
+}
+
+/// Reads a `cursors_scalable/<shape>` directory (its `metadata.json` and the
+/// referenced SVG files) into a list of parsed frames.
+fn parse_svg_dir(dir: &std::path::Path, options: &usvg::Options) -> Option<Vec<SvgFrame>> {
+    let metadata = std::fs::read(dir.join("metadata.json")).ok()?;
+    let metas: Vec<SvgCursorMeta> = match serde_json::from_slice(&metadata) {
+        Ok(metas) => metas,
+        Err(err) => {
+            warn!(?dir, ?err, "Malformed SVG cursor metadata");
+            return None;
+        }
+    };
+
+    let mut frames = Vec::with_capacity(metas.len());
+    for meta in metas {
+        let svg_path = dir.join(&meta.filename);
+        let svg_data = match std::fs::read(&svg_path) {
+            Ok(data) => data,
+            Err(err) => {
+                warn!(?svg_path, ?err, "Unable to read SVG cursor");
+                break;
+            }
+        };
+        let tree = match usvg::Tree::from_data(&svg_data, options) {
+            Ok(tree) => tree,
+            Err(err) => {
+                warn!(?svg_path, ?err, "Unable to parse SVG cursor");
+                break;
+            }
+        };
+        frames.push(SvgFrame {
+            tree,
+            nominal_size: meta.nominal_size,
+            hotspot_x: meta.hotspot_x,
+            hotspot_y: meta.hotspot_y,
+            delay: meta.delay,
+        });
+    }
+
+    (!frames.is_empty()).then_some(frames)
 }
 
 render_elements! {
@@ -266,7 +460,7 @@ pub struct CursorStateInner {
 
     cursors: HashMap<CursorIcon, Cursor>,
     current_image: Option<Image>,
-    image_cache: Vec<(Image, MemoryRenderBuffer)>,
+    image_cache: Vec<CachedFrame>,
 
     hidden: bool,
     idle_timer: Option<RegistrationToken>,
@@ -280,6 +474,15 @@ pub struct CursorStateInner {
     magnification: f32,
     anim_from: f32,
     anim_start: Option<Instant>,
+    rest_started: Option<Instant>,
+}
+
+/// A rasterized cursor frame, keyed by `(shape, pixel size, frame index)`.
+struct CachedFrame {
+    key: (CursorIcon, u32, usize),
+    image: Image,
+    buffer: MemoryRenderBuffer,
+    unmagnified: bool,
 }
 
 /// One sampled pointer position on the recent motion path.
@@ -288,6 +491,9 @@ struct PathSample {
     position: Point<f64, Logical>,
     time: Instant,
 }
+
+/// How long everything must stay unmagnified before the enlarged frames go.
+const MAGNIFIED_FRAME_GRACE: Duration = Duration::from_secs(10);
 
 /// How far back the motion path is considered when looking for a shake.
 const SHAKE_INTERVAL: Duration = Duration::from_millis(1000);
@@ -301,6 +507,8 @@ const SHAKE_SAME_SIGN_TOLERANCE: f64 = 1.0;
 const SHAKE_HOLD: Duration = Duration::from_millis(2000);
 /// Extra magnification added by each shake, growing from the normal cursor size.
 const OVER_MAGNIFICATION: f32 = 1.0;
+/// Upper bound on the nominal size (in px) a cursor frame is rasterized at.
+const MAX_RASTER_SIZE: u32 = 512;
 /// Duration of the grow/shrink animation.
 const MAGNIFICATION_ANIM: Duration = Duration::from_millis(200);
 
@@ -320,13 +528,30 @@ impl CursorStateInner {
     }
 
     pub fn get_named_cursor(&mut self, shape: CursorIcon) -> &Cursor {
+        let cursor_theme = &self.cursor_theme;
+        let cursor_size = self.cursor_size;
         self.cursors
             .entry(shape)
-            .or_insert_with(|| Cursor::load(&self.cursor_theme, shape, self.cursor_size))
+            .or_insert_with(|| Cursor::load(cursor_theme, shape, cursor_size))
     }
 
     pub fn size(&self) -> u32 {
         self.cursor_size
+    }
+
+    /// Drop the rasterizations only a magnified cursor needed, once nothing has
+    /// magnified it for [`MAGNIFIED_FRAME_GRACE`].
+    pub fn drop_magnified_frames(&mut self, now: Instant, zoomed: bool) {
+        if zoomed || self.is_magnifying() {
+            self.rest_started = None;
+            return;
+        }
+        let rest_started = *self.rest_started.get_or_insert(now);
+        if now.duration_since(rest_started) < MAGNIFIED_FRAME_GRACE {
+            return;
+        }
+
+        self.image_cache.retain(|frame| frame.unmagnified);
     }
 
     /// Feed one relative-motion event into the shake detector.
@@ -480,8 +705,24 @@ impl Default for CursorStateInner {
             magnification: 1.0,
             anim_from: 1.0,
             anim_start: None,
+            rest_started: None,
         }
     }
+}
+
+/// Pick the size a cursor frame is rasterized at, given the size the output wants
+/// (`needed`) and the size it would want unmagnified (`base`).
+///
+/// Rasterizations are restricted to `base * 2^n`, rounded up, and clamped to
+/// [`MAX_RASTER_SIZE`].
+fn raster_size(needed: u32, base: u32) -> u32 {
+    let base = base.max(1);
+    let cap = MAX_RASTER_SIZE.max(base);
+    let mut rung = base;
+    while rung < needed && rung.saturating_mul(2) <= cap {
+        rung *= 2;
+    }
+    rung
 }
 
 #[profiling::function]
@@ -519,31 +760,52 @@ pub fn draw_cursor<R>(
             return;
         }
 
-        let integer_scale = (scale.x.max(scale.y) * buffer_scale).ceil() as u32;
-        let frame = state
-            .get_named_cursor(current_cursor)
-            .get_image(integer_scale, time.as_millis());
-        let actual_scale = (frame.size / state.size()).max(1);
+        let output_scale = scale.x.max(scale.y);
+        let integer_scale = (output_scale * buffer_scale).ceil() as u32;
+        let unmagnified_px = state.size() * (output_scale.ceil() as u32);
+        let size_px = raster_size(state.size() * integer_scale, unmagnified_px);
 
-        let pointer_images = &mut state.image_cache;
-        let maybe_image = pointer_images
-            .iter()
-            .find_map(|(image, texture)| if image == &frame { Some(texture) } else { None });
-        let pointer_image = match maybe_image {
-            Some(image) => image,
+        // Pick the frame to display without rasterizing, so a cache hit avoids
+        // any SVG rendering. The `&Cursor` borrow is scoped to this block.
+        let frame_idx = {
+            let cursor = state.get_named_cursor(current_cursor);
+            cursor.frame_index(size_px, time.as_millis())
+        };
+        let key = (current_cursor, size_px, frame_idx);
+
+        // Rasterize and upload this (shape, size, frame) only if not cached.
+        let index = match state.image_cache.iter().position(|frame| frame.key == key) {
+            Some(index) => index,
             None => {
+                let image = {
+                    let cursor = state.get_named_cursor(current_cursor);
+                    cursor.render_frame(size_px, frame_idx)
+                };
+                let actual_scale = (image.size / state.size()).max(1);
                 let buffer = MemoryRenderBuffer::from_slice(
-                    &frame.pixels_rgba,
+                    &image.pixels_rgba,
                     Fourcc::Argb8888,
-                    (frame.width as i32, frame.height as i32),
+                    (image.width as i32, image.height as i32),
                     actual_scale as i32,
                     Transform::Normal,
                     None,
                 );
-                pointer_images.push((frame.clone(), buffer));
-                pointer_images.last().map(|(_, i)| i).unwrap()
+                state.image_cache.push(CachedFrame {
+                    key,
+                    image,
+                    buffer,
+                    unmagnified: size_px == unmagnified_px,
+                });
+                state.image_cache.len() - 1
             }
         };
+
+        let (frame, pointer_image) = {
+            let entry = &mut state.image_cache[index];
+            entry.unmagnified |= size_px == unmagnified_px;
+            (entry.image.clone(), entry.buffer.clone())
+        };
+        let actual_scale = (frame.size / state.size()).max(1);
 
         let hotspot = Point::<i32, BufferCoords>::from((frame.xhot as i32, frame.yhot as i32))
             .to_logical(
@@ -558,7 +820,7 @@ pub fn draw_cursor<R>(
                 MemoryRenderBufferRenderElement::from_buffer(
                     renderer,
                     location.to_physical(scale),
-                    pointer_image,
+                    &pointer_image,
                     None,
                     None,
                     None,
