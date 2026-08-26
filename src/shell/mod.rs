@@ -266,6 +266,16 @@ pub struct PendingLayer {
 }
 
 #[derive(Debug)]
+struct ShellResizeState {
+    focused: KeyboardFocusTarget,
+    direction: ResizeDirection,
+    edge: ResizeEdge,
+    amount: i32,
+    idx: usize,
+    output: Output,
+}
+
+#[derive(Debug)]
 pub struct Shell {
     pub workspaces: Workspaces,
 
@@ -284,14 +294,7 @@ pub struct Shell {
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
-    resize_state: Option<(
-        KeyboardFocusTarget,
-        ResizeDirection,
-        ResizeEdge,
-        i32,
-        usize,
-        Output,
-    )>,
+    resize_state: Option<ShellResizeState>,
     resize_indicator: Option<ResizeIndicator>,
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
@@ -2399,7 +2402,10 @@ impl Shell {
             ));
         } else if let Some(direction) = self.resize_mode.active_direction() {
             self.resize_mode = ResizeMode::Ended(Instant::now(), direction);
-            if let Some((_, direction, edge, _, _, _)) = self.resize_state.as_ref() {
+            if let Some(ShellResizeState {
+                direction, edge, ..
+            }) = self.resize_state.as_ref()
+            {
                 self.finish_resize(*direction, *edge);
             }
         }
@@ -4583,13 +4589,7 @@ impl Shell {
         let Some(focused) = seat.get_keyboard().unwrap().current_focus() else {
             return;
         };
-        let amount = (self
-            .resize_state
-            .take()
-            .map(|(_, _, _, amount, _, _)| amount)
-            .unwrap_or(10)
-            + 2)
-        .min(20);
+        let amount = (self.resize_state.take().map(|s| s.amount).unwrap_or(10) + 2).min(20);
 
         if self
             .workspaces
@@ -4599,17 +4599,37 @@ impl Shell {
             .sticky_layer
             .resize(&focused, direction, edge, amount)
         {
-            self.resize_state = Some((focused, direction, edge, amount, idx, output));
+            self.resize_state = Some(ShellResizeState {
+                focused,
+                direction,
+                edge,
+                amount,
+                idx,
+                output,
+            });
         } else if let Some(workspace) = self.workspaces.get_mut(idx, &output)
             && workspace.resize(&focused, direction, edge, amount)
         {
-            self.resize_state = Some((focused, direction, edge, amount, idx, output));
+            self.resize_state = Some(ShellResizeState {
+                focused,
+                direction,
+                edge,
+                amount,
+                idx,
+                output,
+            });
         }
     }
 
     pub fn finish_resize(&mut self, direction: ResizeDirection, edge: ResizeEdge) {
-        if let Some((old_focused, old_direction, old_edge, _, idx, output)) =
-            self.resize_state.take()
+        if let Some(ShellResizeState {
+            focused: old_focused,
+            direction: old_direction,
+            edge: old_edge,
+            idx,
+            output,
+            ..
+        }) = self.resize_state.take()
             && old_direction == direction
             && old_edge == edge
         {
