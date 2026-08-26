@@ -2992,15 +2992,6 @@ impl State {
             let under = State::surface_under(point, &output, &self.common.shell.write())
                 .map(|(target, pos)| (target, pos.as_logical()));
             let time = InputTime::now();
-            pointer.relative_motion(
-                self,
-                under.clone(),
-                &RelativeMotionEvent {
-                    delta: (0., 0.).into(),
-                    delta_unaccel: (0., 0.).into(),
-                    time,
-                },
-            );
             pointer.motion(
                 self,
                 under,
