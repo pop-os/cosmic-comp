@@ -1356,8 +1356,14 @@ impl Workspaces {
     }
 
     pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
-        let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
-        (set.previously_active.map(|(idx, _)| idx), set.active)
+        match self.sets.get(output).or(self.backup_set.as_ref()) {
+            Some(set) => (set.previously_active.map(|(idx, _)| idx), set.active),
+            // `sets` no longer has an entry for `output` (it was just removed) and
+            // `backup_set` isn't populated yet (it only fills in once no outputs
+            // remain), same race `active`/`active_mut` already handle by returning
+            // `None` instead of unwrapping.
+            None => (None, 0),
+        }
     }
 
     pub fn idx_for_handle(&self, output: &Output, handle: &WorkspaceHandle) -> Option<usize> {
