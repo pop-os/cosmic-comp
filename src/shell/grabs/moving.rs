@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 use smithay::{
     backend::{
         drm::DrmNode,
-        input::ButtonState,
+        input::{ButtonState, InputTime},
         renderer::{
             ImportAll, ImportMem,
             element::{RenderElement, utils::RescaleRenderElement},
@@ -956,7 +956,7 @@ impl Drop for MoveGrab {
                             &MotionEvent {
                                 location: pointer.current_location(),
                                 serial,
-                                time: state.common.clock.now().as_millis(),
+                                time: InputTime::now(),
                             },
                         );
                     }

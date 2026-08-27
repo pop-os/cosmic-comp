@@ -146,4 +146,4 @@ lto = "fat"
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "5fb12b8" }
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "e3d461a" }

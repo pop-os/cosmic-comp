@@ -5,7 +5,10 @@ use smithay::{
     input::pointer::PointerHandle,
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point},
-    wayland::{pointer_constraints::PointerConstraintsHandler, seat::WaylandFocus},
+    wayland::{
+        pointer_constraints::{ConstraintRemove, PointerConstraintsHandler},
+        seat::WaylandFocus,
+    },
 };
 
 pub use smithay::wayland::pointer_constraints::{PointerConstraintRef, with_pointer_constraint};
@@ -76,23 +79,38 @@ impl PointerConstraintsHandler for State {
         }
     }
 
-    fn remove_constraint(&mut self, surface: &WlSurface, pointer: &PointerHandle<Self>) {
-        if with_pointer_constraint(surface, pointer, |constraint| constraint.is_none()) {
-            let seat = self
-                .common
-                .shell
-                .read()
-                .seats
-                .iter()
-                .find(|s| s.get_pointer().as_ref() == Some(pointer))
-                .cloned();
+    fn remove_constraint(
+        &mut self,
+        surface: &WlSurface,
+        pointer: &PointerHandle<Self>,
+        constraint_remove: ConstraintRemove,
+    ) {
+        match constraint_remove {
+            ConstraintRemove::PointerLeave(_) => {
+                // If the constraint was broken by the pointer forcibly leaving the surface, then it doesn't
+                // make much sense to warp it.
+                return;
+            }
+            ConstraintRemove::Destroyed(constraint) => {
+                let Some(seat) = self
+                    .common
+                    .shell
+                    .read()
+                    .seats
+                    .iter()
+                    .find(|s| s.get_pointer().as_ref() == Some(pointer))
+                    .cloned()
+                else {
+                    return;
+                };
+                let Some((hint_surface, hint_location)) = seat.pointer_constraint_hint() else {
+                    return;
+                };
 
-            if let Some(seat) = seat
-                && let Some((hint_surface, hint_location)) = seat.pointer_constraint_hint()
-                && hint_surface == *surface
-            {
-                self.apply_cursor_hint(surface, pointer, hint_location);
-                seat.set_pointer_constraint_hint(None);
+                if hint_surface == *surface {
+                    self.apply_cursor_hint(surface, pointer, hint_location, Some(&constraint));
+                    seat.set_pointer_constraint_hint(None);
+                }
             }
         }
     }

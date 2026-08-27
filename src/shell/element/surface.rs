@@ -21,6 +21,7 @@ use std::{
 use smithay::{
     backend::{
         drm::DrmNode,
+        input::InputTime,
         renderer::{
             ImportAll, Renderer, buffer_has_alpha,
             element::{Kind, RenderElementStates, surface::KindEvaluation},
@@ -1084,7 +1085,7 @@ impl KeyboardTarget<State> for CosmicSurface {
         key: KeysymHandle<'_>,
         state: smithay::backend::input::KeyState,
         serial: smithay::utils::Serial,
-        time: u32,
+        time: InputTime,
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {

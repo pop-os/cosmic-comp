@@ -38,7 +38,7 @@ use shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     backend::{
         drm::DrmNode,
-        input::KeyState,
+        input::{InputTime, KeyState},
         renderer::{
             ImportAll, ImportMem, Renderer,
             element::{Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage},
@@ -1557,7 +1557,7 @@ impl KeyboardTarget<State> for CosmicStack {
         key: KeysymHandle<'_>,
         state: KeyState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
         self.0.with_program(|p| {
@@ -1726,7 +1726,7 @@ impl PointerTarget<State> for CosmicStack {
         }
     }
 
-    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
+    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: InputTime) {
         self.0.with_program(|p| {
             let mut cursor_state = seat
                 .user_data()
