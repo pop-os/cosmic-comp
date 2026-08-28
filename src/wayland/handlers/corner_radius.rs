@@ -3,7 +3,7 @@ use smithay::wayland::compositor::SurfaceData;
 
 use crate::wayland::protocols::corner_radius::{
     CacheableCorners, CacheablePadding, CornerRadiusData, CornerRadiusHandler, CornerRadiusState,
-    delegate_corner_radius,
+    Padding, delegate_corner_radius,
 };
 
 use crate::state::State;
@@ -50,13 +50,23 @@ pub fn surface_padding(states: &SurfaceData, size: Size<i32, Logical>) -> Option
 
     let padding = guard.current().0?;
 
+    Some(constrain_padding(padding, size))
+}
+
+fn constrain_padding(padding: Padding, size: Size<i32, Logical>) -> [i32; 4] {
+    let [top, bottom] = constrain_padding_axis(padding.top, padding.bottom, size.h);
+    let [right, left] = constrain_padding_axis(padding.right, padding.left, size.w);
+
+    [top, right, bottom, left]
+}
+
+fn constrain_padding_axis(first: i32, second: i32, length: i32) -> [i32; 2] {
     // guard against padding being too large
-    Some([
-        padding.top.min(size.h / 2),
-        padding.right.min(size.w / 2),
-        padding.bottom.min(size.h / 2),
-        padding.left.min(size.w / 2),
-    ])
+    if first.saturating_add(second) <= length {
+        [first, second]
+    } else {
+        [first.min(length / 2), second.min(length / 2)]
+    }
 }
 
 pub fn pad_rect(
