@@ -44,6 +44,7 @@ pub struct ResizeData {
     pub initial_window_size: Size<i32, Logical>,
 }
 
+// XXX this exists and is seperate from shell resize state?
 /// State of the resize operation.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ResizeState {

@@ -275,6 +275,19 @@ struct ShellResizeState {
     output: Output,
 }
 
+// XXX Do we need multiple to transition from one to another?
+enum ShellMode {
+    Normal,
+    Overview(OverviewMode),
+    Resize {
+        mode: ResizeMode,
+        state: ShellResizeState,
+        indicator: ResizeIndicator,
+    },
+    Swap(SwapIndicator),
+    Workspaces,
+}
+
 #[derive(Debug)]
 pub struct Shell {
     pub workspaces: Workspaces,
@@ -2387,6 +2400,7 @@ impl Shell {
         config: &Config,
         evlh: LoopHandle<'static, crate::state::State>,
     ) {
+        // XXX what if overview mode is already open?
         if let Some((pattern, direction)) = enabled {
             if let ResizeMode::Started(old_pattern, _, old_direction) = &mut self.resize_mode {
                 *old_pattern = pattern;
@@ -2394,6 +2408,7 @@ impl Shell {
             } else {
                 self.resize_mode = ResizeMode::Started(pattern, Instant::now(), direction);
             }
+            // XXX is resize_indicator always siet with this?
             self.resize_indicator = Some(ResizeIndicator::new(
                 direction,
                 config,
