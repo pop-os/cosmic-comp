@@ -338,6 +338,9 @@ impl State {
                     let current_output = seat.active_output();
 
                     if self.common.config.cosmic_conf.cursor_shake_to_find
+                        && seat
+                            .get_pointer()
+                            .is_some_and(|pointer| !pointer.is_grabbed())
                         && let Some(cursor_state) =
                             seat.user_data()
                                 .get::<crate::backend::render::cursor::CursorState>()
