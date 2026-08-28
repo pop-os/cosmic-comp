@@ -281,6 +281,7 @@ pub struct Shell {
 
     theme: cosmic::Theme,
     pub active_hint: bool,
+    pub dim_inactive_panels: bool,
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
@@ -507,6 +508,12 @@ impl WorkspaceSet {
         }
     }
 
+    fn refresh_focus_stacks(&mut self) {
+        for workspace in &mut self.workspaces {
+            workspace.refresh_focus_stack();
+        }
+    }
+
     fn activate(
         &mut self,
         idx: usize,
@@ -611,6 +618,7 @@ impl WorkspaceSet {
             self.workspaces[self.active].refresh();
         }
         self.sticky_layer.refresh();
+        self.refresh_focus_stacks();
     }
 
     fn add_empty_workspace(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
@@ -1573,6 +1581,7 @@ impl Common {
         let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
         shell_ref.active_hint = self.config.cosmic_conf.active_hint;
+        shell_ref.dim_inactive_panels = self.config.cosmic_conf.dim_inactive_panels;
         shell_ref.appearance_conf = self.config.cosmic_conf.appearance_settings;
         if let Some(zoom_state) = shell_ref.zoom_state.as_mut() {
             zoom_state.increment = self.config.cosmic_conf.accessibility_zoom.increment;
@@ -1728,6 +1737,7 @@ impl Shell {
 
             theme,
             active_hint: config.cosmic_conf.active_hint,
+            dim_inactive_panels: config.cosmic_conf.dim_inactive_panels,
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
@@ -2878,8 +2888,10 @@ impl Shell {
             _ => None,
         };
 
+        let seat_output = seat.keyboard_or_active_output();
+
         let should_be_fullscreen = output.is_some();
-        let mut output = output.unwrap_or_else(|| seat.active_output());
+        let mut output = output.unwrap_or_else(|| seat_output.clone());
 
         // this is beyond stupid, just to make the borrow checker happy
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
@@ -2920,7 +2932,7 @@ impl Shell {
 
         let workspace_output = workspace.output.clone();
         let was_activated = workspace_handle.is_some()
-            && (workspace_output != seat.active_output() || active_handle != workspace.handle);
+            && (workspace_output != seat_output || active_handle != workspace.handle);
         let workspace_handle = workspace.handle;
         let is_dialog = layout::is_dialog(&window);
         let floating_exception = layout::has_floating_exception(&self.tiling_exceptions, &window);
@@ -2931,7 +2943,7 @@ impl Shell {
                 workspace_state.add_workspace_state(&workspace_handle, WState::Urgent);
             }
 
-            return (workspace_output == seat.active_output() && active_handle == workspace_handle)
+            return (workspace_output == seat_output && active_handle == workspace_handle)
                 .then_some(KeyboardFocusTarget::Fullscreen(window));
         }
 
@@ -2946,7 +2958,7 @@ impl Shell {
             if was_activated {
                 workspace_state.add_workspace_state(&workspace_handle, WState::Urgent);
             }
-            return (workspace_output == seat.active_output() && active_handle == workspace_handle)
+            return (workspace_output == seat_output && active_handle == workspace_handle)
                 .then_some(KeyboardFocusTarget::Element(focused));
         }
 
@@ -2988,8 +3000,7 @@ impl Shell {
             self.maximize_request(&mapped, &seat, false, loop_handle);
         }
 
-        let new_target = if (workspace_output == seat.active_output()
-            && active_handle == workspace_handle)
+        let new_target = if (workspace_output == seat_output && active_handle == workspace_handle)
             || should_be_sticky
         {
             // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
@@ -4044,7 +4055,7 @@ impl Shell {
         let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
             return FocusResult::None;
         };
-        let output = seat.active_output();
+        let output = seat.keyboard_or_active_output();
 
         if matches!(target, KeyboardFocusTarget::Fullscreen(_)) {
             return FocusResult::None;
@@ -4838,7 +4849,11 @@ impl Shell {
         ) {
             return;
         }
-        let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
+        let set = self
+            .workspaces
+            .sets
+            .get_mut(&seat.keyboard_or_active_output())
+            .unwrap();
         let workspace = &mut set.workspaces[set.active];
 
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();

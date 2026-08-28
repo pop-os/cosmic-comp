@@ -54,7 +54,7 @@ impl XdgActivationHandler for State {
                     let shell = self.common.shell.read();
                     shell.seats.last_active().clone()
                 });
-            let output = seat.active_output();
+            let output = seat.keyboard_or_active_output();
             let mut shell = self.common.shell.write();
             let Some(workspace) = shell.active_space_mut(&output) else {
                 debug!(?token, "created urgent token for privileged client");
@@ -93,7 +93,7 @@ impl XdgActivationHandler for State {
             .unwrap_or(false);
 
         if valid {
-            let output = seat.active_output();
+            let output = seat.keyboard_or_active_output();
             let mut shell = self.common.shell.write();
             let Some(workspace) = shell.active_space_mut(&output) else {
                 data.user_data
@@ -145,7 +145,7 @@ impl XdgActivationHandler for State {
                         };
 
                         let seat = shell.seats.last_active().clone();
-                        let current_output = seat.active_output();
+                        let current_output = seat.keyboard_or_active_output();
                         let current_workspace = shell.active_space(&current_output).unwrap().handle;
 
                         if target_workspace == current_workspace {
@@ -181,7 +181,7 @@ impl State {
         let mut shell = self.common.shell.write();
 
         let seat = shell.seats.last_active().clone();
-        let current_output = seat.active_output();
+        let current_output = seat.keyboard_or_active_output();
 
         if let Some(element) = shell.element_for_surface(surface).cloned() {
             if element.is_minimized() {

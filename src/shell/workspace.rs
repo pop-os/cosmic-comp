@@ -499,7 +499,7 @@ impl Workspace {
         self.is_empty() && !self.has_activation_token(xdg_activation_state) && !self.pinned
     }
 
-    /// cleans up any window that is not alive anymore
+    /// Drops focus stack entries for windows that are no longer in this workspace.
     pub fn refresh_focus_stack(&mut self) {
         for (seat, stack) in self.focus_stack.0.iter_mut() {
             let fullscreen_surfaces: Vec<&CosmicSurface> = self
@@ -526,10 +526,18 @@ impl Workspace {
                     .mapped()
                     .chain(self.tiling_layer.mapped().map(|(w, _)| w))
                     .chain(move_mapped.iter())
+                    .chain(
+                        self.minimized_windows
+                            .iter()
+                            .flat_map(MinimizedWindow::mapped),
+                    )
             };
             stack.retain(|w| match w {
                 FocusTarget::Fullscreen(s) => fullscreen_surfaces.contains(&s),
-                FocusTarget::Window(w) => mapped().any(|m| w == m),
+                // Sticky windows live in the `WorkspaceSet`, not in our own layers, but are
+                // shown on whichever workspace is current, so a focused one legitimately sits
+                // in this stack
+                FocusTarget::Window(w) => w.is_sticky() || mapped().any(|m| w == m),
             });
         }
     }
@@ -1767,13 +1775,17 @@ impl Workspace {
 
             self.floating_layer.render(
                 renderer,
-                focused.as_ref().and_then(|target| {
-                    if let FocusTarget::Window(mapped) = target {
-                        Some(mapped)
-                    } else {
-                        None
-                    }
-                }),
+                render_focus
+                    .then(|| {
+                        focused.as_ref().and_then(|target| {
+                            if let FocusTarget::Window(mapped) = target {
+                                Some(mapped)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .flatten(),
                 resize_indicator.clone(),
                 indicator_thickness,
                 alpha,

@@ -20,6 +20,7 @@ use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     backend::input::InputTime,
     input::{Seat, pointer::MotionEvent},
+    output::Output,
     utils::{Point, Serial},
 };
 #[cfg(not(feature = "debug"))]
@@ -122,11 +123,13 @@ impl State {
             .workspaces
             .workspace_wraparound;
 
+        // Gesture actions target the output under the cursor, not the keyboard-focused one.
+        let output = seat.active_output();
         match action {
             SwipeAction::NextWorkspace => {
                 let _ = to_next_workspace(
                     &mut self.common.shell.write(),
-                    seat,
+                    &output,
                     true,
                     wraparound,
                     &mut self.common.workspace_state.update(),
@@ -135,7 +138,7 @@ impl State {
             SwipeAction::PrevWorkspace => {
                 let _ = to_previous_workspace(
                     &mut self.common.shell.write(),
-                    seat,
+                    &output,
                     true,
                     wraparound,
                     &mut self.common.workspace_state.update(),
@@ -184,7 +187,8 @@ impl State {
             }
 
             Action::Workspace(key_num) => {
-                let current_output = seat.active_output();
+                // Keyboard actions target the keyboard-focused output, not the cursor's.
+                let current_output = seat.keyboard_or_active_output();
                 let workspace = match key_num {
                     0 => 9,
                     x => x - 1,
@@ -195,10 +199,11 @@ impl State {
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
                 );
+                seat.set_keyboard_output(Some(&current_output));
             }
 
             Action::LastWorkspace => {
-                let current_output = seat.active_output();
+                let current_output = seat.keyboard_or_active_output();
                 let mut shell = self.common.shell.write();
                 let workspace = shell.workspaces.len(&current_output).saturating_sub(1);
                 let _ = shell.activate(
@@ -207,6 +212,8 @@ impl State {
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
                 );
+                drop(shell);
+                seat.set_keyboard_output(Some(&current_output));
             }
 
             Action::NextWorkspace => {
@@ -221,9 +228,10 @@ impl State {
                     return;
                 }
 
+                let current_output = seat.keyboard_or_active_output();
                 let next = to_next_workspace(
                     &mut self.common.shell.write(),
-                    seat,
+                    &current_output,
                     false,
                     self.common
                         .config
@@ -232,6 +240,9 @@ impl State {
                         .workspace_wraparound,
                     &mut self.common.workspace_state.update(),
                 );
+                if next.is_ok() {
+                    seat.set_keyboard_output(Some(&current_output));
+                }
                 if next.is_err()
                     && propagate
                     && let Some(inferred) = pattern.inferred_direction()
@@ -261,9 +272,10 @@ impl State {
                     return;
                 }
 
+                let current_output = seat.keyboard_or_active_output();
                 let previous = to_previous_workspace(
                     &mut self.common.shell.write(),
-                    seat,
+                    &current_output,
                     false,
                     self.common
                         .config
@@ -272,6 +284,9 @@ impl State {
                         .workspace_wraparound,
                     &mut self.common.workspace_state.update(),
                 );
+                if previous.is_ok() {
+                    seat.set_keyboard_output(Some(&current_output));
+                }
                 if previous.is_err()
                     && propagate
                     && let Some(inferred) = pattern.inferred_direction()
@@ -533,7 +548,7 @@ impl State {
             }
 
             Action::SwitchOutput(direction) => {
-                let current_output = seat.active_output();
+                let current_output = seat.keyboard_or_active_output();
                 let mut shell = self.common.shell.write();
 
                 let next_output = shell.next_output(&current_output, direction).cloned();
@@ -558,17 +573,15 @@ impl State {
                         }
 
                         let idx = shell.workspaces.active_num(&next_output).1;
-                        let res = shell.activate(
+                        shell.activate(
                             &next_output,
                             idx,
                             WorkspaceDelta::new_shortcut(),
                             &mut workspace_guard,
-                        );
-                        seat.set_active_output(&next_output);
-                        res
+                        )
                     };
 
-                    if let Ok(new_pos) = res {
+                    if res.is_ok() {
                         let workspace = shell.workspaces.active(&next_output).unwrap().1;
                         let new_target = workspace
                             .focus_stack
@@ -578,23 +591,28 @@ impl State {
                             .map(Into::<KeyboardFocusTarget>::into);
                         std::mem::drop(shell);
 
+                        // Make the keyboard output "stick" to the target even if it has no
+                        // focusable window, so the focus indicator and subsequent keyboard
+                        // actions track it.
+                        seat.set_keyboard_output(Some(&next_output));
+
+                        // Only move keyboard focus. The cursor stays on its own output unless
+                        // the user opted into cursor-follows-focus.
                         let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
                         Shell::set_focus(self, new_target.as_ref(), seat, None, update_cursor);
 
-                        if let Some(ptr) = seat.get_pointer() {
-                            // Update cursor position if `set_focus` didn't already
-                            if !update_cursor {
-                                ptr.motion(
-                                    self,
-                                    None,
-                                    &MotionEvent {
-                                        location: new_pos.to_f64().as_logical(),
-                                        serial,
-                                        time,
-                                    },
-                                );
-                            }
-                            ptr.frame(self);
+                        // The keyboard output changed, which flips the panel-dim state on both
+                        // the old and new output. Switching to an empty output produces no
+                        // window damage there, so redraw every output to update the indicator.
+                        let outputs = self
+                            .common
+                            .shell
+                            .read()
+                            .outputs()
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        for output in &outputs {
+                            self.backend.schedule_render(output);
                         }
                     }
                 }
@@ -682,7 +700,7 @@ impl State {
             }
 
             Action::MigrateWorkspaceToOutput(direction) => {
-                let active_output = seat.active_output();
+                let active_output = seat.keyboard_or_active_output();
                 let (active, next_output) = {
                     let shell = self.common.shell.read();
 
@@ -764,7 +782,7 @@ impl State {
                                     .as_ref()
                                     .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
                                 {
-                                    let current_output = seat.active_output();
+                                    let current_output = seat.keyboard_or_active_output();
                                     let workspace_idx =
                                         shell.workspaces.active_num(&current_output).1;
                                     shell.previous_workspace_idx = Some((
@@ -804,7 +822,8 @@ impl State {
                     }
                     FocusResult::Handled => {}
                     FocusResult::Some(target) => {
-                        Shell::set_focus(self, Some(&target), seat, None, true);
+                        let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
+                        Shell::set_focus(self, Some(&target), seat, None, update_cursor);
                     }
                 }
             }
@@ -824,7 +843,7 @@ impl State {
                                 .as_ref()
                                 .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
                             {
-                                let current_output = seat.active_output();
+                                let current_output = seat.keyboard_or_active_output();
                                 let workspace_idx = shell.workspaces.active_num(&current_output).1;
                                 shell.previous_workspace_idx = Some((
                                     last_mod_serial,
@@ -864,7 +883,7 @@ impl State {
                         Shell::set_focus(self, Some(&shift), seat, None, true);
                     }
                     _ => {
-                        let current_output = seat.active_output();
+                        let current_output = seat.keyboard_or_active_output();
                         let mut shell = self.common.shell.write();
                         let workspace = shell.active_space(&current_output).unwrap();
                         if let Some(FocusTarget::Window(focused_window)) =
@@ -957,17 +976,15 @@ impl State {
                 &self.common.config,
                 self.common.event_loop_handle.clone(),
             ),
-            // NOTE: implementation currently assumes actions that apply to outputs should apply to the active output
-            // rather than the output that has keyboard focus
             Action::ToggleOrientation => {
-                let output = seat.active_output();
+                let output = seat.keyboard_or_active_output();
                 let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace.tiling_layer.update_orientation(None, seat);
             }
 
             Action::Orientation(orientation) => {
-                let output = seat.active_output();
+                let output = seat.keyboard_or_active_output();
                 let mut shell = self.common.shell.write();
                 let workspace = shell.active_space_mut(&output).unwrap();
                 workspace
@@ -1010,7 +1027,7 @@ impl State {
                         }
                     });
                 } else {
-                    let output = seat.active_output();
+                    let output = seat.keyboard_or_active_output();
                     let mut shell = self.common.shell.write();
                     let workspace = shell.workspaces.active_mut(&output).unwrap();
                     let mut guard = self.common.workspace_state.update();
@@ -1065,7 +1082,7 @@ impl State {
         let (token, data) = self.common.xdg_activation_state.create_external_token(None);
         let (token, data) = (token.clone(), data.clone());
 
-        let output = shell.seats.last_active().active_output();
+        let output = shell.seats.last_active().keyboard_or_active_output();
         let workspace = shell.active_space_mut(&output).unwrap();
         let handle = workspace.handle;
         std::mem::drop(shell);
@@ -1141,12 +1158,12 @@ impl State {
 
 fn to_next_workspace(
     shell: &mut Shell,
-    seat: &Seat<State>,
+    output: &Output,
     gesture: bool,
     wraparound: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
 ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
-    let current_output = seat.active_output();
+    let current_output = output.clone();
     let active = shell.workspaces.active_num(&current_output).1;
     let mut workspace = active.checked_add(1).ok_or(InvalidWorkspaceIndex)?;
 
@@ -1171,12 +1188,12 @@ fn to_next_workspace(
 
 fn to_previous_workspace(
     shell: &mut Shell,
-    seat: &Seat<State>,
+    output: &Output,
     gesture: bool,
     wraparound: bool,
     workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
 ) -> Result<Point<i32, Global>, InvalidWorkspaceIndex> {
-    let current_output = seat.active_output();
+    let current_output = output.clone();
     let active = shell.workspaces.active_num(&current_output).1;
     let workspace = active.checked_sub(1).unwrap_or(if wraparound {
         shell
