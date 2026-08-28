@@ -23,6 +23,7 @@ use crate::{
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
+            session_lock_layer::SessionLockLayerState,
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
             workspace::{WorkspaceState, WorkspaceUpdateGuard},
@@ -320,6 +321,7 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
+    pub session_lock_layer_state: SessionLockLayerState,
 
     #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
@@ -763,6 +765,8 @@ impl State {
 
         let dbus_state = DBusState::init(&handle);
 
+        let session_lock_layer_state = SessionLockLayerState::new::<State>(dh);
+
         State {
             common: Common {
                 config,
@@ -830,6 +834,7 @@ impl State {
                 pointer_focus_state: None,
                 dbus_state,
                 keyboard_layout_state,
+                session_lock_layer_state,
 
                 #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
