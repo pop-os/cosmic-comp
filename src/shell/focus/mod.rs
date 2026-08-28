@@ -2,12 +2,15 @@ use crate::{
     shell::{CosmicSurface, MinimizedWindow, Shell, Trigger, element::CosmicMapped},
     state::{Common, State},
     utils::prelude::*,
-    wayland::handlers::{xdg_shell::PopupGrabData, xwayland_keyboard_grab::XWaylandGrabSeatData},
+    wayland::{
+        handlers::{xdg_shell::PopupGrabData, xwayland_keyboard_grab::XWaylandGrabSeatData},
+        protocols::session_lock_layer::layer_show_on_lock,
+    },
 };
 use indexmap::IndexSet;
 use smithay::{
     backend::input::InputTime,
-    desktop::{PopupUngrabStrategy, layer_map_for_output},
+    desktop::{PopupUngrabStrategy, find_popup_root_surface, layer_map_for_output},
     input::{Seat, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
@@ -627,8 +630,15 @@ fn focus_target_is_valid(
     output: &Output,
     target: KeyboardFocusTarget,
 ) -> bool {
-    // If a session lock is active, only lock surfaces can be focused
+    // If a session lock is active, only lock surfaces and lock layers can be focused
     if shell.session_lock.is_some() {
+        if let KeyboardFocusTarget::LayerSurface(layer) = &target {
+            return layer_show_on_lock(layer.wl_surface());
+        } else if let KeyboardFocusTarget::Popup(popup) = &target
+            && let Ok(root) = find_popup_root_surface(popup)
+        {
+            return layer_show_on_lock(&root);
+        }
         return matches!(target, KeyboardFocusTarget::LockSurface(_));
     }
 
