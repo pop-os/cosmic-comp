@@ -1207,6 +1207,38 @@ impl XwmHandler for State {
         }
     }
 
+    fn below_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Err(err) = window.set_below(true) {
+            warn!(?window, ?err, "Failed to set X11 window below");
+            return;
+        }
+
+        let output =
+            self.common
+                .shell
+                .write()
+                .set_x11_below(&window, true, &self.common.event_loop_handle);
+        if let Some(output) = output {
+            self.backend.schedule_render(&output);
+        }
+    }
+
+    fn unbelow_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Err(err) = window.set_below(false) {
+            warn!(?window, ?err, "Failed to unset X11 window below");
+            return;
+        }
+
+        let output =
+            self.common
+                .shell
+                .write()
+                .set_x11_below(&window, false, &self.common.event_loop_handle);
+        if let Some(output) = output {
+            self.backend.schedule_render(&output);
+        }
+    }
+
     fn stick_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
         if let Some(pending) = shell

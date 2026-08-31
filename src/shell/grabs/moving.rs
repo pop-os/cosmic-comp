@@ -405,7 +405,10 @@ impl MoveGrab {
             let mut window_geo = self.window.geometry();
             window_geo.loc += location.to_i32_round() + grab_state.window_offset;
 
-            if matches!(self.previous, ManagedLayer::Floating | ManagedLayer::Sticky) {
+            if matches!(
+                self.previous,
+                ManagedLayer::Floating | ManagedLayer::Below | ManagedLayer::Sticky
+            ) {
                 let loc = grab_state.window_offset.to_f64() + grab_state.location;
                 let size = window_geo.size.to_f64();
                 let output_geom = self.cursor_output.geometry().to_f64().as_logical();
@@ -843,6 +846,18 @@ impl Drop for MoveGrab {
                                 .unwrap()
                                 .tiling_layer
                                 .drop_window(grab_state.window);
+                            Some((window, location.to_global(&output)))
+                        }
+                        ManagedLayer::Below => {
+                            grab_state.window.set_geometry(Rectangle::new(
+                                window_location,
+                                grab_state.window.geometry().size.as_global(),
+                            ));
+                            let workspace = shell.active_space_mut(&output).unwrap();
+                            let (window, location) = workspace.below_layer.drop_window(
+                                grab_state.window,
+                                window_location.to_local(&workspace.output),
+                            );
                             Some((window, location.to_global(&output)))
                         }
                         _ => {
