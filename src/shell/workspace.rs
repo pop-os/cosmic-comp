@@ -1680,6 +1680,7 @@ impl Workspace {
                     }
                     (None, None) => (fullscreen_geo, 1.0),
                 };
+                let alpha = fullscreen.surface.effective_render_alpha(alpha);
 
                 let render_loc = target_geo
                     .loc
