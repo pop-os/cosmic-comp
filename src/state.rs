@@ -139,6 +139,14 @@ struct Localizations;
 pub static LANG_LOADER: LazyLock<FluentLanguageLoader> =
     LazyLock::new(|| fluent_language_loader!());
 
+fn xwayland_frame_throttle(throttle: Option<Duration>, is_xwayland: bool) -> Option<Duration> {
+    if is_xwayland {
+        Some(Duration::ZERO)
+    } else {
+        throttle
+    }
+}
+
 #[macro_export]
 macro_rules! fl {
     ($message_id:literal) => {{
@@ -1365,7 +1373,9 @@ impl Common {
                 && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
             {
                 for (window, _) in grab_state.element().windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle =
+                        xwayland_frame_throttle(throttle(&window), window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             }
 
@@ -1389,25 +1399,34 @@ impl Common {
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle =
+                        xwayland_frame_throttle(throttle(&window), window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             });
 
         if let Some(active) = shell.active_space(output) {
             if let Some(fs) = active.get_fullscreen(shell.seats.last_active()) {
-                fs.surface
-                    .send_frame(output, time, throttle(&fs.surface), should_send);
+                let throttle = xwayland_frame_throttle(
+                    throttle(&fs.surface),
+                    fs.surface.x11_surface().is_some(),
+                );
+                fs.surface.send_frame(output, time, throttle, should_send);
             }
             active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle =
+                        xwayland_frame_throttle(throttle(&window), window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             });
 
             // other (throttled) windows
             active.minimized_windows.iter().for_each(|m| {
                 for window in m.windows() {
-                    window.send_frame(output, time, throttle(&window), |_, _| None);
+                    let throttle =
+                        xwayland_frame_throttle(throttle(&window), window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, |_, _| None);
                 }
             });
 
@@ -1418,17 +1437,25 @@ impl Common {
             {
                 if let Some(fs) = space.get_fullscreen(shell.seats.last_active()) {
                     let throttle = min(throttle(space), throttle(&fs.surface));
+                    let throttle =
+                        xwayland_frame_throttle(throttle, fs.surface.x11_surface().is_some());
                     fs.surface.send_frame(output, time, throttle, |_, _| None);
                 }
                 space.mapped().for_each(|mapped| {
                     for (window, _) in mapped.windows() {
                         let throttle = min(throttle(space), throttle(&window));
+                        let throttle =
+                            xwayland_frame_throttle(throttle, window.x11_surface().is_some());
                         window.send_frame(output, time, throttle, |_, _| None);
                     }
                 });
                 space.minimized_windows.iter().for_each(|m| {
                     for window in m.windows() {
-                        window.send_frame(output, time, throttle(&window), |_, _| None);
+                        let throttle = xwayland_frame_throttle(
+                            throttle(&window),
+                            window.x11_surface().is_some(),
+                        );
+                        window.send_frame(output, time, throttle, |_, _| None);
                     }
                 })
             }
