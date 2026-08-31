@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
-use calloop::Interest;
+use calloop::{
+    Interest,
+    timer::{TimeoutAction, Timer},
+};
 use smithay::{
     backend::{
         input::InputTime,
@@ -14,6 +17,7 @@ use smithay::{
     reexports::wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
     utils::{Clock, Logical, Monotonic, SERIAL_COUNTER, Size, Time},
     wayland::{
+        commit_timing::{CommitTimerBarrierStateUserData, CommitTimerStateUserData, Timestamp},
         compositor::{
             BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
             SurfaceAttributes, SurfaceData, TraversalAction, add_blocker, add_post_commit_hook,
@@ -235,6 +239,27 @@ impl CompositorHandler for State {
             }
         });
 
+        add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
+            let timestamp = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<CommitTimerStateUserData>()
+                    .and_then(|state| state.borrow_mut().timestamp.take())
+            });
+
+            if let Some(timestamp) = timestamp {
+                let barrier = with_states(surface, |states| {
+                    let barrier_state = states
+                        .data_map
+                        .get_or_insert(CommitTimerBarrierStateUserData::default);
+                    barrier_state.lock().unwrap().register(timestamp)
+                });
+
+                add_blocker(surface, barrier);
+                state.schedule_commit_timing(surface, timestamp);
+            }
+        });
+
         add_post_commit_hook::<Self, _>(surface, |state, _dh, surface| {
             let now = state.common.clock.now();
             with_states(surface, |states| {
@@ -378,6 +403,57 @@ impl CompositorHandler for State {
 }
 
 impl State {
+    fn schedule_commit_timing(&self, surface: &WlSurface, deadline: Timestamp) {
+        // TODO: further improve the timing based on render time and vblank timing
+        let next_deadline = Time::elapsed(&self.common.clock.now(), deadline.into());
+        let timer = Timer::from_duration(next_deadline);
+        let week_surface = surface.downgrade();
+
+        let _ = self
+            .common
+            .event_loop_handle
+            .insert_source(timer, move |_instant, _, state| {
+                let Ok(surface) = week_surface.upgrade() else {
+                    return TimeoutAction::Drop;
+                };
+
+                let Some(client) = surface.client() else {
+                    return TimeoutAction::Drop;
+                };
+
+                let Some((signaled, next_deadline)) = with_states(&surface, |states| {
+                    let Some(commit_timer_barrier_state) =
+                        states.data_map.get::<CommitTimerBarrierStateUserData>()
+                    else {
+                        return None;
+                    };
+
+                    let mut commit_timer_barrier_state = commit_timer_barrier_state.lock().unwrap();
+
+                    Some((
+                        commit_timer_barrier_state.signal_until(deadline),
+                        commit_timer_barrier_state.next_deadline(),
+                    ))
+                }) else {
+                    return TimeoutAction::Drop;
+                };
+
+                if signaled {
+                    let dh = &state.common.display_handle.clone();
+                    state
+                        .client_compositor_state(&client)
+                        .blocker_cleared(state, dh);
+                }
+
+                if let Some(deadline) = next_deadline {
+                    state.schedule_commit_timing(&surface, deadline);
+                }
+
+                TimeoutAction::Drop
+            })
+            .expect("failed to register commit-timing timer");
+    }
+
     fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
         let mut shell = self.common.shell.write();
 

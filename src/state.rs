@@ -74,6 +74,7 @@ use smithay::{
     wayland::{
         alpha_modifier::AlphaModifierState,
         background_effect::BackgroundEffectState,
+        commit_timing::CommitTimingManagerState,
         compositor::{CompositorClientState, CompositorState, SurfaceData},
         cursor_shape::CursorShapeManagerState,
         dmabuf::{DmabufFeedback, DmabufGlobal, DmabufState},
@@ -308,6 +309,7 @@ pub struct Common {
     pub dbus_state: DBusState,
     pub keyboard_layout_state: KeyboardLayoutState,
     pub background_effect_state: BackgroundEffectState,
+    pub commit_timing_manager_state: CommitTimingManagerState,
     pub fifo_manager_state: FifoManagerState,
 
     // shell-related wayland state
@@ -765,6 +767,8 @@ impl State {
 
         let dbus_state = DBusState::init(&handle);
 
+        let commit_timing_manager_state = CommitTimingManagerState::unmanaged::<State>(dh);
+
         let fifo_manager_state = FifoManagerState::new::<State>(dh);
 
         State {
@@ -828,6 +832,7 @@ impl State {
                 workspace_state,
                 background_effect_state,
                 a11y_state,
+                commit_timing_manager_state,
                 fifo_manager_state,
                 xwayland_scale: None,
                 xwayland_state: None,
