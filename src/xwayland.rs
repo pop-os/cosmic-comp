@@ -808,6 +808,7 @@ impl XwmHandler for State {
             );
         }
         let fullscreen = window.is_fullscreen().then(|| seat.active_output());
+        let minimized = window.is_hidden();
         let maximized = window.is_maximized();
         if let Some(pending) = shell
             .pending_windows
@@ -816,6 +817,7 @@ impl XwmHandler for State {
         {
             pending.seat = seat;
             pending.fullscreen = fullscreen;
+            pending.minimized = minimized;
             pending.maximized = maximized;
         } else {
             let surface = CosmicSurface::from(window);
@@ -823,6 +825,7 @@ impl XwmHandler for State {
                 surface,
                 seat,
                 fullscreen,
+                minimized,
                 maximized,
                 sticky: false,
             })
