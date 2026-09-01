@@ -1,7 +1,7 @@
-//! cosmic-display-fix — Rust COSMIC, event-driven GNOME-style (0% idle)
-//! Hardware-agnóstico: lee EDID nativo vs cosmic-randr current, corrige a preferred
-//! Usa notify (inotify) sobre /sys/class/drm/*/status + ~/.config/cosmic (como Mutter GUdevClient HOTPLUG)
-//! Solo primary plane fallback (COSMIC_DISABLE_*).
+//! cosmic-display-fix — Rust COSMIC, event-driven (0% idle)
+//! Hardware-agnostic: reads native EDID vs cosmic-randr current, corrects to preferred
+//! Uses notify (inotify) on /sys/class/drm/*/status + ~/.config/cosmic (like Mutter GUdevClient HOTPLUG)
+//! Primary plane fallback only (COSMIC_DISABLE_*).
 #![allow(dead_code)]
 #![allow(clippy::collapsible_if)]
 
@@ -22,9 +22,9 @@ use std::time::Duration;
     about = "Universal Display Fix - Rust COSMIC event-driven"
 )]
 struct Args {
-    #[arg(long, help = "modo daemon event-driven")]
+    #[arg(long, help = "event-driven daemon mode")]
     daemon: bool,
-    #[arg(long, help = "solo chequear y salir")]
+    #[arg(long, help = "check only and exit")]
     check: bool,
 }
 
@@ -120,7 +120,7 @@ fn parse_randr_modes(text: &str) -> HashMap<String, OutputInfo> {
     outputs
 }
 
-// --- EDID parser Rust puro (sin deps externas) ---
+// --- Pure Rust EDID parser (no external deps) ---
 #[derive(Debug)]
 struct EdidInfo {
     manufacturer: String,
@@ -324,7 +324,7 @@ fn ensure_scanout_disabled() -> bool {
         for l in &missing {
             writeln!(f, "{}", l).ok();
         }
-        info!("Actualizado {} con {:?}", env_file.display(), missing);
+        info!("Updated {} with {:?}", env_file.display(), missing);
         run("export COSMIC_DISABLE_DIRECT_SCANOUT=1; export COSMIC_DISABLE_OVERLAY_SCANOUT=1; systemctl --user import-environment COSMIC_DISABLE_DIRECT_SCANOUT COSMIC_DISABLE_OVERLAY_SCANOUT 2>/dev/null; dbus-update-activation-environment --systemd COSMIC_DISABLE_DIRECT_SCANOUT=1 COSMIC_DISABLE_OVERLAY_SCANOUT=1 2>/dev/null");
         return true;
     }
@@ -349,7 +349,7 @@ fn fix_modes() -> Vec<(String, Mode, Mode)> {
                 };
                 if should_fix {
                     warn!(
-                        "{}: mismatch current {}x{}@{:.3} vs preferred {}x{}@{:.3} -> corrigiendo",
+                        "{}: mismatch current {}x{}@{:.3} vs preferred {}x{}@{:.3} -> correcting",
                         name, cur.w, cur.h, cur.refresh, pref.w, pref.h, pref.refresh
                     );
                     let cmd = format!(
@@ -382,7 +382,7 @@ fn watch_drm_inotify<F>(mut callback: F) -> Result<()>
 where
     F: FnMut() + Send + 'static,
 {
-    // notify sobre /sys/class/drm/*/status + ~/.config/cosmic
+    // notify on /sys/class/drm/*/status + ~/.config/cosmic
     let (tx, rx) = channel();
     let mut watcher = notify::recommended_watcher(move |res| {
         tx.send(res).ok();
@@ -408,12 +408,12 @@ where
     if cosmic_cfg.exists() {
         watcher.watch(&cosmic_cfg, RecursiveMode::Recursive).ok();
     }
-    info!("inotify watches activos (event-driven, como Mutter GUdevClient HOTPLUG)");
+    info!("inotify watches active (event-driven, like Mutter GUdevClient HOTPLUG)");
     loop {
         match rx.recv_timeout(Duration::from_secs(60)) {
             Ok(Ok(event)) => match event.kind {
                 EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_) => {
-                    debug!("inotify evento {:?}", event);
+                    debug!("inotify event {:?}", event);
                     std::thread::sleep(Duration::from_millis(500));
                     callback();
                 }
@@ -426,11 +426,11 @@ where
 }
 
 fn daemon_event_driven() -> Result<()> {
-    info!("cosmic-display-fix — MODO EVENT-DRIVEN (GNOME-style) iniciado — Rust COSMIC");
+    info!("cosmic-display-fix — EVENT-DRIVEN mode started — Rust COSMIC");
     ensure_scanout_disabled();
     fix_modes();
     watch_drm_inotify(|| {
-        info!("Evento HOTPLUG/config -> re-evaluando");
+        info!("HOTPLUG/config event -> re-evaluating");
         ensure_scanout_disabled();
         fix_modes();
     })?;
@@ -444,16 +444,16 @@ fn main() -> Result<()> {
         ensure_scanout_disabled();
         let actions = fix_modes();
         if actions.is_empty() {
-            info!("No se requirieron correcciones (modos ya óptimos)");
+            info!("No corrections required (modes already optimal)");
         } else {
-            info!("Correcciones: {:?}", actions);
+            info!("Corrections: {:?}", actions);
         }
         return Ok(());
     }
     daemon_event_driven().context("daemon failed")
 }
 
-// glob helper para /sys/class/drm (portable)
+// glob helper for /sys/class/drm (portable)
 mod glob {
     use std::path::PathBuf;
     pub fn glob(_pattern: &str) -> Result<Vec<Result<PathBuf, std::io::Error>>, std::io::Error> {
