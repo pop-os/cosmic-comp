@@ -803,6 +803,7 @@ where
     } else {
         0
     };
+    let focus_transition_ms = shell.focus_transition_ms;
 
     let output_size = output
         .geometry()
@@ -1022,6 +1023,7 @@ where
                     resize_indicator.clone(),
                     active_hint,
                     alpha,
+                    focus_transition_ms,
                     theme.cosmic(),
                     scanout_node,
                     &mut |elem| {
@@ -1060,6 +1062,7 @@ where
                     overview.clone(),
                     resize_indicator.clone(),
                     active_hint,
+                    focus_transition_ms,
                     theme.cosmic(),
                     scanout_node,
                     &mut |elem| {

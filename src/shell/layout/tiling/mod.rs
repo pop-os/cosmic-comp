@@ -4018,6 +4018,7 @@ impl TilingLayout {
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
+        focus_transition_ms: u64,
         theme: &cosmic::theme::CosmicTheme,
         scanout_node: Option<DrmNode>,
         push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
@@ -4163,6 +4164,7 @@ impl TilingLayout {
             swap_desc.clone(),
             &self.swapping_stack_surface_id,
             &self.backdrop_id,
+            focus_transition_ms,
             theme,
             scanout_node,
             push,
@@ -5288,6 +5290,7 @@ fn render_new_tree_windows<R>(
     swap_desc: Option<NodeDesc>,
     swapping_stack_surface_id: &Id,
     backdrop_id: &Id,
+    focus_transition_ms: u64,
     theme: &cosmic::theme::CosmicTheme,
     scanout_node: Option<DrmNode>,
     push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
@@ -5458,6 +5461,14 @@ fn render_new_tree_windows<R>(
         |node_id, data, geo, original_geo, alpha, animating| {
             if swap_desc.as_ref().map(|desc| &desc.node) == Some(&node_id)
                 || focused.as_ref() == Some(&node_id)
+                || (focus_transition_ms > 0
+                    && match data {
+                        Data::Mapped { mapped, .. } => mapped.focus_indicator_visible(
+                            focused.as_ref() == Some(&node_id),
+                            focus_transition_ms,
+                        ),
+                        _ => false,
+                    })
             {
                 if indicator_thickness > 0 || data.is_group() {
                     let mut geo = geo;
@@ -5511,28 +5522,47 @@ fn render_new_tree_windows<R>(
                         .unwrap_or(false)
                         || focused.as_ref() == Some(&node_id)
                     {
-                        indicators.push(CosmicMappedRenderElement::FocusIndicator(
-                            IndicatorShader::focus_element(
-                                renderer,
+                        // fade the focus indicator in on the newly focused window and
+                        // out on the window that just lost focus (shared
+                        // interpolation logic)
+                        let hint_alpha = alpha
+                            * if focus_transition_ms > 0 {
                                 match data {
-                                    Data::Mapped { mapped, .. } => {
-                                        Key::Window(Usage::FocusIndicator, mapped.clone().key())
-                                    }
-                                    Data::Group { alive, .. } => Key::Group(Arc::downgrade(alive)),
-                                    _ => unreachable!(),
-                                },
-                                geo,
-                                if data.is_group() {
-                                    4
-                                } else {
-                                    indicator_thickness
-                                },
-                                radius,
-                                alpha,
-                                output_scale,
-                                [window_hint.red, window_hint.green, window_hint.blue],
-                            ),
-                        ));
+                                    Data::Mapped { mapped, .. } => mapped.focus_indicator_alpha(
+                                        focused.as_ref() == Some(&node_id),
+                                        focus_transition_ms,
+                                    ),
+                                    _ => 1.0,
+                                }
+                            } else {
+                                1.0
+                            };
+                        if hint_alpha > 0.0 {
+                            indicators.push(CosmicMappedRenderElement::FocusIndicator(
+                                IndicatorShader::focus_element(
+                                    renderer,
+                                    match data {
+                                        Data::Mapped { mapped, .. } => {
+                                            Key::Window(Usage::FocusIndicator, mapped.clone().key())
+                                        }
+                                        Data::Group { alive, .. } => {
+                                            Key::Group(Arc::downgrade(alive))
+                                        }
+                                        _ => unreachable!(),
+                                    },
+                                    geo,
+                                    if data.is_group() {
+                                        4
+                                    } else {
+                                        indicator_thickness
+                                    },
+                                    radius,
+                                    hint_alpha,
+                                    output_scale,
+                                    [window_hint.red, window_hint.green, window_hint.blue],
+                                ),
+                            ));
+                        }
                     }
 
                     if focused.as_ref() == Some(&node_id)

@@ -282,6 +282,7 @@ pub struct Shell {
 
     theme: cosmic::Theme,
     pub active_hint: bool,
+    pub focus_transition_ms: u64,
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
@@ -1574,6 +1575,7 @@ impl Common {
         let mut shell = self.shell.write();
         let shell_ref = &mut *shell;
         shell_ref.active_hint = self.config.cosmic_conf.active_hint;
+        shell_ref.focus_transition_ms = self.config.cosmic_conf.focus_transition_ms;
         shell_ref.appearance_conf = self.config.cosmic_conf.appearance_settings;
         if let Some(zoom_state) = shell_ref.zoom_state.as_mut() {
             zoom_state.increment = self.config.cosmic_conf.accessibility_zoom.increment;
@@ -1729,6 +1731,7 @@ impl Shell {
 
             theme,
             active_hint: config.cosmic_conf.active_hint,
+            focus_transition_ms: config.cosmic_conf.focus_transition_ms,
             overview_mode: OverviewMode::None,
             swap_indicator: None,
             resize_mode: ResizeMode::None,
