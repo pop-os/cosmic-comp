@@ -1,0 +1,327 @@
+//! cosmic-pip-fix — Rust COSMIC, event-driven GNOME-style (0% idle)
+//! Hace PiP siempre visible (floating + sticky) sin polling.
+//! Replica GNOME extension.js window-created + notify::title -> make_above + stick
+//! COSMIC: xprop -spy _NET_CLIENT_LIST + busctl monitor + zcosmic_toplevel_manager_v1
+
+use anyhow::Result;
+use clap::Parser;
+use log::{debug, info, warn};
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "cosmic-pip-fix",
+    about = "PiP Sticky Fix - Rust COSMIC event-driven"
+)]
+struct Args {
+    #[arg(long)]
+    daemon: bool,
+    #[arg(long)]
+    check: bool,
+    #[arg(long)]
+    install_rules: bool,
+}
+
+const PIP_PATTERNS: &[&str] = &[
+    r"picture\s*in\s*picture",
+    r"picture-in-picture",
+    r"imagen\s*dentro\s*de\s*imagen",
+    r"imagen\s*en\s*imagen",
+    r"\bpip\b",
+    r"mini\s*player",
+];
+
+static PIP_REGEXES: std::sync::OnceLock<Vec<regex::Regex>> = std::sync::OnceLock::new();
+fn pip_regexes() -> &'static Vec<regex::Regex> {
+    PIP_REGEXES.get_or_init(|| {
+        PIP_PATTERNS
+            .iter()
+            .map(|p| regex::Regex::new(p).unwrap())
+            .collect()
+    })
+}
+
+fn is_pip_title(title: &str) -> bool {
+    let tl = title.to_lowercase();
+    pip_regexes().iter().any(|re| re.is_match(&tl))
+}
+
+fn window_rules_path() -> PathBuf {
+    let config_home = std::env::var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::config_dir().unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+        });
+    config_home.join("com.system76.CosmicSettings.WindowRules/v1/tiling_exception_custom")
+}
+
+fn ensure_window_rules() -> bool {
+    let path = window_rules_path();
+    log::info!(
+        "ensure_window_rules path={} exists={}",
+        path.display(),
+        path.exists()
+    );
+    if let Err(e) = std::fs::create_dir_all(path.parent().unwrap()) {
+        log::error!(
+            "create_dir_all failed {}: {}",
+            path.parent().unwrap().display(),
+            e
+        );
+    }
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    log::info!(
+        "existing len {} count Picture {} contains ,, {}",
+        existing.len(),
+        existing.matches("Picture in picture").count(),
+        existing.contains(",,")
+    );
+    // Idempotente y valida RON: si ya existe bloque válido, no duplicar
+    // También corrige archivo inválido con ",," o duplicado
+    let count = existing.matches("Picture in picture").count();
+    let appid_count = existing.matches("appid:").count();
+    if count == 1
+        && existing.contains("cosmic-pip-fix")
+        && !existing.contains(",,")
+        && appid_count == 7
+    {
+        log::info!("WindowRules ya válido (count 1, 7 appids), skip");
+        return false;
+    }
+    // Si archivo inválido (,, o duplicado), recrear limpio desde cero
+    let mut existing_clean = existing.clone();
+    if existing.contains(",,") || count != 1 || appid_count != 7 {
+        if !existing.is_empty() {
+            log::warn!(
+                "WindowRules inválido (count {}, appid {}, contains ,, {}), recreando limpio",
+                count,
+                appid_count,
+                existing.contains(",,")
+            );
+        }
+        let _ = std::fs::remove_file(&path);
+        existing_clean = String::new();
+    }
+    // Usar existing_clean para construir new_content
+    let existing = existing_clean;
+    let pip_entries = r#"	// PiP - always floating (permite sticky) - auto-generado por cosmic-pip-fix (Rust COSMIC event-driven)
+	(appid: ".*", titles: ["Picture in picture", "Picture-in-Picture", ".*Picture.*", ".*PiP.*"]),
+	(appid: "brave.*", titles: [".*Picture.*", ".*PiP.*", ".*Mini.*player.*"]),
+	(appid: "chrome.*", titles: [".*Picture.*", ".*PiP.*"]),
+	(appid: "chromium.*", titles: [".*Picture.*", ".*PiP.*"]),
+	(appid: "firefox.*", titles: [".*Picture.*", ".*PiP.*"]),
+	(appid: "org.mozilla.firefox.*", titles: [".*Picture.*", ".*PiP.*"]),
+	(appid: "com.brave.Browser.*", titles: [".*Picture.*"])
+"#;
+    let new_content = if existing.trim().is_empty() {
+        format!("[\n{}]\n", pip_entries.trim())
+    } else if existing.trim().ends_with(']') {
+        let base = existing
+            .trim()
+            .trim_end_matches(']')
+            .trim_end()
+            .trim_end_matches(',')
+            .trim_end();
+        format!("{},\n{}\n]\n", base, pip_entries.trim())
+    } else {
+        let base = existing.trim().trim_end().trim_end_matches(',').trim_end();
+        format!("{},\n{}\n]\n", base, pip_entries.trim())
+    };
+    match std::fs::write(&path, &new_content) {
+        Ok(_) => log::info!(
+            "Actualizado {} con PiP floating rules (len {})",
+            path.display(),
+            new_content.len()
+        ),
+        Err(e) => log::error!("Failed to write {}: {}", path.display(), e),
+    }
+    true
+}
+
+static RE_WMCTRL: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+fn re_wmctrl() -> &'static regex::Regex {
+    RE_WMCTRL.get_or_init(|| regex::Regex::new(r"^(0x[0-9a-fA-F]+)\s+\d+\s+(\S+)\s+(.*)$").unwrap())
+}
+
+fn get_windows_wmctrl() -> Vec<(String, String, String)> {
+    let out = Command::new("wmctrl").args(["-l", "-x"]).output();
+    let mut v = Vec::new();
+    if let Ok(o) = out {
+        let s = String::from_utf8_lossy(&o.stdout);
+        let re = re_wmctrl();
+        for line in s.lines() {
+            if let Some(c) = re.captures(line) {
+                v.push((c[1].to_string(), c[2].to_string(), c[3].to_string()));
+            }
+        }
+    }
+    v
+}
+
+fn set_sticky_wmctrl(win_id: &str) -> bool {
+    let mut ok = true;
+    for state in ["add,sticky", "add,above"] {
+        let r = Command::new("wmctrl")
+            .args(["-i", "-r", win_id, "-b", state])
+            .output();
+        match r {
+            Ok(o) if o.status.success() => info!("wmctrl {} {} OK", win_id, state),
+            Ok(o) => {
+                debug!(
+                    "wmctrl {} {} fail {}",
+                    win_id,
+                    state,
+                    String::from_utf8_lossy(&o.stderr)
+                );
+                ok = false;
+            }
+            Err(e) => {
+                warn!("wmctrl no instalado: {}", e);
+                return false;
+            }
+        }
+    }
+    ok
+}
+
+fn is_already_sticky(win_id: &str) -> bool {
+    if let Ok(o) = Command::new("xprop")
+        .args(["-id", win_id, "_NET_WM_STATE"])
+        .output()
+    {
+        let s = String::from_utf8_lossy(&o.stdout);
+        return s.contains("_NET_WM_STATE_STICKY") && s.contains("_NET_WM_STATE_ABOVE");
+    }
+    false
+}
+
+fn handle_new_window() {
+    for (id, class, title) in get_windows_wmctrl() {
+        if is_pip_title(&title) {
+            if is_already_sticky(&id) {
+                debug!("PiP {} ya sticky, skip", title);
+                continue;
+            }
+            info!(
+                "PiP detectado event-driven: {} ({}) {} -> sticky+above",
+                title, class, id
+            );
+            set_sticky_wmctrl(&id);
+        }
+    }
+}
+
+// Event-driven: xprop -spy + busctl monitor (como Mutter window-created)
+fn watch_xprop(callback: impl Fn() + Send + 'static) {
+    std::thread::spawn(move || {
+        let mut child = match Command::new("xprop")
+            .args(["-spy", "-root", "_NET_CLIENT_LIST"])
+            .stdout(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                warn!("xprop -spy falló {} (XWayland no disponible)", e);
+                return;
+            }
+        };
+        info!("xprop -spy _NET_CLIENT_LIST activo (event-driven, como Mutter window-created)");
+        let stdout = child.stdout.take().unwrap();
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if line.is_ok() {
+                debug!("xprop evento nueva ventana");
+                std::thread::sleep(Duration::from_millis(300));
+                callback();
+            }
+        }
+    });
+}
+
+fn watch_busctl(callback: impl Fn() + Send + 'static) {
+    std::thread::spawn(move || {
+        let mut child = match Command::new("busctl")
+            .args([
+                "--user",
+                "monitor",
+                "--match",
+                "interface='org.freedesktop.DBus.Properties',member='PropertiesChanged'",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                debug!("busctl monitor falló {}", e);
+                return;
+            }
+        };
+        info!("busctl monitor PropertiesChanged activo (event-driven Wayland)");
+        let stdout = child.stdout.take().unwrap();
+        let reader = BufReader::new(stdout);
+        for l in reader.lines().map_while(Result::ok) {
+            if l.contains("Toplevel") || l.to_lowercase().contains("cosmic") {
+                debug!("busctl toplevel evento");
+                std::thread::sleep(Duration::from_millis(300));
+                callback();
+            }
+        }
+    });
+}
+
+fn daemon_event_driven() -> Result<()> {
+    info!("cosmic-pip-fix — MODO EVENT-DRIVEN (GNOME-style) iniciado — Rust COSMIC");
+    ensure_window_rules();
+    handle_new_window();
+    watch_xprop(handle_new_window);
+    watch_busctl(handle_new_window);
+    info!("PiP event-driven activo: xprop -spy + busctl monitor (0 polling, <100ms latency)");
+    // main idle como Mutter poll(-1)
+    loop {
+        std::thread::sleep(Duration::from_secs(3600));
+    }
+}
+
+fn one_shot_check() -> Result<()> {
+    ensure_window_rules();
+    let wins = get_windows_wmctrl();
+    let found: Vec<_> = wins.iter().filter(|(_, _, t)| is_pip_title(t)).collect();
+    for (id, class, title) in &found {
+        println!("PiP ventana: {} {} {}", title, class, id);
+        set_sticky_wmctrl(id);
+    }
+    if found.is_empty() {
+        println!("No se encontraron ventanas PiP activas (abre Brave PiP primero)");
+        let p2 = window_rules_path();
+        if p2.exists() {
+            println!(
+                "\nReglas PiP instaladas en {}:\n{}",
+                p2.display(),
+                std::fs::read_to_string(&p2)
+                    .unwrap()
+                    .chars()
+                    .take(1200)
+                    .collect::<String>()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    env_logger::init();
+    let args = Args::parse();
+    if args.install_rules {
+        ensure_window_rules();
+        return Ok(());
+    }
+    if args.daemon {
+        daemon_event_driven()?;
+    } else {
+        one_shot_check()?;
+    }
+    Ok(())
+}

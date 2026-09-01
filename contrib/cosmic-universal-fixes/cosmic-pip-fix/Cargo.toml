@@ -1,0 +1,25 @@
+[package]
+name = "cosmic-pip-fix"
+version = "0.1.0"
+edition = "2021"
+description = "PiP Sticky Fix - event-driven GNOME-style for COSMIC (Rust)"
+license = "GPL-3.0-only"
+repository = "https://github.com/pop-os/cosmic-comp"
+keywords = ["cosmic", "wayland", "pip"]
+categories = ["os::unix-apis"]
+
+[[bin]]
+name = "cosmic-pip-fix"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+notify = { workspace = true }
+regex = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+clap = { workspace = true }
+zbus = { workspace = true }
+serde = { workspace = true }
+dirs = { workspace = true }
