@@ -14,16 +14,10 @@ Fixes hardware-agnostic dual-monitor flicker (100Hz+60Hz mixed refresh) + PiP st
 - **PiP:** `tiling_exception_custom` 7 appids (bilingual) + `xprop -spy` + `busctl monitor` event-driven <100ms + `OnceLock` regex + `wmctrl sticky+above` + `is_already_sticky`
 
 ## Testing
-- `cargo test` `cargo fmt --check` `cargo clippy -- -D warnings` pass
-- `cosmic-randr list` DP-1 100Hz + HDMI 60Hz `current==preferred`
-- `systemctl --user is-active` active Rust 4.0M/3.6M, 20/20 `test_professional.sh`
-- Cable ruled out (GNOME Wayland same hardware 100Hz no flicker)
-
-## Checklist
-- [x] XDG Base Directory 0.8 (`is_absolute` + `empty` + `HOST_XDG_*` + `0700`)
-- [x] No hardcode `/home/diez` (`dirs::config_dir()` + `XDG_CONFIG_HOME`)
-- [x] Event-driven, no polling
-- [x] Rust `COSMIC` (`cargo 1.95` `rustc 1.95` `clippy` `rustfmt`)
+- `cargo test` `cargo fmt --check` `cargo clippy` pass
+- `cosmic-randr` reports both outputs at native refresh (`DP-1 100Hz`, `HDMI 60Hz`)
+- Daemons active and idle (inotify / xprop event-driven)
+- Verified on same hardware with GNOME Wayland — no flicker, cable ruled out
 
 ## Repro
 See `.github/BUG_REPORT_*.md`
