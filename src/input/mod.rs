@@ -2877,6 +2877,9 @@ impl State {
                             return ControlFlow::Break(Ok(Some(element)));
                         }
                     }
+                    Stage::WorkspacesOverview(_) => {
+                        // TODO
+                    }
                 }
                 ControlFlow::Continue(())
             },
@@ -3030,6 +3033,9 @@ impl State {
                         {
                             return ControlFlow::Break(Ok(Some(under)));
                         }
+                    }
+                    Stage::WorkspacesOverview(_) => {
+                        // TODO
                     }
                 }
 

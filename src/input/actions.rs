@@ -1033,7 +1033,13 @@ impl State {
 
             // Gets the configured command for a given system action.
             Action::System(system) => {
-                if let Some(command) = self.common.config.system_actions.get(&system) {
+                if matches!(
+                    system,
+                    cosmic_settings_config::shortcuts::action::System::WorkspaceOverview
+                ) {
+                    let mut shell = self.common.shell.write();
+                    shell.show_workspaces_overview();
+                } else if let Some(command) = self.common.config.system_actions.get(&system) {
                     self.spawn_command(command.clone());
                 }
             }

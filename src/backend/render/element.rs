@@ -32,12 +32,14 @@ use smithay::{
 
 use super::{GlMultiRenderer, cursor::CursorRenderElement};
 
+use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 pub enum CosmicElement<R>
 where
     R: AsGlowRenderer,
     R::TextureId: Send + 'static,
     CosmicMappedRenderElement<R>: RenderElement<R>,
 {
+    WorkspacesOverview(WaylandSurfaceRenderElement<R>),
     Workspace(
         RelocateRenderElement<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>,
     ),
@@ -63,6 +65,7 @@ where
 {
     fn inner_element(&self) -> &dyn Element {
         match self {
+            CosmicElement::WorkspacesOverview(elem) => elem,
             CosmicElement::Workspace(elem) => elem,
             CosmicElement::Cursor(elem) => elem,
             CosmicElement::Dnd(elem) => elem,
@@ -147,6 +150,9 @@ where
         cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
         match self {
+            CosmicElement::WorkspacesOverview(elem) => {
+                elem.draw(frame, src, dst, damage, opaque_regions, cache)
+            }
             CosmicElement::Workspace(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
@@ -193,6 +199,7 @@ where
 
     fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
         match self {
+            CosmicElement::WorkspacesOverview(elem) => elem.underlying_storage(renderer),
             CosmicElement::Workspace(elem) => elem.underlying_storage(renderer),
             CosmicElement::Cursor(elem) => elem.underlying_storage(renderer),
             CosmicElement::Dnd(elem) => elem.underlying_storage(renderer),
@@ -219,6 +226,9 @@ where
         cache: &UserDataMap,
     ) -> Result<(), <R>::Error> {
         match self {
+            CosmicElement::WorkspacesOverview(elem) => {
+                elem.capture_framebuffer(frame, src, dst, cache)
+            }
             CosmicElement::Workspace(elem) => elem.capture_framebuffer(frame, src, dst, cache),
             CosmicElement::Cursor(elem) => elem.capture_framebuffer(frame, src, dst, cache),
             CosmicElement::Dnd(elem) => elem.capture_framebuffer(frame, src, dst, cache),

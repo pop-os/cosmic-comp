@@ -16,6 +16,7 @@ use crate::{
         SeatExt, Shell, Workspace, WorkspaceDelta,
         focus::target::KeyboardFocusTarget,
         layout::{floating::FloatingLayout, tiling::ANIMATION_DURATION},
+        workspaces_view::WorkspacesViewState,
     },
     utils::{
         geometry::*,
@@ -53,6 +54,7 @@ pub enum Stage<'a> {
         workspace: &'a Workspace,
         offset: Point<i32, Logical>,
     },
+    WorkspacesOverview(&'a WorkspacesViewState),
 }
 
 pub fn render_input_order<R: Default + 'static>(
@@ -292,6 +294,11 @@ fn render_input_order_internal<R: 'static>(
         }
         None => (None, Point::default()),
     };
+
+    // TODO workspaces overview
+    if let Some(overview) = &shell.workspaces_overview {
+        callback(Stage::WorkspacesOverview(overview))?;
+    }
 
     // Top-level layer shell popups
     if !has_focused_fullscreen {

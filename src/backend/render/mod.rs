@@ -58,7 +58,7 @@ use smithay::{
             Color32F, Offscreen, Texture, TextureFilter,
             damage::{Error as RenderError, OutputDamageTracker, RenderOutputResult},
             element::{
-                Element, Id, Kind, NamespacedElement, RenderElement, WeakId,
+                AsRenderElements, Element, Id, Kind, NamespacedElement, RenderElement, WeakId,
                 texture::{TextureRenderBuffer, TextureRenderElement},
                 utils::{
                     ConstrainAlign, ConstrainScaleBehavior, CropRenderElement, Relocate,
@@ -736,6 +736,8 @@ where
 {
     let mut elements = Vec::<CosmicElement<R>>::new();
 
+    let shell_arc = shell; // XXX
+
     let shell_ref = shell.read();
     let seats = shell_ref.seats.iter().cloned().collect::<Vec<_>>();
     if seats.is_empty() {
@@ -1073,6 +1075,17 @@ where
                         }
                     },
                 );
+            }
+            Stage::WorkspacesOverview(workspaces_view) => {
+                if matches!(element_filter, ElementFilter::ExcludeWorkspaceOverview) {
+                    // drop(shell); XXX Do we deadlock?
+                    elements.extend(
+                        workspaces_view
+                            .render(_gpu, renderer, shell_arc, now, output, scanout_node)
+                            .into_iter()
+                            .map(CosmicElement::WorkspacesOverview),
+                    );
+                }
             }
         };
 

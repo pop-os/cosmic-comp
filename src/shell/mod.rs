@@ -102,6 +102,7 @@ pub mod grabs;
 pub mod layout;
 mod seats;
 mod workspace;
+mod workspaces_view;
 pub mod zoom;
 pub use self::element::{CosmicMapped, CosmicMappedRenderElement, CosmicSurface};
 pub use self::seats::*;
@@ -308,6 +309,7 @@ pub struct Shell {
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
+    workspaces_overview: Option<workspaces_view::WorkspacesViewState>,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -1755,6 +1757,7 @@ impl Shell {
             appearance_conf: config.cosmic_conf.appearance_settings,
             zoom_state: None,
             tiling_exceptions,
+            workspaces_overview: None,
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -5187,6 +5190,10 @@ impl Shell {
                         .chain(w.minimized_windows.iter().flat_map(|m| m.mapped()))
                 }))
         })
+    }
+
+    pub fn show_workspaces_overview(&mut self) {
+        self.workspaces_overview = Some(workspaces_view::WorkspacesViewState::new());
     }
 }
 
