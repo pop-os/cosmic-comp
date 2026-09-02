@@ -1357,7 +1357,12 @@ impl Workspaces {
     }
 
     pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
-        let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
+        // An output whose set has just been removed can still be asked by its
+        // own render thread (take_presentation_feedback). Answer like `active`
+        // and `active_mut` do, rather than unwrapping.
+        let Some(set) = self.sets.get(output).or(self.backup_set.as_ref()) else {
+            return (None, 0);
+        };
         (set.previously_active.map(|(idx, _)| idx), set.active)
     }
 
