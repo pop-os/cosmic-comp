@@ -72,11 +72,10 @@ use smithay::{
             linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1,
             presentation_time::server::wp_presentation_feedback,
         },
-        wayland_server::{Client, protocol::wl_surface::WlSurface},
+        wayland_server::protocol::wl_surface::WlSurface,
     },
     utils::{Clock, Monotonic, Physical, Point, Rectangle, Transform},
     wayland::{
-        compositor::CompositorHandler,
         dmabuf::{DmabufFeedbackBuilder, get_dmabuf},
         image_copy_capture::{
             CaptureFailureReason, Frame as ScreencopyFrame, SessionRef as ScreencopySessionRef,
@@ -87,7 +86,6 @@ use smithay::{
     },
 };
 use tracing::{error, info, trace, warn};
-use wayland_backend::server::ClientId;
 
 use std::{
     borrow::{Borrow, BorrowMut},
@@ -227,7 +225,7 @@ pub enum ThreadCommand {
 
 #[derive(Debug)]
 pub enum SurfaceCommand {
-    BlockerCleared(HashMap<ClientId, Client>),
+    SignalFIFO,
     SendFrames(usize),
     RenderStates(RenderElementStates),
 }
@@ -282,13 +280,8 @@ impl Surface {
         let output_clone = output.clone();
         let thread_token = evlh
             .insert_source(rx2, move |command, _, state| match command {
-                Event::Msg(SurfaceCommand::BlockerCleared(signaled_clients)) => {
-                    let dh = &state.common.display_handle.clone();
-                    for (_id, client) in signaled_clients {
-                        state
-                            .client_compositor_state(&client)
-                            .blocker_cleared(state, dh);
-                    }
+                Event::Msg(SurfaceCommand::SignalFIFO) => {
+                    output_clone.signal_fifo(state);
                 }
                 Event::Msg(SurfaceCommand::SendFrames(sequence)) => {
                     if output_clone.mirroring().is_some() {
@@ -1386,11 +1379,7 @@ impl SurfaceThreadState {
                             // If postprocessing, use states from first render
                             let states = pre_postprocess_data.states.unwrap_or(frame_result.states);
                             self.send_dmabuf_feedback(states);
-
-                            let shell = self.shell.read();
-                            let signaled_clients = shell.signal_fifos(&self.output);
-                            drop(shell);
-                            self.send_blocker_cleared_callbacks(signaled_clients);
+                            self.send_signal_fifo_callbacks();
                         }
 
                         if x.is_ok() {
@@ -1478,11 +1467,9 @@ impl SurfaceThreadState {
         self.postprocess_textures.clear();
     }
 
-    fn send_blocker_cleared_callbacks(&mut self, signaled_clients: HashMap<ClientId, Client>) {
+    fn send_signal_fifo_callbacks(&mut self) {
         if self.mirroring.is_none() {
-            let _ = self
-                .thread_sender
-                .send(SurfaceCommand::BlockerCleared(signaled_clients));
+            let _ = self.thread_sender.send(SurfaceCommand::SignalFIFO);
         }
     }
 

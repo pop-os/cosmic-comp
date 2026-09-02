@@ -373,6 +373,7 @@ impl State {
 
         for output in outputs_removed {
             self.common.remove_output(&output);
+            output.signal_fifo(self);
         }
 
         self.backend.kms().refresh_used_devices()?;
