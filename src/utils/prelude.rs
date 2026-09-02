@@ -1,4 +1,5 @@
 use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
+use parking_lot::RwLock;
 use smithay::{
     backend::drm::VrrSupport as Support,
     output::{Output, WeakOutput},
@@ -19,6 +20,7 @@ use std::{
         Mutex,
         atomic::{AtomicU8, Ordering},
     },
+    time::Duration,
 };
 
 pub trait OutputExt {
@@ -42,6 +44,9 @@ pub trait OutputExt {
     fn init_fifo(&self);
     fn fifo_barrier(&self, barrier: Barrier, client: Client);
     fn signal_fifo(&self, state: &mut State);
+
+    fn set_avg_frametime(&self, duration: Option<Duration>);
+    fn get_avg_frametime(&self) -> Option<Duration>;
 }
 
 struct Vrr(AtomicU8);
@@ -56,6 +61,8 @@ pub struct FifoBarrierItem {
 
 #[derive(Default)]
 struct FifoBarriers(Mutex<Vec<FifoBarrierItem>>);
+
+struct AvgFrameTime(RwLock<Option<Duration>>);
 
 impl OutputExt for Output {
     fn is_internal(&self) -> bool {
@@ -210,5 +217,17 @@ impl OutputExt for Output {
                 .client_compositor_state(&item.client)
                 .blocker_cleared(state, dh);
         });
+    }
+
+    fn set_avg_frametime(&self, duration: Option<Duration>) {
+        let user_data = self.user_data();
+        user_data.insert_if_missing_threadsafe(|| AvgFrameTime(RwLock::new(None)));
+        if let Some(avg_frametime) = user_data.get::<AvgFrameTime>() {
+            *avg_frametime.0.write() = duration;
+        }
+    }
+
+    fn get_avg_frametime(&self) -> Option<Duration> {
+        *self.user_data().get::<AvgFrameTime>()?.0.read()
     }
 }

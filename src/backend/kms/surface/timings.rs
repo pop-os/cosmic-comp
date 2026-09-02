@@ -7,7 +7,7 @@ use smithay::{
 use tracing::{debug, error};
 
 const BASE_SAFETY_MARGIN: Duration = Duration::from_millis(3);
-const SAMPLE_TIME_WINDOW: usize = 5;
+pub const SAMPLE_TIME_WINDOW: usize = 5;
 
 pub struct Timings {
     refresh_interval_ns: Option<NonZeroU64>,
