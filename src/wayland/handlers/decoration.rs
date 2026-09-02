@@ -10,6 +10,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
+    utils::IsAlive,
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
@@ -232,14 +233,12 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
-        let mode = if let Some(mapped) = self.common.shell.read().element_for_surface(surface) {
-            if mapped.is_stack() {
-                KdeMode::Server
-            } else {
-                KdeMode::from_preference(self.default_decoration())
-            }
-        } else {
-            KdeMode::from_preference(self.default_decoration())
+        let preference = KdeMode::from_preference(self.default_decoration());
+        // A stacked window is sent `Server` (forced SSD), but only the
+        // configured preference is recorded - `state.mode` is the client's.
+        let mode = match self.common.shell.read().element_for_surface(surface) {
+            Some(mapped) if mapped.alive() && mapped.is_stack() => KdeMode::Server,
+            _ => preference,
         };
 
         with_states(surface, |states| {
@@ -251,7 +250,7 @@ impl KdeDecorationHandler for State {
 
             state.objs.push(decoration.clone());
             if state.mode.is_none() {
-                state.mode = Some(mode)
+                state.mode = Some(preference);
             }
         });
 
