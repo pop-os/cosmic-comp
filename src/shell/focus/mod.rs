@@ -8,7 +8,7 @@ use indexmap::IndexSet;
 use smithay::{
     backend::input::InputTime,
     desktop::{PopupUngrabStrategy, layer_map_for_output},
-    input::{Seat, pointer::MotionEvent},
+    input::{Seat, keyboard::KeyboardTarget, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
     utils::{IsAlive, Point, SERIAL_COUNTER, Serial},
@@ -440,6 +440,15 @@ fn update_focus_state(
             .xwayland_notify_focus_change(target.cloned(), serial);
         ActiveFocus::set(seat, target.cloned());
         keyboard.set_focus(state, target.cloned(), serial);
+        // Smithay skips enter/leave when the focus target is unchanged - re-enter
+        // if the wire focus went stale underneath it (enter pairs with modifiers).
+        if let Some(KeyboardFocusTarget::Element(mapped)) = target
+            && keyboard.current_focus().as_ref() == target
+            && mapped.needs_reenter(seat)
+        {
+            KeyboardTarget::enter(mapped, seat, state, Vec::new(), serial);
+            KeyboardTarget::modifiers(mapped, seat, state, keyboard.modifier_state(), serial);
+        }
         std::mem::drop(keyboard);
 
         //update the focused output or set it to the active output
@@ -537,7 +546,25 @@ impl Common {
 
             if let Some(target) = last_known_focus {
                 if target.alive() {
-                    if focus_target_is_valid(&mut shell, seat, &output, target) {
+                    if focus_target_is_valid(&mut shell, seat, &output, target.clone()) {
+                        // The active tab can change without a set_focus call
+                        // (deferred activation, tab death) - re-enter it here.
+                        if let KeyboardFocusTarget::Element(mapped) = &target
+                            && let Some(keyboard) = seat.get_keyboard()
+                            && keyboard.current_focus().as_ref() == Some(&target)
+                            && mapped.needs_reenter(seat)
+                        {
+                            std::mem::drop(shell);
+                            let serial = SERIAL_COUNTER.next_serial();
+                            KeyboardTarget::enter(mapped, seat, state, Vec::new(), serial);
+                            KeyboardTarget::modifiers(
+                                mapped,
+                                seat,
+                                state,
+                                keyboard.modifier_state(),
+                                serial,
+                            );
+                        }
                         continue; // Focus is valid
                     } else {
                         trace!("Wrong Window, focus fixup");

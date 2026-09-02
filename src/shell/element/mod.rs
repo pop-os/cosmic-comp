@@ -532,6 +532,15 @@ impl CosmicMapped {
         }
     }
 
+    /// Whether the wire keyboard focus must be re-asserted even though this
+    /// element is already the keyboard focus target: a stack's active tab can
+    /// change underneath the unchanged target, which smithay can't observe.
+    pub fn needs_reenter(&self, seat: &Seat<State>) -> bool {
+        self.stack_ref().is_some_and(|stack| {
+            surface::KeyboardEnteredSurface::get(seat).as_ref() != Some(&stack.active())
+        })
+    }
+
     pub fn convert_to_stack(
         &mut self,
         (output, overlap): (&Output, Rectangle<i32, Logical>),

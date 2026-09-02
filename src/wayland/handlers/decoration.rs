@@ -10,6 +10,7 @@ use smithay::{
         },
         wayland_server::protocol::wl_surface::WlSurface,
     },
+    utils::IsAlive,
     wayland::{
         compositor::with_states,
         seat::WaylandFocus,
@@ -121,6 +122,17 @@ impl FromDecorationPreference for KdeMode {
     }
 }
 
+/// The KDE mode to restore when forced server-side decorations are released:
+/// the xdg preference recorded when they were forced wins, then the client's
+/// own kde request.
+pub fn released_kde_mode(previous_mode: Option<XdgMode>, requested: Option<KdeMode>) -> KdeMode {
+    match previous_mode {
+        Some(XdgMode::ServerSide) => KdeMode::Server,
+        Some(_) => KdeMode::Client,
+        None => requested.unwrap_or(KdeMode::Client),
+    }
+}
+
 pub type KdeDecorationData = Mutex<KdeDecorationSurfaceState>;
 #[derive(Debug, Default)]
 pub struct KdeDecorationSurfaceState {
@@ -221,14 +233,12 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
-        let mode = if let Some(mapped) = self.common.shell.read().element_for_surface(surface) {
-            if mapped.is_stack() {
-                KdeMode::Server
-            } else {
-                KdeMode::from_preference(self.default_decoration())
-            }
-        } else {
-            KdeMode::from_preference(self.default_decoration())
+        let preference = KdeMode::from_preference(self.default_decoration());
+        // A stacked window is sent `Server` (forced SSD), but only the
+        // configured preference is recorded - `state.mode` is the client's.
+        let mode = match self.common.shell.read().element_for_surface(surface) {
+            Some(mapped) if mapped.alive() && mapped.is_stack() => KdeMode::Server,
+            _ => preference,
         };
 
         with_states(surface, |states| {
@@ -240,7 +250,7 @@ impl KdeDecorationHandler for State {
 
             state.objs.push(decoration.clone());
             if state.mode.is_none() {
-                state.mode = Some(mode)
+                state.mode = Some(preference);
             }
         });
 
@@ -279,5 +289,38 @@ impl KdeDecorationHandler for State {
                 state.mode.take();
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KdeMode, XdgMode, released_kde_mode};
+
+    #[test]
+    fn releasing_forced_ssd_restores_the_clients_kde_request() {
+        // Regression: the release path re-sent `Server` (the mode the enable
+        // path sends), so CSD clients protested with request_mode(Client) on
+        // every stack extraction.
+        assert_eq!(
+            released_kde_mode(None, Some(KdeMode::Client)),
+            KdeMode::Client
+        );
+        assert_eq!(
+            released_kde_mode(None, Some(KdeMode::Server)),
+            KdeMode::Server
+        );
+        assert_eq!(released_kde_mode(None, None), KdeMode::Client);
+    }
+
+    #[test]
+    fn the_recorded_xdg_preference_wins_over_the_kde_request() {
+        assert_eq!(
+            released_kde_mode(Some(XdgMode::ClientSide), Some(KdeMode::Server)),
+            KdeMode::Client
+        );
+        assert_eq!(
+            released_kde_mode(Some(XdgMode::ServerSide), Some(KdeMode::Client)),
+            KdeMode::Server
+        );
     }
 }
