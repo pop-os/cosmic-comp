@@ -541,7 +541,13 @@ impl Config {
                     primary.config_mut().xwayland_primary = true;
                 }
             }
-            for output in outputs.iter().filter(|o| o.mirroring().is_none()) {
+            // sort by connector name for a deterministic layout independent of hotplug order
+            let mut sorted_outputs = outputs
+                .iter()
+                .filter(|o| o.mirroring().is_none())
+                .collect::<Vec<_>>();
+            sorted_outputs.sort_by_key(|o| o.name());
+            for output in sorted_outputs {
                 {
                     let mut config = output.config_mut();
                     config.position = (w, 0);
