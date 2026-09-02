@@ -49,6 +49,7 @@ use smithay::{
     desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
     input::{
         Seat,
+        keyboard::KeyboardHandle,
         keyboard::{FilterResult, KeyboardSource, KeysymHandle, ModifiersState},
         pointer::{
             AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
@@ -1907,13 +1908,7 @@ impl State {
 
     /// Mirror the seat's current modifier state to every libei sender with a keyboard via
     /// `ei_keyboard.modifiers`
-    pub(crate) fn broadcast_ei_keyboard_modifiers(&self, seat: &Seat<State>) {
-        if self.common.ei_seats.is_empty() {
-            return;
-        }
-        let Some(keyboard) = seat.get_keyboard() else {
-            return;
-        };
+    pub(crate) fn broadcast_ei_keyboard_modifiers(&self, keyboard: &KeyboardHandle<State>) {
         let s = keyboard.modifier_state().serialized;
         for ei_seat in self.common.ei_seats.values() {
             ei_seat.keyboard_modifiers(s.depressed, s.locked, s.latched, s.layout_effective);
@@ -1958,7 +1953,7 @@ impl State {
     ) -> FilterResult<Option<(Action, shortcuts::Binding)>> {
         if previous_modifiers != *modifiers {
             seat.set_last_modifier_change(backend_id, serial);
-            self.broadcast_ei_keyboard_modifiers(seat);
+            self.broadcast_ei_keyboard_modifiers(&seat.get_keyboard().unwrap());
         }
 
         let current_focus = seat.get_keyboard().unwrap().current_focus();

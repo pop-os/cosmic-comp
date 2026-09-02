@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use smithay::input::keyboard::KeyboardHandle;
+
 use crate::state::State;
 use crate::wayland::protocols::keyboard_layout::{KeyboardLayoutHandler, KeyboardLayoutState};
 
 impl KeyboardLayoutHandler for State {
     fn keyboard_layout_state(&mut self) -> &mut KeyboardLayoutState {
         &mut self.common.keyboard_layout_state
+    }
+
+    fn group_changed(&mut self, keyboard: &KeyboardHandle<Self>) {
+        self.broadcast_ei_keyboard_modifiers(keyboard);
     }
 }
