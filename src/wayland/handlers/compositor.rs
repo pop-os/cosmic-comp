@@ -458,9 +458,20 @@ impl CompositorHandler for State {
 
 impl State {
     fn schedule_commit_timing(&self, surface: &WlSurface, deadline: Timestamp) {
-        // TODO: further improve the timing based on render time and vblank timing
+        const SAFE_MARGE: Duration = Duration::from_millis(1);
         let next_deadline = Time::elapsed(&self.common.clock.now(), deadline.into());
-        let timer = Timer::from_duration(next_deadline);
+
+        let target_deadline = if let Some(output) =
+            self.common.shell.read().visible_output_for_surface(surface)
+            && let Some(avg_frametime) = output.get_avg_frametime()
+        {
+            // content update should be presented as closely as possible to, but not before, a specified time
+            next_deadline.saturating_sub(avg_frametime.saturating_sub(SAFE_MARGE))
+        } else {
+            next_deadline
+        };
+
+        let timer: Timer = Timer::from_duration(target_deadline);
         let weak_surface = surface.downgrade();
 
         let _ = self

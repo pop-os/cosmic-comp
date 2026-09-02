@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{
-        CLEAR_COLOR, CursorMode, GlMultiError, GlMultiRenderer, PostprocessOutputConfig,
-        PostprocessShader, PostprocessState,
-        element::{CosmicElement, DamageElement},
-        init_shaders, output_elements,
+    backend::{
+        kms::surface::timings::SAMPLE_TIME_WINDOW,
+        render::{
+            CLEAR_COLOR, CursorMode, GlMultiError, GlMultiRenderer, PostprocessOutputConfig,
+            PostprocessShader, PostprocessState,
+            element::{CosmicElement, DamageElement},
+            init_shaders, output_elements,
+        },
     },
     config::ScreenFilter,
     shell::Shell,
@@ -866,6 +869,8 @@ impl SurfaceThreadState {
             feedback.presented(clock, refresh, sequence as u64, flags);
 
             self.timings.presented(clock);
+            self.output
+                .set_avg_frametime(self.timings.avg_frametime(SAMPLE_TIME_WINDOW));
 
             while let Ok(pending_image_copy_data) = frames.recv() {
                 pending_image_copy_data.send_success_when_ready(
