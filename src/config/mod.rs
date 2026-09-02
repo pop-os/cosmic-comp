@@ -842,7 +842,9 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
                 if !state.common.ei_seats.is_empty() {
                     let seat = state.common.shell.read().seats.last_active().clone();
-                    state.broadcast_ei_keyboard_modifiers(&seat);
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        state.broadcast_ei_keyboard_modifiers(&keyboard);
+                    }
                 }
                 state.common.config.cosmic_conf.xkb_config = value;
             }
