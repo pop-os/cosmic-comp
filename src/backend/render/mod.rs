@@ -899,8 +899,7 @@ where
                 let geometry = geometry.to_local(output).as_logical();
 
                 let padded = with_states(layer.wl_surface(), |states| {
-                    surface_padding(states, geometry.size)
-                        .and_then(|padding| pad_rect(geometry, &padding))
+                    surface_padding(states).and_then(|padding| pad_rect(geometry, &padding))
                 })
                 .unwrap_or(geometry);
                 let radii = with_states(layer.wl_surface(), |states| {
