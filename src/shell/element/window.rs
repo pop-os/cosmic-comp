@@ -438,12 +438,12 @@ impl CosmicWindow {
                 .map(|x| (x * scale as f32).round() as u8);
             if has_ssd && !clip {
                 // bottom corners
-                radii[0] = 0;
                 radii[2] = 0;
+                radii[3] = 0;
                 if is_tiled {
                     // top corners
+                    radii[0] = 0;
                     radii[1] = 0;
-                    radii[3] = 0;
                 }
             }
 
@@ -510,12 +510,12 @@ impl CosmicWindow {
             && !is_maximized;
         if has_ssd && !clip {
             // bottom corners
-            radii[0] = 0;
             radii[2] = 0;
+            radii[3] = 0;
             if is_tiled {
                 // top corners
+                radii[0] = 0;
                 radii[1] = 0;
-                radii[3] = 0;
             }
         }
 
@@ -560,8 +560,8 @@ impl CosmicWindow {
         self.0.with_program(|p| {
             let mut radii = radii;
             if has_ssd {
+                radii[0] = 0;
                 radii[1] = 0;
-                radii[3] = 0;
             }
             let theme = p.theme.lock().unwrap();
             let frosted = if theme.cosmic().frosted_windows {
@@ -585,8 +585,8 @@ impl CosmicWindow {
         });
 
         if has_ssd {
-            radii[0] = 0;
             radii[2] = 0;
+            radii[3] = 0;
             let ssd_loc = location
                 + self
                     .0
@@ -691,26 +691,26 @@ impl CosmicWindow {
                 (has_ssd, true) => {
                     let mut corners = p.window.corner_radius(geometry_size).unwrap_or(radii);
 
-                    corners[0] = radii[0].max(corners[0]);
+                    corners[0] = if has_ssd {
+                        radii[0]
+                    } else {
+                        radii[0].max(corners[0])
+                    };
                     corners[1] = if has_ssd {
                         radii[1]
                     } else {
                         radii[1].max(corners[1])
                     };
                     corners[2] = radii[2].max(corners[2]);
-                    corners[3] = if has_ssd {
-                        radii[3]
-                    } else {
-                        radii[3].max(corners[3])
-                    };
+                    corners[3] = radii[3].max(corners[3]);
 
                     corners
                 }
                 (true, false) => p
                     .window
                     .corner_radius(geometry_size)
-                    .map(|[a, _, c, _]| [a, radii[1], c, radii[3]])
-                    .unwrap_or([default_radius, radii[1], default_radius, radii[3]]),
+                    .map(|[_, _, c, d]| [radii[0], radii[1], c, d])
+                    .unwrap_or([radii[0], radii[1], default_radius, default_radius]),
                 (false, false) => p
                     .window
                     .corner_radius(geometry_size)
