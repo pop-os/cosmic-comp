@@ -842,7 +842,7 @@ impl CosmicStack {
                 )));
             };
 
-            let radii = radii.map(|[a, _, c, _]| [a, 0, c, 0]);
+            let radii = radii.map(|[_, _, c, d]| [0, 0, c, d]);
             windows[active].push_render_elements(
                 renderer,
                 window_loc,
@@ -1015,17 +1015,17 @@ impl CosmicStack {
                     .corner_radius(geometry_size)
                     .unwrap_or([default_radius; 4]);
 
+                corners[0] = 0;
                 corners[1] = 0;
-                corners[3] = 0;
 
                 corners
             } else {
                 let mut corners = active_window.corner_radius(geometry_size).unwrap_or(radii);
 
-                corners[0] = radii[0].max(corners[0]);
+                corners[0] = radii[0];
                 corners[1] = radii[1];
                 corners[2] = radii[2].max(corners[2]);
-                corners[3] = radii[3];
+                corners[3] = radii[3].max(corners[3]);
 
                 corners
             }
