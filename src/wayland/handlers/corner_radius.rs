@@ -30,16 +30,16 @@ pub fn surface_corners(states: &SurfaceData, size: Size<i32, Logical>) -> Option
     let corners = guard.current().0?;
 
     Some([
-        u8::try_from(corners.top_left)
+        u8::try_from(corners.bottom_right)
             .unwrap_or(u8::MAX)
             .min(half_min_dim),
         u8::try_from(corners.top_right)
             .unwrap_or(u8::MAX)
             .min(half_min_dim),
-        u8::try_from(corners.bottom_right)
+        u8::try_from(corners.bottom_left)
             .unwrap_or(u8::MAX)
             .min(half_min_dim),
-        u8::try_from(corners.bottom_left)
+        u8::try_from(corners.top_left)
             .unwrap_or(u8::MAX)
             .min(half_min_dim),
     ])
