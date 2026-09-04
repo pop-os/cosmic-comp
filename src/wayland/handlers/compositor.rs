@@ -21,11 +21,11 @@ use smithay::{
         compositor::{
             Barrier, BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
             SurfaceAttributes, SurfaceData, TraversalAction, add_blocker, add_post_commit_hook,
-            add_pre_commit_hook, is_sync_subsurface, with_states, with_surface_tree_downward,
+            add_pre_commit_hook, with_states, with_surface_tree_downward,
         },
         dmabuf::get_dmabuf,
         drm_syncobj::DrmSyncobjCachedState,
-        fifo::{FifoBarrierCachedState, FifoCachedState},
+        fifo::FifoBarrierCachedState,
         seat::WaylandFocus,
         shell::{
             wlr_layer::LayerSurfaceAttributes,
@@ -198,57 +198,6 @@ impl CompositorHandler for State {
                 state.schedule_commit_timing(surface, timestamp, Some(barrier));
             }
 
-            let fifo_barrier = with_states(surface, |states| {
-                let fifo_state = *states.cached_state.get::<FifoCachedState>().pending();
-
-                // The pending state will contain any previously set barrier on this surface
-                // In case this commit updates the barrier with `set_barrier`, but also mandates to
-                // wait for a previously set barrier it is important to first retrieve the previously
-                // set barrier to not overwrite it with our own.
-                let fifo_barrier = fifo_state
-                    .wait_barrier
-                    .then(|| {
-                        states
-                            .cached_state
-                            .get::<FifoBarrierCachedState>()
-                            .pending()
-                            .barrier
-                            .take()
-                    })
-                    .flatten();
-
-                // If requested set the barrier for this commit.
-                // The barrier will be available for the next commit requesting to wait on it
-                // in the pending state.
-                // The barrier will also be either put in the current state in case this commit
-                // is not blocked or into a transaction otherwise eventually ending in the current
-                // state when it is unblocked.
-                if fifo_state.set_barrier {
-                    states
-                        .cached_state
-                        .get::<FifoBarrierCachedState>()
-                        .pending()
-                        .barrier = Some(Barrier::new(false));
-                }
-
-                fifo_barrier
-            });
-
-            if let Some(barrier) = fifo_barrier {
-                let skip = barrier.is_signaled() || is_sync_subsurface(surface);
-                if !skip
-                    && let Some(output) = state
-                        .common
-                        .shell
-                        .read()
-                        .visible_output_for_surface(surface)
-                    && let Some(client) = surface.client()
-                {
-                    add_blocker(surface, barrier.clone());
-                    output.fifo_barrier(barrier, client);
-                }
-            }
-
             let mut acquire_point = None;
             let maybe_dmabuf = with_states(surface, |surface_data| {
                 acquire_point = surface_data
@@ -331,6 +280,40 @@ impl CompositorHandler for State {
                 }
                 data.last_commit = Some(now);
             });
+
+            let fifo_barrier = with_states(surface, |states| {
+                states
+                    .cached_state
+                    .get::<FifoBarrierCachedState>()
+                    .current()
+                    .barrier
+                    .take()
+            });
+
+            if let Some(barrier) = fifo_barrier
+                && let Some(client) = surface.client()
+            {
+                if let Some(output) = state
+                    .common
+                    .shell
+                    .read()
+                    .visible_output_for_surface(surface)
+                {
+                    output.fifo_barrier(barrier, client);
+                } else {
+                    let _ = state.common.event_loop_handle.insert_source(
+                        Timer::immediate(),
+                        move |_, _, state| {
+                            barrier.signal();
+                            let dh = state.common.display_handle.clone();
+                            state
+                                .client_compositor_state(&client)
+                                .blocker_cleared(state, &dh);
+                            TimeoutAction::Drop
+                        },
+                    );
+                }
+            }
         });
     }
 

@@ -16,6 +16,7 @@ use crate::{config::EdidProduct, shell::zoom::OutputZoomState};
 
 use std::{
     cell::{Ref, RefCell, RefMut},
+    collections::HashMap,
     sync::{
         Mutex,
         atomic::{AtomicU8, Ordering},
@@ -203,13 +204,18 @@ impl OutputExt for Output {
             return;
         };
 
-        let dh = &state.common.display_handle.clone();
+        let mut clients = HashMap::new();
         fifo_barriers.0.lock().unwrap().drain(..).for_each(|item| {
             item.barrier.signal();
-            state
-                .client_compositor_state(&item.client)
-                .blocker_cleared(state, dh);
+            clients.insert(item.client.id(), item.client);
         });
+
+        let dh = &state.common.display_handle.clone();
+        for (_id, client) in clients {
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, dh);
+        }
     }
 
     fn set_avg_frametime(&self, duration: Option<Duration>) {
