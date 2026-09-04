@@ -105,6 +105,7 @@ pub struct Workspace {
     pub output: Output,
     pub tiling_layer: TilingLayout,
     pub floating_layer: FloatingLayout,
+    pub below_layer: FloatingLayout,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub tiling_enabled: bool,
     pub fullscreen_surfaces: Vec<FullscreenSurface>,
@@ -130,6 +131,10 @@ pub enum MinimizedWindow {
         window: CosmicMapped,
         previous: FloatingRestoreData,
     },
+    Below {
+        window: CosmicMapped,
+        previous: FloatingRestoreData,
+    },
     Tiling {
         window: CosmicMapped,
         previous: TilingRestoreData,
@@ -145,37 +150,37 @@ impl PartialEq<CosmicMapped> for MinimizedWindow {
 impl MinimizedWindow {
     pub fn mapped(&self) -> Option<&CosmicMapped> {
         match self {
-            MinimizedWindow::Floating { window, .. } | MinimizedWindow::Tiling { window, .. } => {
-                Some(window)
-            }
+            MinimizedWindow::Floating { window, .. }
+            | MinimizedWindow::Below { window, .. }
+            | MinimizedWindow::Tiling { window, .. } => Some(window),
             _ => None,
         }
     }
 
     pub fn mapped_mut(&mut self) -> Option<&mut CosmicMapped> {
         match self {
-            MinimizedWindow::Floating { window, .. } | MinimizedWindow::Tiling { window, .. } => {
-                Some(window)
-            }
+            MinimizedWindow::Floating { window, .. }
+            | MinimizedWindow::Below { window, .. }
+            | MinimizedWindow::Tiling { window, .. } => Some(window),
             _ => None,
         }
     }
 
     pub fn active_window(&self) -> CosmicSurface {
         match self {
-            MinimizedWindow::Floating { window, .. } | MinimizedWindow::Tiling { window, .. } => {
-                window.active_window()
-            }
+            MinimizedWindow::Floating { window, .. }
+            | MinimizedWindow::Below { window, .. }
+            | MinimizedWindow::Tiling { window, .. } => window.active_window(),
             MinimizedWindow::Fullscreen { surface, .. } => surface.clone(),
         }
     }
 
     pub fn windows(&self) -> impl Iterator<Item = CosmicSurface> + '_ {
         match self {
-            MinimizedWindow::Floating { window, .. } | MinimizedWindow::Tiling { window, .. } => {
-                Box::new(window.windows().map(|(s, _)| s))
-                    as Box<dyn Iterator<Item = CosmicSurface>>
-            }
+            MinimizedWindow::Floating { window, .. }
+            | MinimizedWindow::Below { window, .. }
+            | MinimizedWindow::Tiling { window, .. } => Box::new(window.windows().map(|(s, _)| s))
+                as Box<dyn Iterator<Item = CosmicSurface>>,
             MinimizedWindow::Fullscreen { surface, .. } => {
                 Box::new(std::iter::once(surface.clone())) as _
             }
@@ -197,6 +202,9 @@ impl MinimizedWindow {
                 window.configure();
             }
             MinimizedWindow::Floating {
+                window, previous, ..
+            }
+            | MinimizedWindow::Below {
                 window, previous, ..
             } => {
                 previous.geometry = original_geometry;
@@ -244,6 +252,7 @@ pub enum ManagedLayer {
     Fullscreen,
     Tiling,
     Floating,
+    Below,
     Sticky,
 }
 
@@ -259,6 +268,10 @@ pub enum FullscreenRestoreState {
         state: FloatingRestoreData,
         was_stack: bool,
     },
+    Below {
+        workspace: WorkspaceHandle,
+        state: FloatingRestoreData,
+    },
     Sticky {
         output: WeakOutput,
         state: FloatingRestoreData,
@@ -273,6 +286,7 @@ impl FullscreenRestoreState {
     pub fn was_maximized(&self) -> bool {
         match self {
             FullscreenRestoreState::Floating { state, .. }
+            | FullscreenRestoreState::Below { state, .. }
             | FullscreenRestoreState::Sticky { state, .. } => state.was_maximized,
             FullscreenRestoreState::Tiling { state, .. } => state.was_maximized,
             FullscreenRestoreState::Stack { .. } => false,
@@ -285,6 +299,7 @@ impl FullscreenRestoreState {
             FullscreenRestoreState::Floating { was_stack, .. }
             | FullscreenRestoreState::Sticky { was_stack, .. } => *was_stack,
             FullscreenRestoreState::Tiling { was_stack, .. } => *was_stack,
+            FullscreenRestoreState::Below { .. } => false,
             // Stack wasn't removed; surface was removed from the stack
             FullscreenRestoreState::Stack { .. } => false,
         }
@@ -296,6 +311,7 @@ pub enum WorkspaceRestoreData {
     Fullscreen(Option<FullscreenRestoreData>),
     Tiling(TilingRestoreData),
     Floating(FloatingRestoreData),
+    Below(FloatingRestoreData),
     Stack(StackRestoreData),
 }
 
@@ -389,13 +405,15 @@ impl Workspace {
         appearance: AppearanceConfig,
     ) -> Workspace {
         let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
-        let floating_layer = FloatingLayout::new(theme, appearance, &output);
+        let floating_layer = FloatingLayout::new(theme.clone(), appearance, &output);
+        let below_layer = FloatingLayout::new(theme, appearance, &output);
         let output_match = output_match_for_output(&output);
 
         Workspace {
             output,
             tiling_layer,
             floating_layer,
+            below_layer,
             tiling_enabled,
             minimized_windows: Vec::new(),
             fullscreen_surfaces: Vec::new(),
@@ -423,13 +441,15 @@ impl Workspace {
         appearance: AppearanceConfig,
     ) -> Self {
         let tiling_layer = TilingLayout::new(theme.clone(), appearance, &output);
-        let floating_layer = FloatingLayout::new(theme, appearance, &output);
+        let floating_layer = FloatingLayout::new(theme.clone(), appearance, &output);
+        let below_layer = FloatingLayout::new(theme, appearance, &output);
         let output_match = output_match_for_output(&output);
 
         Workspace {
             output,
             tiling_layer,
             floating_layer,
+            below_layer,
             tiling_enabled: pinned.tiling_enabled,
             minimized_windows: Vec::new(),
             fullscreen_surfaces: Vec::new(),
@@ -478,6 +498,7 @@ impl Workspace {
 
         self.floating_layer.refresh();
         self.tiling_layer.refresh();
+        self.below_layer.refresh();
     }
 
     fn has_activation_token(&self, xdg_activation_state: &XdgActivationState) -> bool {
@@ -525,6 +546,7 @@ impl Workspace {
                 self.floating_layer
                     .mapped()
                     .chain(self.tiling_layer.mapped().map(|(w, _)| w))
+                    .chain(self.below_layer.mapped())
                     .chain(move_mapped.iter())
             };
             stack.retain(|w| match w {
@@ -537,6 +559,7 @@ impl Workspace {
     pub fn animations_going(&self) -> bool {
         self.tiling_layer.animations_going()
             || self.floating_layer.animations_going()
+            || self.below_layer.animations_going()
             || self.fullscreen_surfaces.iter().any(|f| f.is_animating())
             || self.dirty.swap(false, Ordering::SeqCst)
     }
@@ -564,6 +587,7 @@ impl Workspace {
 
         let clients = self.tiling_layer.update_animation_state();
         self.floating_layer.update_animation_state();
+        self.below_layer.update_animation_state();
         clients
     }
 
@@ -583,6 +607,7 @@ impl Workspace {
     pub fn set_output(&mut self, output: &Output, explicit: bool) {
         self.tiling_layer.set_output(output);
         self.floating_layer.set_output(output);
+        self.below_layer.set_output(output);
         for mapped in self.mapped() {
             for (surface, _) in mapped.windows() {
                 toplevel_leave_output(&surface, &self.output);
@@ -657,6 +682,7 @@ impl Workspace {
                 MinimizedWindow::Floating { previous, .. } => {
                     WorkspaceRestoreData::Floating(previous)
                 }
+                MinimizedWindow::Below { previous, .. } => WorkspaceRestoreData::Below(previous),
                 MinimizedWindow::Tiling { previous, .. } => WorkspaceRestoreData::Tiling(previous),
                 MinimizedWindow::Fullscreen { .. } => unreachable!(),
             });
@@ -666,6 +692,15 @@ impl Workspace {
             return Some(WorkspaceRestoreData::Tiling(TilingRestoreData {
                 state,
                 was_maximized: was_maximized.is_some(),
+            }));
+        }
+
+        if let Some(geometry) = self.below_layer.unmap(mapped, None) {
+            return Some(WorkspaceRestoreData::Below(FloatingRestoreData {
+                geometry,
+                output_size: self.output.geometry().size.as_logical(),
+                was_maximized: was_maximized.is_some(),
+                was_snapped: None,
             }));
         }
 
@@ -776,6 +811,7 @@ impl Workspace {
         self.floating_layer
             .mapped()
             .chain(self.tiling_layer.mapped().map(|(w, _)| w))
+            .chain(self.below_layer.mapped())
             .chain(self.minimized_windows.iter().flat_map(|w| w.mapped()))
             .find(|e| e.windows().any(|(w, _)| &w == surface))
     }
@@ -827,6 +863,7 @@ impl Workspace {
                 }
                 None
             })
+            .or_else(|| self.below_layer.popup_element_under(location, seat))
     }
 
     pub fn toplevel_element_under(
@@ -876,6 +913,7 @@ impl Workspace {
                 }
                 None
             })
+            .or_else(|| self.below_layer.toplevel_element_under(location, seat))
     }
 
     pub fn popup_surface_under(
@@ -925,6 +963,7 @@ impl Workspace {
                     .popup_surface_under(location, overview, seat)
             })
             .or_else(|| self.get_fullscreen(seat).and_then(check_fullscreen))
+            .or_else(|| self.below_layer.popup_surface_under(location, seat))
             .map(|(m, p)| (m, p.to_global(&self.output)))
     }
 
@@ -969,6 +1008,7 @@ impl Workspace {
                     .toplevel_surface_under(location, overview, seat)
             })
             .or_else(|| self.get_fullscreen(seat).and_then(check_fullscreen))
+            .or_else(|| self.below_layer.toplevel_surface_under(location, seat))
             .map(|(m, p)| (m, p.to_global(&self.output)))
     }
 
@@ -980,17 +1020,54 @@ impl Workspace {
         self.floating_layer.update_pointer_position(location);
         self.tiling_layer
             .update_pointer_position(location, overview);
+        self.below_layer.update_pointer_position(location);
     }
 
     pub fn element_geometry(&self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
         self.floating_layer
             .element_geometry(elem)
             .or_else(|| self.tiling_layer.element_geometry(elem))
+            .or_else(|| self.below_layer.element_geometry(elem))
+    }
+
+    pub fn map_below(&mut self, mapped: CosmicMapped, geometry: Option<Rectangle<i32, Local>>) {
+        let geometry =
+            geometry.unwrap_or_else(|| mapped.geometry().as_global().to_local(&self.output));
+        self.below_layer.map_internal(
+            mapped,
+            Some(geometry.loc),
+            Some(geometry.size.as_logical()),
+            None,
+        );
+    }
+
+    pub fn move_to_below(&mut self, mapped: &CosmicMapped) -> bool {
+        if self.below_layer.element_geometry(mapped).is_some() {
+            return false;
+        }
+
+        if mapped.maximized_state.lock().unwrap().is_some() {
+            self.unmaximize_request(mapped);
+        }
+        let Some(geometry) = self.element_geometry(mapped) else {
+            return false;
+        };
+
+        if self.tiling_layer.unmap(mapped, None).is_err() {
+            self.floating_layer.unmap(mapped, None);
+        }
+        self.map_below(mapped.clone(), Some(geometry));
+        true
+    }
+
+    pub fn take_below(&mut self, mapped: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
+        self.below_layer.unmap(mapped, None)
     }
 
     pub fn recalculate(&mut self) {
         self.tiling_layer.recalculate();
         self.floating_layer.recalculate();
+        self.below_layer.recalculate();
     }
 
     pub fn unmaximize_request(&mut self, elem: &CosmicMapped) -> Option<Rectangle<i32, Local>> {
@@ -1011,6 +1088,16 @@ impl Workspace {
                         elem.configure();
                         self.tiling_layer.recalculate();
                         geo
+                    }
+                    ManagedLayer::Below => {
+                        elem.set_maximized(false);
+                        self.below_layer.map_internal(
+                            elem.clone(),
+                            Some(state.original_geometry.loc),
+                            Some(state.original_geometry.size.as_logical()),
+                            None,
+                        );
+                        Some(state.original_geometry)
                     }
                     ManagedLayer::Sticky => unreachable!(),
 
@@ -1123,6 +1210,18 @@ impl Workspace {
             });
         }
 
+        if let Some(geometry) = self.below_layer.unmap(&mapped, Some(to)) {
+            return Some(MinimizedWindow::Below {
+                window: mapped,
+                previous: FloatingRestoreData {
+                    geometry: was_maximized.unwrap_or(geometry),
+                    output_size: self.output.geometry().size.as_logical(),
+                    was_maximized: was_maximized.is_some(),
+                    was_snapped: None,
+                },
+            });
+        }
+
         if let Ok(state) = self
             .tiling_layer
             .unmap(&mapped, was_maximized.is_none().then_some(to))
@@ -1188,6 +1287,24 @@ impl Workspace {
                     self.floating_layer.snap_to_corner(&window, &corners);
                 }
 
+                None
+            }
+            MinimizedWindow::Below { window, previous } => {
+                let current_output_size = self.output.geometry().size.as_logical();
+                let previous_position = previous.position_relative(current_output_size);
+
+                window.set_minimized(false);
+                self.below_layer
+                    .remap_minimized(window.clone(), from, previous_position);
+                if previous.was_maximized {
+                    let geometry = self.below_layer.element_geometry(&window).unwrap();
+                    *window.maximized_state.lock().unwrap() = Some(MaximizedState {
+                        original_geometry: geometry,
+                        original_layer: ManagedLayer::Below,
+                        original_snapped: None,
+                    });
+                    self.below_layer.map_maximized(window, geometry, true);
+                }
                 None
             }
             MinimizedWindow::Tiling {
@@ -1483,6 +1600,9 @@ impl Workspace {
     }
 
     pub fn toggle_floating_window(&mut self, seat: &Seat<State>, window: &CosmicMapped) {
+        if self.below_layer.element_geometry(window).is_some() {
+            return;
+        }
         if self.tiling_enabled {
             if window.is_maximized(false) {
                 self.unmaximize_request(window);
@@ -1516,11 +1636,13 @@ impl Workspace {
         self.floating_layer
             .mapped()
             .chain(self.tiling_layer.mapped().map(|(w, _)| w))
+            .chain(self.below_layer.mapped())
     }
 
     pub fn len(&self) -> usize {
         self.floating_layer.mapped().count()
             + self.tiling_layer.mapped().count()
+            + self.below_layer.mapped().count()
             + self.minimized_windows.len()
             + self
                 .fullscreen_surfaces
@@ -1532,6 +1654,7 @@ impl Workspace {
     pub fn is_empty(&self) -> bool {
         self.floating_layer.mapped().next().is_none()
             && self.tiling_layer.mapped().next().is_none()
+            && self.below_layer.mapped().next().is_none()
             && self.minimized_windows.is_empty()
             && self.fullscreen_surfaces.is_empty()
     }
@@ -1543,6 +1666,10 @@ impl Workspace {
         self.floating_layer
             .mapped()
             .any(|m| m.windows().any(|(ref s, _)| s == surface))
+            || self
+                .below_layer
+                .mapped()
+                .any(|m| m.windows().any(|(ref s, _)| s == surface))
             || self.minimized_windows.iter().any(|m| {
                 if let MinimizedWindow::Floating { window, .. } = m {
                     window.windows().any(|(ref s, _)| s == surface)
@@ -1550,6 +1677,15 @@ impl Workspace {
                     false
                 }
             })
+    }
+
+    pub fn is_below<S>(&self, surface: &S) -> bool
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        self.below_layer
+            .mapped()
+            .any(|m| m.windows().any(|(ref s, _)| s == surface))
     }
 
     pub fn is_tiled<S>(&self, surface: &S) -> bool
@@ -1680,6 +1816,7 @@ impl Workspace {
                     }
                     (None, None) => (fullscreen_geo, 1.0),
                 };
+                let alpha = fullscreen.surface.effective_render_alpha(alpha);
 
                 let render_loc = target_geo
                     .loc
@@ -1833,6 +1970,19 @@ impl Workspace {
                 )
             }
         }
+
+        self.below_layer
+            .render_popups(renderer, 1.0, scanout_node, &mut |elem| push(elem.into()));
+        self.below_layer.render(
+            renderer,
+            None,
+            None,
+            indicator_thickness,
+            1.0,
+            theme,
+            scanout_node,
+            &mut |elem| push(elem.into()),
+        );
 
         for elem in fullscreen_elements {
             push(elem);
