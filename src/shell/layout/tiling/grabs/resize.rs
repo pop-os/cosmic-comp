@@ -201,7 +201,7 @@ impl TabletToolTarget<State> for ResizeForkTarget {
                         tool,
                         data: TabletToolGrabStartData {
                             focus: None,
-                            location: location,
+                            location,
                             trigger: TabletToolGrabTrigger::Tip,
                         },
                     },

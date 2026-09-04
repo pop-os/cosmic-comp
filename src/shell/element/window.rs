@@ -1112,12 +1112,12 @@ impl PointerTarget<State> for CosmicWindow {
                         false,
                     );
 
-                    if let Some((grab, focus)) = res {
-                        if let GrabType::Pointer = grab.grab_type() {
-                            seat.get_pointer()
-                                .unwrap()
-                                .set_grab(state, grab, serial, focus)
-                        }
+                    if let Some((grab, focus)) = res
+                        && let GrabType::Pointer = grab.grab_type()
+                    {
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(state, grab, serial, focus)
                     }
                 });
             }
@@ -1315,13 +1315,13 @@ impl TabletToolTarget<State> for CosmicWindow {
                         false,
                     );
 
-                    if let Some((grab, focus)) = res {
-                        if let GrabType::TabletTool = grab.grab_type() {
-                            seat.tablet_seat()
-                                .get_tool(grab.tool().unwrap())
-                                .unwrap()
-                                .set_grab(state, grab, InputTime::now(), serial, focus)
-                        }
+                    if let Some((grab, focus)) = res
+                        && let GrabType::TabletTool = grab.grab_type()
+                    {
+                        seat.tablet_seat()
+                            .get_tool(grab.tool().unwrap())
+                            .unwrap()
+                            .set_grab(state, grab, InputTime::now(), serial, focus)
                     }
                 });
             }

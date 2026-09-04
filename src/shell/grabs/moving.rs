@@ -905,7 +905,7 @@ impl Drop for MoveGrab {
         let seat = self.seat.clone();
         // false-positive: `Output`s hash is based on it's inner ptr
         #[allow(clippy::mutable_key_type)]
-        let window_outputs = self.window_outputs.drain().collect::<HashSet<_>>();
+        let window_outputs = std::mem::take(&mut self.window_outputs);
         let previous = self.previous;
         let window = self.window.clone();
         let is_touch_grab = matches!(self.start_data, GrabStartData::Touch(_));
