@@ -180,6 +180,75 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
+            let timestamp = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<CommitTimerStateUserData>()
+                    .and_then(|state| state.borrow_mut().timestamp.take())
+            });
+
+            if let Some(timestamp) = timestamp {
+                let barrier = with_states(surface, |states| {
+                    let barrier_state = states
+                        .data_map
+                        .get_or_insert(CommitTimerBarrierStateUserData::default);
+                    barrier_state.lock().unwrap().register(timestamp)
+                });
+
+                state.schedule_commit_timing(surface, timestamp, Some(barrier));
+            }
+
+            let fifo_barrier = with_states(surface, |states| {
+                let fifo_state = *states.cached_state.get::<FifoCachedState>().pending();
+
+                // The pending state will contain any previously set barrier on this surface
+                // In case this commit updates the barrier with `set_barrier`, but also mandates to
+                // wait for a previously set barrier it is important to first retrieve the previously
+                // set barrier to not overwrite it with our own.
+                let fifo_barrier = fifo_state
+                    .wait_barrier
+                    .then(|| {
+                        states
+                            .cached_state
+                            .get::<FifoBarrierCachedState>()
+                            .pending()
+                            .barrier
+                            .take()
+                    })
+                    .flatten();
+
+                // If requested set the barrier for this commit.
+                // The barrier will be available for the next commit requesting to wait on it
+                // in the pending state.
+                // The barrier will also be either put in the current state in case this commit
+                // is not blocked or into a transaction otherwise eventually ending in the current
+                // state when it is unblocked.
+                if fifo_state.set_barrier {
+                    states
+                        .cached_state
+                        .get::<FifoBarrierCachedState>()
+                        .pending()
+                        .barrier = Some(Barrier::new(false));
+                }
+
+                fifo_barrier
+            });
+
+            if let Some(barrier) = fifo_barrier {
+                let skip = barrier.is_signaled() || is_sync_subsurface(surface);
+                if !skip
+                    && let Some(output) = state
+                        .common
+                        .shell
+                        .read()
+                        .visible_output_for_surface(surface)
+                    && let Some(client) = surface.client()
+                {
+                    add_blocker(surface, barrier.clone());
+                    output.fifo_barrier(barrier, client);
+                }
+            }
+
             let mut acquire_point = None;
             let maybe_dmabuf = with_states(surface, |surface_data| {
                 acquire_point = surface_data
@@ -236,80 +305,6 @@ impl CompositorHandler for State {
                     if res.is_ok() {
                         add_blocker(surface, blocker);
                     }
-                }
-            }
-        });
-
-        add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
-            let timestamp = with_states(surface, |states| {
-                states
-                    .data_map
-                    .get::<CommitTimerStateUserData>()
-                    .and_then(|state| state.borrow_mut().timestamp.take())
-            });
-
-            if let Some(timestamp) = timestamp {
-                let barrier = with_states(surface, |states| {
-                    let barrier_state = states
-                        .data_map
-                        .get_or_insert(CommitTimerBarrierStateUserData::default);
-                    barrier_state.lock().unwrap().register(timestamp)
-                });
-
-                add_blocker(surface, barrier);
-                state.schedule_commit_timing(surface, timestamp);
-            }
-        });
-
-        add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
-            let fifo_barrier = with_states(surface, |states| {
-                let fifo_state = *states.cached_state.get::<FifoCachedState>().pending();
-
-                // The pending state will contain any previously set barrier on this surface
-                // In case this commit updates the barrier with `set_barrier`, but also mandates to
-                // wait for a previously set barrier it is important to first retrieve the previously
-                // set barrier to not overwrite it with our own.
-                let fifo_barrier = fifo_state
-                    .wait_barrier
-                    .then(|| {
-                        states
-                            .cached_state
-                            .get::<FifoBarrierCachedState>()
-                            .pending()
-                            .barrier
-                            .take()
-                    })
-                    .flatten();
-
-                // If requested set the barrier for this commit.
-                // The barrier will be available for the next commit requesting to wait on it
-                // in the pending state.
-                // The barrier will also be either put in the current state in case this commit
-                // is not blocked or into a transaction otherwise eventually ending in the current
-                // state when it is unblocked.
-                if fifo_state.set_barrier {
-                    states
-                        .cached_state
-                        .get::<FifoBarrierCachedState>()
-                        .pending()
-                        .barrier = Some(Barrier::new(false));
-                }
-
-                fifo_barrier
-            });
-
-            if let Some(barrier) = fifo_barrier {
-                let skip = barrier.is_signaled() || is_sync_subsurface(surface);
-                if !skip
-                    && let Some(output) = state
-                        .common
-                        .shell
-                        .read()
-                        .visible_output_for_surface(surface)
-                    && let Some(client) = surface.client()
-                {
-                    add_blocker(surface, barrier.clone());
-                    output.fifo_barrier(barrier, client);
                 }
             }
         });
@@ -457,8 +452,12 @@ impl CompositorHandler for State {
 }
 
 impl State {
-    fn schedule_commit_timing(&self, surface: &WlSurface, deadline: Timestamp) {
-        const SAFE_MARGE: Duration = Duration::from_millis(1);
+    fn schedule_commit_timing(
+        &self,
+        surface: &WlSurface,
+        deadline: Timestamp,
+        barrier: Option<Barrier>,
+    ) {
         let next_deadline = Time::elapsed(&self.common.clock.now(), deadline.into());
 
         let target_deadline = if let Some(output) =
@@ -466,10 +465,19 @@ impl State {
             && let Some(avg_frametime) = output.get_avg_frametime()
         {
             // content update should be presented as closely as possible to, but not before, a specified time
-            next_deadline.saturating_sub(avg_frametime.saturating_sub(SAFE_MARGE))
+            next_deadline.saturating_sub(avg_frametime)
         } else {
             next_deadline
         };
+
+        if !target_deadline.is_zero()
+            && let Some(barrier) = barrier
+        {
+            add_blocker(surface, barrier);
+        } else if target_deadline.is_zero() && barrier.is_some() {
+            // let it go
+            return;
+        }
 
         let timer: Timer = Timer::from_duration(target_deadline);
         let weak_surface = surface.downgrade();
@@ -509,7 +517,7 @@ impl State {
                 }
 
                 if let Some(deadline) = next_deadline {
-                    state.schedule_commit_timing(&surface, deadline);
+                    state.schedule_commit_timing(&surface, deadline, None);
                 }
 
                 TimeoutAction::Drop

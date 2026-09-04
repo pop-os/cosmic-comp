@@ -1568,7 +1568,6 @@ impl Common {
         output
             .user_data()
             .insert_if_missing_threadsafe(|| OutputId(next_output_id()));
-        output.init_fifo();
 
         if let Some(state) = shell.zoom_state.as_ref() {
             output.user_data().insert_if_missing_threadsafe(|| {
