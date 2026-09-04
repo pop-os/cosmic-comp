@@ -928,7 +928,8 @@ impl CosmicMapped {
 
     pub fn ssd_height(&self, pending: bool) -> Option<i32> {
         match &self.element {
-            CosmicMappedInternal::Window(w) => (!w.surface().is_decorated(pending))
+            CosmicMappedInternal::Window(w) => w
+                .has_ssd(pending)
                 .then_some(crate::shell::element::window::SSD_HEIGHT),
             CosmicMappedInternal::Stack(_) => Some(crate::shell::element::stack::TAB_HEIGHT),
             _ => unreachable!(),
