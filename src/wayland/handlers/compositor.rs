@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
-use calloop::Interest;
+use calloop::{
+    Interest,
+    timer::{TimeoutAction, Timer},
+};
 use smithay::{
     backend::{
         input::InputTime,
@@ -14,13 +17,15 @@ use smithay::{
     reexports::wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
     utils::{Clock, Logical, Monotonic, SERIAL_COUNTER, Size, Time},
     wayland::{
+        commit_timing::{CommitTimerBarrierStateUserData, CommitTimerStateUserData, Timestamp},
         compositor::{
-            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            Barrier, BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
             SurfaceAttributes, SurfaceData, TraversalAction, add_blocker, add_post_commit_hook,
             add_pre_commit_hook, with_states, with_surface_tree_downward,
         },
         dmabuf::get_dmabuf,
         drm_syncobj::DrmSyncobjCachedState,
+        fifo::FifoBarrierCachedState,
         seat::WaylandFocus,
         shell::{
             wlr_layer::LayerSurfaceAttributes,
@@ -175,6 +180,24 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
+            let timestamp = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<CommitTimerStateUserData>()
+                    .and_then(|state| state.borrow_mut().timestamp.take())
+            });
+
+            if let Some(timestamp) = timestamp {
+                let barrier = with_states(surface, |states| {
+                    let barrier_state = states
+                        .data_map
+                        .get_or_insert(CommitTimerBarrierStateUserData::default);
+                    barrier_state.lock().unwrap().register(timestamp)
+                });
+
+                state.schedule_commit_timing(surface, timestamp, Some(barrier));
+            }
+
             let mut acquire_point = None;
             let maybe_dmabuf = with_states(surface, |surface_data| {
                 acquire_point = surface_data
@@ -257,6 +280,40 @@ impl CompositorHandler for State {
                 }
                 data.last_commit = Some(now);
             });
+
+            let fifo_barrier = with_states(surface, |states| {
+                states
+                    .cached_state
+                    .get::<FifoBarrierCachedState>()
+                    .current()
+                    .barrier
+                    .take()
+            });
+
+            if let Some(barrier) = fifo_barrier
+                && let Some(client) = surface.client()
+            {
+                if let Some(output) = state
+                    .common
+                    .shell
+                    .read()
+                    .visible_output_for_surface(surface)
+                {
+                    output.fifo_barrier(barrier, client);
+                } else {
+                    let _ = state.common.event_loop_handle.insert_source(
+                        Timer::immediate(),
+                        move |_, _, state| {
+                            barrier.signal();
+                            let dh = state.common.display_handle.clone();
+                            state
+                                .client_compositor_state(&client)
+                                .blocker_cleared(state, &dh);
+                            TimeoutAction::Drop
+                        },
+                    );
+                }
+            }
         });
     }
 
@@ -378,6 +435,79 @@ impl CompositorHandler for State {
 }
 
 impl State {
+    fn schedule_commit_timing(
+        &self,
+        surface: &WlSurface,
+        deadline: Timestamp,
+        barrier: Option<Barrier>,
+    ) {
+        let next_deadline = Time::elapsed(&self.common.clock.now(), deadline.into());
+
+        let target_deadline = if let Some(output) =
+            self.common.shell.read().visible_output_for_surface(surface)
+            && let Some(avg_frametime) = output.get_avg_frametime()
+        {
+            // content update should be presented as closely as possible to, but not before, a specified time
+            next_deadline.saturating_sub(avg_frametime)
+        } else {
+            next_deadline
+        };
+
+        if !target_deadline.is_zero()
+            && let Some(barrier) = barrier
+        {
+            add_blocker(surface, barrier);
+        } else if target_deadline.is_zero() && barrier.is_some() {
+            // let it go
+            return;
+        }
+
+        let timer: Timer = Timer::from_duration(target_deadline);
+        let weak_surface = surface.downgrade();
+
+        let _ = self
+            .common
+            .event_loop_handle
+            .insert_source(timer, move |_instant, _, state| {
+                let Ok(surface) = weak_surface.upgrade() else {
+                    return TimeoutAction::Drop;
+                };
+
+                let Some(client) = surface.client() else {
+                    return TimeoutAction::Drop;
+                };
+
+                let Some((signaled, next_deadline)) = with_states(&surface, |states| {
+                    let mut commit_timer_barrier_state = states
+                        .data_map
+                        .get::<CommitTimerBarrierStateUserData>()?
+                        .lock()
+                        .unwrap();
+
+                    Some((
+                        commit_timer_barrier_state.signal_until(deadline),
+                        commit_timer_barrier_state.next_deadline(),
+                    ))
+                }) else {
+                    return TimeoutAction::Drop;
+                };
+
+                if signaled {
+                    let dh = &state.common.display_handle.clone();
+                    state
+                        .client_compositor_state(&client)
+                        .blocker_cleared(state, dh);
+                }
+
+                if let Some(deadline) = next_deadline {
+                    state.schedule_commit_timing(&surface, deadline, None);
+                }
+
+                TimeoutAction::Drop
+            })
+            .expect("failed to register commit-timing timer");
+    }
+
     fn send_initial_configure_and_map(&mut self, surface: &WlSurface) -> bool {
         let mut shell = self.common.shell.write();
 

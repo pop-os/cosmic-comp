@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{
-        CLEAR_COLOR, CursorMode, GlMultiError, GlMultiRenderer, PostprocessOutputConfig,
-        PostprocessShader, PostprocessState,
-        element::{CosmicElement, DamageElement},
-        init_shaders, output_elements,
+    backend::{
+        kms::surface::timings::SAMPLE_TIME_WINDOW,
+        render::{
+            CLEAR_COLOR, CursorMode, GlMultiError, GlMultiRenderer, PostprocessOutputConfig,
+            PostprocessShader, PostprocessState,
+            element::{CosmicElement, DamageElement},
+            init_shaders, output_elements,
+        },
     },
     config::ScreenFilter,
     shell::Shell,
@@ -225,6 +228,7 @@ pub enum ThreadCommand {
 
 #[derive(Debug)]
 pub enum SurfaceCommand {
+    SignalFIFO,
     SendFrames(usize),
     RenderStates(RenderElementStates),
 }
@@ -279,6 +283,9 @@ impl Surface {
         let output_clone = output.clone();
         let thread_token = evlh
             .insert_source(rx2, move |command, _, state| match command {
+                Event::Msg(SurfaceCommand::SignalFIFO) => {
+                    output_clone.signal_fifo(state);
+                }
                 Event::Msg(SurfaceCommand::SendFrames(sequence)) => {
                     if output_clone.mirroring().is_some() {
                         return;
@@ -862,6 +869,8 @@ impl SurfaceThreadState {
             feedback.presented(clock, refresh, sequence as u64, flags);
 
             self.timings.presented(clock);
+            self.output
+                .set_avg_frametime(self.timings.avg_frametime(SAMPLE_TIME_WINDOW));
 
             while let Ok(pending_image_copy_data) = frames.recv() {
                 pending_image_copy_data.send_success_when_ready(
@@ -1375,6 +1384,7 @@ impl SurfaceThreadState {
                             // If postprocessing, use states from first render
                             let states = pre_postprocess_data.states.unwrap_or(frame_result.states);
                             self.send_dmabuf_feedback(states);
+                            self.send_signal_fifo_callbacks();
                         }
 
                         if x.is_ok() {
@@ -1460,6 +1470,12 @@ impl SurfaceThreadState {
     fn update_screen_filter(&mut self, filter_config: ScreenFilter) {
         self.screen_filter = filter_config;
         self.postprocess_textures.clear();
+    }
+
+    fn send_signal_fifo_callbacks(&mut self) {
+        if self.mirroring.is_none() {
+            let _ = self.thread_sender.send(SurfaceCommand::SignalFIFO);
+        }
     }
 
     fn send_frame_callbacks(&mut self) {
