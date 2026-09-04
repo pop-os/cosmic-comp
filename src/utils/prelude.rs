@@ -41,7 +41,6 @@ pub trait OutputExt {
 
     fn edid(&self) -> Option<&EdidProduct>;
 
-    fn init_fifo(&self);
     fn fifo_barrier(&self, barrier: Barrier, client: Client);
     fn signal_fifo(&self, state: &mut State);
 
@@ -190,19 +189,13 @@ impl OutputExt for Output {
         self.user_data().get()
     }
 
-    fn init_fifo(&self) {
-        self.user_data()
-            .insert_if_missing_threadsafe(|| FifoBarriers(Mutex::new(Vec::new())));
-    }
-
     fn fifo_barrier(&self, barrier: Barrier, client: Client) {
-        let user_data = self.user_data();
-        user_data.insert_if_missing_threadsafe(|| FifoBarriers(Mutex::new(Vec::new())));
-        if let Some(barriers) = user_data.get::<FifoBarriers>()
-            && let Ok(mut barriers_vec) = barriers.0.lock()
-        {
-            barriers_vec.push(FifoBarrierItem { barrier, client });
-        }
+        self.user_data()
+            .get_or_insert_threadsafe(|| FifoBarriers(Mutex::new(Vec::new())))
+            .0
+            .lock()
+            .unwrap()
+            .push(FifoBarrierItem { barrier, client });
     }
 
     fn signal_fifo(&self, state: &mut State) {
@@ -220,11 +213,11 @@ impl OutputExt for Output {
     }
 
     fn set_avg_frametime(&self, duration: Option<Duration>) {
-        let user_data = self.user_data();
-        user_data.insert_if_missing_threadsafe(|| AvgFrameTime(RwLock::new(None)));
-        if let Some(avg_frametime) = user_data.get::<AvgFrameTime>() {
-            *avg_frametime.0.write() = duration;
-        }
+        *self
+            .user_data()
+            .get_or_insert_threadsafe(|| AvgFrameTime(RwLock::new(None)))
+            .0
+            .write() = duration;
     }
 
     fn get_avg_frametime(&self) -> Option<Duration> {
