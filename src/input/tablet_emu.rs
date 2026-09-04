@@ -105,19 +105,17 @@ impl TabletToolGrab<State> for PointerEmulationGrab {
                 InputTime::now(),
                 true,
             );
-        } else {
-            if let Some(pointer) = self.seat.get_pointer() {
-                pointer.motion(
-                    data,
-                    focus,
-                    &pointer::MotionEvent {
-                        location: event.location,
-                        serial: SERIAL_COUNTER.next_serial(),
-                        time: InputTime::now(),
-                    },
-                );
-                pointer.frame(data);
-            }
+        } else if let Some(pointer) = self.seat.get_pointer() {
+            pointer.motion(
+                data,
+                focus,
+                &pointer::MotionEvent {
+                    location: event.location,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: InputTime::now(),
+                },
+            );
+            pointer.frame(data);
         }
     }
 
@@ -179,19 +177,17 @@ impl TabletToolGrab<State> for PointerEmulationGrab {
                 InputTime::now(),
                 true,
             );
-        } else {
-            if let Some(pointer) = self.seat.get_pointer() {
-                pointer.motion(
-                    data,
-                    focus,
-                    &pointer::MotionEvent {
-                        location: event.location,
-                        serial: SERIAL_COUNTER.next_serial(),
-                        time: InputTime::now(),
-                    },
-                );
-                pointer.frame(data);
-            }
+        } else if let Some(pointer) = self.seat.get_pointer() {
+            pointer.motion(
+                data,
+                focus,
+                &pointer::MotionEvent {
+                    location: event.location,
+                    serial: SERIAL_COUNTER.next_serial(),
+                    time: InputTime::now(),
+                },
+            );
+            pointer.frame(data);
         }
     }
 
