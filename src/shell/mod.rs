@@ -23,7 +23,7 @@ use crate::{
     },
 };
 use cosmic_comp_config::{
-    AppearanceConfig, TileBehavior, ZoomConfig, ZoomMovement,
+    AppearanceConfig, SplitConfig, TileBehavior, ZoomConfig, ZoomMovement,
     workspace::{PinnedWorkspace, WorkspaceLayout, WorkspaceMode},
 };
 use cosmic_config::ConfigSet;
@@ -372,6 +372,7 @@ pub struct WorkspaceSet {
     output: Output,
     theme: cosmic::Theme,
     appearance: AppearanceConfig,
+    split: SplitConfig,
     pub sticky_layer: FloatingLayout,
     pub minimized_windows: Vec<MinimizedWindow>,
     pub workspaces: Vec<Workspace>,
@@ -385,6 +386,7 @@ fn create_workspace(
     tiling: bool,
     theme: cosmic::Theme,
     appearance: AppearanceConfig,
+    split: SplitConfig,
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
@@ -414,6 +416,7 @@ fn create_workspace(
         tiling,
         theme.clone(),
         appearance,
+        split,
     )
 }
 
@@ -425,6 +428,7 @@ fn create_workspace_from_pinned(
     active: bool,
     theme: cosmic::Theme,
     appearance: AppearanceConfig,
+    split: SplitConfig,
 ) -> Workspace {
     let workspace_handle = state
         .create_workspace(
@@ -459,6 +463,7 @@ fn create_workspace_from_pinned(
         output.clone(),
         theme.clone(),
         appearance,
+        split,
     )
 }
 
@@ -495,6 +500,7 @@ impl WorkspaceSet {
         tiling_enabled: bool,
         theme: &cosmic::Theme,
         appearance: AppearanceConfig,
+        split: SplitConfig,
     ) -> WorkspaceSet {
         let group_handle = state.create_workspace_group();
         let sticky_layer = FloatingLayout::new(theme.clone(), appearance, output);
@@ -510,6 +516,7 @@ impl WorkspaceSet {
             workspaces: Vec::new(),
             output: output.clone(),
             appearance,
+            split,
         }
     }
 
@@ -628,6 +635,7 @@ impl WorkspaceSet {
             self.tiling_enabled,
             self.theme.clone(),
             self.appearance,
+            self.split,
         );
         workspace_set_idx(
             state,
@@ -835,6 +843,7 @@ pub struct Workspaces {
     autotile_behavior: TileBehavior,
     theme: cosmic::Theme,
     appearance: AppearanceConfig,
+    split: SplitConfig,
     // Persisted workspace to add on first `output_add`
     persisted_workspaces: Vec<PinnedWorkspace>,
 }
@@ -850,6 +859,7 @@ impl Workspaces {
             autotile_behavior: config.cosmic_conf.autotile_behavior,
             theme,
             appearance: config.cosmic_conf.appearance_settings,
+            split: config.cosmic_conf.split_config(),
             persisted_workspaces: config.cosmic_conf.pinned_workspaces.clone(),
         }
     }
@@ -877,6 +887,7 @@ impl Workspaces {
                     self.autotile,
                     &self.theme,
                     self.appearance,
+                    self.split,
                 )
             });
         workspace_state.add_group_output(&set.group, output);
@@ -891,6 +902,7 @@ impl Workspaces {
                 false,
                 self.theme.clone(),
                 self.appearance,
+                self.split,
             );
             set.workspaces.push(workspace);
         }
@@ -1169,13 +1181,17 @@ impl Workspaces {
         self.mode = config.cosmic_conf.workspaces.workspace_mode;
         self.layout = config.cosmic_conf.workspaces.workspace_layout;
         self.appearance = config.cosmic_conf.appearance_settings;
+        // Config exposes the split config as 4 different fields, which we convert to a single SplitConfig
+        self.split = config.cosmic_conf.split_config();
 
         for set in self.sets.values_mut() {
             set.appearance = self.appearance;
+            set.split = self.split;
             set.sticky_layer.appearance = self.appearance;
             for workspace in set.workspaces.iter_mut() {
                 workspace.floating_layer.appearance = self.appearance;
                 workspace.tiling_layer.appearance = self.appearance;
+                workspace.tiling_layer.split = self.split;
             }
         }
 
@@ -1225,6 +1241,7 @@ impl Workspaces {
                                     config.cosmic_conf.autotile,
                                     self.theme.clone(),
                                     self.appearance,
+                                    self.split,
                                 ),
                             );
                         }
