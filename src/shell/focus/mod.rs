@@ -19,8 +19,9 @@ use smithay::{
         shell::wlr_layer::{KeyboardInteractivity, Layer},
     },
 };
-use std::{borrow::Cow, hash::Hash, mem, sync::Mutex};
+use std::{borrow::Cow, hash::Hash, mem, sync::Mutex, time::Duration};
 
+use calloop::timer::{Timer, TimeoutAction};
 use tracing::{debug, trace};
 
 pub use self::order::{Stage, render_input_order};
@@ -210,7 +211,21 @@ impl Shell {
 
         update_focus_state(seat, target, state, serial, update_cursor);
 
-        state.common.shell.write().update_active();
+        // Mark a focus indicator transition on every window whose activation state
+        // changed during this update, so the render path can fade the hint in/out.
+        // Re-triggered transitions resume from the currently displayed alpha
+        // instead of restarting, so rapid focus changes never flicker.
+        let changed_windows = {
+            let transition_ms = state.common.config.cosmic_conf.focus_transition_ms;
+            let mut shell = state.common.shell.write();
+            let changed = shell.update_active();
+            if transition_ms > 0 {
+                changed
+            } else {
+                Vec::new()
+            }
+        };
+        schedule_focus_transition_redraws(state, changed_windows);
     }
 
     // We suppress Element(X) to Fullscreen(X) transition to avoid
@@ -270,7 +285,7 @@ impl Shell {
         }
     }
 
-    fn update_active(&mut self) {
+    fn update_active(&mut self) -> Vec<(Output, CosmicMapped)> {
         // update activate status
         let focused_windows = self
             .seats
@@ -293,13 +308,20 @@ impl Shell {
             })
             .collect::<Vec<_>>();
 
+        let mut changed = Vec::new();
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
             let set = self.workspaces.sets.get_mut(&output).unwrap();
             for focused in focused_windows.iter() {
                 raise_with_children(&mut set.sticky_layer, focused);
             }
             for window in set.sticky_layer.mapped() {
-                window.set_activated(focused_windows.contains(window));
+                let new_active = focused_windows.contains(window);
+                if window.is_activated(false) != new_active {
+                    let from = window.current_hint_alpha(self.focus_transition_ms);
+                    window.mark_activation_changed(from, new_active);
+                    changed.push((output.clone(), window.clone()));
+                }
+                window.set_activated(new_active);
                 window.configure();
             }
             for window in set
@@ -329,7 +351,13 @@ impl Shell {
                 raise_with_children(&mut workspace.floating_layer, focused);
             }
             for window in workspace.mapped() {
-                window.set_activated(focused_windows.contains(window));
+                let new_active = focused_windows.contains(window);
+                if window.is_activated(false) != new_active {
+                    let from = window.current_hint_alpha(self.focus_transition_ms);
+                    window.mark_activation_changed(from, new_active);
+                    changed.push((output.clone(), window.clone()));
+                }
+                window.set_activated(new_active);
                 window.configure();
             }
             for m in workspace.minimized_windows.iter() {
@@ -354,6 +382,8 @@ impl Shell {
                 }
             }
         }
+
+        changed
     }
 }
 
@@ -617,8 +647,60 @@ impl Common {
             }
         }
 
-        state.common.shell.write().update_active()
+        let changed = state.common.shell.write().update_active();
+        schedule_focus_transition_redraws(state, changed);
     }
+}
+
+/// Schedules the ~60fps redraws that drive all running focus indicator
+/// transitions, using a single repeating timer that self-cancels once every
+/// transition has finished, rendering one final settled frame. Transitions
+/// are never force-cleared by a timer from an earlier focus change: that
+/// killed just-started transitions mid-fade (visible as a flicker on rapid
+/// clicks), so expired state is only cleaned up lazily here.
+fn schedule_focus_transition_redraws(
+    state: &mut State,
+    changed_windows: Vec<(Output, CosmicMapped)>,
+) {
+    let transition_ms = state.common.config.cosmic_conf.focus_transition_ms;
+    if transition_ms == 0 || changed_windows.is_empty() {
+        return;
+    }
+    tracing::debug!(
+        "focus_transition: {} windows changed, transition_ms={}",
+        changed_windows.len(),
+        transition_ms
+    );
+    let outputs: Vec<Output> = changed_windows
+        .iter()
+        .map(|(output, _)| output.clone())
+        .collect();
+    let windows: Vec<_> = changed_windows
+        .into_iter()
+        .map(|(_, window)| window)
+        .collect();
+    let _ = state.common.event_loop_handle.insert_source(
+        Timer::from_duration(Duration::from_millis(16)),
+        move |_, _, state: &mut State| {
+            let mut any_active = false;
+            for window in &windows {
+                if window.active_hint_transition(transition_ms).is_some() {
+                    any_active = true;
+                } else if window.focus_transition.lock().unwrap().is_some() {
+                    window.clear_focus_transition();
+                }
+            }
+            for output in outputs.iter() {
+                state.backend.schedule_render(output);
+            }
+            if any_active {
+                // re-arm for the next ~60fps frame
+                TimeoutAction::ToDuration(Duration::from_millis(16))
+            } else {
+                TimeoutAction::Drop
+            }
+        },
+    );
 }
 
 fn focus_target_is_valid(

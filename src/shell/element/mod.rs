@@ -46,7 +46,20 @@ use std::{
     fmt,
     hash::Hash,
     sync::{Arc, Mutex, Weak, atomic::AtomicBool},
+    time::Instant,
 };
+
+use keyframe::{ease, functions::EaseInOutCubic};
+
+/// State of an in-progress focus indicator transition.
+#[derive(Clone, Debug)]
+pub struct FocusTransition {
+    pub started_at: Instant,
+    /// Alpha the indicator was displayed with when the transition started.
+    pub from_alpha: f32,
+    /// Whether the window is gaining (`true`) or losing focus.
+    pub to_focused: bool,
+}
 
 pub mod surface;
 use self::stack::MoveResult;
@@ -108,6 +121,8 @@ pub struct CosmicMapped {
     pub floating_tiled: Arc<Mutex<Option<TiledCorners>>>,
     //sticky
     pub previous_layer: Arc<Mutex<Option<ManagedLayer>>>,
+    // focus indicator transition state
+    pub focus_transition: Arc<Mutex<Option<FocusTransition>>>,
 
     #[cfg(feature = "debug")]
     debug: Arc<Mutex<Option<smithay_egui::EguiState>>>,
@@ -408,6 +423,66 @@ impl CosmicMapped {
             CosmicMappedInternal::Window(w) => w.set_activate(activated),
             _ => unreachable!(),
         }
+    }
+
+    /// Marks the activation (focus) state of this window as changed,
+    /// starting a new focus indicator transition (if enabled) that fades
+    /// from `from_alpha` toward the new state, so re-triggered transitions
+    /// resume from the currently displayed alpha instead of restarting.
+    pub fn mark_activation_changed(&self, from_alpha: f32, to_focused: bool) {
+        *self.focus_transition.lock().unwrap() = Some(FocusTransition {
+            started_at: Instant::now(),
+            from_alpha,
+            to_focused,
+        });
+    }
+
+    /// Clears a finished focus indicator transition.
+    pub fn clear_focus_transition(&self) {
+        *self.focus_transition.lock().unwrap() = None;
+    }
+
+    /// Current alpha of the focus indicator while a transition is running,
+    /// or `None` when there is no active (non-expired) transition.
+    pub fn active_hint_transition(&self, transition_ms: u64) -> Option<f32> {
+        let tr = self.focus_transition.lock().unwrap().clone()?;
+        let elapsed_ms = tr.started_at.elapsed().as_millis();
+        if transition_ms == 0 || elapsed_ms >= transition_ms as u128 {
+            return None;
+        }
+        let t = (elapsed_ms as f32 / transition_ms as f32).clamp(0.0, 1.0);
+        let eased = ease(EaseInOutCubic, 0.0, 1.0, t);
+        let alpha = if tr.to_focused {
+            tr.from_alpha + (1.0 - tr.from_alpha) * eased
+        } else {
+            tr.from_alpha * (1.0 - eased)
+        };
+        Some(alpha.clamp(0.0, 1.0))
+    }
+
+    /// Alpha the focus indicator is currently displayed with (sampling any
+    /// running transition), used as the starting point of a new transition.
+    pub fn current_hint_alpha(&self, transition_ms: u64) -> f32 {
+        self.active_hint_transition(transition_ms)
+            .unwrap_or(if self.is_activated(false) { 1.0 } else { 0.0 })
+    }
+
+    /// Alpha to render the focus indicator with on the floating/tiling render
+    /// paths, shared so both stay in sync: a running transition provides the
+    /// interpolated alpha, otherwise the steady state (full when focused,
+    /// nothing when not).
+    pub fn focus_indicator_alpha(&self, focused: bool, transition_ms: u64) -> f32 {
+        if transition_ms > 0 {
+            if let Some(alpha) = self.active_hint_transition(transition_ms) {
+                return alpha;
+            }
+        }
+        if focused { 1.0 } else { 0.0 }
+    }
+
+    /// Whether the focus indicator should be drawn at all for this window.
+    pub fn focus_indicator_visible(&self, focused: bool, transition_ms: u64) -> bool {
+        focused || self.focus_indicator_alpha(focused, transition_ms) > 0.0
     }
 
     pub fn is_activated(&self, pending: bool) -> bool {
@@ -1076,6 +1151,7 @@ impl From<CosmicWindow> for CosmicMapped {
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
             floating_tiled: Arc::new(Mutex::new(None)),
             previous_layer: Arc::new(Mutex::new(None)),
+            focus_transition: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }
@@ -1093,6 +1169,7 @@ impl From<CosmicStack> for CosmicMapped {
             moved_since_mapped: Arc::new(AtomicBool::new(false)),
             floating_tiled: Arc::new(Mutex::new(None)),
             previous_layer: Arc::new(Mutex::new(None)),
+            focus_transition: Arc::new(Mutex::new(None)),
             #[cfg(feature = "debug")]
             debug: Arc::new(Mutex::new(None)),
         }

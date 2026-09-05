@@ -916,6 +916,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     state.common.update_config();
                 }
             }
+            "focus_transition_ms" => {
+                let new = get_config::<u64>(&config, "focus_transition_ms");
+                if new != state.common.config.cosmic_conf.focus_transition_ms {
+                    state.common.config.cosmic_conf.focus_transition_ms = new;
+                    state.common.update_config();
+                }
+            }
             "descale_xwayland" => {
                 let new = get_config::<XwaylandDescaling>(&config, "descale_xwayland");
                 if new != state.common.config.cosmic_conf.descale_xwayland {
