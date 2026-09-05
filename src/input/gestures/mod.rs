@@ -16,6 +16,8 @@ pub struct SwipeEvent {
 pub enum SwipeAction {
     NextWorkspace,
     PrevWorkspace,
+    /// Grid layout: a directional workspace move (any of the 4 directions).
+    GridMove(Direction),
 }
 
 #[derive(Debug, Clone)]

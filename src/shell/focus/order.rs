@@ -147,6 +147,18 @@ fn render_input_order_internal<R: 'static>(
     let (previous, current_offset) = match previous.as_ref() {
         Some((previous, previous_idx, start)) => {
             let layout = shell.workspaces.layout;
+            // Grid mode: match exhaustiveness is type-based, not value-based, so
+            // shadowing `layout` to a narrower value doesn't satisfy the compiler.
+            // Instead, reduce to a plain bool ("is this move horizontal?") up
+            // front, and match on that below instead of on `layout` directly.
+            // In Grid mode this is based on whether the column changed; `forward`
+            // (computed below) already gives the correct sign for either axis.
+            let is_horizontal_move = if layout == WorkspaceLayout::Grid {
+                let columns = shell.workspaces.grid_columns.max(1) as usize;
+                *previous_idx % columns != current.1 % columns
+            } else {
+                layout == WorkspaceLayout::Horizontal
+            };
 
             let Some(workspace) = shell.workspaces.space_for_handle(previous) else {
                 return ControlFlow::Break(Err(OutputNoMode));
@@ -178,28 +190,20 @@ fn render_input_order_internal<R: 'static>(
                 ),
             };
 
-            let offset = Point::<i32, Logical>::from(match (layout, forward) {
-                (WorkspaceLayout::Vertical, true) => {
-                    (0, (-output_size.h as f32 * percentage).round() as i32)
-                }
-                (WorkspaceLayout::Vertical, false) => {
-                    (0, (output_size.h as f32 * percentage).round() as i32)
-                }
-                (WorkspaceLayout::Horizontal, true) => {
-                    ((-output_size.w as f32 * percentage).round() as i32, 0)
-                }
-                (WorkspaceLayout::Horizontal, false) => {
-                    ((output_size.w as f32 * percentage).round() as i32, 0)
-                }
+            let offset = Point::<i32, Logical>::from(match (is_horizontal_move, forward) {
+                (false, true) => (0, (-output_size.h as f32 * percentage).round() as i32),
+                (false, false) => (0, (output_size.h as f32 * percentage).round() as i32),
+                (true, true) => ((-output_size.w as f32 * percentage).round() as i32, 0),
+                (true, false) => ((output_size.w as f32 * percentage).round() as i32, 0),
             });
 
             (
                 Some((previous, previous_idx, has_fullscreen, offset)),
-                Point::<i32, Logical>::from(match (layout, forward) {
-                    (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
-                    (WorkspaceLayout::Vertical, false) => (0, -(output_size.h - offset.y)),
-                    (WorkspaceLayout::Horizontal, true) => (output_size.w + offset.x, 0),
-                    (WorkspaceLayout::Horizontal, false) => (-(output_size.w - offset.x), 0),
+                Point::<i32, Logical>::from(match (is_horizontal_move, forward) {
+                    (false, true) => (0, output_size.h + offset.y),
+                    (false, false) => (0, -(output_size.h - offset.y)),
+                    (true, true) => (output_size.w + offset.x, 0),
+                    (true, false) => (-(output_size.w - offset.x), 0),
                 }),
             )
         }
