@@ -8,6 +8,7 @@ pub mod keyboard_layout;
 pub mod output_configuration;
 pub mod output_power;
 pub mod overlap_notify;
+pub mod session_lock_layer;
 pub mod toplevel_info;
 pub mod toplevel_management;
 pub mod workspace;

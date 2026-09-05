@@ -22,7 +22,7 @@ use crate::{
         prelude::OutputExt,
         quirks::{WORKSPACE_OVERVIEW_NAMESPACE, workspace_overview_is_open},
     },
-    wayland::protocols::workspace::WorkspaceHandle,
+    wayland::protocols::{session_lock_layer::layer_show_on_lock, workspace::WorkspaceHandle},
 };
 
 pub enum Stage<'a> {
@@ -87,7 +87,51 @@ fn render_input_order_internal<R: 'static>(
 
     // Session Lock
     if let Some(session_lock) = &shell.session_lock {
-        return callback(Stage::SessionLock(session_lock.surfaces.get(output)));
+        for (layer, popup, location) in layer_popups(output, Layer::Top, element_filter) {
+            if !layer_show_on_lock(layer.wl_surface()) {
+                continue;
+            }
+            callback(Stage::LayerPopup {
+                layer,
+                popup: &popup,
+                location,
+                workspace_idx: current.1,
+            })?;
+        }
+        for (layer, location) in layer_surfaces(output, Layer::Top, element_filter) {
+            if !layer_show_on_lock(layer.wl_surface()) {
+                continue;
+            }
+            callback(Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx: current.1,
+            })?;
+        }
+        callback(Stage::SessionLock(session_lock.surfaces.get(output)))?;
+        // TODO other layers set to show on session lock
+        for (layer, popup, location) in layer_popups(output, Layer::Background, element_filter) {
+            if !layer_show_on_lock(layer.wl_surface()) {
+                continue;
+            }
+            callback(Stage::LayerPopup {
+                layer,
+                popup: &popup,
+                location,
+                workspace_idx: current.1,
+            })?;
+        }
+        for (layer, location) in layer_surfaces(output, Layer::Background, element_filter) {
+            if !layer_show_on_lock(layer.wl_surface()) {
+                continue;
+            }
+            callback(Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx: current.1,
+            })?;
+        }
+        return ControlFlow::Continue(());
     }
 
     // Overlay-level layer shell
