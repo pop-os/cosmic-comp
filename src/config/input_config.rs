@@ -1,3 +1,5 @@
+#[cfg(feature = "custom-accel")]
+use smithay::reexports::input::{AccelConfig as LibinputAccelConfig, AccelProfile, AccelType};
 use smithay::reexports::input::{
     Device as InputDevice, DeviceConfigError, DragLockState, ScrollMethod, SendEventsMode,
 };
@@ -20,6 +22,7 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
             Some(AccelConfig {
                 profile: device.config_accel_profile(),
                 speed: device.config_accel_speed(),
+                custom_points: None,
             })
         } else {
             None
@@ -142,10 +145,33 @@ pub fn update_device(
         );
     }
     if let Some((accel, is_default)) = config!(|x| x.acceleration.as_ref()) {
-        if let Some(profile) = accel.profile
-            && let Err(err) = device.config_accel_set_profile(profile)
-        {
-            config_set_error(device, "acceleration profile", profile, err, is_default);
+        let profile_result = match (accel.profile, accel.custom_points.as_ref()) {
+            #[cfg(feature = "custom-accel")]
+            (Some(AccelProfile::Custom), Some(pts)) => {
+                match LibinputAccelConfig::new(AccelProfile::Custom) {
+                    Some(cfg) => {
+                        let mut err = cfg.set_points(AccelType::Motion, pts.step, &pts.motion);
+                        if err.is_ok()
+                            && let Some(scroll) = pts.scroll.as_ref()
+                        {
+                            err = cfg.set_points(AccelType::Scroll, pts.step, scroll);
+                        }
+                        err.and_then(|()| device.config_accel_apply(cfg))
+                    }
+                    None => Err(DeviceConfigError::Unsupported),
+                }
+            }
+            (Some(profile), _) => device.config_accel_set_profile(profile),
+            (None, _) => Ok(()),
+        };
+        if let Err(err) = profile_result {
+            config_set_error(
+                device,
+                "acceleration profile",
+                accel.profile,
+                err,
+                is_default,
+            );
         }
         if let Err(err) = device.config_accel_set_speed(accel.speed) {
             config_set_error(device, "acceleration speed", accel.speed, err, is_default);
