@@ -2747,11 +2747,7 @@ impl State {
             .zip(previous_idx)
             .map(|((w, start), idx)| (w.handle, idx, start));
         let workspace = (workspace.handle, idx);
-        let element_filter = if workspace_overview_is_open(output) {
-            ElementFilter::LayerShellOnly
-        } else {
-            ElementFilter::All
-        };
+        let element_filter = ElementFilter::for_output(output);
 
         render_input_order(
             shell,
@@ -2876,11 +2872,7 @@ impl State {
             .map(|((w, start), idx)| (w.handle, idx, start));
         let workspace = (workspace.handle, idx);
 
-        let element_filter = if workspace_overview_is_open(output) {
-            ElementFilter::LayerShellOnly
-        } else {
-            ElementFilter::All
-        };
+        let element_filter = ElementFilter::for_output(output);
 
         let relative_pos = global_pos.to_local(output);
         let output_geo = output.geometry();

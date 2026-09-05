@@ -31,10 +31,14 @@ use smithay::{
 };
 
 use crate::{
+    backend::render::ElementFilter,
     shell::{CosmicSurface, CursorGeometry, Shell},
     state::{BackendData, State},
-    utils::prelude::{
-        OutputExt, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt, SeatExt,
+    utils::{
+        prelude::{
+            OutputExt, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt, SeatExt,
+        },
+        quirks::output_has_capture_excluded_surface,
     },
     wayland::protocols::image_capture_source::ImageCaptureSourceKind,
 };
@@ -294,12 +298,42 @@ impl ImageCopyCaptureHandler for State {
                     return;
                 };
 
+                let handle = output_has_capture_excluded_surface(&output)
+                    .then(|| {
+                        self.common
+                            .shell
+                            .read()
+                            .workspaces
+                            .active(&output)
+                            .map(|(_, workspace)| workspace.handle)
+                    })
+                    .flatten();
+
+                if let Some(data) = session.user_data().get::<SessionData>() {
+                    data.lock().unwrap().set_filtered(handle.is_some(), &output);
+                }
+
+                if let Some(handle) = handle {
+                    render_workspace_to_buffer(
+                        self,
+                        session,
+                        frame,
+                        handle,
+                        ElementFilter::for_output_capture(&output),
+                    );
+                    return;
+                }
+
                 output.add_frame(session.clone(), frame);
                 self.backend.schedule_render(&output);
             }
-            ImageCaptureSourceKind::Workspace(handle) => {
-                render_workspace_to_buffer(self, session, frame, handle)
-            }
+            ImageCaptureSourceKind::Workspace(handle) => render_workspace_to_buffer(
+                self,
+                session,
+                frame,
+                handle,
+                ElementFilter::for_workspace_capture(),
+            ),
             ImageCaptureSourceKind::Toplevel(toplevel) => {
                 let Some(toplevel) = toplevel.upgrade() else {
                     return;
