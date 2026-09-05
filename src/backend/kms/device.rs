@@ -34,6 +34,7 @@ use smithay::{
     output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
     reexports::{
         calloop::{LoopHandle, RegistrationToken},
+        drm::Device as _,
         drm::control::{Device as ControlDevice, ModeTypeFlags, connector, crtc},
         gbm::BufferObjectFlags as GbmBufferFlags,
         rustix::fs::{Dev as dev_t, OFlags},
@@ -676,6 +677,14 @@ pub struct OutputChanges {
 }
 
 impl Device {
+    pub(super) fn has_drm_master(&self) -> bool {
+        self.drm
+            .device()
+            .device_fd()
+            .authenticated()
+            .unwrap_or(false)
+    }
+
     fn new(
         dev: dev_t,
         path: impl AsRef<Path>,
