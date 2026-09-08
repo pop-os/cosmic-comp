@@ -966,6 +966,20 @@ impl CosmicSurface {
                 )
             }
             WindowSurface::X11(surface) => {
+                if surface.render_shape().is_some() {
+                    for element in smithay::backend::renderer::element::AsRenderElements::render_elements::<
+                        smithay::backend::renderer::element::NamespacedElement<
+                            smithay::backend::renderer::element::utils::CropRenderElement<
+                                smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement<R>,
+                            >,
+                        >,
+                    >(surface, renderer, location, scale, alpha)
+                    {
+                        push_above(element.into());
+                    }
+                    return;
+                }
+
                 let Some(surface) = surface.wl_surface() else {
                     return;
                 };

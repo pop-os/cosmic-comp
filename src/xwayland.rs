@@ -1028,6 +1028,20 @@ impl XwmHandler for State {
         }
     }
 
+    fn shape_notify(&mut self, _xwm: XwmId, _window: X11Surface) {
+        let outputs = self
+            .common
+            .shell
+            .read()
+            .outputs()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for output in outputs {
+            self.backend.schedule_render(&output);
+        }
+    }
+
     fn resize_request(
         &mut self,
         _xwm: XwmId,
