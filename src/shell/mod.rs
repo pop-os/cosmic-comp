@@ -2046,6 +2046,8 @@ impl Shell {
     }
 
     pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         if let Some(session_lock) = &self.session_lock {
             return session_lock
                 .surfaces

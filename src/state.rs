@@ -968,6 +968,8 @@ impl Common {
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let shell = self.shell.read();
         let processor = |namespace: Option<usize>| {
             move |surface: &WlSurface, states: &SurfaceData| {
@@ -1074,6 +1076,8 @@ impl Common {
         render_element_states: &RenderElementStates,
         mut dmabuf_feedback: impl FnMut(DrmNode) -> Option<SurfaceDmabufFeedback>,
     ) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let shell = self.shell.read();
 
         if let Some(session_lock) = shell.session_lock.as_ref()
@@ -1287,6 +1291,8 @@ impl Common {
 
     #[profiling::function]
     pub fn send_frames(&self, output: &Output, sequence: Option<usize>) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let time = self.clock.now();
         let should_send = |surface: &WlSurface, states: &SurfaceData| {
             // Do the standard primary scanout output check. For pointer surfaces it deduplicates

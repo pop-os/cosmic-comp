@@ -77,6 +77,8 @@ fn render_input_order_internal<R: 'static>(
     element_filter: ElementFilter,
     mut callback: impl FnMut(Stage) -> ControlFlow<Result<R, OutputNoMode>, ()>,
 ) -> ControlFlow<Result<R, OutputNoMode>, ()> {
+    // NOTE: Keep in sync with other surface iteration functions
+
     if shell
         .zoom_state
         .as_ref()
