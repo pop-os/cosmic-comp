@@ -174,6 +174,10 @@ pub struct XkbConfig {
     pub repeat_delay: u32,
     #[serde(default = "default_repeat_rate")]
     pub repeat_rate: u32,
+    /// Remember and restore the active layout on a per-window basis, instead of
+    /// sharing a single active layout across all windows.
+    #[serde(default)]
+    pub per_window_layout: bool,
 }
 
 impl Default for XkbConfig {
@@ -186,6 +190,7 @@ impl Default for XkbConfig {
             options: None,
             repeat_delay: default_repeat_delay(),
             repeat_rate: default_repeat_rate(),
+            per_window_layout: false,
         }
     }
 }
