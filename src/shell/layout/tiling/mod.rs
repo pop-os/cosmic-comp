@@ -37,7 +37,7 @@ use crate::{
     },
 };
 
-use cosmic_comp_config::AppearanceConfig;
+use cosmic_comp_config::{AppearanceConfig, SplitConfig};
 use cosmic_settings_config::shortcuts::action::{FocusDirection, ResizeDirection};
 use id_tree::{InsertBehavior, MoveBehavior, Node, NodeId, NodeIdError, RemoveBehavior, Tree};
 use keyframe::{
@@ -138,6 +138,8 @@ pub struct TilingLayout {
     last_overview_hover: Option<(Option<Instant>, TargetZone)>,
     pub theme: cosmic::Theme,
     pub appearance: AppearanceConfig,
+    /// Configuration for tiling split ratios.
+    pub split: SplitConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -174,16 +176,22 @@ pub enum PlaceholderType {
 }
 
 impl Data {
-    fn new_group(orientation: Orientation, geo: Rectangle<i32, Local>) -> Data {
+    fn new_group(orientation: Orientation, geo: Rectangle<i32, Local>, h_ratio: f64, v_ratio: f64) -> Data {
+        let total = match orientation {
+            Orientation::Vertical => geo.size.w,
+            Orientation::Horizontal => geo.size.h,
+        };
+        // we clamp the ratio here to avoid having sizes that are too small or too large
+        let ratio = match orientation {
+            Orientation::Horizontal => h_ratio,
+            Orientation::Vertical => v_ratio,
+        }
+        .clamp(0.1, 0.9);
+        let first = (total as f64 * ratio).round() as i32;
+        let second = total - first;
         Data::Group {
             orientation,
-            sizes: vec![
-                match orientation {
-                    Orientation::Vertical => geo.size.w / 2,
-                    Orientation::Horizontal => geo.size.h / 2,
-                };
-                2
-            ],
+            sizes: vec![first, second],
             last_geometry: geo,
             alive: Arc::new(()),
             pill_indicator: None,
@@ -353,6 +361,7 @@ impl TilingLayout {
         theme: cosmic::Theme,
         appearance: AppearanceConfig,
         output: &Output,
+        split: SplitConfig,
     ) -> TilingLayout {
         TilingLayout {
             queue: TreeQueue {
@@ -369,6 +378,7 @@ impl TilingLayout {
             last_overview_hover: None,
             theme,
             appearance,
+            split,
         }
     }
 
@@ -430,6 +440,7 @@ impl TilingLayout {
             last_active,
             direction,
             minimize_rect,
+            self.split,
         );
         let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
         self.queue.push_tree(tree, duration, blocker);
@@ -515,7 +526,7 @@ impl TilingLayout {
 
                 let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
                 let group_id =
-                    TilingLayout::new_group(&mut tree, &sibling_id, &new_id, orientation).unwrap();
+                    TilingLayout::new_group(&mut tree, &sibling_id, &new_id, orientation, self.split.default_h, self.split.default_v).unwrap();
                 tree.make_nth_sibling(&new_id, idx).unwrap();
                 if let Data::Group {
                     sizes: default_sizes,
@@ -552,7 +563,16 @@ impl TilingLayout {
         node: Option<NodeId>,
         direction: Option<Direction>,
         minimize_rect: Option<Rectangle<i32, Local>>,
+        split: SplitConfig,
     ) {
+        // Detect if this is the very first split (tree has exactly one node, the root window)
+        let is_first_split = tree
+            .root_node_id()
+            .and_then(|id| tree.get(id).ok())
+            .is_some_and(|n| matches!(n.data(), Data::Mapped { .. }));
+        let h_ratio = split.h_ratio(is_first_split);
+        let v_ratio = split.v_ratio(is_first_split);
+
         let window = window.into();
         let new_window = Node::new(Data::Mapped {
             mapped: window.clone(),
@@ -568,7 +588,8 @@ impl TilingLayout {
                 };
 
                 let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-                TilingLayout::new_group(tree, &root_id, &new_id, orientation).unwrap();
+                TilingLayout::new_group(tree, &root_id, &new_id, orientation, h_ratio, v_ratio)
+                    .unwrap();
                 tree.make_nth_sibling(
                     &new_id,
                     match direction {
@@ -591,7 +612,8 @@ impl TilingLayout {
                 }
             };
             let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-            TilingLayout::new_group(tree, node_id, &new_id, orientation).unwrap();
+            TilingLayout::new_group(tree, node_id, &new_id, orientation, h_ratio, v_ratio)
+                .unwrap();
             new_id
         } else {
             // nothing? then we add to the root
@@ -605,7 +627,8 @@ impl TilingLayout {
                     }
                 };
                 let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-                TilingLayout::new_group(tree, &root_id, &new_id, orientation).unwrap();
+                TilingLayout::new_group(tree, &root_id, &new_id, orientation, h_ratio, v_ratio)
+                    .unwrap();
                 new_id
             } else {
                 tree.insert(new_window, InsertBehavior::AsRoot).unwrap()
@@ -735,7 +758,7 @@ impl TilingLayout {
                             }
                         };
                         let id = other_tree.insert(node, InsertBehavior::AsRoot).unwrap();
-                        TilingLayout::new_group(&mut other_tree, &focused_node, &id, orientation)
+                        TilingLayout::new_group(&mut other_tree, &focused_node, &id, orientation, other.split.default_h, other.split.default_v)
                             .unwrap();
                         other_tree
                             .make_nth_sibling(
@@ -1540,7 +1563,7 @@ impl TilingLayout {
                         minimize_rect: None,
                     });
                     let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
-                    TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation).unwrap();
+                    TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation, self.split.default_h, self.split.default_v).unwrap();
                     tree.make_nth_sibling(
                         &new_id,
                         match direction {
@@ -1610,6 +1633,8 @@ impl TilingLayout {
                         Direction::Left | Direction::Right => Orientation::Vertical,
                         Direction::Up | Direction::Down => Orientation::Horizontal,
                     },
+                    self.split.default_h,
+                    self.split.default_v,
                 )
                 .unwrap();
                 tree.make_nth_sibling(
@@ -1758,6 +1783,8 @@ impl TilingLayout {
                                     &old_id,
                                     &node_id,
                                     !group_orientation,
+                                    self.split.default_h,
+                                    self.split.default_v,
                                 )
                                 .unwrap();
                                 tree.make_nth_sibling(
@@ -1790,7 +1817,7 @@ impl TilingLayout {
                     MoveResult::Done
                 } else {
                     // else we make a new fork
-                    TilingLayout::new_group(&mut tree, &next_child_id, &node_id, orientation)
+                    TilingLayout::new_group(&mut tree, &next_child_id, &node_id, orientation, self.split.default_h, self.split.default_v)
                         .unwrap();
                     tree.make_nth_sibling(
                         &node_id,
@@ -2204,6 +2231,7 @@ impl TilingLayout {
                     Some(current_node),
                     None,
                     None,
+                    self.split,
                 );
 
                 let node = window.tiling_node_id.lock().unwrap().clone().unwrap();
@@ -2693,7 +2721,7 @@ impl TilingLayout {
                     Orientation::Horizontal
                 };
                 if tree.get(group_id).unwrap().data().orientation() != orientation {
-                    TilingLayout::new_group(&mut tree, group_id, &new_id, orientation).unwrap();
+                    TilingLayout::new_group(&mut tree, group_id, &new_id, orientation, self.split.default_h, self.split.default_v).unwrap();
                 } else {
                     let data = tree.get_mut(group_id).unwrap().data_mut();
                     let len = data.len();
@@ -2760,7 +2788,7 @@ impl TilingLayout {
                 } else {
                     Orientation::Horizontal
                 };
-                TilingLayout::new_group(&mut tree, window_id, &new_id, orientation).unwrap();
+                TilingLayout::new_group(&mut tree, window_id, &new_id, orientation, self.split.default_h, self.split.default_v).unwrap();
                 if matches!(direction, Direction::Left | Direction::Up) {
                     tree.make_first_sibling(&new_id).unwrap();
                 }
@@ -2794,6 +2822,7 @@ impl TilingLayout {
                     None,
                     None,
                     None,
+                    self.split,
                 );
                 window
             }
@@ -2900,10 +2929,14 @@ impl TilingLayout {
         old_id: &NodeId,
         new_id: &NodeId,
         orientation: Orientation,
+        h_split_ratio: f64,
+        v_split_ratio: f64,
     ) -> Result<NodeId, NodeIdError> {
         let new_group = Node::new(Data::new_group(
             orientation,
             Rectangle::from_size((100, 100).into()),
+            h_split_ratio,
+            v_split_ratio,
         ));
         let old = tree.get(old_id)?;
         let parent_id = old.parent().cloned();
@@ -3822,7 +3855,7 @@ impl TilingLayout {
                                         } else {
                                             Orientation::Horizontal
                                         };
-                                    TilingLayout::new_group(&mut tree, node_id, &id, orientation)
+                                    TilingLayout::new_group(&mut tree, node_id, &id, orientation, self.split.default_h, self.split.default_v)
                                         .unwrap();
                                     if matches!(dir, Direction::Left | Direction::Up) {
                                         tree.make_first_sibling(&id).unwrap();
@@ -3984,7 +4017,9 @@ impl TilingLayout {
                 {
                     *mapped.tiling_node_id.lock().unwrap() = Some(new_id.clone());
                 }
-                TilingLayout::new_group(dst, &dst_root_id, &new_id, orientation).unwrap();
+                // Cloning preserves the original tree structure, so use equal halves
+                // rather than the user's split config.
+                TilingLayout::new_group(dst, &dst_root_id, &new_id, orientation, 0.5, 0.5).unwrap();
                 stack.push((src_root_id.clone(), new_id));
             }
 
