@@ -46,6 +46,11 @@ impl SessionLockHandler for State {
         let mut shell = self.common.shell.write();
         shell.session_lock = None;
 
+        let seats = shell.seats.iter().cloned().collect::<Vec<_>>();
+        for seat in &seats {
+            self.common.idle_notifier_state.notify_activity(seat);
+        }
+
         for output in shell.outputs() {
             self.backend.schedule_render(output);
         }

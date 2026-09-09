@@ -4,32 +4,32 @@ use super::{
 };
 use crate::{
     backend::render::{
-        IndicatorShader, Key, Usage,
-        clipped_surface::ClippedSurfaceRenderElement,
-        cursor::CursorState,
-        element::{AsGlowRenderer, FromGlesError},
-        shadow::ShadowShader,
+        IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
+        shadow::ShadowShader, wayland::SurfaceRenderElement,
     },
     hooks::{Decorations, HOOKS},
     shell::{
         element::{CosmicMappedKey, CosmicMappedKeyInner},
         focus::target::PointerFocusTarget,
-        grabs::{ReleaseMode, ResizeEdge},
+        grabs::{GrabType, ReleaseMode, ResizeEdge},
         layout::tiling::NodeDesc,
     },
     state::State,
     utils::{
-        iced::{IcedElement, Program},
+        iced::{IcedElement, IcedRenderElement, Program},
         prelude::*,
     },
 };
 use calloop::LoopHandle;
 use cosmic::{
     Apply, Element as CosmicElement, Theme,
-    iced::{Alignment, id::Id, widget as iced_widget},
-    iced_core::{Background, Border, Color, Length, border::Radius},
-    iced_runtime::Task,
-    iced_widget::scrollable::AbsoluteOffset,
+    iced::{
+        Alignment,
+        core::{Background, Border, Color, Length, border::Radius},
+        id::Id,
+        runtime::Task,
+        widget::{self as iced_widget, scrollable::AbsoluteOffset},
+    },
     theme, widget as cosmic_widget,
 };
 use cosmic_comp_config::AppearanceConfig;
@@ -37,14 +37,11 @@ use cosmic_settings_config::shortcuts;
 use shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     backend::{
-        input::KeyState,
+        drm::DrmNode,
+        input::{InputTime, KeyState, TabletToolDescriptor},
         renderer::{
             ImportAll, ImportMem, Renderer,
-            element::{
-                AsRenderElements, Element, Id as RendererId, Kind, RenderElement,
-                UnderlyingStorage, memory::MemoryRenderBufferRenderElement,
-                surface::WaylandSurfaceRenderElement,
-            },
+            element::{Element, Id as RendererId, Kind, RenderElement, UnderlyingStorage},
             gles::element::PixelShaderElement,
             glow::GlowRenderer,
             utils::{CommitCounter, DamageSet, OpaqueRegions},
@@ -55,14 +52,23 @@ use smithay::{
         Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, CursorImageStatus, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent, CursorImageStatus,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent,
             PointerTarget, RelativeMotionEvent,
         },
+        tablet::{
+            Tablet, TabletSeatTrait,
+            tool::{
+                AxisFrame as ToolAxisFrame, ButtonEvent as ToolButtonEvent,
+                DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolTarget,
+                UpEvent as ToolUpEvent,
+            },
+        },
         touch::{
-            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
-            TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, FrameMarker, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchTarget, UpEvent as TouchUpEvent,
         },
     },
     output::Output,
@@ -115,6 +121,7 @@ pub struct CosmicStackInternal {
     previous_keyboard: AtomicUsize,
     pointer_entered: AtomicU8,
     touch_serial: AtomicU32,
+    tablet_serial: AtomicU32,
     reenter: AtomicBool,
     potential_drag: Mutex<Option<usize>>,
     override_alive: AtomicBool,
@@ -149,9 +156,10 @@ impl CosmicStack {
     pub fn new<I: Into<CosmicSurface>>(
         windows: impl Iterator<Item = I>,
         handle: LoopHandle<'static, crate::state::State>,
-        theme: cosmic::Theme,
+        mut theme: cosmic::Theme,
         appearance: AppearanceConfig,
     ) -> CosmicStack {
+        theme.transparent = theme.cosmic().frosted_windows;
         let windows = windows.map(Into::into).collect::<Vec<_>>();
         assert!(!windows.is_empty());
 
@@ -173,6 +181,7 @@ impl CosmicStack {
                 previous_keyboard: AtomicUsize::new(0),
                 pointer_entered: AtomicU8::new(0),
                 touch_serial: AtomicU32::new(0),
+                tablet_serial: AtomicU32::new(0),
                 reenter: AtomicBool::new(false),
                 potential_drag: Mutex::new(None),
                 override_alive: AtomicBool::new(true),
@@ -532,7 +541,7 @@ impl CosmicStack {
             let geo = p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry();
 
             if surface_type.contains(WindowSurfaceType::TOPLEVEL) {
-                let point_i32 = relative_pos.to_i32_round::<i32>();
+                let point_i32 = relative_pos.to_i32_floor::<i32>();
                 if (point_i32.x - geo.loc.x >= -RESIZE_BORDER && point_i32.x - geo.loc.x < 0)
                     || (point_i32.y - geo.loc.y >= -RESIZE_BORDER && point_i32.y - geo.loc.y < 0)
                     || (point_i32.x - geo.loc.x >= geo.size.w
@@ -648,30 +657,38 @@ impl CosmicStack {
         self.0.loop_handle()
     }
 
-    pub fn popup_render_elements<R, C>(
+    pub fn push_popup_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<C>
-    where
+        scanout_node: Option<DrmNode>,
+        push: &mut dyn FnMut(CosmicStackRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicStackRenderElement<R>>,
     {
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
         self.0.with_program(|p| {
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
+            let theme = p.theme.lock().unwrap();
+            let frosted = if theme.cosmic().frosted_windows {
+                (theme.cosmic().frosted as u8 + 1) as usize
+            } else {
+                0
+            };
 
-            windows[active]
-                .popup_render_elements::<R, CosmicStackRenderElement<R>>(
-                    renderer, window_loc, scale, alpha,
-                )
-                .into_iter()
-                .map(C::from)
-                .collect()
+            windows[active].push_popup_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_node,
+                frosted,
+                &mut |elem| push(elem.into()),
+            )
         })
     }
 
@@ -742,7 +759,7 @@ impl CosmicStack {
         })
     }
 
-    pub fn render_elements<R, C>(
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
@@ -750,17 +767,18 @@ impl CosmicStack {
         scale: Scale<f64>,
         alpha: f32,
         scanout_override: Option<bool>,
-    ) -> Vec<C>
-    where
+        scanout_node: Option<DrmNode>,
+        push_above: &mut dyn FnMut(CosmicStackRenderElement<R>),
+        push_below: &mut dyn FnMut(CosmicStackRenderElement<R>),
+    ) where
         R: AsGlowRenderer,
         R::TextureId: Send + Clone + 'static,
-        C: From<CosmicStackRenderElement<R>>,
     {
         if !self
             .0
             .with_program(|p| p.override_alive.load(Ordering::Acquire))
         {
-            return Vec::new();
+            return;
         }
 
         let geometry = self
@@ -769,27 +787,36 @@ impl CosmicStack {
             .to_physical_precise_round(scale);
         let stack_loc = location + geometry.loc;
         let window_loc = location + Point::from((0, (TAB_HEIGHT as f64 * scale.y) as i32));
-
-        let mut elements = AsRenderElements::<R>::render_elements::<CosmicStackRenderElement<R>>(
-            &self.0, renderer, stack_loc, scale, alpha,
-        );
-
-        elements.extend(self.0.with_program(|p| {
+        let frosted = self.0.with_program(|p| {
+            let theme = p.theme.lock().unwrap();
+            if theme.cosmic().frosted_windows {
+                (theme.cosmic().frosted as u8 + 1) as usize
+            } else {
+                0
+            }
+        });
+        let radii = self.0.with_program(|p| {
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
-            let theme = p.theme.lock().unwrap();
             let appearance = p.appearance_conf.lock().unwrap();
+            let theme = p.theme.lock().unwrap();
             let tiled = p.tiled.load(Ordering::Acquire);
             let maximized = windows[active].is_maximized(false);
-
             let round = (appearance.clip_tiled_windows || !tiled) && !maximized;
-            let radii = round.then(|| {
+            round.then(|| {
                 theme
                     .cosmic()
                     .radius_s()
                     .map(|x| if x < 4.0 { x } else { x + 4.0 })
                     .map(|x| x.round() as u8)
-            });
+            })
+        });
+
+        self.0.with_program(|p| {
+            let windows = p.windows.lock().unwrap();
+            let active = p.active.load(Ordering::SeqCst);
+            let theme = p.theme.lock().unwrap();
+            let maximized = windows[active].is_maximized(false);
 
             let mut geo = SpaceElement::geometry(&windows[active]).to_f64();
             geo.loc += location.to_f64().to_logical(scale);
@@ -801,53 +828,49 @@ impl CosmicStack {
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.0.0)));
 
-            let border = (!maximized).then(|| {
+            if !maximized {
                 let (r, g, b, a) = theme.cosmic().bg_divider().into_components();
-                CosmicStackRenderElement::Border(IndicatorShader::element(
+                push_above(CosmicStackRenderElement::Border(IndicatorShader::element(
                     renderer,
                     Key::Window(Usage::Border, window_key.clone()),
                     geo.to_i32_round().as_local(),
                     1,
-                    radii.unwrap_or([0, 0, 0, 0]),
+                    radii.unwrap_or([0; 4]),
                     a * alpha,
                     scale.x,
                     [r, g, b],
-                ))
-            });
+                )));
+            };
 
-            border.into_iter().chain(
-                windows[active]
-                    .render_elements::<R, WaylandSurfaceRenderElement<R>>(
-                        renderer,
-                        window_loc,
-                        scale,
-                        alpha,
-                        scanout_override,
-                    )
-                    .into_iter()
-                    .map(move |elem| {
-                        let radii = radii.map(|[a, _, c, _]| [a, 0, c, 0]);
-                        if radii.is_some_and(|radii| {
-                            ClippedSurfaceRenderElement::will_clip(&elem, scale, geo, radii)
-                        }) {
-                            CosmicStackRenderElement::Clipped(ClippedSurfaceRenderElement::new(
-                                renderer,
-                                elem,
-                                scale,
-                                geo,
-                                radii.unwrap(),
-                            ))
-                        } else {
-                            CosmicStackRenderElement::Window(elem)
-                        }
-                    }),
-            )
-        }));
+            let radii = radii.map(|[_, _, c, d]| [0, 0, c, d]);
+            windows[active].push_render_elements(
+                renderer,
+                window_loc,
+                scale,
+                alpha,
+                scanout_override,
+                scanout_node,
+                radii.is_some(),
+                radii.unwrap_or([0; 4]),
+                frosted,
+                &mut |elem| push_above(elem.into()),
+                Some(&mut |elem| push_below(elem.into())),
+            );
+        });
 
-        elements.into_iter().map(C::from).collect()
+        self.0.push_render_elements(
+            renderer,
+            stack_loc,
+            scale,
+            alpha,
+            radii.map(|[_, b, _, d]| [0, b, 0, d]).unwrap_or([0; 4]),
+            &mut |elem| push_above(elem.into()),
+            Some(&mut |elem| push_below(elem.into())),
+        );
     }
 
-    pub(crate) fn set_theme(&self, theme: cosmic::Theme) {
+    pub(crate) fn set_theme(&self, mut theme: cosmic::Theme) {
+        theme.transparent = theme.cosmic().frosted_windows;
         self.0.with_program(|p| {
             *p.theme.lock().unwrap() = theme.clone();
         });
@@ -897,12 +920,19 @@ impl CosmicStack {
                         false,
                     );
                     if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(state, grab, serial);
-                        } else {
-                            seat.get_pointer()
+                        match grab.grab_type() {
+                            GrabType::Touch => {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial)
+                            }
+                            GrabType::Pointer => seat
+                                .get_pointer()
                                 .unwrap()
-                                .set_grab(state, grab, serial, focus);
+                                .set_grab(state, grab, serial, focus),
+                            GrabType::TabletTool => seat
+                                .tablet_seat()
+                                .get_tool(grab.tool().unwrap())
+                                .unwrap()
+                                .set_grab(state, grab, InputTime::now(), serial, focus),
                         }
                     }
                 });
@@ -985,17 +1015,17 @@ impl CosmicStack {
                     .corner_radius(geometry_size)
                     .unwrap_or([default_radius; 4]);
 
+                corners[0] = 0;
                 corners[1] = 0;
-                corners[3] = 0;
 
                 corners
             } else {
                 let mut corners = active_window.corner_radius(geometry_size).unwrap_or(radii);
 
-                corners[0] = radii[0].max(corners[0]);
+                corners[0] = radii[0];
                 corners[1] = radii[1];
                 corners[2] = radii[2].max(corners[2]);
-                corners[3] = radii[3];
+                corners[3] = radii[3].max(corners[3]);
 
                 corners
             }
@@ -1077,12 +1107,19 @@ impl Program for CosmicStackInternal {
                                 false,
                             );
                             if let Some((grab, focus)) = res {
-                                if grab.is_touch_grab() {
-                                    seat.get_touch().unwrap().set_grab(state, grab, serial);
-                                } else {
-                                    seat.get_pointer()
+                                match grab.grab_type() {
+                                    GrabType::Touch => {
+                                        seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                    }
+                                    GrabType::Pointer => seat
+                                        .get_pointer()
                                         .unwrap()
-                                        .set_grab(state, grab, serial, focus);
+                                        .set_grab(state, grab, serial, focus),
+                                    GrabType::TabletTool => seat
+                                        .tablet_seat()
+                                        .get_tool(grab.tool().unwrap())
+                                        .unwrap()
+                                        .set_grab(state, grab, InputTime::now(), serial, focus),
                                 }
                             }
                         });
@@ -1356,16 +1393,29 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
             .class(theme::Container::custom(move |theme| {
                 let cosmic_theme = theme.cosmic();
 
-                let background = if group_focused {
+                let mut background = if group_focused {
                     cosmic_theme.accent_color()
                 } else {
                     cosmic_theme.primary_container_color()
                 };
+                if cosmic_theme.frosted_windows {
+                    background.alpha = cosmic_theme.alpha_map.blurred_alpha(cosmic_theme.frosted);
+                }
 
                 iced_widget::container::Style {
                     snap: true,
-                    icon_color: Some(cosmic_theme.background.on.into()),
-                    text_color: Some(cosmic_theme.background.on.into()),
+                    icon_color: Some(
+                        cosmic_theme
+                            .background(cosmic_theme.frosted_windows)
+                            .on
+                            .into(),
+                    ),
+                    text_color: Some(
+                        cosmic_theme
+                            .background(cosmic_theme.frosted_windows)
+                            .on
+                            .into(),
+                    ),
                     background: Some(Background::Color(background.into())),
                     border: Border {
                         radius,
@@ -1532,7 +1582,7 @@ impl KeyboardTarget<State> for CosmicStack {
         key: KeysymHandle<'_>,
         state: KeyState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         let active = self.keyboard_leave_if_previous(seat, data, serial);
         self.0.with_program(|p| {
@@ -1572,7 +1622,7 @@ impl KeyboardTarget<State> for CosmicStack {
 }
 
 impl PointerTarget<State> for CosmicStack {
-    fn enter(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+    fn enter(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
         let mut event = event.clone();
         self.0.with_program(|p| {
             let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
@@ -1600,7 +1650,7 @@ impl PointerTarget<State> for CosmicStack {
         PointerTarget::enter(&self.0, seat, data, &event)
     }
 
-    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &MotionEvent) {
+    fn motion(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
         let mut event = event.clone();
         self.0.with_program(|p| {
             let active = p.active.load(Ordering::SeqCst);
@@ -1643,7 +1693,7 @@ impl PointerTarget<State> for CosmicStack {
     ) {
     }
 
-    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
+    fn button(&self, seat: &Seat<State>, data: &mut State, event: &PointerButtonEvent) {
         match self.0.with_program(|p| p.current_focus()) {
             Some(Focus::Header) => PointerTarget::button(&self.0, seat, data, event),
             Some(x) => {
@@ -1674,14 +1724,12 @@ impl PointerTarget<State> for CosmicStack {
                         state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
                     );
-                    if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(state, grab, serial);
-                        } else {
-                            seat.get_pointer()
-                                .unwrap()
-                                .set_grab(state, grab, serial, focus);
-                        }
+                    if let Some((grab, focus)) = res
+                        && let GrabType::Pointer = grab.grab_type()
+                    {
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(state, grab, serial, focus);
                     }
                 });
             }
@@ -1689,7 +1737,7 @@ impl PointerTarget<State> for CosmicStack {
         }
     }
 
-    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
+    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: PointerAxisFrame) {
         if let Some(Focus::Header) = self.0.with_program(|p| p.current_focus()) {
             PointerTarget::axis(&self.0, seat, data, frame)
         }
@@ -1701,7 +1749,7 @@ impl PointerTarget<State> for CosmicStack {
         }
     }
 
-    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: u32) {
+    fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: InputTime) {
         self.0.with_program(|p| {
             let mut cursor_state = seat
                 .user_data()
@@ -1737,14 +1785,12 @@ impl PointerTarget<State> for CosmicStack {
                         &state.common.event_loop_handle,
                         false,
                     );
-                    if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(state, grab, serial);
-                        } else {
-                            seat.get_pointer()
-                                .unwrap()
-                                .set_grab(state, grab, serial, focus);
-                        }
+                    if let Some((grab, focus)) = res
+                        && let GrabType::Pointer = grab.grab_type()
+                    {
+                        seat.get_pointer()
+                            .unwrap()
+                            .set_grab(state, grab, serial, focus);
                     }
                 });
             }
@@ -1817,7 +1863,7 @@ impl PointerTarget<State> for CosmicStack {
 }
 
 impl TouchTarget<State> for CosmicStack {
-    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &TouchDownEvent) {
         let mut event = event.clone();
         let active_window_geo = self.0.with_program(|p| {
             p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
@@ -1828,7 +1874,7 @@ impl TouchTarget<State> for CosmicStack {
         TouchTarget::down(&self.0, seat, data, &event)
     }
 
-    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent) {
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &TouchUpEvent) {
         TouchTarget::up(&self.0, seat, data, event)
     }
 
@@ -1876,41 +1922,212 @@ impl TouchTarget<State> for CosmicStack {
     }
 }
 
-pub enum CosmicStackRenderElement<R: Renderer + ImportAll + ImportMem> {
-    Header(MemoryRenderBufferRenderElement<R>),
-    Shadow(PixelShaderElement),
-    Border(PixelShaderElement),
-    Window(WaylandSurfaceRenderElement<R>),
-    Clipped(ClippedSurfaceRenderElement<R>),
+impl TabletToolTarget<State> for CosmicStack {
+    fn proximity_in(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        tablet: &Tablet,
+        serial: Serial,
+    ) {
+        TabletToolTarget::proximity_in(&self.0, seat, data, tool_descriptor, tablet, serial)
+    }
+
+    fn proximity_out(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+    ) {
+        self.0.with_program(|p| {
+            let mut cursor_state = seat
+                .user_data()
+                .get::<CursorState>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            cursor_state.unset_shape();
+            let _previous = p.swap_focus(None);
+        });
+        TabletToolTarget::proximity_out(&self.0, seat, data, tool_descriptor);
+    }
+
+    fn down(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &ToolDownEvent,
+    ) {
+        self.0.with_program(|p| {
+            p.tablet_serial
+                .store(event.serial.into(), Ordering::Release)
+        });
+        match self.0.with_program(|p| p.current_focus()) {
+            Some(Focus::Header) => {
+                TabletToolTarget::down(&self.0, seat, data, tool_descriptor, event)
+            }
+            Some(x) => {
+                let serial = self
+                    .0
+                    .with_program(|p| p.tablet_serial.load(Ordering::Acquire))
+                    .into();
+                let seat = seat.clone();
+                let Some(surface) = self.0.with_program(|p| {
+                    let window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
+                    window.wl_surface().map(Cow::into_owned)
+                }) else {
+                    return;
+                };
+                self.0.loop_handle().insert_idle(move |state| {
+                    let res = state.common.shell.write().resize_request(
+                        &surface,
+                        &seat,
+                        serial,
+                        match x {
+                            Focus::ResizeTop => ResizeEdge::TOP,
+                            Focus::ResizeTopLeft => ResizeEdge::TOP_LEFT,
+                            Focus::ResizeTopRight => ResizeEdge::TOP_RIGHT,
+                            Focus::ResizeBottom => ResizeEdge::BOTTOM,
+                            Focus::ResizeBottomLeft => ResizeEdge::BOTTOM_LEFT,
+                            Focus::ResizeBottomRight => ResizeEdge::BOTTOM_RIGHT,
+                            Focus::ResizeLeft => ResizeEdge::LEFT,
+                            Focus::ResizeRight => ResizeEdge::RIGHT,
+                            Focus::Header => unreachable!(),
+                        },
+                        state.common.config.cosmic_conf.edge_snap_threshold,
+                        false,
+                    );
+                    if let Some((grab, focus)) = res
+                        && let GrabType::TabletTool = grab.grab_type()
+                    {
+                        seat.tablet_seat()
+                            .get_tool(grab.tool().unwrap())
+                            .unwrap()
+                            .set_grab(state, grab, InputTime::now(), serial, focus);
+                    }
+                });
+            }
+            None => {}
+        }
+    }
+
+    fn up(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &ToolUpEvent,
+    ) {
+        TabletToolTarget::up(&self.0, seat, data, tool_descriptor, event)
+    }
+
+    fn motion(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &ToolMotionEvent,
+    ) {
+        let mut event = event.clone();
+        self.0.with_program(|p| {
+            let active = p.active.load(Ordering::SeqCst);
+            let active_window = &p.windows.lock().unwrap()[active];
+            let Some(next) = Focus::under(active_window, TAB_HEIGHT, event.location) else {
+                return;
+            };
+            let _previous = p.swap_focus(Some(next));
+
+            let mut cursor_state = seat
+                .user_data()
+                .get::<CursorState>()
+                .unwrap()
+                .lock()
+                .unwrap();
+            cursor_state.set_shape(next.cursor_shape());
+            seat.set_cursor_image_status(CursorImageStatus::default_named());
+        });
+
+        let active_window_geo = self.0.with_program(|p| {
+            p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)].geometry()
+        });
+        event.location -= active_window_geo.loc.to_f64();
+
+        TabletToolTarget::motion(&self.0, seat, data, tool_descriptor, &event);
+        if event.location.y < 0.0
+            || event.location.y > TAB_HEIGHT as f64
+            || event.location.x < 64.0
+            || event.location.x > (active_window_geo.size.w as f64 - 64.0)
+        {
+            self.start_drag(
+                data,
+                seat,
+                self.0
+                    .with_program(|p| p.tablet_serial.load(Ordering::Acquire))
+                    .into(),
+            );
+        }
+    }
+
+    fn axis(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        frame: ToolAxisFrame,
+    ) {
+        TabletToolTarget::axis(&self.0, seat, data, tool_descriptor, frame)
+    }
+
+    fn button(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &ToolButtonEvent,
+    ) {
+        TabletToolTarget::button(&self.0, seat, data, tool_descriptor, event)
+    }
+
+    fn frame(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        time: InputTime,
+    ) {
+        TabletToolTarget::frame(&self.0, seat, data, tool_descriptor, time)
+    }
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<MemoryRenderBufferRenderElement<R>>
+pub enum CosmicStackRenderElement<R: Renderer + ImportAll + ImportMem> {
+    Header(IcedRenderElement<R>),
+    Shadow(PixelShaderElement),
+    Border(PixelShaderElement),
+    Window(SurfaceRenderElement<R>),
+}
+
+impl<R: Renderer + ImportAll + ImportMem> From<IcedRenderElement<R>>
     for CosmicStackRenderElement<R>
 {
-    fn from(value: MemoryRenderBufferRenderElement<R>) -> Self {
+    fn from(value: IcedRenderElement<R>) -> Self {
         Self::Header(value)
     }
 }
 
-impl<R: Renderer + ImportAll + ImportMem> From<WaylandSurfaceRenderElement<R>>
+impl<R: Renderer + ImportAll + ImportMem> From<SurfaceRenderElement<R>>
     for CosmicStackRenderElement<R>
 {
-    fn from(value: WaylandSurfaceRenderElement<R>) -> Self {
+    fn from(value: SurfaceRenderElement<R>) -> Self {
         Self::Window(value)
-    }
-}
-
-impl<R: Renderer + ImportAll + ImportMem> From<ClippedSurfaceRenderElement<R>>
-    for CosmicStackRenderElement<R>
-{
-    fn from(value: ClippedSurfaceRenderElement<R>) -> Self {
-        Self::Clipped(value)
     }
 }
 
 impl<R> Element for CosmicStackRenderElement<R>
 where
-    R: Renderer + ImportAll + ImportMem,
+    R: Renderer + ImportAll + ImportMem + AsGlowRenderer,
+    R::TextureId: Send + 'static,
 {
     fn id(&self) -> &RendererId {
         match self {
@@ -1918,7 +2135,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.id(),
             CosmicStackRenderElement::Border(elem) => elem.id(),
             CosmicStackRenderElement::Window(elem) => elem.id(),
-            CosmicStackRenderElement::Clipped(elem) => elem.id(),
         }
     }
 
@@ -1928,7 +2144,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.current_commit(),
             CosmicStackRenderElement::Border(elem) => elem.current_commit(),
             CosmicStackRenderElement::Window(elem) => elem.current_commit(),
-            CosmicStackRenderElement::Clipped(elem) => elem.current_commit(),
         }
     }
 
@@ -1938,7 +2153,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.src(),
             CosmicStackRenderElement::Border(elem) => elem.src(),
             CosmicStackRenderElement::Window(elem) => elem.src(),
-            CosmicStackRenderElement::Clipped(elem) => elem.src(),
         }
     }
 
@@ -1948,7 +2162,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Border(elem) => elem.geometry(scale),
             CosmicStackRenderElement::Window(elem) => elem.geometry(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.geometry(scale),
         }
     }
 
@@ -1958,7 +2171,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.location(scale),
             CosmicStackRenderElement::Border(elem) => elem.location(scale),
             CosmicStackRenderElement::Window(elem) => elem.location(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.location(scale),
         }
     }
 
@@ -1968,7 +2180,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.transform(),
             CosmicStackRenderElement::Border(elem) => elem.transform(),
             CosmicStackRenderElement::Window(elem) => elem.transform(),
-            CosmicStackRenderElement::Clipped(elem) => elem.transform(),
         }
     }
 
@@ -1982,7 +2193,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Border(elem) => elem.damage_since(scale, commit),
             CosmicStackRenderElement::Window(elem) => elem.damage_since(scale, commit),
-            CosmicStackRenderElement::Clipped(elem) => elem.damage_since(scale, commit),
         }
     }
 
@@ -1992,7 +2202,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Border(elem) => elem.opaque_regions(scale),
             CosmicStackRenderElement::Window(elem) => elem.opaque_regions(scale),
-            CosmicStackRenderElement::Clipped(elem) => elem.opaque_regions(scale),
         }
     }
 
@@ -2002,7 +2211,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.alpha(),
             CosmicStackRenderElement::Border(elem) => elem.alpha(),
             CosmicStackRenderElement::Window(elem) => elem.alpha(),
-            CosmicStackRenderElement::Clipped(elem) => elem.alpha(),
         }
     }
 
@@ -2012,7 +2220,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.kind(),
             CosmicStackRenderElement::Border(elem) => elem.kind(),
             CosmicStackRenderElement::Window(elem) => elem.kind(),
-            CosmicStackRenderElement::Clipped(elem) => elem.kind(),
         }
     }
 
@@ -2022,7 +2229,6 @@ where
             CosmicStackRenderElement::Shadow(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Border(elem) => elem.is_framebuffer_effect(),
             CosmicStackRenderElement::Window(elem) => elem.is_framebuffer_effect(),
-            CosmicStackRenderElement::Clipped(elem) => elem.is_framebuffer_effect(),
         }
     }
 }
@@ -2030,12 +2236,11 @@ where
 impl<R> RenderElement<R> for CosmicStackRenderElement<R>
 where
     R: AsGlowRenderer,
-    R::TextureId: 'static,
-    R::Error: FromGlesError,
+    R::TextureId: Send + 'static,
 {
     fn draw(
         &self,
-        frame: &mut <R>::Frame<'_, '_>,
+        frame: &mut R::Frame<'_, '_>,
         src: Rectangle<f64, Buffer>,
         dst: Rectangle<i32, Physical>,
         damage: &[Rectangle<i32, Physical>],
@@ -2056,12 +2261,9 @@ where
                     opaque_regions,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicStackRenderElement::Window(elem) => {
-                elem.draw(frame, src, dst, damage, opaque_regions, cache)
-            }
-            CosmicStackRenderElement::Clipped(elem) => {
                 elem.draw(frame, src, dst, damage, opaque_regions, cache)
             }
         }
@@ -2074,7 +2276,6 @@ where
                 elem.underlying_storage(renderer.glow_renderer_mut())
             }
             CosmicStackRenderElement::Window(elem) => elem.underlying_storage(renderer),
-            CosmicStackRenderElement::Clipped(elem) => elem.underlying_storage(renderer),
         }
     }
 
@@ -2097,12 +2298,9 @@ where
                     dst,
                     cache,
                 )
-                .map_err(FromGlesError::from_gles_error)
+                .map_err(R::from_gles_error)
             }
             CosmicStackRenderElement::Window(elem) => {
-                elem.capture_framebuffer(frame, src, dst, cache)
-            }
-            CosmicStackRenderElement::Clipped(elem) => {
                 elem.capture_framebuffer(frame, src, dst, cache)
             }
         }

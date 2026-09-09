@@ -12,15 +12,15 @@ use cosmic::{
     iced::{
         Limits, Point as IcedPoint, Size as IcedSize, Task,
         advanced::{graphics::text::font_system, widget::Tree},
+        core::{Color, Length, Pixels, clipboard::Null as NullClipboard, id::Id, renderer::Style},
         event::Event,
         futures::{FutureExt, StreamExt},
         keyboard::{Event as KeyboardEvent, Modifiers as IcedModifiers},
         mouse::{Button as MouseButton, Cursor, Event as MouseEvent, ScrollDelta},
+        runtime::{Action, task::into_stream},
         touch::{Event as TouchEvent, Finger},
         window::Event as WindowEvent,
     },
-    iced_core::{Color, Length, Pixels, clipboard::Null as NullClipboard, id::Id, renderer::Style},
-    iced_runtime::{Action, task::into_stream},
 };
 use iced_tiny_skia::{
     Layer,
@@ -31,11 +31,11 @@ use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
         allocator::Fourcc,
-        input::{ButtonState, KeyState},
+        input::{ButtonState, InputTime, KeyState, TabletToolDescriptor},
         renderer::{
-            ImportMem, Renderer,
+            ImportMem,
             element::{
-                AsRenderElements, Kind,
+                Kind,
                 memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
             },
         },
@@ -45,25 +45,41 @@ use smithay::{
         Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent,
             PointerTarget, RelativeMotionEvent,
         },
+        tablet::{
+            Tablet,
+            tool::{
+                AxisFrame as ToolAxisFrame, ButtonEvent as ToolButtonEvent,
+                DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolTarget,
+                UpEvent as ToolUpEvent,
+            },
+        },
         touch::{
-            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
-            TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, FrameMarker, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchTarget, UpEvent as TouchUpEvent,
         },
     },
     output::Output,
     reexports::calloop::{self, LoopHandle, RegistrationToken, futures::Scheduler},
+    render_elements,
     utils::{
         Buffer as BufferCoords, IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size,
         Transform,
     },
 };
 
-use crate::utils::iced::state::State;
+use crate::{
+    backend::render::{
+        element::AsGlowRenderer,
+        wayland::blur_effect::{BlurElement, BlurState},
+    },
+    utils::iced::state::State,
+};
 
 static ID: LazyLock<Id> = LazyLock::new(|| Id::new("Program"));
 
@@ -173,6 +189,7 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     outputs: HashSet<Output>,
     buffers: HashMap<OrderedFloat<f64>, (MemoryRenderBuffer, Option<(Vec<Layer>, Color)>)>,
     pending_realloc: bool,
+    blur: BlurState,
 
     // state
     size: Size<i32, Logical>,
@@ -181,6 +198,7 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     touch_map: HashMap<Finger, IcedPoint>,
     last_touch_frame: Option<FrameMarker>,
     last_touch_serial: Option<Serial>,
+    last_tablet_serial: Option<Serial>,
 
     // iced
     theme: Theme,
@@ -225,12 +243,14 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             outputs: self.outputs.clone(),
             buffers: self.buffers.clone(),
             pending_realloc: self.pending_realloc,
+            blur: BlurState::default(),
             size: self.size,
             last_seat: self.last_seat.clone(),
             cursor_pos: self.cursor_pos,
             touch_map: self.touch_map.clone(),
             last_touch_frame: None,
             last_touch_serial: None,
+            last_tablet_serial: None,
             theme: self.theme.clone(),
             renderer,
             state,
@@ -258,6 +278,7 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
             .field("touch_map", &self.touch_map)
             .field("last_touch_frame", &self.last_touch_frame)
             .field("last_touch_serial", &self.last_touch_serial)
+            .field("last_tablet_serial", &self.last_tablet_serial)
             .field("theme", &"...")
             .field("renderer", &"...")
             .field("state", &"...")
@@ -310,12 +331,14 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             outputs: HashSet::new(),
             buffers: HashMap::new(),
             pending_realloc: false,
+            blur: BlurState::default(),
             size,
             cursor_pos: None,
             last_seat,
             touch_map: HashMap::new(),
             last_touch_frame: None,
             last_touch_serial: None,
+            last_tablet_serial: None,
             theme,
             renderer,
             state,
@@ -342,7 +365,6 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         let node = element
             .as_widget_mut()
             .layout(
-                // TODO Avoid creating a new tree here?
                 &mut tree,
                 &internal.renderer,
                 &Limits::new(IcedSize::ZERO, IcedSize::INFINITE)
@@ -384,6 +406,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
 
     pub fn force_update(&self) {
         self.0.lock().unwrap().update(true);
+    }
+
+    pub fn with_theme<R: 'static>(&self, f: impl FnOnce(&Theme) -> R) -> R {
+        let guard = self.0.lock().unwrap();
+        f(&guard.theme)
     }
 
     pub fn set_theme(&self, theme: cosmic::Theme) {
@@ -467,12 +494,143 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
     }
 }
 
+impl<P: Program + Send + 'static> TabletToolTarget<crate::state::State> for IcedElement<P> {
+    fn proximity_in(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _tablet: &Tablet,
+        serial: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        internal
+            .state
+            .queue_event(Event::Mouse(MouseEvent::CursorEntered));
+        internal.last_tablet_serial = Some(serial);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), serial));
+        internal.update(false);
+    }
+
+    fn proximity_out(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        internal
+            .state
+            .queue_event(Event::Mouse(MouseEvent::CursorLeft));
+        internal.update(false);
+    }
+
+    fn down(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        event: &ToolDownEvent,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(0);
+        let Some(event_location) = internal.cursor_pos else {
+            return;
+        };
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+        internal
+            .state
+            .queue_event(Event::Touch(TouchEvent::FingerPressed { id, position }));
+        internal.last_tablet_serial = Some(event.serial);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(false);
+    }
+
+    fn up(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolUpEvent,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(0);
+        if let Some(event_location) = internal.cursor_pos {
+            *internal.last_seat.lock().unwrap() =
+                Some((seat.clone(), internal.last_tablet_serial.unwrap()));
+            let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+            internal
+                .state
+                .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
+            internal.update(false);
+        }
+    }
+
+    fn motion(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        event: &ToolMotionEvent,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+        internal
+            .state
+            .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
+        internal.cursor_pos = Some(event_location);
+        *internal.last_seat.lock().unwrap() =
+            Some((seat.clone(), internal.last_tablet_serial.unwrap()));
+        internal.update(false);
+    }
+
+    fn axis(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _frame: ToolAxisFrame,
+    ) {
+    }
+
+    fn button(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        event: &ToolButtonEvent,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let button = match event.button {
+            0x14b => MouseButton::Right,
+            0x14c => MouseButton::Middle,
+            _ => return,
+        };
+        internal.state.queue_event(Event::Mouse(match event.state {
+            ButtonState::Pressed => MouseEvent::ButtonPressed(button),
+            ButtonState::Released => MouseEvent::ButtonReleased(button),
+        }));
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(false);
+    }
+
+    fn frame(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _time: InputTime,
+    ) {
+    }
+}
+
 impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedElement<P> {
     fn enter(
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &MotionEvent,
+        event: &PointerMotionEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         internal
@@ -493,7 +651,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &MotionEvent,
+        event: &PointerMotionEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         let event_location = event.location.downscale(internal.additional_scale);
@@ -518,7 +676,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         let button = match event.button {
@@ -539,7 +697,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         &self,
         _seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        frame: AxisFrame,
+        frame: PointerAxisFrame,
     ) {
         let mut internal = self.0.lock().unwrap();
         internal
@@ -567,7 +725,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         _seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
         _serial: Serial,
-        _time: u32,
+        _time: InputTime,
     ) {
         let mut internal = self.0.lock().unwrap();
         internal
@@ -639,7 +797,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &DownEvent,
+        event: &TouchDownEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
@@ -659,7 +817,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &UpEvent,
+        event: &TouchUpEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
@@ -770,7 +928,7 @@ impl<P: Program + Send + 'static> KeyboardTarget<crate::state::State> for IcedEl
         _key: KeysymHandle<'_>,
         _state: KeyState,
         _serial: Serial,
-        _time: u32,
+        _time: InputTime,
     ) {
         // TODO convert keys
     }
@@ -910,21 +1068,20 @@ impl<P: Program + Send + 'static> SpaceElement for IcedElement<P> {
     }
 }
 
-impl<P, R> AsRenderElements<R> for IcedElement<P>
-where
-    P: Program + Send + 'static,
-    R: Renderer + ImportMem,
-    R::TextureId: Send + Clone + 'static,
-{
-    type RenderElement = MemoryRenderBufferRenderElement<R>;
-
-    fn render_elements<C: From<Self::RenderElement>>(
+impl<P: Program + Send + 'static> IcedElement<P> {
+    pub fn push_render_elements<R>(
         &self,
         renderer: &mut R,
         location: Point<i32, Physical>,
         mut scale: Scale<f64>,
         alpha: f32,
-    ) -> Vec<C> {
+        mut radii: [u8; 4],
+        push_above: &mut dyn FnMut(IcedRenderElement<R>),
+        push_below: Option<&mut dyn FnMut(IcedRenderElement<R>)>,
+    ) where
+        R: AsGlowRenderer + ImportMem,
+        R::TextureId: Send + Clone + 'static,
+    {
         let mut internal = self.0.lock().unwrap();
         // makes partial borrows easier
         let internal_ref = &mut *internal;
@@ -1055,11 +1212,51 @@ where
                 Kind::Unspecified,
             ) {
                 Ok(buffer) => {
-                    return vec![C::from(buffer)];
+                    push_above(buffer.into());
                 }
                 Err(err) => tracing::warn!("What? {:?}", err),
             }
+
+            if internal_ref.theme.transparent {
+                for radius in radii.iter_mut() {
+                    *radius = ((*radius as f64) * internal_ref.additional_scale).round() as u8;
+                }
+
+                match BlurElement::from_state(
+                    renderer,
+                    &mut internal_ref.blur,
+                    Rectangle::new(
+                        location
+                            .to_f64()
+                            .to_logical(scale)
+                            .upscale(internal_ref.additional_scale),
+                        internal_ref
+                            .size
+                            .to_f64()
+                            .upscale(internal_ref.additional_scale)
+                            .to_i32_round(),
+                    ),
+                    scale.x,
+                    radii,
+                    (internal_ref.theme.cosmic().frosted as u8 + 1) as usize,
+                ) {
+                    Ok(Some(elem)) => {
+                        if let Some(push_below) = push_below {
+                            push_below(elem.into())
+                        } else {
+                            push_above(elem.into())
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => tracing::warn!("Blur elem error: {:?}", err),
+                }
+            }
         }
-        Vec::new()
     }
+}
+
+render_elements! {
+    pub IcedRenderElement<R> where R: ImportMem + AsGlowRenderer, R::TextureId: Send;
+    UI=MemoryRenderBufferRenderElement<R>,
+    Blur=BlurElement,
 }

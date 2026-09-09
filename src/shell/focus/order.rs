@@ -32,10 +32,12 @@ pub enum Stage<'a> {
         layer: LayerSurface,
         popup: &'a PopupKind,
         location: Point<i32, Global>,
+        workspace_idx: usize,
     },
     LayerSurface {
         layer: LayerSurface,
         location: Point<i32, Global>,
+        workspace_idx: usize,
     },
     OverrideRedirect {
         surface: &'a X11Surface,
@@ -95,10 +97,15 @@ fn render_input_order_internal<R: 'static>(
             layer,
             popup: &popup,
             location,
+            workspace_idx: current.1,
         })?;
     }
     for (layer, location) in layer_surfaces(output, Layer::Overlay, element_filter) {
-        callback(Stage::LayerSurface { layer, location })?;
+        callback(Stage::LayerSurface {
+            layer,
+            location,
+            workspace_idx: current.1,
+        })?;
     }
 
     // calculate a bunch of stuff for workspace transitions
@@ -187,7 +194,7 @@ fn render_input_order_internal<R: 'static>(
             });
 
             (
-                Some((previous, has_fullscreen, offset)),
+                Some((previous, previous_idx, has_fullscreen, offset)),
                 Point::<i32, Logical>::from(match (layout, forward) {
                     (WorkspaceLayout::Vertical, true) => (0, output_size.h + offset.y),
                     (WorkspaceLayout::Vertical, false) => (0, -(output_size.h - offset.y)),
@@ -206,6 +213,7 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location,
+                workspace_idx: current.1,
             })?;
         }
     }
@@ -236,7 +244,7 @@ fn render_input_order_internal<R: 'static>(
 
     if element_filter != ElementFilter::LayerShellOnly {
         // previous workspace popups
-        if let Some((previous_handle, _, offset)) = previous.as_ref() {
+        if let Some((previous_handle, _, _, offset)) = previous.as_ref() {
             let Some(workspace) = shell.workspaces.space_for_handle(previous_handle) else {
                 return ControlFlow::Break(Err(OutputNoMode));
             };
@@ -265,11 +273,12 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location,
+                workspace_idx: current.1,
             })?;
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+    if let Some((_, idx, has_fullscreen, offset)) = previous.as_ref()
         && !has_fullscreen
     {
         // previous bottom layer popups
@@ -278,6 +287,7 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location: location + offset.as_global(),
+                workspace_idx: **idx,
             })?;
         }
     }
@@ -289,11 +299,12 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location,
+                workspace_idx: current.1,
             })?;
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+    if let Some((_, idx, has_fullscreen, offset)) = previous.as_ref()
         && !has_fullscreen
     {
         // previous background layer popups
@@ -302,6 +313,7 @@ fn render_input_order_internal<R: 'static>(
                 layer,
                 popup: &popup,
                 location: location + offset.as_global(),
+                workspace_idx: **idx,
             })?;
         }
     }
@@ -309,7 +321,11 @@ fn render_input_order_internal<R: 'static>(
     if !has_focused_fullscreen {
         // top-layer shell
         for (layer, location) in layer_surfaces(output, Layer::Top, element_filter) {
-            callback(Stage::LayerSurface { layer, location })?;
+            callback(Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx: current.1,
+            })?;
         }
     }
 
@@ -326,7 +342,7 @@ fn render_input_order_internal<R: 'static>(
         })?;
 
         // previous workspace windows
-        if let Some((previous_handle, _, offset)) = previous.as_ref() {
+        if let Some((previous_handle, _, _, offset)) = previous.as_ref() {
             let Some(workspace) = shell.workspaces.space_for_handle(previous_handle) else {
                 return ControlFlow::Break(Err(OutputNoMode));
             };
@@ -341,17 +357,25 @@ fn render_input_order_internal<R: 'static>(
         // bottom layer
         for (layer, mut location) in layer_surfaces(output, Layer::Bottom, element_filter) {
             location += current_offset.as_global();
-            callback(Stage::LayerSurface { layer, location })?;
+            callback(Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx: current.1,
+            })?;
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+    if let Some((_, idx, has_fullscreen, offset)) = previous.as_ref()
         && !has_fullscreen
     {
         // previous bottom layer
         for (layer, mut location) in layer_surfaces(output, Layer::Bottom, element_filter) {
             location += offset.as_global();
-            callback(Stage::LayerSurface { layer, location })?;
+            callback(Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx: **idx,
+            })?;
         }
     }
 
@@ -359,17 +383,25 @@ fn render_input_order_internal<R: 'static>(
         // background layer
         for (layer, mut location) in layer_surfaces(output, Layer::Background, element_filter) {
             location += current_offset.as_global();
-            callback(Stage::LayerSurface { layer, location })?;
+            callback(Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx: current.1,
+            })?;
         }
     }
 
-    if let Some((_, has_fullscreen, offset)) = previous.as_ref()
+    if let Some((_, idx, has_fullscreen, offset)) = previous.as_ref()
         && !has_fullscreen
     {
         // previous background layer
         for (layer, mut location) in layer_surfaces(output, Layer::Background, element_filter) {
             location += offset.as_global();
-            callback(Stage::LayerSurface { layer, location })?;
+            callback(Stage::LayerSurface {
+                layer,
+                location,
+                workspace_idx: **idx,
+            })?;
         }
     }
 

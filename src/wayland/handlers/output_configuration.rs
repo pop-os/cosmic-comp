@@ -230,6 +230,16 @@ impl State {
             state.common.output_configuration_state.update();
         });
 
+        // Output scale or geometry may have changed. EI absolute-pointer regions
+        // are immutable per device, so any connected EI client (e.g. an RDP server)
+        // keeps mapping with the old scale until it reconnects. Recreate the
+        // device with the updated region so the mapping tracks the change live.
+        // (drop the backend lock first: refresh borrows `self` immutably.)
+        drop(backend);
+        if !test_only {
+            crate::libei::refresh_absolute_pointer_regions(self);
+        }
+
         true
     }
 }

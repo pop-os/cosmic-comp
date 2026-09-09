@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use smithay::{
+    backend::input::InputTime,
     desktop::{WindowSurfaceType, layer_map_for_output},
     input::{Seat, pointer::MotionEvent},
     output::Output,
@@ -111,8 +112,10 @@ impl ToplevelManagementHandler for State {
             std::mem::drop(shell);
 
             // move pointer to window if it’s on a different monitor/output
-            let switching_output = seat.active_output() != *output;
-            if switching_output && let Some(new_pos) = new_pos {
+            if seat.active_output() != *output
+                && self.common.config.cosmic_conf.cursor_follows_focus
+                && let Some(new_pos) = new_pos
+            {
                 seat.set_active_output(output);
                 if let Some(ptr) = seat.get_pointer() {
                     let serial = SERIAL_COUNTER.next_serial();
@@ -122,7 +125,7 @@ impl ToplevelManagementHandler for State {
                         &MotionEvent {
                             location: new_pos.to_f64().as_logical(),
                             serial,
-                            time: self.common.clock.now().as_millis(),
+                            time: InputTime::now(),
                         },
                     );
                     ptr.frame(self);
