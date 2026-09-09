@@ -1,8 +1,11 @@
 use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
+use parking_lot::RwLock;
 use smithay::{
     backend::drm::VrrSupport as Support,
     output::{Output, WeakOutput},
+    reexports::wayland_server::Client,
     utils::Rectangle,
+    wayland::compositor::{Barrier, CompositorHandler},
 };
 
 pub use super::geometry::*;
@@ -13,10 +16,12 @@ use crate::{config::EdidProduct, shell::zoom::OutputZoomState};
 
 use std::{
     cell::{Ref, RefCell, RefMut},
+    collections::HashMap,
     sync::{
         Mutex,
         atomic::{AtomicU8, Ordering},
     },
+    time::Duration,
 };
 
 pub trait OutputExt {
@@ -36,11 +41,28 @@ pub trait OutputExt {
     fn config_mut(&self) -> RefMut<'_, OutputConfig>;
 
     fn edid(&self) -> Option<&EdidProduct>;
+
+    fn fifo_barrier(&self, barrier: Barrier, client: Client);
+    fn signal_fifo(&self, state: &mut State);
+
+    fn set_avg_frametime(&self, duration: Option<Duration>);
+    fn get_avg_frametime(&self) -> Option<Duration>;
 }
 
 struct Vrr(AtomicU8);
 struct VrrSupport(AtomicU8);
 struct Mirroring(Mutex<Option<WeakOutput>>);
+
+#[derive(Debug, Clone)]
+pub struct FifoBarrierItem {
+    pub barrier: Barrier,
+    pub client: Client,
+}
+
+#[derive(Default)]
+struct FifoBarriers(Mutex<Vec<FifoBarrierItem>>);
+
+struct AvgFrameTime(RwLock<Option<Duration>>);
 
 impl OutputExt for Output {
     fn is_internal(&self) -> bool {
@@ -166,5 +188,45 @@ impl OutputExt for Output {
 
     fn edid(&self) -> Option<&EdidProduct> {
         self.user_data().get()
+    }
+
+    fn fifo_barrier(&self, barrier: Barrier, client: Client) {
+        self.user_data()
+            .get_or_insert_threadsafe(|| FifoBarriers(Mutex::new(Vec::new())))
+            .0
+            .lock()
+            .unwrap()
+            .push(FifoBarrierItem { barrier, client });
+    }
+
+    fn signal_fifo(&self, state: &mut State) {
+        let Some(fifo_barriers) = self.user_data().get::<FifoBarriers>() else {
+            return;
+        };
+
+        let mut clients = HashMap::new();
+        fifo_barriers.0.lock().unwrap().drain(..).for_each(|item| {
+            item.barrier.signal();
+            clients.insert(item.client.id(), item.client);
+        });
+
+        let dh = &state.common.display_handle.clone();
+        for (_id, client) in clients {
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, dh);
+        }
+    }
+
+    fn set_avg_frametime(&self, duration: Option<Duration>) {
+        *self
+            .user_data()
+            .get_or_insert_threadsafe(|| AvgFrameTime(RwLock::new(None)))
+            .0
+            .write() = duration;
+    }
+
+    fn get_avg_frametime(&self) -> Option<Duration> {
+        *self.user_data().get::<AvgFrameTime>()?.0.read()
     }
 }
