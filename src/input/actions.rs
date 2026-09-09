@@ -13,7 +13,10 @@ use crate::{
         handlers::xdg_activation::ActivationContext, protocols::workspace::WorkspaceUpdateGuard,
     },
 };
-use cosmic_comp_config::{TileBehavior, workspace::WorkspaceLayout};
+use cosmic_comp_config::{
+    TileBehavior,
+    workspace::{EdgeNavigation, WorkspaceLayout, WorkspaceMode},
+};
 use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
@@ -360,6 +363,27 @@ impl State {
                     return;
                 };
 
+                let entry_output = if propagate
+                    && self.common.config.cosmic_conf.workspaces.workspace_mode
+                        == WorkspaceMode::Global
+                    && let Some(pressed) = pattern.inferred_direction()
+                {
+                    let entry_direction = match pressed {
+                        Direction::Left => Direction::Right,
+                        Direction::Right => Direction::Left,
+                        Direction::Up => Direction::Down,
+                        Direction::Down => Direction::Up,
+                    };
+                    let shell = self.common.shell.read();
+                    let mut output = focused_output.clone();
+                    while let Some(next) = shell.next_output(&output, entry_direction) {
+                        output = next.clone();
+                    }
+                    output
+                } else {
+                    focused_output.clone()
+                };
+
                 let res = {
                     let mut shell = self.common.shell.write();
                     shell
@@ -371,7 +395,7 @@ impl State {
                         .and_then(|workspace| {
                             shell.move_current(
                                 seat,
-                                (&focused_output, Some(workspace)),
+                                (&entry_output, Some(workspace)),
                                 matches!(x, Action::MoveToNextWorkspace),
                                 direction,
                                 &mut self.common.workspace_state.update(),
@@ -454,6 +478,27 @@ impl State {
                     return;
                 };
 
+                let entry_output = if propagate
+                    && self.common.config.cosmic_conf.workspaces.workspace_mode
+                        == WorkspaceMode::Global
+                    && let Some(pressed) = pattern.inferred_direction()
+                {
+                    let entry_direction = match pressed {
+                        Direction::Left => Direction::Right,
+                        Direction::Right => Direction::Left,
+                        Direction::Up => Direction::Down,
+                        Direction::Down => Direction::Up,
+                    };
+                    let shell = self.common.shell.read();
+                    let mut output = focused_output.clone();
+                    while let Some(next) = shell.next_output(&output, entry_direction) {
+                        output = next.clone();
+                    }
+                    output
+                } else {
+                    focused_output.clone()
+                };
+
                 let res = {
                     let mut shell = self.common.shell.write();
                     shell
@@ -465,7 +510,7 @@ impl State {
                         .and_then(|workspace| {
                             shell.move_current(
                                 seat,
-                                (&focused_output, Some(workspace)),
+                                (&entry_output, Some(workspace)),
                                 matches!(x, Action::MoveToPreviousWorkspace),
                                 direction,
                                 &mut self.common.workspace_state.update(),
@@ -636,19 +681,6 @@ impl State {
                             &self.common.event_loop_handle,
                         );
 
-                        if is_move_action
-                            && propagate
-                            && let Some((_, prev_output, prev_idx)) =
-                                shell.previous_workspace_idx.take()
-                            && prev_output == focused_output
-                        {
-                            let _ = shell.activate(
-                                &focused_output,
-                                prev_idx,
-                                WorkspaceDelta::new_shortcut(),
-                                &mut workspace_guard,
-                            );
-                        }
                         res
                     };
 
@@ -775,19 +807,40 @@ impl State {
                                 }
                             }
 
-                            let action = match (
-                                direction,
-                                self.common.config.cosmic_conf.workspaces.workspace_layout,
-                            ) {
-                                (Direction::Left, WorkspaceLayout::Horizontal)
-                                | (Direction::Up, WorkspaceLayout::Vertical) => {
-                                    Action::PreviousWorkspace
+                            let action = match self
+                                .common
+                                .config
+                                .cosmic_conf
+                                .workspaces
+                                .focus_edge_navigation
+                            {
+                                EdgeNavigation::LockedSpaces => Action::SwitchOutput(direction),
+                                EdgeNavigation::SwitchWorkspace => {
+                                    let output_in_direction_has_windows = {
+                                        let shell = self.common.shell.read();
+                                        let current_output = seat.active_output();
+                                        shell
+                                            .next_output(&current_output, direction)
+                                            .and_then(|output| shell.active_space(output))
+                                            .is_some_and(|workspace| !workspace.is_empty())
+                                    };
+
+                                    match (
+                                        direction,
+                                        self.common.config.cosmic_conf.workspaces.workspace_layout,
+                                        output_in_direction_has_windows,
+                                    ) {
+                                        (Direction::Left, WorkspaceLayout::Horizontal, false)
+                                        | (Direction::Up, WorkspaceLayout::Vertical, false) => {
+                                            Action::PreviousWorkspace
+                                        }
+                                        (Direction::Right, WorkspaceLayout::Horizontal, false)
+                                        | (Direction::Down, WorkspaceLayout::Vertical, false) => {
+                                            Action::NextWorkspace
+                                        }
+                                        _ => Action::SwitchOutput(direction),
+                                    }
                                 }
-                                (Direction::Right, WorkspaceLayout::Horizontal)
-                                | (Direction::Down, WorkspaceLayout::Vertical) => {
-                                    Action::NextWorkspace
-                                }
-                                _ => Action::SwitchOutput(direction),
                             };
 
                             self.handle_shortcut_action(
@@ -817,36 +870,40 @@ impl State {
                     .move_current_element(direction, seat);
                 match res {
                     MoveResult::MoveFurther(_move_further) => {
-                        if let Some(last_mod_serial) = seat.last_modifier_change_for(backend_id) {
-                            let mut shell = self.common.shell.write();
-                            if !shell
-                                .previous_workspace_idx
-                                .as_ref()
-                                .is_some_and(|(serial, _, _)| *serial == last_mod_serial)
-                            {
-                                let current_output = seat.active_output();
-                                let workspace_idx = shell.workspaces.active_num(&current_output).1;
-                                shell.previous_workspace_idx = Some((
-                                    last_mod_serial,
-                                    current_output.downgrade(),
-                                    workspace_idx,
-                                ));
-                            }
-                        }
+                        let action = match self
+                            .common
+                            .config
+                            .cosmic_conf
+                            .workspaces
+                            .move_edge_navigation
+                        {
+                            EdgeNavigation::LockedSpaces => Action::MoveToOutput(direction),
+                            EdgeNavigation::SwitchWorkspace => {
+                                let output_exists_in_direction =
+                                    seat.focused_output().is_some_and(|output| {
+                                        self.common
+                                            .shell
+                                            .read()
+                                            .next_output(&output, direction)
+                                            .is_some()
+                                    });
 
-                        let action = match (
-                            direction,
-                            self.common.config.cosmic_conf.workspaces.workspace_layout,
-                        ) {
-                            (Direction::Left, WorkspaceLayout::Horizontal)
-                            | (Direction::Up, WorkspaceLayout::Vertical) => {
-                                Action::MoveToPreviousWorkspace
+                                match (
+                                    direction,
+                                    self.common.config.cosmic_conf.workspaces.workspace_layout,
+                                    output_exists_in_direction,
+                                ) {
+                                    (Direction::Left, WorkspaceLayout::Horizontal, false)
+                                    | (Direction::Up, WorkspaceLayout::Vertical, false) => {
+                                        Action::MoveToPreviousWorkspace
+                                    }
+                                    (Direction::Right, WorkspaceLayout::Horizontal, false)
+                                    | (Direction::Down, WorkspaceLayout::Vertical, false) => {
+                                        Action::MoveToNextWorkspace
+                                    }
+                                    _ => Action::MoveToOutput(direction),
+                                }
                             }
-                            (Direction::Right, WorkspaceLayout::Horizontal)
-                            | (Direction::Down, WorkspaceLayout::Vertical) => {
-                                Action::MoveToNextWorkspace
-                            }
-                            _ => Action::MoveToOutput(direction),
                         };
 
                         self.handle_shortcut_action(
