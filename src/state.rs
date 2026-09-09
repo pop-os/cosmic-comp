@@ -1172,12 +1172,13 @@ impl Common {
             }
         }
 
-        shell
-            .workspaces
-            .sets
-            .get(output)
-            .unwrap()
-            .sticky_layer
+        // The set can be gone already when this runs for an output that a
+        // configuration change just removed; a render message from its surface
+        // thread may still be queued. Nothing to send in that case.
+        let Some(set) = shell.workspaces.sets.get(output) else {
+            return;
+        };
+        set.sticky_layer
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
@@ -1385,12 +1386,11 @@ impl Common {
             }
         }
 
-        shell
-            .workspaces
-            .sets
-            .get(output)
-            .unwrap()
-            .sticky_layer
+        // Same as in send_dmabuf_feedback: the set may already be gone.
+        let Some(set) = shell.workspaces.sets.get(output) else {
+            return;
+        };
+        set.sticky_layer
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
