@@ -324,6 +324,24 @@ pub struct Common {
     #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
 
+    /// Whether the laptop lid is currently shut.
+    ///
+    /// Kept so the built-in panel can stay powered down for as long as the lid
+    /// is closed. Without this, any input event powers every output back on,
+    /// which lights the panel inside a closed lid.
+    ///
+    /// Fed from two sources that cost nothing: the `SwitchToggle` input event,
+    /// which carries the state and covers every transition while the compositor
+    /// runs, and the `lid_closed()` call `update_inhibitor_locks` already makes
+    /// when it takes the inhibitor. Deliberately never queried on the output
+    /// configuration path - that call blocks the main thread.
+    ///
+    /// The gap this leaves is a compositor that starts with the lid already shut
+    /// and a single output, where nothing has asked yet. `false` is the safe
+    /// default there: the panel stays lit, which is the unpatched behaviour, and
+    /// the first lid transition corrects it.
+    pub lid_closed: bool,
+
     pub with_xwayland: bool,
 }
 
@@ -833,6 +851,7 @@ impl State {
 
                 #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
+                lid_closed: false,
 
                 with_xwayland,
             },
@@ -886,6 +905,11 @@ impl State {
                                 .cloned();
                             let closed =
                                 crate::dbus::logind::lid_closed(&self.common).unwrap_or(false);
+                            // Reuse the value this branch already fetches. Asking
+                            // logind again on the configuration path would put a
+                            // blocking bus round trip on the main thread, which is
+                            // exactly what must not happen here.
+                            self.common.lid_closed = closed;
 
                             if closed {
                                 backend.disable_internal_output(
@@ -935,11 +959,27 @@ impl State {
 
                 if let Err(err) = self.refresh_output_config() {
                     warn!(?err, "Failed to re-enable internal connector");
-                    if let Some(output) = output {
+                    if let Some(output) = &output {
                         output.config_mut().enabled = OutputState::Disabled;
                         if let Err(err) = self.refresh_output_config() {
                             error!("Unrecoverable output configuration error: {}", err);
                         }
+                    }
+                } else if self.common.lid_closed {
+                    // The second output has just gone away while the lid is still
+                    // shut. Re-enabling the internal panel above is not optional -
+                    // it is the only output left, and a session with none has
+                    // nowhere to render - but it must not light up inside a closed
+                    // lid. Power the connector down instead, which is the same
+                    // trade the single-output lid path makes.
+                    //
+                    // `lid_closed` is a plain field, so this costs no bus traffic
+                    // on the output configuration path. Asking logind here is what
+                    // deadlocked the first version of this fix.
+                    if let Some(output) = &output {
+                        use crate::wayland::protocols::output_power::OutputPowerHandler;
+                        self.set_dpms(output, false);
+                        OutputPowerState::refresh(self);
                     }
                 }
                 // drop _fd

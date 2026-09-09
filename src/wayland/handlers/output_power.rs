@@ -12,8 +12,16 @@ use crate::{
 };
 
 pub fn set_all_surfaces_dpms_on(state: &mut State) {
+    // Input events power every output back on. The built-in panel is exempt while
+    // the lid is shut, otherwise the lid switch itself - and any later keypress or
+    // pointer motion from an external device - lights a screen nobody can see.
+    let lid_closed = state.common.lid_closed;
+
     let mut changed = false;
     for surface in kms_surfaces(state) {
+        if lid_closed && surface.output.is_internal() {
+            continue;
+        }
         if !surface.get_dpms() {
             surface.set_dpms(true);
             changed = true;
