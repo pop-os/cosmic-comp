@@ -31,7 +31,7 @@ use ordered_float::OrderedFloat;
 use smithay::{
     backend::{
         allocator::Fourcc,
-        input::{ButtonState, InputTime, KeyState},
+        input::{ButtonState, InputTime, KeyState, TabletToolDescriptor},
         renderer::{
             ImportMem,
             element::{
@@ -45,14 +45,23 @@ use smithay::{
         Seat,
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent,
             PointerTarget, RelativeMotionEvent,
         },
+        tablet::{
+            Tablet,
+            tool::{
+                AxisFrame as ToolAxisFrame, ButtonEvent as ToolButtonEvent,
+                DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolTarget,
+                UpEvent as ToolUpEvent,
+            },
+        },
         touch::{
-            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
-            TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, FrameMarker, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchTarget, UpEvent as TouchUpEvent,
         },
     },
     output::Output,
@@ -189,6 +198,7 @@ pub(crate) struct IcedElementInternal<P: Program + Send + 'static> {
     touch_map: HashMap<Finger, IcedPoint>,
     last_touch_frame: Option<FrameMarker>,
     last_touch_serial: Option<Serial>,
+    last_tablet_serial: Option<Serial>,
 
     // iced
     theme: Theme,
@@ -240,6 +250,7 @@ impl<P: Program + Send + Clone + 'static> Clone for IcedElementInternal<P> {
             touch_map: self.touch_map.clone(),
             last_touch_frame: None,
             last_touch_serial: None,
+            last_tablet_serial: None,
             theme: self.theme.clone(),
             renderer,
             state,
@@ -267,6 +278,7 @@ impl<P: Program + Send + 'static> fmt::Debug for IcedElementInternal<P> {
             .field("touch_map", &self.touch_map)
             .field("last_touch_frame", &self.last_touch_frame)
             .field("last_touch_serial", &self.last_touch_serial)
+            .field("last_tablet_serial", &self.last_tablet_serial)
             .field("theme", &"...")
             .field("renderer", &"...")
             .field("state", &"...")
@@ -326,6 +338,7 @@ impl<P: Program + Send + 'static> IcedElement<P> {
             touch_map: HashMap::new(),
             last_touch_frame: None,
             last_touch_serial: None,
+            last_tablet_serial: None,
             theme,
             renderer,
             state,
@@ -481,12 +494,143 @@ impl<P: Program + Send + 'static> IcedElementInternal<P> {
     }
 }
 
+impl<P: Program + Send + 'static> TabletToolTarget<crate::state::State> for IcedElement<P> {
+    fn proximity_in(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _tablet: &Tablet,
+        serial: Serial,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        internal
+            .state
+            .queue_event(Event::Mouse(MouseEvent::CursorEntered));
+        internal.last_tablet_serial = Some(serial);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), serial));
+        internal.update(false);
+    }
+
+    fn proximity_out(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        internal
+            .state
+            .queue_event(Event::Mouse(MouseEvent::CursorLeft));
+        internal.update(false);
+    }
+
+    fn down(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        event: &ToolDownEvent,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(0);
+        let Some(event_location) = internal.cursor_pos else {
+            return;
+        };
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+        internal
+            .state
+            .queue_event(Event::Touch(TouchEvent::FingerPressed { id, position }));
+        internal.last_tablet_serial = Some(event.serial);
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(false);
+    }
+
+    fn up(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _event: &ToolUpEvent,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let id = Finger(0);
+        if let Some(event_location) = internal.cursor_pos {
+            *internal.last_seat.lock().unwrap() =
+                Some((seat.clone(), internal.last_tablet_serial.unwrap()));
+            let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+            internal
+                .state
+                .queue_event(Event::Touch(TouchEvent::FingerLifted { id, position }));
+            internal.update(false);
+        }
+    }
+
+    fn motion(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        event: &ToolMotionEvent,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let event_location = event.location.downscale(internal.additional_scale);
+        let position = IcedPoint::new(event_location.x as f32, event_location.y as f32);
+        internal
+            .state
+            .queue_event(Event::Mouse(MouseEvent::CursorMoved { position }));
+        internal.cursor_pos = Some(event_location);
+        *internal.last_seat.lock().unwrap() =
+            Some((seat.clone(), internal.last_tablet_serial.unwrap()));
+        internal.update(false);
+    }
+
+    fn axis(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _frame: ToolAxisFrame,
+    ) {
+    }
+
+    fn button(
+        &self,
+        seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        event: &ToolButtonEvent,
+    ) {
+        let mut internal = self.0.lock().unwrap();
+        let button = match event.button {
+            0x14b => MouseButton::Right,
+            0x14c => MouseButton::Middle,
+            _ => return,
+        };
+        internal.state.queue_event(Event::Mouse(match event.state {
+            ButtonState::Pressed => MouseEvent::ButtonPressed(button),
+            ButtonState::Released => MouseEvent::ButtonReleased(button),
+        }));
+        *internal.last_seat.lock().unwrap() = Some((seat.clone(), event.serial));
+        internal.update(false);
+    }
+
+    fn frame(
+        &self,
+        _seat: &Seat<crate::state::State>,
+        _data: &mut crate::state::State,
+        _tool_descriptor: &TabletToolDescriptor,
+        _time: InputTime,
+    ) {
+    }
+}
+
 impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedElement<P> {
     fn enter(
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &MotionEvent,
+        event: &PointerMotionEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         internal
@@ -507,7 +651,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &MotionEvent,
+        event: &PointerMotionEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         let event_location = event.location.downscale(internal.additional_scale);
@@ -532,7 +676,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         let button = match event.button {
@@ -553,7 +697,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         &self,
         _seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        frame: AxisFrame,
+        frame: PointerAxisFrame,
     ) {
         let mut internal = self.0.lock().unwrap();
         internal
@@ -653,7 +797,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &DownEvent,
+        event: &TouchDownEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);
@@ -673,7 +817,7 @@ impl<P: Program + Send + 'static> TouchTarget<crate::state::State> for IcedEleme
         &self,
         seat: &Seat<crate::state::State>,
         _data: &mut crate::state::State,
-        event: &UpEvent,
+        event: &TouchUpEvent,
     ) {
         let mut internal = self.0.lock().unwrap();
         let id = Finger(i32::from(event.slot) as u64);

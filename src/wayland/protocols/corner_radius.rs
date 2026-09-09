@@ -5,16 +5,19 @@ use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v
 use cosmic_protocols::corner_radius::v1::server::{
     cosmic_corner_radius_manager_v1, cosmic_corner_radius_toplevel_v1,
 };
+use smithay::backend::renderer::buffer_dimensions;
+use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_popup::XdgPopup;
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 use smithay::reexports::wayland_server::New;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{HookId, Logical, Rectangle};
-use smithay::wayland::compositor::Cacheable;
 use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::compositor::with_states;
-use smithay::wayland::shell::wlr_layer::{LayerSurfaceAttributes, WlrLayerShellHandler};
+use smithay::wayland::compositor::{BufferAssignment, Cacheable, SurfaceAttributes};
+use smithay::wayland::shell::wlr_layer::WlrLayerShellHandler;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgShellSurfaceUserData};
+use smithay::wayland::viewporter::ViewportCachedState;
 use smithay::{
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel,
@@ -664,25 +667,31 @@ fn layer_radius_hook<D: 'static>(_state: &mut D, _dh: &DisplayHandle, surface: &
             .get::<CacheablePadding>()
             .pending();
 
-        //  The radius and padding is relative to the size of `zwlr_layer_surface_v1` (according to
-        //  the protocol). That is the configure the client acked.
-        //
-        // `last_acked` is the becomes current as part of this commit,
-        // so it is staged consistently with the pending radius/padding above.
-        //
-        // Until the client acks a configure there is no defined size, and nothing to check.
-        let Some(size) = surface_data
-            .data_map
-            .get::<Mutex<LayerSurfaceAttributes>>()
-            .and_then(|attrs| {
-                attrs
-                    .lock()
-                    .unwrap()
-                    .last_acked
-                    .as_ref()
-                    .and_then(|configure| configure.state.size)
+        // The wl_surface size after this commit is:
+        // - viewport destination if set
+        // - else the logical size of the buffer that will be current attached now
+        // - else existing
+        let size = surface_data
+            .cached_state
+            .get::<ViewportCachedState>()
+            .pending()
+            .size()
+            .or_else(|| {
+                let mut guard = surface_data.cached_state.get::<SurfaceAttributes>();
+                let attrs = guard.pending();
+                match &attrs.buffer {
+                    Some(BufferAssignment::NewBuffer(buffer)) => buffer_dimensions(buffer)
+                        .map(|d| d.to_logical(attrs.buffer_scale, attrs.buffer_transform.into())),
+                    _ => None,
+                }
             })
-        else {
+            .or_else(|| {
+                surface_data
+                    .data_map
+                    .get::<RendererSurfaceStateUserData>()
+                    .and_then(|state| state.lock().unwrap().surface_size())
+            });
+        let Some(size) = size else {
             return;
         };
 

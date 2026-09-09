@@ -9,7 +9,9 @@ use std::{
 use crate::{
     backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
     shell::{
-        CosmicSurface, PendingWindow, Shell, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
+        CosmicSurface, PendingWindow, Shell,
+        focus::target::KeyboardFocusTarget,
+        grabs::{GrabType, ReleaseMode},
     },
     state::State,
     utils::prelude::*,
@@ -32,7 +34,7 @@ use smithay::{
         },
     },
     desktop::space::SpaceElement,
-    input::{keyboard::ModifiersState, pointer::CursorIcon},
+    input::{keyboard::ModifiersState, pointer::CursorIcon, tablet::TabletSeatTrait},
     reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
     utils::{
         Buffer as BufferCoords, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform,
@@ -1045,17 +1047,29 @@ impl XwmHandler for State {
                 true,
             ) {
                 std::mem::drop(shell);
-                if grab.is_touch_grab() {
-                    seat.get_touch()
-                        .unwrap()
-                        .set_grab(self, grab, SERIAL_COUNTER.next_serial())
-                } else {
-                    seat.get_pointer().unwrap().set_grab(
+                match grab.grab_type() {
+                    GrabType::Touch => {
+                        seat.get_touch()
+                            .unwrap()
+                            .set_grab(self, grab, SERIAL_COUNTER.next_serial())
+                    }
+                    GrabType::Pointer => seat.get_pointer().unwrap().set_grab(
                         self,
                         grab,
                         SERIAL_COUNTER.next_serial(),
                         focus,
-                    )
+                    ),
+                    GrabType::TabletTool => seat
+                        .tablet_seat()
+                        .get_tool(grab.tool().unwrap())
+                        .unwrap()
+                        .set_grab(
+                            self,
+                            grab,
+                            InputTime::now(),
+                            SERIAL_COUNTER.next_serial(),
+                            focus,
+                        ),
                 }
             }
         }
@@ -1076,17 +1090,29 @@ impl XwmHandler for State {
                 true,
             ) {
                 std::mem::drop(shell);
-                if grab.is_touch_grab() {
-                    seat.get_touch()
-                        .unwrap()
-                        .set_grab(self, grab, SERIAL_COUNTER.next_serial())
-                } else {
-                    seat.get_pointer().unwrap().set_grab(
+                match grab.grab_type() {
+                    GrabType::Touch => {
+                        seat.get_touch()
+                            .unwrap()
+                            .set_grab(self, grab, SERIAL_COUNTER.next_serial())
+                    }
+                    GrabType::Pointer => seat.get_pointer().unwrap().set_grab(
                         self,
                         grab,
                         SERIAL_COUNTER.next_serial(),
                         focus,
-                    )
+                    ),
+                    GrabType::TabletTool => seat
+                        .tablet_seat()
+                        .get_tool(grab.tool().unwrap())
+                        .unwrap()
+                        .set_grab(
+                            self,
+                            grab,
+                            InputTime::now(),
+                            SERIAL_COUNTER.next_serial(),
+                            focus,
+                        ),
                 }
             }
         }

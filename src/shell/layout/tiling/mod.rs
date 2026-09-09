@@ -3381,7 +3381,7 @@ impl TilingLayout {
         let Some(root) = tree.root_node_id() else {
             if matches!(
                 overview.active_trigger(),
-                Some(Trigger::Pointer(_) | Trigger::Touch(_))
+                Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
             ) && location_f64.is_some()
             {
                 let mut tree = tree.copy_clone();
@@ -3414,7 +3414,7 @@ impl TilingLayout {
 
         if matches!(
             overview.active_trigger(),
-            Some(Trigger::Pointer(_) | Trigger::Touch(_))
+            Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
         ) {
             let non_exclusive_zone = layer_map_for_output(&self.output)
                 .non_exclusive_zone()
@@ -4062,8 +4062,11 @@ impl TilingLayout {
         let draw_groups = overview.0.alpha();
 
         let is_overview = !matches!(overview.0, OverviewMode::None);
-        let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
-            .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
+        let is_mouse_tiling = (matches!(
+            overview.0.trigger(),
+            Some(Trigger::Pointer(_) | Trigger::Tool(_, _))
+        ))
+        .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
         let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
             Some(desc.clone())
         } else {
@@ -4216,8 +4219,11 @@ impl TilingLayout {
         };
         let draw_groups = overview.0.alpha();
 
-        let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
-            .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
+        let is_mouse_tiling = (matches!(
+            overview.0.trigger(),
+            Some(Trigger::Pointer(_) | Trigger::Tool(_, _))
+        ))
+        .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
         let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
             Some(desc.clone())
         } else {

@@ -541,7 +541,13 @@ impl Config {
                     primary.config_mut().xwayland_primary = true;
                 }
             }
-            for output in outputs.iter().filter(|o| o.mirroring().is_none()) {
+            // sort by connector name for a deterministic layout independent of hotplug order
+            let mut sorted_outputs = outputs
+                .iter()
+                .filter(|o| o.mirroring().is_none())
+                .collect::<Vec<_>>();
+            sorted_outputs.sort_by_key(|o| o.name());
+            for output in sorted_outputs {
                 {
                     let mut config = output.config_mut();
                     config.position = (w, 0);
@@ -842,7 +848,9 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 }
                 if !state.common.ei_seats.is_empty() {
                     let seat = state.common.shell.read().seats.last_active().clone();
-                    state.broadcast_ei_keyboard_modifiers(&seat);
+                    if let Some(keyboard) = seat.get_keyboard() {
+                        state.broadcast_ei_keyboard_modifiers(&keyboard);
+                    }
                 }
                 state.common.config.cosmic_conf.xkb_config = value;
             }

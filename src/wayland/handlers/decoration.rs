@@ -69,17 +69,16 @@ impl State {
                 XdgMode::from_preference(self.default_decoration())
             };
             for (window, _) in mapped.windows() {
-                if PreferredDecorationMode::is_unset(&window.0) {
-                    if let Some(toplevel) = window.0.toplevel() {
-                        if toplevel.with_committed_state(|state| {
-                            state.is_some_and(|state| state.decoration_mode.is_some())
-                        }) {
-                            toplevel.with_pending_state(|state| {
-                                state.decoration_mode = Some(mode);
-                            });
-                            toplevel.send_configure();
-                        }
-                    }
+                if PreferredDecorationMode::is_unset(&window.0)
+                    && let Some(toplevel) = window.0.toplevel()
+                    && toplevel.with_committed_state(|state| {
+                        state.is_some_and(|state| state.decoration_mode.is_some())
+                    })
+                {
+                    toplevel.with_pending_state(|state| {
+                        state.decoration_mode = Some(mode);
+                    });
+                    toplevel.send_configure();
                 }
             }
         };
