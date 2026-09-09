@@ -284,7 +284,25 @@ impl Shell {
                 }
 
                 let output = seat.focused_or_active_output();
-                let space = self.active_space(&output).unwrap();
+                // `focused_or_active_output()` is seat-stored state that is never
+                // validated against `sets`. `Common::refresh_focus` re-points stale
+                // seats before it calls `update_active`, but the other caller,
+                // `Shell::set_focus`, does not - and it fires as a consequence of an
+                // output change, with no user input needed.
+                //
+                // The fallback inside `active_space` is no help on its own. Removing
+                // the last output parks its set in `backup_set` and skips the seat
+                // fix-ups; the next `add_output` then *takes* that backup for the new
+                // output. `sets` is non-empty and `backup_set` is `None` while the
+                // seat still names the output that went away.
+                let Some(space) = self.active_space(&output) else {
+                    tracing::warn!(
+                        target: "cosmic_comp::wsdiag",
+                        output = %output.name(),
+                        "update_active: output absent from workspace sets (upstream unwrap would abort here)"
+                    );
+                    return None;
+                };
                 let stack = space.focus_stack.get(seat);
                 stack.last().and_then(|target| match target {
                     FocusTarget::Window(window) => Some(window.clone()),

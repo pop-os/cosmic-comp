@@ -306,7 +306,9 @@ pub fn render_workspace_to_buffer(
     };
 
     let mut output = workspace.output().clone();
-    let idx = shell.workspaces.idx_for_handle(&output, &handle).unwrap();
+    let Some(idx) = shell.workspaces.idx_for_handle(&output, &handle) else {
+        return;
+    };
     std::mem::drop(shell);
 
     let mode = output
