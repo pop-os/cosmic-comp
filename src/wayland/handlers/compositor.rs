@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
+use crate::{
+    shell::{Raise, grabs::SeatMoveGrabState},
+    state::ClientState,
+    utils::prelude::*,
+};
 use calloop::Interest;
 use smithay::{
     backend::{
@@ -411,7 +415,7 @@ impl State {
                 if let Some(target) = res {
                     let seat = shell.seats.last_active().clone();
                     std::mem::drop(shell);
-                    Shell::set_focus(self, Some(&target), &seat, None, true);
+                    Shell::set_focus(self, Some(&target), &seat, None, true, Raise::Yes);
                     return true;
                 }
             }
@@ -428,7 +432,7 @@ impl State {
             if let Some(target) = shell.map_layer(&layer_surface) {
                 let seat = shell.seats.last_active().clone();
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, false);
+                Shell::set_focus(self, Some(&target), &seat, None, false, Raise::Yes);
             }
             layer_surface.layer_surface().send_configure();
             return true;

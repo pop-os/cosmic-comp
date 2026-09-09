@@ -4,7 +4,7 @@ use crate::{
     config::{Action, PrivateAction},
     input::InputBackendId,
     shell::{
-        FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
+        FocusResult, InvalidWorkspaceIndex, MoveResult, Raise, SeatExt, Trigger, WorkspaceDelta,
         focus::{FocusTarget, target::KeyboardFocusTarget},
         layout::tiling::SwapWindowGrab,
     },
@@ -314,6 +314,7 @@ impl State {
                         seat,
                         None,
                         matches!(x, Action::MoveToWorkspace(_)),
+                        Raise::Yes,
                     );
                 }
             }
@@ -341,6 +342,7 @@ impl State {
                         seat,
                         None,
                         matches!(x, Action::MoveToLastWorkspace),
+                        Raise::Yes,
                     );
                 }
             }
@@ -389,6 +391,7 @@ impl State {
                             seat,
                             None,
                             matches!(x, Action::MoveToNextWorkspace),
+                            Raise::Yes,
                         );
                     }
                     Ok(None) => {}
@@ -482,6 +485,7 @@ impl State {
                             seat,
                             None,
                             matches!(x, Action::MoveToPreviousWorkspace),
+                            Raise::Yes,
                         );
                     }
                     Ok(None) => {}
@@ -579,7 +583,14 @@ impl State {
                         std::mem::drop(shell);
 
                         let update_cursor = self.common.config.cosmic_conf.cursor_follows_focus;
-                        Shell::set_focus(self, new_target.as_ref(), seat, None, update_cursor);
+                        Shell::set_focus(
+                            self,
+                            new_target.as_ref(),
+                            seat,
+                            None,
+                            update_cursor,
+                            Raise::Yes,
+                        );
 
                         if let Some(ptr) = seat.get_pointer() {
                             // Update cursor position if `set_focus` didn't already
@@ -654,7 +665,14 @@ impl State {
 
                     if let Ok(Some((target, new_pos))) = res {
                         std::mem::drop(shell);
-                        Shell::set_focus(self, Some(&target), seat, None, is_move_action);
+                        Shell::set_focus(
+                            self,
+                            Some(&target),
+                            seat,
+                            None,
+                            is_move_action,
+                            Raise::Yes,
+                        );
                         if let Some(ptr) = seat.get_pointer() {
                             ptr.motion(
                                 self,
@@ -804,7 +822,7 @@ impl State {
                     }
                     FocusResult::Handled => {}
                     FocusResult::Some(target) => {
-                        Shell::set_focus(self, Some(&target), seat, None, true);
+                        Shell::set_focus(self, Some(&target), seat, None, true, Raise::Yes);
                     }
                 }
             }
@@ -861,7 +879,7 @@ impl State {
                         )
                     }
                     MoveResult::ShiftFocus(shift) => {
-                        Shell::set_focus(self, Some(&shift), seat, None, true);
+                        Shell::set_focus(self, Some(&shift), seat, None, true, Raise::Yes);
                     }
                     _ => {
                         let current_output = seat.active_output();
@@ -937,7 +955,14 @@ impl State {
                             &self.common.event_loop_handle,
                         ) {
                             std::mem::drop(shell);
-                            Shell::set_focus(self, Some(&target), seat, Some(serial), true);
+                            Shell::set_focus(
+                                self,
+                                Some(&target),
+                                seat,
+                                Some(serial),
+                                true,
+                                Raise::Yes,
+                            );
                         }
                     }
                     Some(KeyboardFocusTarget::Fullscreen(surface)) => {
@@ -945,7 +970,14 @@ impl State {
                             shell.unfullscreen_request(&surface, &self.common.event_loop_handle)
                         {
                             std::mem::drop(shell);
-                            Shell::set_focus(self, Some(&target), seat, Some(serial), true);
+                            Shell::set_focus(
+                                self,
+                                Some(&target),
+                                seat,
+                                Some(serial),
+                                true,
+                                Raise::Yes,
+                            );
                         }
                     }
                     _ => {}
@@ -982,7 +1014,14 @@ impl State {
                     .write()
                     .toggle_stacking_focused(seat, &self.common.event_loop_handle);
                 if let Some(new_focus) = res {
-                    Shell::set_focus(self, Some(&new_focus), seat, Some(serial), false);
+                    Shell::set_focus(
+                        self,
+                        Some(&new_focus),
+                        seat,
+                        Some(serial),
+                        false,
+                        Raise::Yes,
+                    );
                 }
             }
 

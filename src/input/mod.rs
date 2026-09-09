@@ -14,7 +14,7 @@ use crate::{
         tablet_emu::PointerEmulationGrab,
     },
     shell::{
-        SeatExt, Trigger,
+        Raise, SeatExt, Trigger,
         focus::{
             Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -518,12 +518,27 @@ impl State {
                                         //takes this function to run
                                         state.common.pointer_focus_state = None;
 
+                                        // Focus is following the pointer here. Raise
+                                        // only if the user has left raise-on-hover on;
+                                        // otherwise pass Raise::No so the window gains
+                                        // focus without being lifted (sloppy focus).
+                                        let raise = if state
+                                            .common
+                                            .config
+                                            .cosmic_conf
+                                            .focus_follows_cursor_raise
+                                        {
+                                            Raise::Yes
+                                        } else {
+                                            Raise::No
+                                        };
                                         Shell::set_focus(
                                             state,
                                             target.as_ref(),
                                             &seat,
                                             Some(SERIAL_COUNTER.next_serial()),
                                             false,
+                                            raise,
                                         );
 
                                         TimeoutAction::Drop
@@ -1001,7 +1016,14 @@ impl State {
                                 }
                             }
 
-                            Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
+                            Shell::set_focus(
+                                self,
+                                Some(&target),
+                                &seat,
+                                Some(serial),
+                                false,
+                                Raise::Yes,
+                            );
                         }
                     }
                 } else {
@@ -1858,7 +1880,14 @@ impl State {
                     if event.tip_state() == TabletToolTipState::Down
                         && let Some(target) = under.as_ref()
                     {
-                        Shell::set_focus(self, Some(target), &seat, Some(serial), false);
+                        Shell::set_focus(
+                            self,
+                            Some(target),
+                            &seat,
+                            Some(serial),
+                            false,
+                            Raise::Yes,
+                        );
                     }
 
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
@@ -2673,7 +2702,14 @@ impl State {
                         ) {
                             let seat = seat.clone();
                             self.common.event_loop_handle.insert_idle(move |state| {
-                                Shell::set_focus(state, Some(&focus), &seat, None, true);
+                                Shell::set_focus(
+                                    state,
+                                    Some(&focus),
+                                    &seat,
+                                    None,
+                                    true,
+                                    Raise::Yes,
+                                );
                             });
                         }
                         old_workspace.refresh_focus_stack();
@@ -2689,7 +2725,7 @@ impl State {
                         std::mem::drop(spaces);
                         let seat = seat.clone();
                         self.common.event_loop_handle.insert_idle(move |state| {
-                            Shell::set_focus(state, Some(&focus), &seat, None, true);
+                            Shell::set_focus(state, Some(&focus), &seat, None, true, Raise::Yes);
                         });
                     }
                     workspace.refresh_focus_stack();
@@ -2725,7 +2761,7 @@ impl State {
                     ) {
                         let seat = seat.clone();
                         self.common.event_loop_handle.insert_idle(move |state| {
-                            Shell::set_focus(state, Some(&focus), &seat, None, true);
+                            Shell::set_focus(state, Some(&focus), &seat, None, true, Raise::Yes);
                         });
                     }
                     old_workspace.refresh_focus_stack();

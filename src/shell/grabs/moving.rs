@@ -5,7 +5,7 @@ use crate::{
         BackdropShader, IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
     },
     shell::{
-        CosmicMapped, CosmicSurface, Direction, ManagedLayer,
+        CosmicMapped, CosmicSurface, Direction, ManagedLayer, Raise,
         element::{CosmicMappedRenderElement, stack_hover::StackHover},
         focus::target::{KeyboardFocusTarget, PointerFocusTarget},
         grabs::GrabType,
@@ -1079,6 +1079,7 @@ impl Drop for MoveGrab {
                     &seat,
                     Some(serial),
                     false,
+                    Raise::Yes,
                 )
             }
         });

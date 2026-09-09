@@ -2,7 +2,7 @@
 
 use crate::{
     shell::{
-        CosmicSurface, PendingWindow,
+        CosmicSurface, PendingWindow, Raise,
         focus::target::KeyboardFocusTarget,
         grabs::{GrabType, ReleaseMode},
     },
@@ -129,6 +129,7 @@ impl XdgShellHandler for State {
                             &seat,
                             Some(serial),
                             false,
+                            Raise::Yes,
                         );
                         keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
                     }
@@ -291,7 +292,7 @@ impl XdgShellHandler for State {
         match shell.fullscreen_request(&surface, output.clone(), &self.common.event_loop_handle) {
             Some(target) => {
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, true);
+                Shell::set_focus(self, Some(&target), &seat, None, true, Raise::Yes);
             }
             None => {
                 if let Some(pending) = shell.pending_windows.iter_mut().find(|pending| {
@@ -321,7 +322,7 @@ impl XdgShellHandler for State {
         if let Some(target) = shell.unfullscreen_request(&surface, &self.common.event_loop_handle) {
             std::mem::drop(shell);
             if should_focus {
-                Shell::set_focus(self, Some(&target), &seat, None, true);
+                Shell::set_focus(self, Some(&target), &seat, None, true, Raise::Yes);
             }
         } else if let Some(pending) = shell
             .pending_windows
