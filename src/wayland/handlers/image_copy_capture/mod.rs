@@ -401,7 +401,8 @@ fn constraints_for_output(output: &Output, backend: &mut BackendData) -> Option<
             kms.target_node_for_output(output)
                 .or(*kms.primary_node.read().unwrap())
         })
-        .unwrap();
+        .inspect_err(|err| tracing::warn!(?err, "Couldn't use node for screencopy"))
+        .ok()?;
     Some(constraints_for_renderer(mode, renderer.as_mut()))
 }
 
@@ -423,7 +424,8 @@ fn constraints_for_toplevel(
 
             dma_node.or(*kms.primary_node.read().unwrap())
         })
-        .unwrap();
+        .inspect_err(|err| tracing::warn!(?err, "Couldn't use node for screencopy"))
+        .ok()?;
 
     Some(constraints_for_renderer(size, renderer.as_mut()))
 }
