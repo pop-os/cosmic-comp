@@ -15,6 +15,7 @@ use tracing::{error, warn};
 
 pub mod a11y_keyboard_monitor;
 use a11y_keyboard_monitor::A11yKeyboardMonitorState;
+mod client_allow_list;
 pub mod ei;
 #[cfg(feature = "logind")]
 pub mod logind;
@@ -90,10 +91,22 @@ impl DBusState {
 async fn init_session(state: &DBusState) -> zbus::Result<()> {
     let conn = state.session_conn().await?;
     let name_owners = name_owners::NameOwners::new(conn, &state.0.executor).await?;
-    let a11y_keyboard_monitor_state =
-        A11yKeyboardMonitorState::new(conn, &name_owners, &state.0.executor).await?;
+    let allow_lists = client_allow_list::ClientAllowLists::load();
+    let a11y_keyboard_monitor_state = A11yKeyboardMonitorState::new(
+        conn,
+        &name_owners,
+        &state.0.executor,
+        allow_lists.a11y_keyboard_monitor,
+    )
+    .await?;
     *state.0.a11y_keyboard_monitor.borrow_mut() = Some(a11y_keyboard_monitor_state);
-    ei::init(conn, &name_owners, state.0.ei_sender.clone()).await?;
+    ei::init(
+        conn,
+        &name_owners,
+        state.0.ei_sender.clone(),
+        allow_lists.ei,
+    )
+    .await?;
     Ok(())
 }
 
