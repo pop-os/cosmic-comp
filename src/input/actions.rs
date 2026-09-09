@@ -141,6 +141,46 @@ impl State {
                     &mut self.common.workspace_state.update(),
                 );
             }
+               SwipeAction::WorkspaceOverview => {
+                if let Some(command) = self
+                    .common
+                    .config
+                    .system_actions
+                    .get(&shortcuts::action::System::WorkspaceOverview)
+                {
+                    self.spawn_command(command.clone());
+                }
+            }
+            SwipeAction::AppLibrary => {
+                 if let Some(command) = self
+                    .common
+                    .config
+                    .system_actions
+                    .get(&shortcuts::action::System::AppLibrary)
+                 {
+                    self.spawn_command(command.clone());
+                 }
+            }
+            SwipeAction::WindowSwitcher => {
+                 if let Some(command) = self
+                    .common
+                    .config
+                    .system_actions
+                    .get(&shortcuts::action::System::WindowSwitcher)
+                 {
+                    self.spawn_command(command.clone());
+                 }
+            }
+            SwipeAction::WindowSwitcherPrevious => {
+                 if let Some(command) = self
+                    .common
+                    .config
+                    .system_actions
+                    .get(&shortcuts::action::System::WindowSwitcherPrevious)
+                 {
+                    self.spawn_command(command.clone());
+                 }
+            }
         }
     }
 
