@@ -211,6 +211,15 @@ struct Sticky(AtomicBool);
 struct GlobalGeometry(Mutex<Option<Rectangle<i32, Global>>>);
 
 impl CosmicSurface {
+    pub fn effective_render_alpha(&self, alpha: f32) -> f32 {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(_) => alpha,
+            WindowSurface::X11(surface) => {
+                alpha * surface.opacity().unwrap_or(u32::MAX) as f32 / u32::MAX as f32
+            }
+        }
+    }
+
     pub fn title(&self) -> String {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {

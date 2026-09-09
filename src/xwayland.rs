@@ -55,7 +55,7 @@ use smithay::{
     },
     xwayland::{
         X11Surface, X11Wm, XWayland, XWaylandClientData, XWaylandEvent, XwmHandler,
-        xwm::{Reorder, XwmId},
+        xwm::{Reorder, WmWindowProperty, XwmId},
     },
 };
 use tracing::{error, trace, warn};
@@ -1028,6 +1028,29 @@ impl XwmHandler for State {
         }
     }
 
+    fn property_notify(&mut self, _xwm: XwmId, window: X11Surface, property: WmWindowProperty) {
+        if property != WmWindowProperty::Opacity {
+            return;
+        }
+
+        let output = {
+            let shell = self.common.shell.read();
+            shell
+                .element_for_surface(&window)
+                .and_then(|mapped| shell.space_for(mapped))
+                .map(|workspace| workspace.output().clone())
+                .or_else(|| {
+                    window
+                        .wl_surface()
+                        .and_then(|surface| shell.visible_output_for_surface(&surface).cloned())
+                })
+        };
+
+        if let Some(output) = output {
+            self.backend.schedule_render(&output);
+        }
+    }
+
     fn resize_request(
         &mut self,
         _xwm: XwmId,
@@ -1207,6 +1230,38 @@ impl XwmHandler for State {
             .find(|pending| pending.surface.x11_surface() == Some(&window))
         {
             pending.fullscreen.take();
+        }
+    }
+
+    fn below_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Err(err) = window.set_below(true) {
+            warn!(?window, ?err, "Failed to set X11 window below");
+            return;
+        }
+
+        let output =
+            self.common
+                .shell
+                .write()
+                .set_x11_below(&window, true, &self.common.event_loop_handle);
+        if let Some(output) = output {
+            self.backend.schedule_render(&output);
+        }
+    }
+
+    fn unbelow_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Err(err) = window.set_below(false) {
+            warn!(?window, ?err, "Failed to unset X11 window below");
+            return;
+        }
+
+        let output =
+            self.common
+                .shell
+                .write()
+                .set_x11_below(&window, false, &self.common.event_loop_handle);
+        if let Some(output) = output {
+            self.backend.schedule_render(&output);
         }
     }
 
