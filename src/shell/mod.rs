@@ -857,6 +857,7 @@ impl Workspaces {
     pub fn add_output(
         &mut self,
         output: &Output,
+        seats: &Seats,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
         if self.sets.contains_key(output) {
@@ -922,6 +923,26 @@ impl Workspaces {
             }
         }
         self.sets.insert(output.clone(), set);
+
+        // Taking `backup_set` above is the point where the fallback stops covering
+        // for stale seats. `remove_output` re-points seats only inside its
+        // `if let Some(new_output)` branch, which is skipped when the *last* output
+        // goes away: it parks the set in `backup_set` and leaves every seat naming
+        // an output that is no longer in `sets`. Bring them back in line here, so
+        // that an output-keyed lookup cannot miss on a seat nothing ever fixed up.
+        //
+        // Only the insert path needs this - it is the one that consumes the backup.
+        for seat in seats.iter() {
+            if !self.sets.contains_key(&seat.active_output()) {
+                seat.set_active_output(output);
+            }
+            if seat
+                .focused_output()
+                .is_some_and(|focused| !self.sets.contains_key(&focused))
+            {
+                seat.set_focused_output(None);
+            }
+        }
     }
 
     pub fn remove_output<'a>(
@@ -1362,12 +1383,14 @@ impl Workspaces {
     }
 
     pub fn active_num(&self, output: &Output) -> (Option<usize>, usize) {
-        let set = self.sets.get(output).or(self.backup_set.as_ref()).unwrap();
+        let Some(set) = self.sets.get(output).or(self.backup_set.as_ref()) else {
+            return (None, 0);
+        };
         (set.previously_active.map(|(idx, _)| idx), set.active)
     }
 
     pub fn idx_for_handle(&self, output: &Output, handle: &WorkspaceHandle) -> Option<usize> {
-        let set = self.sets.get(output).unwrap();
+        let set = self.sets.get(output).or(self.backup_set.as_ref())?;
         set.workspaces
             .iter()
             .enumerate()
@@ -1375,8 +1398,10 @@ impl Workspaces {
     }
 
     pub fn len(&self, output: &Output) -> usize {
-        let set = self.sets.get(output).unwrap();
-        set.workspaces.len()
+        self.sets
+            .get(output)
+            .or(self.backup_set.as_ref())
+            .map_or(0, |set| set.workspaces.len())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet)> {
@@ -1535,9 +1560,12 @@ impl Drop for OutputId {
 impl Common {
     pub fn add_output(&mut self, output: &Output) {
         let mut shell = self.shell.write();
-        shell
-            .workspaces
-            .add_output(output, &mut self.workspace_state.update());
+        let shell_ref = &mut *shell;
+        shell_ref.workspaces.add_output(
+            output,
+            &shell_ref.seats,
+            &mut self.workspace_state.update(),
+        );
 
         output
             .user_data()
@@ -2690,12 +2718,22 @@ impl Shell {
                 .upgrade()
                 .unwrap_or_else(|| self.seats.last_active().active_output());
             toplevel_enter_output(&window.active_window(), &output);
-            let set = self
+            // Same window as `update_active`: `active_output()` can name an output
+            // that is in neither `sets` nor `backup_set`. Carrying the fallback is
+            // not sufficient - it has to be allowed to miss.
+            let Some(set) = self
                 .workspaces
                 .sets
                 .get_mut(&output)
                 .or(self.workspaces.backup_set.as_mut())
-                .unwrap();
+            else {
+                tracing::warn!(
+                    target: "cosmic_comp::wsdiag",
+                    output = %output.name(),
+                    "remap_unfullscreened_window: output absent from workspace sets (upstream unwrap would abort here)"
+                );
+                return window;
+            };
             set.sticky_layer.map_internal(
                 window.clone(),
                 Some(state.geometry.loc),
@@ -4065,7 +4103,18 @@ impl Shell {
             return FocusResult::None;
         }
 
-        let set = self.workspaces.sets.get(&output).unwrap();
+        // `seat.active_output()` can name an output that is no longer in `sets`:
+        // `remove_output` only re-points seats when another output remains, so
+        // removing the last one leaves every seat pointing at it while its set
+        // moves to `backup_set`. Fall back the way the other accessors do.
+        let Some(set) = self
+            .workspaces
+            .sets
+            .get(&output)
+            .or(self.workspaces.backup_set.as_ref())
+        else {
+            return FocusResult::None;
+        };
         let sticky_layer = &set.sticky_layer;
         let workspace = &set.workspaces[set.active];
 
@@ -4699,7 +4748,15 @@ impl Shell {
         loop_handle: &LoopHandle<'static, State>,
     ) -> Option<KeyboardFocusTarget> {
         let focused_output = seat.focused_output()?;
-        let set = self.workspaces.sets.get_mut(&focused_output).unwrap();
+        // Same stale-output case as `next_focus`. Note the `?` above does not
+        // cover it: the `set_focused_output(None)` that would make it `None`
+        // lives in the same branch of `remove_output` that is skipped when the
+        // last output goes away.
+        let set = self
+            .workspaces
+            .sets
+            .get_mut(&focused_output)
+            .or(self.workspaces.backup_set.as_mut())?;
         let workspace = &mut set.workspaces[set.active];
 
         if matches!(
@@ -5113,9 +5170,9 @@ impl Shell {
             }
         });
 
+        let namespace = self.workspaces.active_num(output).1;
         let map = smithay::desktop::layer_map_for_output(output);
         for layer_surface in map.layers() {
-            let namespace = self.workspaces.active_num(output).1;
             layer_surface.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
