@@ -2096,6 +2096,21 @@ impl State {
             backend_id, seat, modifiers, handle, serial, keycode, key_state, time,
         );
 
+        // A modifier-only binding fires on the modifier's release, but its press was already
+        // forwarded. Forward the release too.
+        if key_state == KeyState::Released
+            && matches!(&result, FilterResult::Intercept(Some((_, binding))) if binding.key.is_none())
+        {
+            seat.get_keyboard().unwrap().input_forward(
+                self,
+                keycode,
+                key_state,
+                serial,
+                time,
+                previous_modifiers != *modifiers,
+            );
+        }
+
         if (matches!(result, FilterResult::Forward)
             && !seat.get_keyboard().unwrap().is_grabbed()
             && !shortcuts_inhibited
