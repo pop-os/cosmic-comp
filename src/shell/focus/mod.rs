@@ -7,7 +7,10 @@ use crate::{
 use indexmap::IndexSet;
 use smithay::{
     backend::input::InputTime,
-    desktop::{PopupUngrabStrategy, layer_map_for_output},
+    desktop::{
+        LayerSurface, PopupUngrabStrategy, WindowSurfaceType, find_popup_root_surface,
+        layer_map_for_output,
+    },
     input::{Seat, pointer::MotionEvent},
     output::Output,
     reexports::wayland_server::{Resource, protocol::wl_surface::WlSurface},
@@ -634,12 +637,28 @@ fn focus_target_is_valid(
 
     // If an exclusive layer shell surface exists (on any output), only exclusive
     // shell surfaces can have focus, on the highest layer with exclusive surfaces.
+    // Popups are judged by their root surface, so an exclusive surface can
+    // still open grabbing popups (menus, dropdowns, context menus).
     if let Some(layer) = exclusive_layer_surface_layer(shell) {
-        return if let KeyboardFocusTarget::LayerSurface(layer_surface) = target {
+        let is_exclusive_on_layer = |layer_surface: &LayerSurface| {
             let data = layer_surface.cached_state();
             (data.keyboard_interactivity, data.layer) == (KeyboardInteractivity::Exclusive, layer)
-        } else {
-            false
+        };
+        return match target {
+            KeyboardFocusTarget::LayerSurface(layer_surface) => {
+                is_exclusive_on_layer(&layer_surface)
+            }
+            KeyboardFocusTarget::Popup(popup) => find_popup_root_surface(&popup)
+                .ok()
+                .and_then(|root| {
+                    shell.outputs().find_map(|o| {
+                        layer_map_for_output(o)
+                            .layer_for_surface(&root, WindowSurfaceType::ALL)
+                            .map(&is_exclusive_on_layer)
+                    })
+                })
+                .unwrap_or(false),
+            _ => false,
         };
     }
 
