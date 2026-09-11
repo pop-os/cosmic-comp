@@ -1594,7 +1594,7 @@ impl State {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
+                        mapped_output_for_tablet(&self.common.config, &shell, &event.device())
                             .cloned()
                     else {
                         return;
@@ -1698,7 +1698,7 @@ impl State {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
                     let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
+                        mapped_output_for_tablet(&self.common.config, &shell, &event.device())
                             .cloned()
                     else {
                         return;
@@ -3181,6 +3181,17 @@ fn mapped_output_for_device<'a, D: Device + 'static>(
         None
     };
     map_to_output.or_else(|| shell.builtin_output())
+}
+
+/// The output a tablet tool maps onto. Unlike touch this never resolves to `None` while any
+/// output exists: [`Shell::builtin_output`] fits a laptop touchscreen but not a tablet, and
+/// dropping every event leaves the tablet silently dead on a machine with no internal panel.
+fn mapped_output_for_tablet<'a, D: Device + 'static>(
+    config: &Config,
+    shell: &'a Shell,
+    device: &D,
+) -> Option<&'a Output> {
+    mapped_output_for_device(config, shell, device).or_else(|| shell.outputs().next())
 }
 
 pub fn update_output_image_copy_cursor_position(
