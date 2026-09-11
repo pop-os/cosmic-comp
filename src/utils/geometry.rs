@@ -172,3 +172,16 @@ impl<C: Coordinate> RectLocalExt<C> for Rectangle<C, Local> {
         Rectangle::new(self.loc.as_logical(), self.size.as_logical())
     }
 }
+
+/// Location that centers `size` on `anchor`, kept within `bounds`.
+pub fn centered_on<Kind>(
+    size: Size<i32, Kind>,
+    anchor: Rectangle<i32, Kind>,
+    bounds: Rectangle<i32, Kind>,
+) -> Point<i32, Kind> {
+    Point::from((
+        anchor.loc.x + (anchor.size.w - size.w) / 2,
+        anchor.loc.y + (anchor.size.h - size.h) / 2,
+    ))
+    .constrain(Rectangle::new(bounds.loc, bounds.size - size))
+}
