@@ -82,7 +82,7 @@ use smithay::{
         idle_inhibit::IdleInhibitManagerState,
         idle_notify::IdleNotifierState,
         image_capture_source::{OutputCaptureSourceState, ToplevelCaptureSourceState},
-        image_copy_capture::ImageCopyCaptureState,
+        image_copy_capture::{ImageCopyCaptureState, Session},
         input_method::InputMethodManagerState,
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitState,
         output::OutputManagerState,
@@ -112,6 +112,7 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_activation::XdgActivationState,
         xdg_foreign::XdgForeignState,
+        xdg_toplevel_icon::XdgToplevelIconManager,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
         xwayland_shell::XWaylandShellState,
     },
@@ -291,6 +292,7 @@ pub struct Common {
     pub output_capture_source_state: OutputCaptureSourceState,
     pub toplevel_capture_source_state: ToplevelCaptureSourceState,
     pub image_copy_capture_state: ImageCopyCaptureState,
+    pub icon_capture_sessions: Vec<Session>,
     pub seat_state: SeatState<State>,
     pub session_lock_manager_state: SessionLockManagerState,
     pub idle_notifier_state: IdleNotifierState<State>,
@@ -310,6 +312,7 @@ pub struct Common {
 
     // shell-related wayland state
     pub xdg_shell_state: XdgShellState,
+    pub xdg_toplevel_icon_manager: XdgToplevelIconManager,
     pub layer_shell_state: WlrLayerShellState,
     pub toplevel_info_state: ToplevelInfoState<State, CosmicSurface>,
     pub toplevel_management_state: ToplevelManagementState,
@@ -743,6 +746,8 @@ impl State {
                 WmCapabilities::WindowMenu,
             ],
         );
+        let mut xdg_toplevel_icon_manager = XdgToplevelIconManager::new::<State>(dh);
+        xdg_toplevel_icon_manager.add_icon_size(128);
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(dh, client_not_sandboxed);
@@ -798,6 +803,7 @@ impl State {
                 output_capture_source_state,
                 toplevel_capture_source_state,
                 image_copy_capture_state,
+                icon_capture_sessions: Vec::new(),
                 shm_state,
                 cursor_shape_manager_state,
                 seat_state,
@@ -816,6 +822,7 @@ impl State {
                 kde_decoration_state,
                 xdg_decoration_state,
                 xdg_shell_state,
+                xdg_toplevel_icon_manager,
                 layer_shell_state,
                 toplevel_info_state,
                 toplevel_management_state,
