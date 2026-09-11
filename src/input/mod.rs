@@ -26,7 +26,7 @@ use crate::{
         },
         zoom::ZoomState,
     },
-    utils::{prelude::*, quirks::workspace_overview_is_open},
+    utils::{prelude::*, quirks::{workspace_overview_is_open, app_library_is_open}},
     wayland::handlers::{
         image_copy_capture::{SessionHolder, cursor_capture_constraints},
         xwayland_keyboard_grab::XWaylandGrabSeat,
@@ -36,7 +36,7 @@ use calloop::{
     RegistrationToken,
     timer::{TimeoutAction, Timer},
 };
-use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout};
+use cosmic_comp_config::{NumlockState, workspace::WorkspaceLayout, input::{GestureAction, TouchpadGestures}};
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, ResizeDirection};
 #[cfg(feature = "logind")]
@@ -1151,7 +1151,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
+                    if event.fingers() >= 3 {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();
@@ -1192,48 +1192,84 @@ impl State {
                             {
                                 natural_scroll = natural;
                             }
-                            activate_action = match gesture_state.fingers {
-                                3 => None, // TODO: 3 finger gestures
-                                4 => {
-                                    if self.common.config.cosmic_conf.workspaces.workspace_layout
-                                        == WorkspaceLayout::Horizontal
-                                    {
-                                        match gesture_state.direction {
-                                            Some(Direction::Left) => {
-                                                if natural_scroll {
-                                                    Some(SwipeAction::NextWorkspace)
-                                                } else {
-                                                    Some(SwipeAction::PrevWorkspace)
-                                                }
-                                            }
-                                            Some(Direction::Right) => {
-                                                if natural_scroll {
-                                                    Some(SwipeAction::PrevWorkspace)
-                                                } else {
-                                                    Some(SwipeAction::NextWorkspace)
-                                                }
-                                            }
-                                            _ => None, // TODO: Other actions
-                                        }
+                            let gestures = self
+                                .common
+                                .config
+                                .cosmic_conf
+                                .input_touchpad
+                                .gestures
+                                .clone()
+                                .unwrap_or_else(|| {
+                                    TouchpadGestures::default_for_layout(
+                                        self.common.config.cosmic_conf.workspaces.workspace_layout,
+                                    )
+                                });
+
+                            let action = match gesture_state.fingers {
+                                3 => match gesture_state.direction {
+                                    Some(Direction::Up) => Some(&gestures.three_finger.swipe_up),
+                                    Some(Direction::Down) => Some(&gestures.three_finger.swipe_down),
+                                    Some(Direction::Left) => Some(&gestures.three_finger.swipe_left),
+                                    Some(Direction::Right) => Some(&gestures.three_finger.swipe_right),
+                                    None => None,
+                                },
+                                4 => match gesture_state.direction {
+                                    Some(Direction::Up) => Some(&gestures.four_finger.swipe_up),
+                                    Some(Direction::Down) => Some(&gestures.four_finger.swipe_down),
+                                    Some(Direction::Left) => Some(&gestures.four_finger.swipe_left),
+                                    Some(Direction::Right) => Some(&gestures.four_finger.swipe_right),
+                                    None => None,
+                                },
+                                _ => None,
+                            };
+
+                            activate_action = match action {
+                                Some(GestureAction::PrevWorkspace) => {
+                                    if natural_scroll {
+                                        Some(SwipeAction::NextWorkspace)
                                     } else {
-                                        match gesture_state.direction {
-                                            Some(Direction::Up) => {
-                                                if natural_scroll {
-                                                    Some(SwipeAction::NextWorkspace)
-                                                } else {
-                                                    Some(SwipeAction::PrevWorkspace)
-                                                }
-                                            }
-                                            Some(Direction::Down) => {
-                                                if natural_scroll {
-                                                    Some(SwipeAction::PrevWorkspace)
-                                                } else {
-                                                    Some(SwipeAction::NextWorkspace)
-                                                }
-                                            }
-                                            _ => None, // TODO: Other actions
-                                        }
+                                        Some(SwipeAction::PrevWorkspace)
                                     }
+                                }
+                                Some(GestureAction::NextWorkspace) => {
+                                    if natural_scroll {
+                                        Some(SwipeAction::PrevWorkspace)
+                                    } else {
+                                        Some(SwipeAction::NextWorkspace)
+                                    }
+                                }
+                                Some(GestureAction::AppLibrary) => {
+                                    if !app_library_is_open(&seat.active_output()) {
+                                        Some(SwipeAction::AppLibrary)
+                                    } else {
+                                        None
+                                    }
+                                }
+                                Some(GestureAction::WorkspaceOverview) => {
+                                    let is_open = workspace_overview_is_open(&seat.active_output());
+                                    match gesture_state.direction {
+                                        Some(Direction::Up) | Some(Direction::Left) => {
+                                            if !is_open {
+                                                Some(SwipeAction::WorkspaceOverview)
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                        Some(Direction::Down) | Some(Direction::Right) => {
+                                            if is_open {
+                                                Some(SwipeAction::WorkspaceOverview)
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                        _ => None,
+                                    }
+                                }
+                                Some(GestureAction::WindowSwitcher) => {
+                                    Some(SwipeAction::WindowSwitcher)
+                                }
+                                Some(GestureAction::WindowSwitcherPrevious) => {
+                                    Some(SwipeAction::WindowSwitcherPrevious)
                                 }
                                 _ => None,
                             };
