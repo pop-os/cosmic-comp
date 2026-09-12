@@ -1490,6 +1490,7 @@ impl FloatingLayout {
         mut resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
         indicator_thickness: u8,
         alpha: f32,
+        focus_transition_ms: u64,
         theme: &cosmic::theme::CosmicTheme,
         scanout_node: Option<DrmNode>,
         push: &mut dyn FnMut(CosmicMappedRenderElement<R>),
@@ -1587,9 +1588,17 @@ impl FloatingLayout {
                 None
             };
 
-            if focused == Some(elem) && !elem.is_maximized(false) {
+            let is_focused = focused == Some(elem);
+            if elem.focus_indicator_visible(is_focused, focus_transition_ms)
+                && !elem.is_maximized(false)
+            {
                 let active_window_hint = crate::theme::active_window_hint(theme);
                 let radius = elem.corner_radius(geometry.size.as_logical(), indicator_thickness);
+
+                // fade the focus indicator in on the newly focused window and out on
+                // the window that just lost focus (shared interpolation logic)
+                let hint_alpha = alpha
+                    * elem.focus_indicator_alpha(is_focused, focus_transition_ms);
 
                 if let Some((mode, resize)) = resize_indicator.as_mut() {
                     let mut resize_geometry = geometry;
@@ -1605,7 +1614,7 @@ impl FloatingLayout {
                             .as_logical()
                             .to_physical_precise_round(output_scale),
                         output_scale.into(),
-                        alpha * mode.alpha().unwrap_or(1.0),
+                        hint_alpha * mode.alpha().unwrap_or(1.0),
                         &mut |elem| push(CosmicMappedRenderElement::Window(elem.into())),
                         None,
                     );
@@ -1618,7 +1627,7 @@ impl FloatingLayout {
                         geometry,
                         indicator_thickness,
                         radius,
-                        alpha,
+                        hint_alpha,
                         output_scale,
                         [
                             active_window_hint.red,
