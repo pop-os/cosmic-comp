@@ -182,7 +182,7 @@ impl CosmicWindowInternal {
 
     /// returns if the window has any current or pending server-side decorations
     pub fn has_ssd(&self, pending: bool) -> bool {
-        !self.window.is_decorated(pending)
+        self.appearance_conf.lock().unwrap().show_titlebars && !self.window.is_decorated(pending)
     }
 
     /// returns if the window is currently tiled
@@ -225,6 +225,11 @@ impl CosmicWindow {
             handle,
             theme,
         ))
+    }
+
+    /// returns if the window has any current or pending server-side decorations
+    pub fn has_ssd(&self, pending: bool) -> bool {
+        self.0.with_program(|p| p.has_ssd(pending))
     }
 
     pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
@@ -634,7 +639,7 @@ impl CosmicWindow {
         self.0
             .with_program(|p| p.window.min_size_without_ssd())
             .map(|size| {
-                if self.0.with_program(|p| !p.window.is_decorated(false)) {
+                if self.has_ssd(false) {
                     size + (0, SSD_HEIGHT).into()
                 } else {
                     size
@@ -645,7 +650,7 @@ impl CosmicWindow {
         self.0
             .with_program(|p| p.window.max_size_without_ssd())
             .map(|size| {
-                if self.0.with_program(|p| !p.window.is_decorated(false)) {
+                if self.has_ssd(false) {
                     size + (0, SSD_HEIGHT).into()
                 } else {
                     size
