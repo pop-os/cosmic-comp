@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use anyhow::Context;
-use cosmic_config::{ConfigGet, CosmicConfigEntry};
+use cosmic_config::{ConfigGet, ConfigSet, CosmicConfigEntry};
 use cosmic_settings_config::window_rules::ApplicationException;
 use cosmic_settings_config::{Shortcuts, shortcuts, window_rules};
 use serde::{Deserialize, Serialize};
@@ -182,7 +182,7 @@ impl Config {
             .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new();
 
-        let cosmic_comp_config =
+        let mut cosmic_comp_config =
             CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
                 if cfg!(debug_assertions) {
                     for err in errs {
@@ -191,6 +191,18 @@ impl Config {
                 }
                 c
             });
+
+        // `cursor_hide_timeout` was replaced by the grouped `cursor_hide` key.
+        // Seed the new key once so configs hand-edited before the rename keep
+        // working; the old file is left in place so a downgrade still reads it.
+        if config.get::<CursorHideConfig>("cursor_hide").is_err()
+            && let Ok(legacy) = config.get::<Option<u32>>("cursor_hide_timeout")
+        {
+            cosmic_comp_config.cursor_hide.idle_timeout = legacy;
+            if let Err(err) = config.set("cursor_hide", cosmic_comp_config.cursor_hide) {
+                warn!(?err, "Failed to migrate cursor_hide_timeout to cursor_hide");
+            }
+        }
 
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
