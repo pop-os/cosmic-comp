@@ -1151,7 +1151,10 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    if event.fingers() >= 3 && !workspace_overview_is_open(&seat.active_output()) {
+                    if event.fingers() >= 3
+                        && (event.fingers() >= 4
+                            || !workspace_overview_is_open(&seat.active_output()))
+                    {
                         self.common.gesture_state = Some(GestureState::new(event.fingers()));
                     } else {
                         let serial = SERIAL_COUNTER.next_serial();
@@ -1213,7 +1216,21 @@ impl State {
                                                     Some(SwipeAction::NextWorkspace)
                                                 }
                                             }
-                                            _ => None, // TODO: Other actions
+                                            Some(Direction::Up)
+                                                if !workspace_overview_is_open(
+                                                    &seat.active_output(),
+                                                ) =>
+                                            {
+                                                Some(SwipeAction::WorkspaceOverview)
+                                            }
+                                            Some(Direction::Down)
+                                                if workspace_overview_is_open(
+                                                    &seat.active_output(),
+                                                ) =>
+                                            {
+                                                Some(SwipeAction::WorkspaceOverview)
+                                            }
+                                            _ => None,
                                         }
                                     } else {
                                         match gesture_state.direction {

@@ -16,6 +16,7 @@ pub struct SwipeEvent {
 pub enum SwipeAction {
     NextWorkspace,
     PrevWorkspace,
+    WorkspaceOverview,
 }
 
 #[derive(Debug, Clone)]
