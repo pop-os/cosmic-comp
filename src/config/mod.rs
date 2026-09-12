@@ -1005,8 +1005,11 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     let seats: Vec<_> = state.common.shell.read().seats.iter().cloned().collect();
                     let mut needs_render = false;
                     for seat in seats {
-                        needs_render |=
-                            crate::backend::render::cursor::notify_cursor_activity(state, &seat);
+                        needs_render |= crate::backend::render::cursor::notify_cursor_activity(
+                            state,
+                            &seat,
+                            crate::backend::render::cursor::PointerEventKind::Motion,
+                        );
                     }
                     if needs_render {
                         let outputs: Vec<_> =
