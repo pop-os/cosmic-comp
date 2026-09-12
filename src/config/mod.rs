@@ -171,6 +171,20 @@ pub enum ColorFilter {
     Tritanopia = 4,
 }
 
+/// `cursor_hide_timeout` was replaced by the grouped `cursor_hide` key. Seed the
+/// new key once so configs hand-edited before the rename keep working; the old
+/// file is left in place so a downgrade still reads it.
+fn migrate_cursor_hide(config: &cosmic_config::Config, cfg: &mut CosmicCompConfig) {
+    if config.get::<CursorHideConfig>("cursor_hide").is_err()
+        && let Ok(legacy) = config.get::<Option<u32>>("cursor_hide_timeout")
+    {
+        cfg.cursor_hide.idle_timeout = legacy;
+        if let Err(err) = config.set("cursor_hide", cfg.cursor_hide) {
+            warn!(?err, "Failed to migrate cursor_hide_timeout to cursor_hide");
+        }
+    }
+}
+
 impl Config {
     pub fn load(loop_handle: &LoopHandle<'_, State>) -> Config {
         let config = cosmic_config::Config::new("com.system76.CosmicComp", 1).unwrap();
@@ -192,17 +206,7 @@ impl Config {
                 c
             });
 
-        // `cursor_hide_timeout` was replaced by the grouped `cursor_hide` key.
-        // Seed the new key once so configs hand-edited before the rename keep
-        // working; the old file is left in place so a downgrade still reads it.
-        if config.get::<CursorHideConfig>("cursor_hide").is_err()
-            && let Ok(legacy) = config.get::<Option<u32>>("cursor_hide_timeout")
-        {
-            cosmic_comp_config.cursor_hide.idle_timeout = legacy;
-            if let Err(err) = config.set("cursor_hide", cosmic_comp_config.cursor_hide) {
-                warn!(?err, "Failed to migrate cursor_hide_timeout to cursor_hide");
-            }
-        }
+        migrate_cursor_hide(&config, &mut cosmic_comp_config);
 
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
@@ -1049,5 +1053,90 @@ impl From<Output> for CompOutputInfo {
             make: physical.make,
             model: physical.model,
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::migrate_cursor_hide;
+    use cosmic_comp_config::{CosmicCompConfig, CursorHideConfig};
+    use cosmic_config::{ConfigGet, ConfigSet};
+
+    fn config(dir: &tempfile::TempDir) -> cosmic_config::Config {
+        cosmic_config::Config::with_custom_path(
+            "com.system76.CosmicComp",
+            1,
+            dir.path().to_path_buf(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_hand_edited_legacy_timeout_is_carried_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(&dir);
+        config.set("cursor_hide_timeout", Some(5u32)).unwrap();
+
+        let mut cfg = CosmicCompConfig::default();
+        migrate_cursor_hide(&config, &mut cfg);
+
+        assert_eq!(cfg.cursor_hide.idle_timeout, Some(5));
+        // Seeded, so a second start does not migrate again.
+        assert_eq!(
+            config.get::<CursorHideConfig>("cursor_hide").unwrap(),
+            cfg.cursor_hide
+        );
+    }
+
+    #[test]
+    fn an_existing_cursor_hide_wins_over_a_stale_legacy_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(&dir);
+        let current = CursorHideConfig {
+            idle_timeout: Some(30),
+            ..CursorHideConfig::default()
+        };
+        config.set("cursor_hide", current).unwrap();
+        config.set("cursor_hide_timeout", Some(5u32)).unwrap();
+
+        let mut cfg = CosmicCompConfig {
+            cursor_hide: current,
+            ..CosmicCompConfig::default()
+        };
+        migrate_cursor_hide(&config, &mut cfg);
+
+        assert_eq!(cfg.cursor_hide, current);
+    }
+
+    #[test]
+    fn a_partial_cursor_hide_is_not_mistaken_for_an_absent_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(&dir);
+        // The audience for the shim hand-edits these files, so a file missing a
+        // field must still count as present rather than being overwritten.
+        std::fs::write(
+            dir.path()
+                .join("cosmic/com.system76.CosmicComp/v1/cursor_hide"),
+            "(idle_timeout: Some(30))",
+        )
+        .unwrap();
+        config.set("cursor_hide_timeout", Some(5u32)).unwrap();
+
+        let mut cfg = CosmicCompConfig::default();
+        migrate_cursor_hide(&config, &mut cfg);
+
+        assert_eq!(cfg.cursor_hide, CursorHideConfig::default());
+    }
+
+    #[test]
+    fn no_legacy_key_leaves_the_defaults_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(&dir);
+
+        let mut cfg = CosmicCompConfig::default();
+        migrate_cursor_hide(&config, &mut cfg);
+
+        assert_eq!(cfg.cursor_hide, CursorHideConfig::default());
+        assert!(config.get::<CursorHideConfig>("cursor_hide").is_err());
     }
 }

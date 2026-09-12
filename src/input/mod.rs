@@ -214,6 +214,16 @@ impl ModifiersShortcutQueue {
     }
 }
 
+/// Whether a key event counts as typing, for `cursor_hide.while_typing`.
+///
+/// A bare modifier press changes the modifier state; a real keystroke does not.
+/// COSMIC binds Super+drag to move windows, so hiding on Super-down would take
+/// the cursor away exactly as the user reaches for it. Super+1 still counts as
+/// typing — that is keyboard-driven intent.
+fn is_typing_keystroke(previous: ModifiersState, current: ModifiersState, state: KeyState) -> bool {
+    state == KeyState::Pressed && previous == current
+}
+
 impl State {
     #[profiling::function]
     pub fn process_input_event<B: InputBackend>(
@@ -331,14 +341,8 @@ impl State {
                         }
                     }
 
-                    // A bare modifier press changes the modifier state; a real
-                    // keystroke does not. Super+drag moves windows, so hiding on
-                    // Super-down would take the cursor away exactly as the user
-                    // reaches for it. Super+1 still counts as typing.
-                    let bare_modifier = previous_modifiers != keyboard.modifier_state();
                     if self.common.config.cosmic_conf.cursor_hide.while_typing
-                        && state == KeyState::Pressed
-                        && !bare_modifier
+                        && is_typing_keystroke(previous_modifiers, keyboard.modifier_state(), state)
                     {
                         crate::backend::render::cursor::hide_cursor_now(
                             self,
@@ -3244,5 +3248,56 @@ pub fn update_output_image_copy_cursor_position(
             session.set_cursor_hotspot(cursor_geometry.hotspot);
             session.set_cursor_pos(Some(cursor_geometry.geometry.loc));
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::is_typing_keystroke;
+    use smithay::{backend::input::KeyState, input::keyboard::ModifiersState};
+
+    fn logo() -> ModifiersState {
+        ModifiersState {
+            logo: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_plain_keystroke_is_typing() {
+        let mods = ModifiersState::default();
+        assert!(is_typing_keystroke(mods, mods, KeyState::Pressed));
+    }
+
+    #[test]
+    fn a_shortcut_with_a_real_key_is_typing() {
+        // Super is already held; Super+1 leaves the modifier state unchanged.
+        assert!(is_typing_keystroke(logo(), logo(), KeyState::Pressed));
+    }
+
+    #[test]
+    fn a_bare_modifier_is_not_typing() {
+        assert!(!is_typing_keystroke(
+            ModifiersState::default(),
+            logo(),
+            KeyState::Pressed
+        ));
+
+        let caps = ModifiersState {
+            caps_lock: true,
+            ..Default::default()
+        };
+        assert!(!is_typing_keystroke(
+            ModifiersState::default(),
+            caps,
+            KeyState::Pressed
+        ));
+    }
+
+    #[test]
+    fn a_release_is_never_typing() {
+        let mods = ModifiersState::default();
+        assert!(!is_typing_keystroke(mods, mods, KeyState::Released));
+        assert!(!is_typing_keystroke(logo(), mods, KeyState::Released));
     }
 }
