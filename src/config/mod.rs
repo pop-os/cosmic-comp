@@ -49,8 +49,8 @@ mod types;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    ActivationPolicy, AppearanceConfig, CosmicCompConfig, DecorationPreference, KeyboardConfig,
-    TileBehavior, XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
+    ActivationPolicy, AppearanceConfig, CosmicCompConfig, CursorHideConfig, DecorationPreference,
+    KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
     output::comp::{
         OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef, load_outputs,
@@ -983,10 +983,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<bool>(&config, "cursor_shake_to_find");
                 state.common.config.cosmic_conf.cursor_shake_to_find = new;
             }
-            "cursor_hide_timeout" => {
-                let new = get_config::<Option<u32>>(&config, "cursor_hide_timeout");
-                if new != state.common.config.cosmic_conf.cursor_hide_timeout {
-                    state.common.config.cosmic_conf.cursor_hide_timeout = new;
+            "cursor_hide" => {
+                let new = get_config::<CursorHideConfig>(&config, "cursor_hide");
+                if new != state.common.config.cosmic_conf.cursor_hide {
+                    state.common.config.cosmic_conf.cursor_hide = new;
+                    // Reveal on every change: a visible cursor is the safe state,
+                    // and it avoids stranding a hidden cursor when the trigger
+                    // that hid it is switched off.
                     let seats: Vec<_> = state.common.shell.read().seats.iter().cloned().collect();
                     let mut needs_render = false;
                     for seat in seats {
