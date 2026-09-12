@@ -188,8 +188,9 @@ impl ToplevelManagementHandler for State {
                     .and_then(|surface| shell.visible_output_for_surface(&surface).cloned())
             })
             .unwrap_or_else(|| seat.focused_or_active_output());
-        if let Some(target) =
-            shell.fullscreen_request(window, output, &self.common.event_loop_handle)
+        if !shell.block_by_modal_child(window)
+            && let Some(target) =
+                shell.fullscreen_request(window, output, &self.common.event_loop_handle)
         {
             std::mem::drop(shell);
             Shell::set_focus(self, Some(&target), &seat, None, true);
@@ -202,6 +203,9 @@ impl ToplevelManagementHandler for State {
         window: &<Self as ToplevelInfoHandler>::Window,
     ) {
         let mut shell = self.common.shell.write();
+        if shell.block_by_modal_child(window) {
+            return;
+        }
         let _ = shell.unfullscreen_request(window, &self.common.event_loop_handle);
         // don't switch focus because of a programmatic action.
         // If the toplevel-management client intends to focus the now unfullscreened toplevel, it can send an `activate`-request.
@@ -209,7 +213,9 @@ impl ToplevelManagementHandler for State {
 
     fn maximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         let mut shell = self.common.shell.write();
-        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+        if let Some(mapped) = shell.element_for_surface(window).cloned()
+            && !shell.block_by_modal_child(window)
+        {
             let seat = shell.seats.last_active().clone();
             shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);
         }
@@ -217,14 +223,18 @@ impl ToplevelManagementHandler for State {
 
     fn unmaximize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         let mut shell = self.common.shell.write();
-        if let Some(mapped) = shell.element_for_surface(window).cloned() {
+        if let Some(mapped) = shell.element_for_surface(window).cloned()
+            && !shell.block_by_modal_child(window)
+        {
             shell.unmaximize_request(&mapped);
         }
     }
 
     fn minimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
         let mut shell = self.common.shell.write();
-        shell.minimize_request(window);
+        if !shell.block_by_modal_child(window) {
+            shell.minimize_request(window);
+        }
     }
 
     fn unminimize(&mut self, _dh: &DisplayHandle, window: &<Self as ToplevelInfoHandler>::Window) {
