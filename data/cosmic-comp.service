@@ -8,5 +8,6 @@ Before=cosmic-session.target
 [Service]
 Type=notify
 ExecStart=/usr/bin/cosmic-comp
-Restart=never
+Restart=on-failure
+RestartSec=1s
 ExecStopPost=/usr/bin/systemctl --user unset-environment DISPLAY WAYLAND_DISPLAY
