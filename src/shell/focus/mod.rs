@@ -302,7 +302,7 @@ impl Shell {
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
             let set = self.workspaces.sets.get_mut(&output).unwrap();
             for focused in focused_windows.iter() {
-                raise_with_children(&mut set.sticky_layer, focused);
+                raise_with_children(&mut set.sticky_layer, focused, true, &mut Vec::new());
             }
             for window in set.sticky_layer.mapped() {
                 window.set_activated(focused_windows.contains(window));
@@ -332,7 +332,12 @@ impl Shell {
                 fs.surface.send_configure();
             }
             for focused in focused_windows.iter() {
-                raise_with_children(&mut workspace.floating_layer, focused);
+                raise_with_children(
+                    &mut workspace.floating_layer,
+                    focused,
+                    true,
+                    &mut Vec::new(),
+                );
             }
             for window in workspace.mapped() {
                 window.set_activated(focused_windows.contains(window));
@@ -467,33 +472,26 @@ fn update_focus_state(
     }
 }
 
-fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
-    if floating_layer.mapped().any(|m| m == focused) {
-        floating_layer.space.raise_element(focused, true);
+fn raise_with_children(
+    floating_layer: &mut FloatingLayout,
+    focused: &CosmicMapped,
+    activate: bool,
+    raised: &mut Vec<CosmicMapped>,
+) {
+    if !raised.contains(focused) && floating_layer.mapped().any(|m| m == focused) {
+        floating_layer.space.raise_element(focused, activate);
+        raised.push(focused.clone());
+        let window = focused.active_window();
         for element in floating_layer
             .space
             .elements()
             .filter(|elem| elem != &focused)
-            .filter(|elem| {
-                let parent = elem
-                    .active_window()
-                    .0
-                    .toplevel()
-                    .and_then(|toplevel| toplevel.parent());
-                parent.is_some_and(|parent| {
-                    focused
-                        .active_window()
-                        .wl_surface()
-                        .map(Cow::into_owned)
-                        .map(|focused| parent == focused)
-                        .unwrap_or(false)
-                })
-            })
+            .filter(|elem| window.is_parent_of(&elem.active_window()))
             .cloned()
             .collect::<Vec<_>>()
             .into_iter()
         {
-            raise_with_children(floating_layer, &element);
+            raise_with_children(floating_layer, &element, false, raised);
         }
     }
 }
