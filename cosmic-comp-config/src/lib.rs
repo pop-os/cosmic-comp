@@ -212,7 +212,10 @@ pub enum HideDecision {
 
 /// When the cursor hides itself. Every trigger is revealed by pointer input, so
 /// these differ only in what arms the hide and after how long.
+// `default`: a trigger added later must not make every existing file fail to
+// deserialize, which `get_entry` would swallow as "reset everyone to defaults".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
 pub struct CursorHideConfig {
     /// Seconds of pointer inactivity before hiding, anywhere. `None` disables.
     pub idle_timeout: Option<u32>,
@@ -435,5 +438,28 @@ mod test {
         assert_eq!(cfg.fullscreen_idle_timeout, Some(3));
         assert!(!cfg.while_typing);
         assert!(cfg.after_touch);
+    }
+
+    #[test]
+    fn config_round_trips_and_tolerates_missing_fields() {
+        let cfg = CursorHideConfig {
+            idle_timeout: Some(7),
+            fullscreen_idle_timeout: None,
+            while_typing: true,
+            after_touch: false,
+        };
+        let encoded = ron::ser::to_string(&cfg).unwrap();
+        assert_eq!(ron::from_str::<CursorHideConfig>(&encoded).unwrap(), cfg);
+
+        // A file written before a field existed must keep the rest of the user's
+        // settings rather than resetting the whole key.
+        let partial: CursorHideConfig = ron::from_str("(idle_timeout: Some(5))").unwrap();
+        assert_eq!(
+            partial,
+            CursorHideConfig {
+                idle_timeout: Some(5),
+                ..CursorHideConfig::default()
+            }
+        );
     }
 }
