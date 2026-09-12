@@ -330,6 +330,26 @@ impl State {
                                 keyboard.modifier_state().num_lock;
                         }
                     }
+
+                    // A bare modifier press changes the modifier state; a real
+                    // keystroke does not. Super+drag moves windows, so hiding on
+                    // Super-down would take the cursor away exactly as the user
+                    // reaches for it. Super+1 still counts as typing.
+                    let bare_modifier = previous_modifiers != keyboard.modifier_state();
+                    if self.common.config.cosmic_conf.cursor_hide.while_typing
+                        && state == KeyState::Pressed
+                        && !bare_modifier
+                    {
+                        crate::backend::render::cursor::hide_cursor_now(
+                            self,
+                            &seat,
+                            crate::backend::render::cursor::HideReason::Typing,
+                        );
+                    } else {
+                        // Still refresh: this is how entering fullscreen by
+                        // keyboard arms the fullscreen timeout.
+                        crate::backend::render::cursor::refresh_idle_timer(self, &seat);
+                    }
                 }
             }
 
@@ -1480,6 +1500,14 @@ impl State {
                             time: event.time(),
                         },
                     );
+
+                    if self.common.config.cosmic_conf.cursor_hide.after_touch {
+                        crate::backend::render::cursor::hide_cursor_now(
+                            self,
+                            &seat,
+                            crate::backend::render::cursor::HideReason::Touch,
+                        );
+                    }
                 }
             }
             InputEvent::TouchMotion { event, .. } => {
