@@ -375,6 +375,10 @@ impl FloatingLayout {
         self.map_internal(mapped, position, None, None)
     }
 
+    pub fn map_centered_on(&mut self, mapped: CosmicMapped, anchor: Rectangle<i32, Local>) {
+        self.map_anchored(mapped, None, None, None, Some(anchor))
+    }
+
     pub fn map_maximized(
         &mut self,
         mapped: CosmicMapped,
@@ -441,6 +445,17 @@ impl FloatingLayout {
         size: Option<Size<i32, Logical>>,
         prev: Option<Rectangle<i32, Local>>,
     ) {
+        self.map_anchored(mapped, position, size, prev, None)
+    }
+
+    fn map_anchored(
+        &mut self,
+        mapped: CosmicMapped,
+        position: Option<Point<i32, Local>>,
+        size: Option<Size<i32, Logical>>,
+        prev: Option<Rectangle<i32, Local>>,
+        anchor: Option<Rectangle<i32, Local>>,
+    ) {
         let already_mapped = self.space.element_geometry(&mapped).map(RectExt::as_local);
         let mut win_geo = mapped.geometry().as_local();
 
@@ -501,6 +516,9 @@ impl FloatingLayout {
 
         let position = position
             .or_else(|| last_geometry.map(|g| g.loc))
+            .or_else(|| {
+                anchor.map(|anchor| centered_on(win_geo.size, anchor, output_geometry.as_local()))
+            })
             .unwrap_or_else(|| {
                 // cleanup moved windows
                 if let Some(pos) = self

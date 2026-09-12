@@ -833,6 +833,16 @@ impl WorkspaceSet {
                 })
             })
     }
+
+    pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
+        self.sticky_layer
+            .mapped()
+            .chain(self.minimized_windows.iter().flat_map(|m| m.mapped()))
+            .chain(self.workspaces.iter().flat_map(|w| {
+                w.mapped()
+                    .chain(w.minimized_windows.iter().flat_map(|m| m.mapped()))
+            }))
+    }
 }
 
 #[derive(Debug)]
@@ -3014,6 +3024,19 @@ impl Shell {
         }
 
         let active_handle = self.active_space(&output).unwrap().handle;
+        let modal_anchor = window
+            .is_modal_dialog()
+            .then(|| {
+                let parent = self
+                    .workspaces
+                    .sets
+                    .get(&output)?
+                    .mapped()
+                    .find(|mapped| mapped.active_window().is_parent_of(&window))?;
+                self.element_geometry(parent)
+                    .map(|geometry| geometry.to_local(&output))
+            })
+            .flatten();
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
             self.workspaces
                 .spaces()
@@ -3079,7 +3102,13 @@ impl Shell {
 
         let workspace_empty = workspace.mapped().next().is_none();
         if is_dialog || floating_exception || !workspace.tiling_enabled {
-            workspace.floating_layer.map(mapped.clone(), None);
+            if let Some(anchor) = modal_anchor {
+                workspace
+                    .floating_layer
+                    .map_centered_on(mapped.clone(), anchor);
+            } else {
+                workspace.floating_layer.map(mapped.clone(), None);
+            }
         } else {
             for mapped in workspace
                 .mapped()
@@ -5256,15 +5285,7 @@ impl Shell {
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
-        self.workspaces.iter().flat_map(|(_, set)| {
-            set.sticky_layer
-                .mapped()
-                .chain(set.minimized_windows.iter().flat_map(|m| m.mapped()))
-                .chain(set.workspaces.iter().flat_map(|w| {
-                    w.mapped()
-                        .chain(w.minimized_windows.iter().flat_map(|m| m.mapped()))
-                }))
-        })
+        self.workspaces.sets.values().flat_map(WorkspaceSet::mapped)
     }
 }
 
