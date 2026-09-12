@@ -212,7 +212,10 @@ pub enum HideDecision {
 
 /// When the cursor hides itself. Every trigger is revealed by pointer input, so
 /// these differ only in what arms the hide and after how long.
+// `default`: a trigger added later must not make every existing file fail to
+// deserialize, which `get_entry` would swallow as "reset everyone to defaults".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
 pub struct CursorHideConfig {
     /// Seconds of pointer inactivity before hiding, anywhere. `None` disables.
     pub idle_timeout: Option<u32>,
