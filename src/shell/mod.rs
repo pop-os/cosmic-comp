@@ -19,7 +19,10 @@ use crate::{
     utils,
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
-        protocols::workspace::{State as WState, WorkspaceCapabilities},
+        protocols::{
+            session_lock_layer::layer_show_on_lock,
+            workspace::{State as WState, WorkspaceCapabilities},
+        },
     },
 };
 use cosmic_comp_config::{
@@ -2046,12 +2049,27 @@ impl Shell {
     }
 
     pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         if let Some(session_lock) = &self.session_lock {
-            return session_lock
+            if let Some((output, _)) = session_lock
                 .surfaces
                 .iter()
                 .find(|(_, v)| v.wl_surface() == surface)
-                .map(|(k, _)| k);
+            {
+                return Some(output);
+            }
+            for o in self.outputs() {
+                let map = layer_map_for_output(o);
+                if let Some(layer_surface) = map.layer_for_surface(surface, WindowSurfaceType::ALL)
+                {
+                    if layer_show_on_lock(layer_surface.wl_surface()) {
+                        return Some(o);
+                    } else {
+                        return None;
+                    }
+                }
+            }
         }
 
         self.outputs()
