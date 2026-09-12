@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::{
-    backend::render::{ElementFilter, cursor::notify_cursor_activity},
+    backend::render::{
+        ElementFilter,
+        cursor::{PointerEventKind, notify_cursor_activity},
+    },
     config::{
         Action, Config, PrivateAction,
         key_bindings::{
@@ -349,7 +352,7 @@ impl State {
                     .cloned()
                 {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    notify_cursor_activity(self, &seat);
+                    notify_cursor_activity(self, &seat, PointerEventKind::Motion);
                     let current_output = seat.active_output();
 
                     if self.common.config.cosmic_conf.cursor_shake_to_find
@@ -723,7 +726,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    notify_cursor_activity(self, &seat);
+                    notify_cursor_activity(self, &seat, PointerEventKind::Motion);
                     let (output, position) = if matches!(&backend_id, InputBackendId::Ei(_)) {
                         // EI absolute coordinates are in the compositor's *global*
                         // logical space: each advertised region carries its output's
@@ -818,7 +821,7 @@ impl State {
                     return;
                 };
                 self.common.idle_notifier_state.notify_activity(&seat);
-                notify_cursor_activity(self, &seat);
+                notify_cursor_activity(self, &seat, PointerEventKind::Other);
 
                 let current_focus = seat.get_keyboard().unwrap().current_focus();
                 let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
@@ -1069,7 +1072,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    notify_cursor_activity(self, &seat);
+                    notify_cursor_activity(self, &seat, PointerEventKind::Other);
 
                     if self.source_modifiers(&backend_id, &seat).logo
                         && self
@@ -1608,7 +1611,7 @@ impl State {
                     .cloned()
                 {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    notify_cursor_activity(self, &seat);
+                    notify_cursor_activity(self, &seat, PointerEventKind::Motion);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
                             .cloned()
@@ -1712,7 +1715,7 @@ impl State {
                     .cloned()
                 {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    notify_cursor_activity(self, &seat);
+                    notify_cursor_activity(self, &seat, PointerEventKind::Motion);
                     let Some(output) =
                         mapped_output_for_device(&self.common.config, &shell, &event.device())
                             .cloned()
@@ -1861,7 +1864,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    notify_cursor_activity(self, &seat);
+                    notify_cursor_activity(self, &seat, PointerEventKind::Other);
 
                     let serial = SERIAL_COUNTER.next_serial();
                     let output = seat.active_output();
@@ -1914,7 +1917,7 @@ impl State {
                     .cloned();
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
-                    notify_cursor_activity(self, &seat);
+                    notify_cursor_activity(self, &seat, PointerEventKind::Other);
                     if let Some(tool) = seat.tablet_seat().get_tool(&event.tool()) {
                         tool.button(
                             self,
