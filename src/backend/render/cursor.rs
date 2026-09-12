@@ -5,9 +5,11 @@ use crate::{
         element::AsGlowRenderer,
         wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
     },
+    shell::focus::target::KeyboardFocusTarget,
     utils::prelude::*,
     wayland::handlers::compositor::FRAME_TIME_FILTER,
 };
+use cosmic_comp_config::HideDecision;
 use keyframe::{ease, functions::EaseInOutCubic};
 use resvg::{tiny_skia, usvg};
 use serde::Deserialize;
@@ -451,6 +453,32 @@ pub fn draw_dnd_icon<R>(
     );
 }
 
+/// Why the cursor is currently hidden. Determines what brings it back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HideReason {
+    /// No pointer activity for the configured timeout.
+    Idle,
+    /// A key was pressed while `while_typing` is enabled.
+    Typing,
+    /// Touch input arrived while `after_touch` is enabled.
+    Touch,
+}
+
+/// Whether a pointer event carries movement. A touch-hidden cursor comes back
+/// only on real movement, so the distinction has to reach the call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerEventKind {
+    Motion,
+    Other,
+}
+
+impl HideReason {
+    /// Whether an event of this kind should reveal the cursor.
+    fn revealed_by(self, kind: PointerEventKind) -> bool {
+        matches!(kind, PointerEventKind::Motion) || !matches!(self, HideReason::Touch)
+    }
+}
+
 pub type CursorState = Mutex<CursorStateInner>;
 pub struct CursorStateInner {
     current_cursor: Option<CursorIcon>,
@@ -462,9 +490,10 @@ pub struct CursorStateInner {
     current_image: Option<Image>,
     image_cache: Vec<CachedFrame>,
 
-    hidden: bool,
+    hidden: Option<HideReason>,
     idle_timer: Option<RegistrationToken>,
     last_armed: Option<Instant>,
+    last_pointer_activity: Instant,
 
     // shake-to-find
     shake_path: VecDeque<PathSample>,
@@ -694,7 +723,8 @@ impl Default for CursorStateInner {
             current_image: None,
             image_cache: Vec::new(),
 
-            hidden: false,
+            hidden: None,
+            last_pointer_activity: Instant::now(),
             idle_timer: None,
             last_armed: None,
 
@@ -747,7 +777,7 @@ pub fn draw_cursor<R>(
     let mut state_ref = seat_userdata.get::<CursorState>().unwrap().lock().unwrap();
     let state = &mut *state_ref;
 
-    if state.hidden {
+    if state.hidden.is_some() {
         return;
     }
 
@@ -837,54 +867,130 @@ pub fn draw_cursor<R>(
 
 const ACTIVITY_THROTTLE: Duration = Duration::from_millis(100);
 
-/// Reveal the cursor and (re)arm the idle-hide timer; returns true if it was previously hidden
-pub fn notify_cursor_activity(state: &State, seat: &Seat<State>) -> bool {
-    let timeout = state.common.config.cosmic_conf.cursor_hide.idle_timeout;
+/// Reveal the cursor if this event should, and (re)arm the idle-hide timer.
+/// Returns true if the cursor was previously hidden and is now visible.
+pub fn notify_cursor_activity(state: &State, seat: &Seat<State>, kind: PointerEventKind) -> bool {
+    let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+
+    let revealed = {
+        let mut inner = cursor_state.lock().unwrap();
+        inner.last_pointer_activity = Instant::now();
+        match inner.hidden {
+            Some(reason) if reason.revealed_by(kind) => {
+                inner.hidden = None;
+                true
+            }
+            // Still hidden on purpose: leave the timer alone.
+            Some(_) => return false,
+            None => false,
+        }
+    };
+
+    refresh_idle_timer(state, seat);
+    revealed
+}
+
+/// (Re)arm the idle-hide timer without counting as pointer activity.
+///
+/// Armed with the shortest timeout any context could want: the input that arms
+/// the timer is usually what goes on to make a window fullscreen, so the
+/// context is not yet knowable here. `on_idle_timer` evaluates it on fire and
+/// re-arms for the remainder if nothing applied yet.
+pub fn refresh_idle_timer(state: &State, seat: &Seat<State>) {
+    let config = state.common.config.cosmic_conf.cursor_hide;
     let loop_handle = &state.common.event_loop_handle;
     let cursor_state = seat.user_data().get::<CursorState>().unwrap();
     let now = Instant::now();
 
-    let (was_hidden, old_token) = {
+    let old_token = {
         let mut inner = cursor_state.lock().unwrap();
-        let was_hidden = inner.hidden;
-        inner.hidden = false;
-
-        let throttled = timeout.is_some()
-            && !was_hidden
-            && inner.idle_timer.is_some()
+        if inner.hidden.is_some() {
+            return;
+        }
+        // Coalesce bursts from high-frequency pointers.
+        let throttled = inner.idle_timer.is_some()
             && inner
                 .last_armed
                 .is_some_and(|t| now.duration_since(t) < ACTIVITY_THROTTLE);
         if throttled {
-            return was_hidden;
+            return;
         }
-
-        let old_token = inner.idle_timer.take();
         inner.last_armed = None;
-        (was_hidden, old_token)
+        inner.idle_timer.take()
     };
 
     if let Some(token) = old_token {
         loop_handle.remove(token);
     }
 
-    if let Some(secs) = timeout {
-        let timer = Timer::from_duration(Duration::from_secs(secs as u64));
-        let seat = seat.clone();
-        if let Ok(token) = loop_handle.insert_source(timer, move |_, _, state| {
-            hide_cursor(state, &seat);
-            TimeoutAction::Drop
-        }) {
-            let mut inner = cursor_state.lock().unwrap();
-            inner.idle_timer = Some(token);
-            inner.last_armed = Some(now);
-        }
-    }
+    let Some(delay) = config.shortest_timeout() else {
+        return;
+    };
 
-    was_hidden
+    let timer = Timer::from_duration(delay);
+    let timer_seat = seat.clone();
+    if let Ok(token) =
+        loop_handle.insert_source(timer, move |_, _, state| on_idle_timer(state, &timer_seat))
+    {
+        let mut inner = cursor_state.lock().unwrap();
+        inner.idle_timer = Some(token);
+        inner.last_armed = Some(now);
+    }
 }
 
-fn hide_cursor(state: &mut State, seat: &Seat<State>) {
+/// Whether the seat is focusing a fullscreen surface. A fullscreen window that
+/// is not focused can be stacked behind others, so its presence on the output
+/// says nothing about what the user is looking at.
+fn fullscreen_focused(seat: &Seat<State>) -> bool {
+    matches!(
+        seat.get_keyboard().and_then(|kbd| kbd.current_focus()),
+        Some(KeyboardFocusTarget::Fullscreen(_))
+    )
+}
+
+fn on_idle_timer(state: &mut State, seat: &Seat<State>) -> TimeoutAction {
+    let config = state.common.config.cosmic_conf.cursor_hide;
+    let fullscreen = fullscreen_focused(seat);
+    let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+
+    let elapsed = {
+        let inner = cursor_state.lock().unwrap();
+        Instant::now().duration_since(inner.last_pointer_activity)
+    };
+
+    match config.resolve(elapsed, fullscreen) {
+        HideDecision::Hide => {
+            hide_cursor(state, seat, HideReason::Idle);
+            TimeoutAction::Drop
+        }
+        HideDecision::Drop => {
+            let mut inner = cursor_state.lock().unwrap();
+            inner.idle_timer = None;
+            inner.last_armed = None;
+            TimeoutAction::Drop
+        }
+        HideDecision::RearmAfter(delay) => {
+            cursor_state.lock().unwrap().last_armed = Some(Instant::now());
+            TimeoutAction::ToDuration(delay)
+        }
+    }
+}
+
+/// Hide the cursor immediately, for a trigger that does not wait on the timer.
+pub fn hide_cursor_now(state: &mut State, seat: &Seat<State>, reason: HideReason) {
+    let loop_handle = state.common.event_loop_handle.clone();
+    let token = {
+        let cursor_state = seat.user_data().get::<CursorState>().unwrap();
+        let mut inner = cursor_state.lock().unwrap();
+        inner.idle_timer.take()
+    };
+    if let Some(token) = token {
+        loop_handle.remove(token);
+    }
+    hide_cursor(state, seat, reason);
+}
+
+fn hide_cursor(state: &mut State, seat: &Seat<State>, reason: HideReason) {
     if let Some(ptr) = seat.get_pointer()
         && ptr.is_grabbed()
     {
@@ -893,12 +999,36 @@ fn hide_cursor(state: &mut State, seat: &Seat<State>) {
     let cursor_state = seat.user_data().get::<CursorState>().unwrap();
     {
         let mut inner = cursor_state.lock().unwrap();
-        inner.hidden = true;
+        if inner.hidden.is_some() {
+            return;
+        }
+        inner.hidden = Some(reason);
         inner.idle_timer = None;
         inner.last_armed = None;
     }
     let outputs: Vec<_> = state.common.shell.read().outputs().cloned().collect();
     for output in outputs {
         state.backend.schedule_render(&output);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{HideReason, PointerEventKind};
+
+    #[test]
+    fn touch_hidden_cursor_waits_for_movement() {
+        assert!(HideReason::Touch.revealed_by(PointerEventKind::Motion));
+        assert!(!HideReason::Touch.revealed_by(PointerEventKind::Other));
+    }
+
+    #[test]
+    fn idle_and_typing_hidden_cursors_are_revealed_by_any_pointer_event() {
+        for reason in [HideReason::Idle, HideReason::Typing] {
+            assert!(reason.revealed_by(PointerEventKind::Motion));
+            // A click or a scroll must rescue the cursor rather than forcing a
+            // blind click.
+            assert!(reason.revealed_by(PointerEventKind::Other));
+        }
     }
 }
