@@ -996,20 +996,20 @@ pub fn hide_cursor_now(state: &mut State, seat: &Seat<State>, reason: HideReason
 }
 
 fn hide_cursor(state: &mut State, seat: &Seat<State>, reason: HideReason) {
-    if let Some(ptr) = seat.get_pointer()
-        && ptr.is_grabbed()
-    {
-        return;
-    }
+    let grabbed = seat.get_pointer().is_some_and(|ptr| ptr.is_grabbed());
     let cursor_state = seat.user_data().get::<CursorState>().unwrap();
     {
         let mut inner = cursor_state.lock().unwrap();
-        if inner.hidden.is_some() {
+        // Every caller has already disposed of the timer source, so clear the
+        // bookkeeping before the grab check rather than only on success.
+        inner.idle_timer = None;
+        inner.last_armed = None;
+        // The reason only ever tightens: `Touch` waits for real movement, so a
+        // later trigger must not relax it back to click-or-scroll.
+        if grabbed || inner.hidden == Some(reason) || inner.hidden == Some(HideReason::Touch) {
             return;
         }
         inner.hidden = Some(reason);
-        inner.idle_timer = None;
-        inner.last_armed = None;
     }
     let outputs: Vec<_> = state.common.shell.read().outputs().cloned().collect();
     for output in outputs {
