@@ -1,7 +1,11 @@
 use smithay::{
     backend::renderer::{
         ImportAll, Renderer,
-        element::surface::{KindEvaluation, WaylandSurfaceRenderElement},
+        element::{
+            NamespacedElement,
+            surface::{KindEvaluation, WaylandSurfaceRenderElement},
+            utils::CropRenderElement,
+        },
         utils::RendererSurfaceStateUserData,
     },
     reexports::wayland_server::protocol::wl_surface,
@@ -23,6 +27,7 @@ render_elements! {
     pub SurfaceRenderElement<R> where R: AsGlowRenderer + ImportAll, R::TextureId: Send;
     Blur=BlurElement,
     Clipped=ClippedSurfaceRenderElement<R>,
+    Cropped=NamespacedElement<CropRenderElement<WaylandSurfaceRenderElement<R>>>,
     Wayland=WaylandSurfaceRenderElement<R>,
 }
 

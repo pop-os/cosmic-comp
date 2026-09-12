@@ -464,7 +464,25 @@ fn update_focus_state(
     }
 }
 
+fn x11_transient_parent_matches(child_parent: Option<u32>, parent_window: Option<u32>) -> bool {
+    child_parent
+        .zip(parent_window)
+        .is_some_and(|(child_parent, parent_window)| child_parent == parent_window)
+}
+
 fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
+    raise_with_children_inner(floating_layer, focused, &mut IndexSet::new());
+}
+
+fn raise_with_children_inner(
+    floating_layer: &mut FloatingLayout,
+    focused: &CosmicMapped,
+    raised: &mut IndexSet<CosmicMapped>,
+) {
+    if !raised.insert(focused.clone()) {
+        return;
+    }
+
     if floating_layer.mapped().any(|m| m == focused) {
         floating_layer.space.raise_element(focused, true);
         for element in floating_layer
@@ -472,25 +490,30 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
             .elements()
             .filter(|elem| elem != &focused)
             .filter(|elem| {
-                let parent = elem
-                    .active_window()
-                    .0
-                    .toplevel()
-                    .and_then(|toplevel| toplevel.parent());
-                parent.is_some_and(|parent| {
-                    focused
-                        .active_window()
+                let child = elem.active_window();
+                let parent = focused.active_window();
+                let wayland_parent = child.0.toplevel().and_then(|toplevel| toplevel.parent());
+                let is_wayland_child = wayland_parent.is_some_and(|wayland_parent| {
+                    parent
                         .wl_surface()
                         .map(Cow::into_owned)
-                        .map(|focused| parent == focused)
+                        .map(|parent| wayland_parent == parent)
                         .unwrap_or(false)
-                })
+                });
+                let is_x11_child = x11_transient_parent_matches(
+                    child
+                        .x11_surface()
+                        .and_then(|child| child.is_transient_for()),
+                    parent.x11_surface().map(|parent| parent.window_id()),
+                );
+
+                is_wayland_child || is_x11_child
             })
             .cloned()
             .collect::<Vec<_>>()
             .into_iter()
         {
-            raise_with_children(floating_layer, &element);
+            raise_with_children_inner(floating_layer, &element, raised);
         }
     }
 }
