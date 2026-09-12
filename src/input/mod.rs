@@ -1001,6 +1001,10 @@ impl State {
                                 }
                             }
 
+                            let redirect = self.common.shell.read().resolve_modal_redirect(&target);
+                            if let Some(dialog) = redirect {
+                                self.common.shell.write().shake_modal_dialog(&dialog);
+                            }
                             Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
                         }
                     }

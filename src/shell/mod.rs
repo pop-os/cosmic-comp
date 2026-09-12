@@ -268,6 +268,12 @@ pub struct PendingWindow {
 }
 
 #[derive(Debug)]
+struct PendingFocusOverride {
+    surface: CosmicSurface,
+    seat: Seat<State>,
+}
+
+#[derive(Debug)]
 pub struct PendingLayer {
     pub surface: LayerSurface,
     pub seat: Seat<State>,
@@ -305,6 +311,7 @@ pub struct Shell {
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
+    pending_focus_overrides: Vec<PendingFocusOverride>,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -1745,6 +1752,7 @@ impl Shell {
             appearance_conf: config.cosmic_conf.appearance_settings,
             zoom_state: None,
             tiling_exceptions,
+            pending_focus_overrides: Vec::new(),
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -2210,6 +2218,88 @@ impl Shell {
                         .find_map(|w| w.element_for_surface(surface))
                 })
         })
+    }
+
+    fn modal_child_for(&self, parent: &CosmicSurface) -> Option<CosmicMapped> {
+        // `FloatingLayout::mapped()` iterates top-to-bottom.
+        self.mapped()
+            .find(|mapped| {
+                let window = mapped.active_window();
+                window.is_modal_dialog() && parent.is_parent_of(&window)
+            })
+            .cloned()
+    }
+
+    fn deepest_modal_child_for(&self, parent: &CosmicSurface) -> Option<CosmicMapped> {
+        // X11 `WM_TRANSIENT_FOR` is not validated and can form a cycle
+        let mut visited = vec![parent.clone()];
+        let mut dialog = None;
+
+        while let Some(child) = self
+            .modal_child_for(visited.last().unwrap())
+            .filter(|child| !visited.contains(&child.active_window()))
+        {
+            visited.push(child.active_window());
+            dialog = Some(child);
+        }
+
+        dialog
+    }
+
+    pub fn block_by_modal_child<S>(&mut self, surface: &S) -> bool
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        let parent = self
+            .element_for_surface(surface)
+            .map(|mapped| mapped.active_window())
+            .or_else(|| {
+                self.workspaces
+                    .spaces()
+                    .flat_map(|workspace| workspace.get_fullscreen_surfaces())
+                    .find(|fullscreen| &fullscreen.surface == surface)
+                    .map(|fullscreen| fullscreen.surface.clone())
+            });
+        let Some(dialog) = parent.and_then(|parent| self.deepest_modal_child_for(&parent)) else {
+            return false;
+        };
+        self.shake_modal_dialog(&dialog);
+        true
+    }
+
+    fn modal_parent_to_refocus<S>(&self, surface: &S, seat: &Seat<State>) -> Option<CosmicSurface>
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        let dialog = self.element_for_surface(surface)?.active_window();
+        if !dialog.is_modal_dialog() {
+            return None;
+        }
+
+        let focused_on_dialog = matches!(
+            seat.get_keyboard().and_then(|k| k.current_focus()),
+            Some(KeyboardFocusTarget::Element(m)) if &m.active_window() == surface
+        );
+        if !focused_on_dialog {
+            return None;
+        }
+
+        self.mapped()
+            .find(|m| m.active_window().is_parent_of(&dialog))
+            .map(|parent| parent.active_window())
+    }
+
+    pub fn shake_modal_dialog(&mut self, mapped: &CosmicMapped) {
+        for set in self.workspaces.sets.values_mut() {
+            set.sticky_layer.shake(mapped);
+            for workspace in set.workspaces.iter_mut() {
+                workspace.floating_layer.shake(mapped);
+            }
+        }
+    }
+
+    pub fn resolve_modal_redirect(&self, target: &KeyboardFocusTarget) -> Option<CosmicMapped> {
+        self.deepest_modal_child_for(&target.active_window()?)
     }
 
     pub fn is_surface_mapped<S>(&self, surface: &S) -> bool
@@ -3092,6 +3182,17 @@ impl Shell {
     where
         CosmicSurface: PartialEq<S>,
     {
+        // the focus stack may hold an unrelated window above the parent of a closing modal dialog
+        let seats = self.seats.iter().cloned().collect::<Vec<_>>();
+        for seat in seats {
+            if let Some(parent) = self.modal_parent_to_refocus(surface, &seat) {
+                self.pending_focus_overrides.push(PendingFocusOverride {
+                    seat,
+                    surface: parent,
+                });
+            }
+        }
+
         for set in self.workspaces.sets.values_mut() {
             let sticky_res = set.sticky_layer.mapped().find_map(|m| {
                 m.windows()
@@ -3789,6 +3890,9 @@ impl Shell {
 
         let mut start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
+        if self.block_by_modal_child(surface) {
+            return None;
+        }
 
         if client_initiated
             && start_data.distance(seat.get_pointer().unwrap().current_location()) < 1.
@@ -4546,6 +4650,9 @@ impl Shell {
         let serial = serial.into();
         let start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
+        if self.block_by_modal_child(surface) {
+            return None;
+        }
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_maximized(true) {
             return None;

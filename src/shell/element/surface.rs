@@ -61,6 +61,7 @@ use smithay::{
         seat::WaylandFocus,
         shell::xdg::{
             SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
+            dialog::ToplevelDialogHint,
         },
     },
     xwayland::{X11Surface, xwm::X11Relatable},
@@ -995,6 +996,22 @@ impl CosmicSurface {
 
     pub fn downgrade(&self) -> WeakCosmicSurface {
         WeakCosmicSurface(self.0.downgrade())
+    }
+
+    pub fn is_modal_dialog(&self) -> bool {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
+                states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .dialog_hint
+                    == ToplevelDialogHint::Modal
+            }),
+            WindowSurface::X11(surface) => surface.is_modal(),
+        }
     }
 
     pub fn is_parent_of(&self, child: &CosmicSurface) -> bool {
