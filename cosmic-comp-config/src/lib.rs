@@ -3,6 +3,7 @@
 use cosmic_config::{CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 use crate::input::TouchpadOverride;
 
@@ -106,8 +107,8 @@ pub struct CosmicCompConfig {
     pub edge_snap_threshold: u32,
     pub accessibility_zoom: ZoomConfig,
     pub appearance_settings: AppearanceConfig,
-    /// Hide the cursor after this many seconds of pointer inactivity (None disables)
-    pub cursor_hide_timeout: Option<u32>,
+    /// When the cursor hides itself: idle, fullscreen idle, typing, touch
+    pub cursor_hide: CursorHideConfig,
     /// Briefly magnify the cursor when the pointer is shaken, to help locate it
     pub cursor_shake_to_find: bool,
     pub activation_policy: ActivationPolicy,
@@ -148,7 +149,7 @@ impl Default for CosmicCompConfig {
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
-            cursor_hide_timeout: None,
+            cursor_hide: CursorHideConfig::default(),
             cursor_shake_to_find: true,
             activation_policy: ActivationPolicy::default(),
             decoration_preference: DecorationPreference::default(),
@@ -196,6 +197,79 @@ fn default_repeat_rate() -> u32 {
 
 fn default_repeat_delay() -> u32 {
     600
+}
+
+/// What the cursor idle timer should do when it fires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HideDecision {
+    /// Nothing applies in this context; drop the timer until the next activity.
+    Drop,
+    /// Hide the cursor now.
+    Hide,
+    /// Not yet — re-arm for this long.
+    RearmAfter(Duration),
+}
+
+/// When the cursor hides itself. Every trigger is revealed by pointer input, so
+/// these differ only in what arms the hide and after how long.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+pub struct CursorHideConfig {
+    /// Seconds of pointer inactivity before hiding, anywhere. `None` disables.
+    pub idle_timeout: Option<u32>,
+    /// Seconds of pointer inactivity before hiding over a fullscreen window.
+    /// Shortens `idle_timeout` in fullscreen; it never lengthens it.
+    pub fullscreen_idle_timeout: Option<u32>,
+    /// Hide as soon as a key is pressed.
+    pub while_typing: bool,
+    /// Hide on touch input, until the pointer next moves.
+    pub after_touch: bool,
+}
+
+impl CursorHideConfig {
+    /// The shortest timeout that applies right now, if any.
+    pub fn effective_timeout(&self, fullscreen: bool) -> Option<Duration> {
+        let secs = if fullscreen {
+            match (self.idle_timeout, self.fullscreen_idle_timeout) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            }
+        } else {
+            self.idle_timeout
+        }?;
+        Some(Duration::from_secs(secs as u64))
+    }
+
+    /// What to do when the idle timer fires after `elapsed` without pointer input.
+    pub fn resolve(&self, elapsed: Duration, fullscreen: bool) -> HideDecision {
+        match self.effective_timeout(fullscreen) {
+            None => HideDecision::Drop,
+            Some(timeout) if elapsed >= timeout => HideDecision::Hide,
+            Some(timeout) => HideDecision::RearmAfter(timeout - elapsed),
+        }
+    }
+
+    /// Whether any timer-driven hiding is configured at all.
+    pub fn has_idle_trigger(&self) -> bool {
+        self.idle_timeout.is_some() || self.fullscreen_idle_timeout.is_some()
+    }
+
+    /// The delay to arm the timer with, before context is known. Callers on the
+    /// input path cannot read fullscreen state without deadlocking, so they arm
+    /// pessimistically and `resolve` corrects it on fire.
+    pub fn shortest_timeout(&self) -> Option<Duration> {
+        self.effective_timeout(true)
+    }
+}
+
+impl Default for CursorHideConfig {
+    fn default() -> Self {
+        CursorHideConfig {
+            idle_timeout: None,
+            fullscreen_idle_timeout: Some(3),
+            while_typing: false,
+            after_touch: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -262,4 +336,104 @@ pub enum XwaylandDescaling {
     Disabled,
     #[default]
     Fractional,
+}
+
+#[cfg(test)]
+mod test {
+    use super::{CursorHideConfig, HideDecision};
+    use std::time::Duration;
+
+    const OFF: CursorHideConfig = CursorHideConfig {
+        idle_timeout: None,
+        fullscreen_idle_timeout: None,
+        while_typing: false,
+        after_touch: false,
+    };
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    #[test]
+    fn no_timeout_never_hides() {
+        assert_eq!(OFF.resolve(secs(600), false), HideDecision::Drop);
+        assert_eq!(OFF.resolve(secs(600), true), HideDecision::Drop);
+        assert!(!OFF.has_idle_trigger());
+    }
+
+    #[test]
+    fn global_timeout_applies_everywhere() {
+        let cfg = CursorHideConfig {
+            idle_timeout: Some(10),
+            ..OFF
+        };
+        assert_eq!(
+            cfg.resolve(secs(4), false),
+            HideDecision::RearmAfter(secs(6))
+        );
+        assert_eq!(cfg.resolve(secs(10), false), HideDecision::Hide);
+        // A fullscreen window must not suppress an enabled global timeout.
+        assert_eq!(cfg.resolve(secs(10), true), HideDecision::Hide);
+        assert!(cfg.has_idle_trigger());
+    }
+
+    #[test]
+    fn fullscreen_timeout_only_applies_in_fullscreen() {
+        let cfg = CursorHideConfig {
+            fullscreen_idle_timeout: Some(3),
+            ..OFF
+        };
+        assert_eq!(cfg.resolve(secs(3), true), HideDecision::Hide);
+        assert_eq!(cfg.resolve(secs(600), false), HideDecision::Drop);
+    }
+
+    #[test]
+    fn fullscreen_shortens_but_never_lengthens() {
+        let short_fs = CursorHideConfig {
+            idle_timeout: Some(10),
+            fullscreen_idle_timeout: Some(3),
+            ..OFF
+        };
+        assert_eq!(short_fs.resolve(secs(3), true), HideDecision::Hide);
+        assert_eq!(
+            short_fs.resolve(secs(3), false),
+            HideDecision::RearmAfter(secs(7))
+        );
+
+        let long_fs = CursorHideConfig {
+            idle_timeout: Some(3),
+            fullscreen_idle_timeout: Some(30),
+            ..OFF
+        };
+        assert_eq!(long_fs.resolve(secs(3), true), HideDecision::Hide);
+
+        // The arming delay is pessimistic: the shortest timeout that could
+        // apply in any context, because arm-time code cannot read the shell.
+        assert_eq!(short_fs.shortest_timeout(), Some(secs(3)));
+        assert_eq!(long_fs.shortest_timeout(), Some(secs(3)));
+        assert_eq!(OFF.shortest_timeout(), None);
+    }
+
+    #[test]
+    fn boundary_is_inclusive() {
+        let cfg = CursorHideConfig {
+            idle_timeout: Some(5),
+            ..OFF
+        };
+        assert_eq!(
+            cfg.resolve(Duration::from_millis(4999), false),
+            HideDecision::RearmAfter(Duration::from_millis(1))
+        );
+        assert_eq!(cfg.resolve(secs(5), false), HideDecision::Hide);
+        assert_eq!(cfg.resolve(secs(6), false), HideDecision::Hide);
+    }
+
+    #[test]
+    fn defaults_match_the_spec() {
+        let cfg = CursorHideConfig::default();
+        assert_eq!(cfg.idle_timeout, None);
+        assert_eq!(cfg.fullscreen_idle_timeout, Some(3));
+        assert!(!cfg.while_typing);
+        assert!(cfg.after_touch);
+    }
 }

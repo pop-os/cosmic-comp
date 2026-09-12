@@ -839,7 +839,7 @@ const ACTIVITY_THROTTLE: Duration = Duration::from_millis(100);
 
 /// Reveal the cursor and (re)arm the idle-hide timer; returns true if it was previously hidden
 pub fn notify_cursor_activity(state: &State, seat: &Seat<State>) -> bool {
-    let timeout = state.common.config.cosmic_conf.cursor_hide_timeout;
+    let timeout = state.common.config.cosmic_conf.cursor_hide.idle_timeout;
     let loop_handle = &state.common.event_loop_handle;
     let cursor_state = seat.user_data().get::<CursorState>().unwrap();
     let now = Instant::now();
