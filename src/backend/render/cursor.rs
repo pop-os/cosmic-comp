@@ -892,6 +892,10 @@ pub fn notify_cursor_activity(state: &State, seat: &Seat<State>, kind: PointerEv
 
 /// (Re)arm the idle-hide timer without counting as pointer activity.
 ///
+/// The deadline is measured from the last *pointer* event, not from now, so a
+/// caller that does not stamp activity — a keystroke, a config reload — cannot
+/// postpone the hide by re-arming.
+///
 /// Armed with the shortest timeout any context could want: the input that arms
 /// the timer is usually what goes on to make a window fullscreen, so the
 /// context is not yet knowable here. `on_idle_timer` evaluates it on fire and
@@ -902,7 +906,7 @@ pub fn refresh_idle_timer(state: &State, seat: &Seat<State>) {
     let cursor_state = seat.user_data().get::<CursorState>().unwrap();
     let now = Instant::now();
 
-    let old_token = {
+    let (old_token, since_activity) = {
         let mut inner = cursor_state.lock().unwrap();
         if inner.hidden.is_some() {
             return;
@@ -915,26 +919,29 @@ pub fn refresh_idle_timer(state: &State, seat: &Seat<State>) {
         if throttled {
             return;
         }
+        let since_activity = now.duration_since(inner.last_pointer_activity);
         inner.last_armed = None;
-        inner.idle_timer.take()
+        (inner.idle_timer.take(), since_activity)
     };
 
     if let Some(token) = old_token {
         loop_handle.remove(token);
     }
 
-    let Some(delay) = config.shortest_timeout() else {
+    let Some(delay) = config.arm_delay(since_activity) else {
         return;
     };
 
     let timer = Timer::from_duration(delay);
     let timer_seat = seat.clone();
-    if let Ok(token) =
-        loop_handle.insert_source(timer, move |_, _, state| on_idle_timer(state, &timer_seat))
-    {
-        let mut inner = cursor_state.lock().unwrap();
-        inner.idle_timer = Some(token);
-        inner.last_armed = Some(now);
+    match loop_handle.insert_source(timer, move |_, _, state| on_idle_timer(state, &timer_seat)) {
+        Ok(token) => {
+            let mut inner = cursor_state.lock().unwrap();
+            inner.idle_timer = Some(token);
+            inner.last_armed = Some(now);
+        }
+        // `idle_timer` stays `None`, so the next activity is unthrottled and retries.
+        Err(err) => warn!(?err, "Failed to arm the cursor idle-hide timer"),
     }
 }
 

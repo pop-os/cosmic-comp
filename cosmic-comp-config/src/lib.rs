@@ -251,11 +251,15 @@ impl CursorHideConfig {
         }
     }
 
-    /// The delay to arm the timer with, before context is known. Callers on the
-    /// input path cannot read fullscreen state without deadlocking, so they arm
-    /// pessimistically and `resolve` corrects it on fire.
-    pub fn shortest_timeout(&self) -> Option<Duration> {
-        self.effective_timeout(true)
+    /// How long to wait before the idle timer should next fire, given how long
+    /// it has been since the last pointer event. Pessimistic: fullscreen only
+    /// ever shortens a timeout, so arming as if fullscreen cannot fire too
+    /// late, and `resolve` corrects an early fire once the context is known.
+    pub fn arm_delay(&self, since_pointer_activity: Duration) -> Option<Duration> {
+        Some(
+            self.effective_timeout(true)?
+                .saturating_sub(since_pointer_activity),
+        )
     }
 }
 
@@ -402,12 +406,6 @@ mod test {
             ..OFF
         };
         assert_eq!(long_fs.resolve(secs(3), true), HideDecision::Hide);
-
-        // The arming delay is pessimistic: the shortest timeout that could
-        // apply in any context, because arm-time code cannot read the shell.
-        assert_eq!(short_fs.shortest_timeout(), Some(secs(3)));
-        assert_eq!(long_fs.shortest_timeout(), Some(secs(3)));
-        assert_eq!(OFF.shortest_timeout(), None);
     }
 
     #[test]
@@ -422,5 +420,28 @@ mod test {
         );
         assert_eq!(cfg.resolve(secs(5), false), HideDecision::Hide);
         assert_eq!(cfg.resolve(secs(6), false), HideDecision::Hide);
+    }
+
+    #[test]
+    fn arm_delay_measures_from_the_last_pointer_event() {
+        let cfg = CursorHideConfig {
+            idle_timeout: Some(10),
+            ..OFF
+        };
+        assert_eq!(cfg.arm_delay(Duration::ZERO), Some(secs(10)));
+        assert_eq!(cfg.arm_delay(secs(4)), Some(secs(6)));
+        // Exactly due, and past due: fire immediately rather than deferring.
+        assert_eq!(cfg.arm_delay(secs(10)), Some(Duration::ZERO));
+        assert_eq!(cfg.arm_delay(secs(600)), Some(Duration::ZERO));
+
+        // Armed against the shortest timeout that any context could want.
+        let fs = CursorHideConfig {
+            idle_timeout: Some(10),
+            fullscreen_idle_timeout: Some(3),
+            ..OFF
+        };
+        assert_eq!(fs.arm_delay(secs(1)), Some(secs(2)));
+
+        assert_eq!(OFF.arm_delay(Duration::ZERO), None);
     }
 }
