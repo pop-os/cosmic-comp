@@ -262,6 +262,17 @@ impl CursorHideConfig {
     pub fn shortest_timeout(&self) -> Option<Duration> {
         self.effective_timeout(true)
     }
+
+    /// How long to wait before the idle timer should next fire, given how long
+    /// it has been since the last pointer event. Pessimistic like
+    /// `shortest_timeout`: the caller cannot know the context, and `resolve`
+    /// corrects an early fire.
+    pub fn arm_delay(&self, since_pointer_activity: Duration) -> Option<Duration> {
+        Some(
+            self.shortest_timeout()?
+                .saturating_sub(since_pointer_activity),
+        )
+    }
 }
 
 impl Default for CursorHideConfig {
@@ -438,6 +449,29 @@ mod test {
         assert_eq!(cfg.fullscreen_idle_timeout, Some(3));
         assert!(!cfg.while_typing);
         assert!(cfg.after_touch);
+    }
+
+    #[test]
+    fn arm_delay_measures_from_the_last_pointer_event() {
+        let cfg = CursorHideConfig {
+            idle_timeout: Some(10),
+            ..OFF
+        };
+        assert_eq!(cfg.arm_delay(Duration::ZERO), Some(secs(10)));
+        assert_eq!(cfg.arm_delay(secs(4)), Some(secs(6)));
+        // Exactly due, and past due: fire immediately rather than deferring.
+        assert_eq!(cfg.arm_delay(secs(10)), Some(Duration::ZERO));
+        assert_eq!(cfg.arm_delay(secs(600)), Some(Duration::ZERO));
+
+        // Armed against the shortest timeout, as `shortest_timeout` is.
+        let fs = CursorHideConfig {
+            idle_timeout: Some(10),
+            fullscreen_idle_timeout: Some(3),
+            ..OFF
+        };
+        assert_eq!(fs.arm_delay(secs(1)), Some(secs(2)));
+
+        assert_eq!(OFF.arm_delay(Duration::ZERO), None);
     }
 
     #[test]

@@ -891,17 +891,21 @@ pub fn notify_cursor_activity(state: &State, seat: &Seat<State>, kind: PointerEv
 
 /// (Re)arm the idle-hide timer without counting as pointer activity.
 ///
+/// The deadline is measured from the last *pointer* event, not from now, so a
+/// caller that does not stamp activity — a keystroke, a config reload — cannot
+/// postpone the hide by re-arming.
+///
 /// Takes `&State`: several callers hold a `shell` write guard, so this must not
-/// lock the shell. That is also why the timer is armed with the shortest
-/// configured timeout rather than the contextually correct one — `on_idle_timer`
-/// reads fullscreen state and corrects the delay when it fires.
+/// lock the shell. That is also why the delay is derived from the shortest
+/// configured timeout rather than the contextually correct one —
+/// `on_idle_timer` reads fullscreen state and corrects it when the timer fires.
 pub fn refresh_idle_timer(state: &State, seat: &Seat<State>) {
     let config = state.common.config.cosmic_conf.cursor_hide;
     let loop_handle = &state.common.event_loop_handle;
     let cursor_state = seat.user_data().get::<CursorState>().unwrap();
     let now = Instant::now();
 
-    let old_token = {
+    let (old_token, since_activity) = {
         let mut inner = cursor_state.lock().unwrap();
         if inner.hidden.is_some() {
             return;
@@ -914,32 +918,35 @@ pub fn refresh_idle_timer(state: &State, seat: &Seat<State>) {
         if throttled {
             return;
         }
+        let since_activity = now.duration_since(inner.last_pointer_activity);
         inner.last_armed = None;
-        inner.idle_timer.take()
+        (inner.idle_timer.take(), since_activity)
     };
 
     if let Some(token) = old_token {
         loop_handle.remove(token);
     }
 
-    let Some(delay) = config.shortest_timeout() else {
+    let Some(delay) = config.arm_delay(since_activity) else {
         return;
     };
 
     let timer = Timer::from_duration(delay);
     let timer_seat = seat.clone();
-    if let Ok(token) =
-        loop_handle.insert_source(timer, move |_, _, state| on_idle_timer(state, &timer_seat))
-    {
-        let mut inner = cursor_state.lock().unwrap();
-        inner.idle_timer = Some(token);
-        inner.last_armed = Some(now);
+    match loop_handle.insert_source(timer, move |_, _, state| on_idle_timer(state, &timer_seat)) {
+        Ok(token) => {
+            let mut inner = cursor_state.lock().unwrap();
+            inner.idle_timer = Some(token);
+            inner.last_armed = Some(now);
+        }
+        // `idle_timer` stays `None`, so the next activity is unthrottled and retries.
+        Err(err) => warn!(?err, "Failed to arm the cursor idle-hide timer"),
     }
 }
 
 /// Whether the seat's active output is showing a fullscreen surface. Only ever
 /// called from the timer callback, which holds no shell lock.
-fn fullscreen_focused(state: &State, seat: &Seat<State>) -> bool {
+fn fullscreen_on_active_output(state: &State, seat: &Seat<State>) -> bool {
     let shell = state.common.shell.read();
     shell
         .active_space(&seat.active_output())
@@ -948,7 +955,7 @@ fn fullscreen_focused(state: &State, seat: &Seat<State>) -> bool {
 
 fn on_idle_timer(state: &mut State, seat: &Seat<State>) -> TimeoutAction {
     let config = state.common.config.cosmic_conf.cursor_hide;
-    let fullscreen = fullscreen_focused(state, seat);
+    let fullscreen = fullscreen_on_active_output(state, seat);
     let cursor_state = seat.user_data().get::<CursorState>().unwrap();
 
     let elapsed = {
