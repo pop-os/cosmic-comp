@@ -4061,11 +4061,9 @@ impl Shell {
                 .to_global(&set.output);
             Some(geometry)
         } else if let Some(workspace) = self.space_for(mapped) {
-            let geometry = workspace
+            workspace
                 .element_geometry(mapped)
-                .unwrap()
-                .to_global(workspace.output());
-            Some(geometry)
+                .map(|geometry| geometry.to_global(workspace.output()))
         } else {
             None
         }
