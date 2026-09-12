@@ -996,6 +996,18 @@ impl CosmicSurface {
     pub fn downgrade(&self) -> WeakCosmicSurface {
         WeakCosmicSurface(self.0.downgrade())
     }
+
+    pub fn is_parent_of(&self, child: &CosmicSurface) -> bool {
+        match child.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                toplevel.parent().is_some_and(|parent| *self == parent)
+            }
+            WindowSurface::X11(surface) => surface
+                .is_transient_for()
+                .zip(self.x11_surface())
+                .is_some_and(|(parent_id, parent)| parent_id == parent.window_id()),
+        }
+    }
 }
 
 impl WeakCosmicSurface {
