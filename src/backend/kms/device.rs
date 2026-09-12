@@ -27,7 +27,7 @@ use smithay::{
             output::{DrmOutputManager, LockedDrmOutputManager},
         },
         egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
-        renderer::glow::GlowRenderer,
+        renderer::{Renderer, glow::GlowRenderer},
         session::{Session, libseat::LibSeatSession},
     },
     desktop::utils::OutputPresentationFeedback,
@@ -45,7 +45,7 @@ use smithay::{
         drm_syncobj::supports_syncobj_eventfd,
     },
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use wayland_backend::server::ClientId;
 
 use std::{
@@ -322,7 +322,7 @@ impl State {
                         .find_map(|(crtc, surface)| (surface.connector == conn).then_some(crtc))
                         .cloned()
                     {
-                        device.inner.surfaces.remove(&crtc).unwrap();
+                        device.inner.surfaces.remove(&crtc).unwrap().drop_and_join();
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
@@ -896,39 +896,55 @@ impl LockedDevice<'_> {
         }
 
         if !flag {
-            let now = clock.now();
-            let output_map = self
-                .inner
-                .surfaces
-                .iter()
-                .filter(|(_, s)| s.is_active())
-                .map(|(crtc, surface)| (*crtc, surface.output.clone()))
-                .collect::<HashMap<_, _>>();
+            let render_result: Result<()> = (|| {
+                let now = clock.now();
+                let output_map = self
+                    .inner
+                    .surfaces
+                    .iter()
+                    .filter(|(_, s)| s.is_active())
+                    .map(|(crtc, surface)| (*crtc, surface.output.clone()))
+                    .collect::<HashMap<_, _>>();
 
-            for (crtc, compositor) in self.drm.compositors().iter() {
-                let elements = match output_map.get(crtc) {
-                    Some(output) => output_elements(
-                        Some(&self.inner.render_node),
+                for (crtc, compositor) in self.drm.compositors().iter() {
+                    let elements = match output_map.get(crtc) {
+                        Some(output) => output_elements(
+                            Some(&self.inner.render_node),
+                            renderer,
+                            shell,
+                            now,
+                            output,
+                            CursorMode::All,
+                            None,
+                            None,
+                        )
+                        .with_context(|| "Failed to render outputs")?,
+                        None => Vec::new(),
+                    };
+
+                    let mut compositor = compositor.lock().unwrap();
+                    compositor.render_frame(
                         renderer,
-                        shell,
-                        now,
-                        output,
-                        CursorMode::All,
-                        None,
-                        None,
-                    )
-                    .with_context(|| "Failed to render outputs")?,
-                    None => Vec::new(),
-                };
-
-                let mut compositor = compositor.lock().unwrap();
-                compositor.render_frame(renderer, &elements, CLEAR_COLOR, FrameFlags::empty())?;
-                if let Err(err) = compositor.commit_frame()
-                    && !matches!(err, FrameError::EmptyFrame)
-                {
-                    return Err(err.into());
+                        &elements,
+                        CLEAR_COLOR,
+                        FrameFlags::empty(),
+                    )?;
+                    if let Err(err) = compositor.commit_frame()
+                        && !matches!(err, FrameError::EmptyFrame)
+                    {
+                        return Err(err.into());
+                    }
                 }
+
+                Ok(())
+            })();
+
+            // This renderer draws only infrequently; drop the imports it just
+            // cached so they don't pin client buffers in VRAM until its next draw.
+            if let Err(err) = renderer.invalidate_caches() {
+                debug!(?err, "Failed to invalidate main-thread renderer caches");
             }
+            render_result?;
         }
 
         Ok(())
