@@ -1918,14 +1918,40 @@ impl State {
             #[allow(unused_variables)]
             InputEvent::SwitchToggle { event } => {
                 #[cfg(feature = "logind")]
-                if event.switch() == Some(Switch::Lid) && self.common.inhibit_lid_fd.is_some() {
+                if event.switch() == Some(Switch::Lid) {
+                    let closed = event.state() == SwitchState::On;
+                    self.common.lid_closed = closed;
+
+                    if self.common.inhibit_lid_fd.is_none() {
+                        // Fewer than two outputs, so the internal panel is the only
+                        // one. Disabling it would leave the session with nowhere to
+                        // render, which is why the lid is otherwise ignored here.
+                        // Powering the connector down instead keeps the output
+                        // configured while the panel goes dark.
+                        let internal = {
+                            let backend = self.backend.lock();
+                            backend
+                                .all_outputs()
+                                .iter()
+                                .find(|o| o.is_internal())
+                                .cloned()
+                        };
+                        if let Some(output) = internal {
+                            use crate::wayland::protocols::output_power::{
+                                OutputPowerHandler, OutputPowerState,
+                            };
+                            self.set_dpms(&output, !closed);
+                            OutputPowerState::refresh(self);
+                        }
+                        return;
+                    }
+
                     let backend = self.backend.lock();
                     let output = backend
                         .all_outputs()
                         .iter()
                         .find(|o| o.is_internal())
                         .cloned();
-                    let closed = event.state() == SwitchState::On;
 
                     if closed {
                         backend
