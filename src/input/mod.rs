@@ -220,7 +220,16 @@ impl State {
     ) where
         <B as InputBackend>::Device: 'static,
     {
-        crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
+        // An input device going away is not user activity, e.g. a wireless keyboard
+        // dropping its link when it sleeps, so it must not power displays back on.
+        // Device additions still wake: after a system resume the re-enumerated
+        // devices may be the only input seen, and the wake resets idle anyway.
+        if !matches!(
+            &event,
+            InputEvent::DeviceRemoved { .. } | InputEvent::Special(_)
+        ) {
+            crate::wayland::handlers::output_power::set_all_surfaces_dpms_on(self);
+        }
 
         use smithay::backend::input::Event;
         match event {
