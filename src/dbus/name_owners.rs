@@ -210,4 +210,29 @@ impl NameOwners {
         self.poll_name_owners(allowed_names).await;
         self.check_owner_no_poll(name, allowed_names)
     }
+
+    /// Always enforce ownership, even in sessions that disable the normal
+    /// compositor D-Bus ownership checks for development. Physical input
+    /// capture must never inherit that debug bypass.
+    pub async fn check_owner_strict(
+        &self,
+        name: &UniqueName<'_>,
+        allowed_names: &[WellKnownName<'_>],
+    ) -> bool {
+        self.poll_name_owners(allowed_names).await;
+        self.check_owner_strict_no_poll(name, allowed_names)
+    }
+
+    pub fn check_owner_strict_no_poll(
+        &self,
+        name: &UniqueName<'_>,
+        allowed_names: &[WellKnownName<'_>],
+    ) -> bool {
+        let mut inner = self.0.lock().unwrap();
+        inner.update_if_needed();
+        inner.unique_names.contains(name)
+            && allowed_names.iter().any(|allowed| {
+                inner.name_owners.get(allowed).and_then(Option::as_ref) == Some(name)
+            })
+    }
 }

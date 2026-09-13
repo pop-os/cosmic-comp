@@ -458,7 +458,6 @@ impl Common {
             }
         }
 
-        tracing::trace!("Forwaring key {} {:?} to xwayland", code.raw() - 8, state);
         for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
             wl_keyboard.key(serial.into(), time.millis(), code.raw() - 8, state.into());
             if xstate.last_modifier_state != Some(modifiers) {
