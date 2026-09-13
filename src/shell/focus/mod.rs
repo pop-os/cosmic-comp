@@ -296,10 +296,9 @@ impl Shell {
                 // output. `sets` is non-empty and `backup_set` is `None` while the
                 // seat still names the output that went away.
                 let Some(space) = self.active_space(&output) else {
-                    tracing::warn!(
-                        target: "cosmic_comp::wsdiag",
+                    tracing::debug!(
                         output = %output.name(),
-                        "update_active: output absent from workspace sets (upstream unwrap would abort here)"
+                        "update_active: output has no workspace set, skipping"
                     );
                     return None;
                 };

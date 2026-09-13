@@ -2727,10 +2727,9 @@ impl Shell {
                 .get_mut(&output)
                 .or(self.workspaces.backup_set.as_mut())
             else {
-                tracing::warn!(
-                    target: "cosmic_comp::wsdiag",
+                tracing::debug!(
                     output = %output.name(),
-                    "remap_unfullscreened_window: output absent from workspace sets (upstream unwrap would abort here)"
+                    "remap_unfullscreened_window: output has no workspace set, skipping"
                 );
                 return window;
             };

@@ -1177,13 +1177,14 @@ impl Common {
             }
         }
 
+        // A render message can still be queued for an output whose workspace set
+        // was just removed, e.g. when it becomes a mirror. Skip its sticky layer.
         shell
             .workspaces
             .sets
             .get(output)
-            .unwrap()
-            .sticky_layer
-            .mapped()
+            .into_iter()
+            .flat_map(|set| set.sticky_layer.mapped())
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
                     if let Some(feedback) = window
@@ -1390,13 +1391,13 @@ impl Common {
             }
         }
 
+        // See `send_dmabuf_feedback`: the set may already be gone.
         shell
             .workspaces
             .sets
             .get(output)
-            .unwrap()
-            .sticky_layer
-            .mapped()
+            .into_iter()
+            .flat_map(|set| set.sticky_layer.mapped())
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
                     let throttle = throttle(&window, window.x11_surface().is_some());
