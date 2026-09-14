@@ -3150,7 +3150,7 @@ impl TilingLayout {
         location_f64: Point<f64, Local>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         for (mapped, geo) in self.mapped() {
             if !mapped.bbox().contains((location - geo.loc).as_logical()) {
@@ -3177,9 +3177,13 @@ impl TilingLayout {
         location_f64: Point<f64, Local>,
         seat: &Seat<State>,
     ) -> Option<KeyboardFocusTarget> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         for (mapped, geo) in self.mapped() {
+            // Tiled windows are rendered cropped to their tile (`geo`), so input must be bound to the tile as well
+            if !geo.contains(location) {
+                continue;
+            }
             if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                 continue;
             }
@@ -3205,7 +3209,7 @@ impl TilingLayout {
         overview: OverviewMode,
         seat: &Seat<State>,
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
@@ -3240,10 +3244,14 @@ impl TilingLayout {
     ) -> Option<(PointerFocusTarget, Point<f64, Local>)> {
         let tree = &self.queue.trees.back().unwrap().0;
         let root = tree.root_node_id()?;
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(overview, OverviewMode::None) {
             for (mapped, geo) in self.mapped() {
+                // Tiled windows are rendered cropped to their tile (`geo`), so input must be bound to the tile as well
+                if !geo.contains(location) {
+                    continue;
+                }
                 if !mapped.bbox().contains((location - geo.loc).as_logical()) {
                     continue;
                 }
@@ -3297,7 +3305,7 @@ impl TilingLayout {
                         ..
                     },
                 )) => {
-                    let test_point = (location.to_f64() - last_geometry.loc.to_f64()
+                    let test_point = (location_f64 - last_geometry.loc.to_f64()
                         + mapped.geometry().loc.to_f64().as_local())
                     .as_logical();
                     mapped
@@ -3373,7 +3381,7 @@ impl TilingLayout {
         let Some(root) = tree.root_node_id() else {
             if matches!(
                 overview.active_trigger(),
-                Some(Trigger::Pointer(_) | Trigger::Touch(_))
+                Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
             ) && location_f64.is_some()
             {
                 let mut tree = tree.copy_clone();
@@ -3402,11 +3410,11 @@ impl TilingLayout {
         }
 
         let location_f64 = location_f64.unwrap();
-        let location = location_f64.to_i32_round();
+        let location = location_f64.to_i32_floor();
 
         if matches!(
             overview.active_trigger(),
-            Some(Trigger::Pointer(_) | Trigger::Touch(_))
+            Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
         ) {
             let non_exclusive_zone = layer_map_for_output(&self.output)
                 .non_exclusive_zone()
@@ -3652,7 +3660,7 @@ impl TilingLayout {
                             TargetZone::WindowStack(id, last_geometry)
                         } else {
                             let left_right = {
-                                let relative_loc = (location.x - last_geometry.loc.x) as f64;
+                                let relative_loc = location_f64.x - last_geometry.loc.x as f64;
                                 if relative_loc < last_geometry.size.w as f64 / 2.0 {
                                     (Direction::Left, relative_loc / last_geometry.size.w as f64)
                                 } else {
@@ -3663,7 +3671,7 @@ impl TilingLayout {
                                 }
                             };
                             let up_down = {
-                                let relative_loc = (location.y - last_geometry.loc.y) as f64;
+                                let relative_loc = location_f64.y - last_geometry.loc.y as f64;
                                 if relative_loc < last_geometry.size.h as f64 / 2.0 {
                                     (Direction::Up, relative_loc / last_geometry.size.h as f64)
                                 } else {
@@ -4005,6 +4013,7 @@ impl TilingLayout {
         &self,
         renderer: &mut R,
         seat: Option<&Seat<State>>,
+        focused: Option<&CosmicMapped>,
         non_exclusive_zone: Rectangle<i32, Local>,
         overview: (OverviewMode, Option<(SwapIndicator, Option<&Tree<Data>>)>),
         resize_indicator: Option<(ResizeMode, ResizeIndicator)>,
@@ -4053,8 +4062,11 @@ impl TilingLayout {
         let draw_groups = overview.0.alpha();
 
         let is_overview = !matches!(overview.0, OverviewMode::None);
-        let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
-            .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
+        let is_mouse_tiling = (matches!(
+            overview.0.trigger(),
+            Some(Trigger::Pointer(_) | Trigger::Tool(_, _))
+        ))
+        .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
         let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
             Some(desc.clone())
         } else {
@@ -4135,6 +4147,7 @@ impl TilingLayout {
             old_geometries,
             is_overview,
             seat,
+            focused,
             &self.output,
             percentage,
             draw_groups,
@@ -4206,8 +4219,11 @@ impl TilingLayout {
         };
         let draw_groups = overview.0.alpha();
 
-        let is_mouse_tiling = (matches!(overview.0.trigger(), Some(Trigger::Pointer(_))))
-            .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
+        let is_mouse_tiling = (matches!(
+            overview.0.trigger(),
+            Some(Trigger::Pointer(_) | Trigger::Tool(_, _))
+        ))
+        .then(|| self.last_overview_hover.as_ref().map(|(_, zone)| zone));
         let swap_desc = if let Some(Trigger::KeyboardSwap(_, desc)) = overview.0.trigger() {
             Some(desc.clone())
         } else {
@@ -5268,6 +5284,7 @@ fn render_new_tree_windows<R>(
     old_geometries: Option<HashMap<NodeId, Rectangle<i32, Local>>>,
     is_overview: bool,
     seat: Option<&Seat<State>>,
+    focused: Option<&CosmicMapped>,
     output: &Output,
     percentage: f32,
     transition: Option<f32>,
@@ -5287,14 +5304,19 @@ fn render_new_tree_windows<R>(
     CosmicWindowRenderElement<R>: RenderElement<R>,
     CosmicStackRenderElement<R>: RenderElement<R>,
 {
-    let focused = seat
-        .and_then(|seat| {
-            seat.get_keyboard()
-                .unwrap()
-                .current_focus()
-                .and_then(|target| TilingLayout::currently_focused_node(target_tree, target))
-        })
-        .map(|(id, _)| id);
+    let focused = match seat.and_then(|seat| seat.get_keyboard().unwrap().current_focus()) {
+        Some(target @ KeyboardFocusTarget::Group(_)) => {
+            TilingLayout::currently_focused_node(target_tree, target).map(|(id, _)| id)
+        }
+        _ => focused.and_then(|mapped| {
+            let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
+            target_tree
+                .get(&node_id)
+                .ok()
+                .filter(|node| node.data().is_mapped(Some(mapped)))
+                .map(|_| node_id)
+        }),
+    };
     let focused_geo = if let Some(focused) = focused.as_ref() {
         geometries
             .as_ref()

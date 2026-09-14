@@ -14,6 +14,7 @@ use smithay::{
         },
     },
     desktop::space::SpaceElement,
+    input::{Seat, pointer::PointerHandle},
     output::Output,
     reexports::wayland_server::protocol::{wl_pointer::WlPointer, wl_shm::Format as ShmFormat},
     utils::{Buffer as BufferCoords, Point, Size, Transform},
@@ -30,7 +31,7 @@ use smithay::{
 };
 
 use crate::{
-    shell::CosmicSurface,
+    shell::{CosmicSurface, CursorGeometry, Shell},
     state::{BackendData, State},
     utils::prelude::{
         OutputExt, PointExt, PointGlobalExt, PointLocalExt, RectExt, RectLocalExt, SeatExt,
@@ -43,6 +44,36 @@ mod user_data;
 pub use self::render::*;
 use self::user_data::*;
 pub use self::user_data::{FrameHolder, ImageCopySessions, SessionData, SessionHolder};
+
+fn default_cursor_size() -> Size<i32, BufferCoords> {
+    Size::new(64, 64)
+}
+
+fn seat_for_wl_pointer<'a>(shell: &'a Shell, pointer: &WlPointer) -> Option<&'a Seat<State>> {
+    let pointer_handle = PointerHandle::<State>::from_resource(pointer)?;
+    shell
+        .seats
+        .iter()
+        .find(|seat| seat.get_pointer().is_some_and(|p| p == pointer_handle))
+}
+
+pub fn cursor_capture_constraints(cursor_geometry: Option<CursorGeometry>) -> BufferConstraints {
+    let size = if let Some(cursor_geometry) = cursor_geometry {
+        let mut size = cursor_geometry.geometry.size;
+        // Client shouldn't try to allocate 0x0 buffer
+        if size == Size::new(0, 0) {
+            size = Size::new(1, 1);
+        }
+        size
+    } else {
+        default_cursor_size()
+    };
+    BufferConstraints {
+        size,
+        shm: vec![ShmFormat::Argb8888],
+        dma: None,
+    }
+}
 
 impl ImageCopyCaptureHandler for State {
     fn image_copy_capture_state(&mut self) -> &mut ImageCopyCaptureState {
@@ -73,26 +104,12 @@ impl ImageCopyCaptureHandler for State {
     fn cursor_capture_constraints(
         &mut self,
         _source: &ImageCaptureSource,
-        _pointer: &WlPointer,
+        pointer: &WlPointer,
     ) -> Option<BufferConstraints> {
-        let size = if let Some((geometry, _)) = self
-            .common
-            .shell
-            .read()
-            .seats
-            .last_active()
-            .cursor_geometry((0.0, 0.0), self.common.clock.now())
-        {
-            geometry.size
-        } else {
-            Size::from((64, 64))
-        };
-
-        Some(BufferConstraints {
-            size,
-            shm: vec![ShmFormat::Argb8888],
-            dma: None,
-        })
+        let shell = self.common.shell.read();
+        let seat = seat_for_wl_pointer(&shell, pointer)?;
+        let cursor_geometry = seat.cursor_geometry((0.0, 0.0), self.common.clock.now());
+        Some(cursor_capture_constraints(cursor_geometry))
     }
 
     fn new_session(&mut self, session: Session) {
@@ -149,20 +166,23 @@ impl ImageCopyCaptureHandler for State {
 
     fn new_cursor_session(&mut self, session: CursorSession) {
         let (pointer_loc, pointer_size, hotspot) = {
-            let seat = self.common.shell.read().seats.last_active().clone();
+            let shell = self.common.shell.read();
+            if let Some(seat) = seat_for_wl_pointer(&shell, &session.pointer()) {
+                let pointer = seat.get_pointer().unwrap();
+                let pointer_loc = pointer.current_location().to_i32_round().as_global();
 
-            let pointer = seat.get_pointer().unwrap();
-            let pointer_loc = pointer.current_location().to_i32_round().as_global();
+                let (pointer_size, hotspot) = if let Some(CursorGeometry { geometry, hotspot }) =
+                    seat.cursor_geometry((0.0, 0.0), self.common.clock.now())
+                {
+                    (geometry.size, hotspot)
+                } else {
+                    (default_cursor_size(), Point::from((0, 0)))
+                };
 
-            let (pointer_size, hotspot) = if let Some((geometry, hotspot)) =
-                seat.cursor_geometry((0.0, 0.0), self.common.clock.now())
-            {
-                (geometry.size, hotspot)
+                (pointer_loc, pointer_size, hotspot)
             } else {
-                (Size::from((64, 64)), Point::from((0, 0)))
-            };
-
-            (pointer_loc, pointer_size, hotspot)
+                (Point::new(0, 0), default_cursor_size(), Point::from((0, 0)))
+            }
         };
 
         session.user_data().insert_if_missing_threadsafe(|| {
@@ -299,8 +319,11 @@ impl ImageCopyCaptureHandler for State {
             return;
         }
 
-        let seat = self.common.shell.read().seats.last_active().clone();
-        render_cursor_to_buffer(self, session, frame, &seat);
+        let shell = self.common.shell.read();
+        if let Some(seat) = seat_for_wl_pointer(&shell, &session.pointer()).cloned() {
+            drop(shell);
+            render_cursor_to_buffer(self, session, frame, &seat);
+        }
     }
 
     fn frame_aborted(&mut self, frame: FrameRef) {

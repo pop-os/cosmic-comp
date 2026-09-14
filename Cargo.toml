@@ -49,6 +49,7 @@ log-panics = { version = "2", features = ["with-backtrace"] }
 ordered-float = "5.1"
 png = "0.18"
 regex = "1"
+resvg = "0.45"
 ron = "0.12"
 rust-embed = { version = "8.11", features = ["debug-embed"] }
 sanitize-filename = "0.6.0"
@@ -83,7 +84,7 @@ parking_lot = "0.12.5"
 logind-zbus = { version = "5.3.2", optional = true }
 futures-executor = { version = "0.3.32" }
 futures-util = "0.3.32"
-cgmath = "0.18.0"
+glam = { version = "0.33", default-features = false, features = ["std"] }
 smallvec = "1.15.2"
 
 [dependencies.id_tree]
@@ -97,6 +98,7 @@ features = [
     "backend_drm",
     "backend_gbm",
     "backend_egl",
+    "backend_libei",
     "backend_libinput",
     "backend_session_libseat",
     "backend_udev",
@@ -144,4 +146,5 @@ lto = "fat"
 cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch = "main" }
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "efeb597" }
+smithay = { git = "https://github.com/smithay/smithay.git", rev = "e3d461a" }
+smithay-egui = { git = "https://github.com/Smithay/smithay-egui.git", rev = "6511552" }

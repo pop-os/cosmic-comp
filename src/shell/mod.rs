@@ -19,7 +19,10 @@ use crate::{
     utils,
     wayland::{
         handlers::data_device::{self, get_dnd_icon},
-        protocols::workspace::{State as WState, WorkspaceCapabilities},
+        protocols::{
+            session_lock_layer::layer_show_on_lock,
+            workspace::{State as WState, WorkspaceCapabilities},
+        },
     },
 };
 use cosmic_comp_config::{
@@ -32,7 +35,10 @@ use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, Resiz
 use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smithay::{
-    backend::{input::TouchSlot, renderer::element::RenderElementStates},
+    backend::{
+        input::{TabletToolDescriptor, TouchSlot},
+        renderer::element::RenderElementStates,
+    },
     desktop::{
         LayerSurface, PopupKind, WindowSurface, WindowSurfaceType, layer_map_for_output,
         space::SpaceElement,
@@ -46,6 +52,7 @@ use smithay::{
         pointer::{
             CursorImageStatus, CursorImageSurfaceData, Focus, GrabStartData as PointerGrabStartData,
         },
+        tablet::{TabletSeatTrait, tool::GrabTrigger as TabletGrabTrigger},
     },
     output::{Output, WeakOutput},
     reexports::{
@@ -130,6 +137,7 @@ pub enum Trigger {
     KeyboardMove(shortcuts::Modifiers),
     Pointer(u32),
     Touch(TouchSlot),
+    Tool(TabletToolDescriptor, TabletGrabTrigger),
 }
 
 #[derive(Debug, Clone)]
@@ -254,6 +262,7 @@ pub struct PendingWindow {
     pub surface: CosmicSurface,
     pub seat: Seat<State>,
     pub fullscreen: Option<Output>,
+    pub minimized: bool,
     pub maximized: bool,
     pub sticky: bool,
 }
@@ -1614,6 +1623,29 @@ impl Common {
             a11y_keyboard_monitor.refresh();
         }
         self.image_copy_capture_state.cleanup();
+        self.cleanup_cursor_images();
+    }
+
+    /// Release the enlarged cursor frames a finished shake or zoom left behind.
+    fn cleanup_cursor_images(&mut self) {
+        let shell = self.shell.read();
+        let zoomed = shell.zoom_state.as_ref().is_some_and(|zoom_state| {
+            shell
+                .outputs()
+                .any(|output| zoom_state.animating_level(output) > 1.0)
+        });
+        let now = Instant::now();
+        for seat in shell.seats.iter() {
+            if let Some(cursor_state) = seat
+                .user_data()
+                .get::<crate::backend::render::cursor::CursorState>()
+            {
+                cursor_state
+                    .lock()
+                    .unwrap()
+                    .drop_magnified_frames(now, zoomed);
+            }
+        }
     }
 
     pub fn refresh_idle_inhibit(&mut self) {
@@ -1731,7 +1763,7 @@ impl Shell {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
                         self.overview_mode.active_trigger(),
-                        Some(Trigger::Pointer(_) | Trigger::Touch(_))
+                        Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
@@ -1782,7 +1814,7 @@ impl Shell {
                 if let Some(set) = self.workspaces.sets.get_mut(output) {
                     if matches!(
                         self.overview_mode.active_trigger(),
-                        Some(Trigger::Pointer(_) | Trigger::Touch(_))
+                        Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
                     ) {
                         set.workspaces[set.active].tiling_layer.cleanup_drag();
                     }
@@ -2017,12 +2049,27 @@ impl Shell {
     }
 
     pub fn visible_output_for_surface(&self, surface: &WlSurface) -> Option<&Output> {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         if let Some(session_lock) = &self.session_lock {
-            return session_lock
+            if let Some((output, _)) = session_lock
                 .surfaces
                 .iter()
                 .find(|(_, v)| v.wl_surface() == surface)
-                .map(|(k, _)| k);
+            {
+                return Some(output);
+            }
+            for o in self.outputs() {
+                let map = layer_map_for_output(o);
+                if let Some(layer_surface) = map.layer_for_surface(surface, WindowSurfaceType::ALL)
+                {
+                    if layer_show_on_lock(layer_surface.wl_surface()) {
+                        return Some(o);
+                    } else {
+                        return None;
+                    }
+                }
+            }
         }
 
         self.outputs()
@@ -2286,6 +2333,11 @@ impl Shell {
                         .is_some_and(|state| state.lock().unwrap().is_animating())
                 })
             })
+            || self.seats.iter().any(|seat| {
+                seat.user_data()
+                    .get::<crate::backend::render::cursor::CursorState>()
+                    .is_some_and(|state| state.lock().unwrap().is_magnifying())
+            })
     }
 
     pub fn update_animations(&mut self) -> HashMap<ClientId, Client> {
@@ -2490,6 +2542,12 @@ impl Shell {
             increment: zoom_config.increment,
             movement: zoom_config.view_moves,
         });
+
+        self.update_focal_point(
+            seat,
+            seat.get_pointer().unwrap().current_location().as_global(),
+            zoom_config.view_moves,
+        );
     }
 
     pub fn update_focal_point(
@@ -2822,6 +2880,7 @@ impl Shell {
             surface: window,
             seat,
             fullscreen: output,
+            minimized: should_be_minimized,
             maximized: should_be_maximized,
             sticky: mut should_be_sticky,
         } = self.pending_windows.remove(pos);
@@ -2905,6 +2964,7 @@ impl Shell {
         if let Some(FocusTarget::Window(focused)) = maybe_focused
             && let Some(stack) = focused.stack_ref()
             && !is_dialog
+            && !should_be_minimized
             && !should_be_maximized
             && !(workspace.is_tiled(&focused.active_window()) && floating_exception)
         {
@@ -2954,8 +3014,13 @@ impl Shell {
             self.maximize_request(&mapped, &seat, false, loop_handle);
         }
 
-        let new_target = if (workspace_output == seat.active_output()
-            && active_handle == workspace_handle)
+        if should_be_minimized {
+            self.minimize_request(&window);
+        }
+
+        let new_target = if should_be_minimized {
+            None
+        } else if (workspace_output == seat.active_output() && active_handle == workspace_handle)
             || should_be_sticky
         {
             // TODO: enforce focus stealing prevention by also checking the same rules as for the else case.
@@ -3079,6 +3144,7 @@ impl Shell {
                     surface,
                     seat: seat.clone(),
                     fullscreen: None,
+                    minimized: false,
                     maximized: false,
                     sticky: false,
                 });
@@ -3797,6 +3863,7 @@ impl Shell {
         let trigger = match &start_data {
             GrabStartData::Pointer(start_data) => Trigger::Pointer(start_data.button),
             GrabStartData::Touch(start_data) => Trigger::Touch(start_data.slot),
+            GrabStartData::TabletTool { tool, data } => Trigger::Tool(tool.clone(), data.trigger),
         };
         let active_hint = if config.cosmic_conf.active_hint {
             self.theme.cosmic().active_hint as u8
@@ -3872,13 +3939,13 @@ impl Shell {
                 }
 
                 (initial_window_location, layer, workspace.handle)
-            } else if let Some(sticky_layer) = self
-                .workspaces
-                .sets
-                .get_mut(&cursor_output)
-                .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
-                .map(|set| &mut set.sticky_layer)
-            {
+            } else {
+                let sticky_layer = self
+                    .workspaces
+                    .sets
+                    .get_mut(&cursor_output)
+                    .filter(|set| set.sticky_layer.mapped().any(|m| m == &old_mapped))
+                    .map(|set| &mut set.sticky_layer)?;
                 let elem_geo = sticky_layer.element_geometry(&old_mapped).unwrap();
                 let mut initial_window_location = elem_geo.loc.to_global(&cursor_output);
 
@@ -3921,8 +3988,6 @@ impl Shell {
                     ManagedLayer::Sticky,
                     self.active_space(&cursor_output).unwrap().handle,
                 )
-            } else {
-                return None;
             };
 
         toplevel_leave_workspace(&window, &workspace_handle);
@@ -4216,14 +4281,13 @@ impl Shell {
                 .unwrap()
                 .to_global(&set.output);
             (&mut set.sticky_layer, geometry)
-        } else if let Some(workspace) = self.space_for_mut(mapped) {
+        } else {
+            let workspace = self.space_for_mut(mapped)?;
             let geometry = workspace
                 .element_geometry(mapped)
                 .unwrap()
                 .to_global(workspace.output());
             (&mut workspace.floating_layer, geometry)
-        } else {
-            return None;
         };
 
         let new_loc = if edge.contains(ResizeEdge::LEFT) {
@@ -4260,7 +4324,8 @@ impl Shell {
             ReleaseMode::Click,
         ) {
             grab.into()
-        } else if let Some(ws) = self.space_for_mut(mapped) {
+        } else {
+            let ws = self.space_for_mut(mapped)?;
             let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
             let (node, left_up_idx, orientation) = ws.tiling_layer.resize_request(node_id, edge)?;
             ResizeForkGrab::new(
@@ -4273,8 +4338,6 @@ impl Shell {
                 ReleaseMode::Click,
             )
             .into()
-        } else {
-            return None;
         };
 
         Some(((focus, new_loc), (grab, Focus::Keep)))
@@ -4511,10 +4574,9 @@ impl Shell {
             .find(|set| set.sticky_layer.mapped().any(|m| m == &mapped))
         {
             &mut set.sticky_layer
-        } else if let Some(workspace) = self.space_for_mut(&mapped) {
-            &mut workspace.floating_layer
         } else {
-            return None;
+            let workspace = self.space_for_mut(&mapped)?;
+            &mut workspace.floating_layer
         };
 
         let grab: ResizeGrab = if let Some(grab) = floating_layer.resize_request(
@@ -4526,7 +4588,8 @@ impl Shell {
             ReleaseMode::NoMouseButtons,
         ) {
             grab.into()
-        } else if let Some(ws) = self.space_for_mut(&mapped) {
+        } else {
+            let ws = self.space_for_mut(&mapped)?;
             let node_id = mapped.tiling_node_id.lock().unwrap().clone()?;
             let (node, left_up_idx, orientation) =
                 ws.tiling_layer.resize_request(node_id, edges)?;
@@ -4540,8 +4603,6 @@ impl Shell {
                 ReleaseMode::NoMouseButtons,
             )
             .into()
-        } else {
-            return None;
         };
 
         Some((grab, Focus::Clear))
@@ -4898,7 +4959,8 @@ impl Shell {
                 })),
                 Some(from),
             );
-        } else if let Some(workspace) = self.space_for_mut(&mapped) {
+        } else {
+            let workspace = self.space_for_mut(&mapped)?;
             if mapped.is_minimized() {
                 // TODO: Rewrite the `MinimizedWindow` to restore to fullscreen
                 return None;
@@ -4946,8 +5008,6 @@ impl Shell {
                 },
                 Some(from),
             );
-        } else {
-            return None;
         };
 
         Some(KeyboardFocusTarget::Fullscreen(window))
@@ -5025,6 +5085,20 @@ impl Shell {
         let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
 
         if let Some(active) = self.active_space(output) {
+            for fs in active.get_fullscreen_surfaces() {
+                fs.surface.take_presentation_feedback(
+                    &mut output_presentation_feedback,
+                    surface_primary_scanout_output,
+                    |surface, _| {
+                        surface_presentation_feedback_flags_from_states(
+                            surface,
+                            None,
+                            render_element_states,
+                        )
+                    },
+                );
+            }
+
             active.mapped().for_each(|mapped| {
                 mapped.active_window().take_presentation_feedback(
                     &mut output_presentation_feedback,
@@ -5108,10 +5182,19 @@ pub fn check_grab_preconditions(
 
     let pointer = seat.get_pointer().unwrap();
     let touch = seat.get_touch().unwrap();
+    let tablet = seat.tablet_seat();
+    let tools = tablet.get_tools();
 
     let start_data =
         if serial.is_some_and(|serial| touch.has_grab(serial)) {
             GrabStartData::Touch(touch.grab_start_data().unwrap())
+        } else if let Some((desc, tool)) =
+            serial.and_then(|serial| tools.iter().find(|(_, tool)| tool.has_grab(serial)))
+        {
+            GrabStartData::TabletTool {
+                tool: desc.clone(),
+                data: tool.grab_start_data().unwrap(),
+            }
         } else {
             GrabStartData::Pointer(pointer.grab_start_data().unwrap_or_else(|| {
                 PointerGrabStartData {
@@ -5125,8 +5208,16 @@ pub fn check_grab_preconditions(
     if let Some(surface) = client_initiated {
         // Check that this surface has a click or touch down grab.
         if !match serial {
-            Some(serial) => pointer.has_grab(serial) || touch.has_grab(serial),
-            None => pointer.is_grabbed() | touch.is_grabbed(),
+            Some(serial) => {
+                pointer.has_grab(serial)
+                    || touch.has_grab(serial)
+                    || tools.values().any(|tool| tool.has_grab(serial))
+            }
+            None => {
+                pointer.is_grabbed()
+                    || touch.is_grabbed()
+                    || tools.values().any(|tool| tool.is_grabbed())
+            }
         } {
             return None;
         }

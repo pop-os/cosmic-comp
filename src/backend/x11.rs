@@ -6,6 +6,7 @@ use crate::{
     shell::{Devices, SeatExt},
     state::{BackendData, Common},
     utils::prelude::*,
+    wayland::protocols::drm::WlDrmState,
 };
 use anyhow::{Context, Result, anyhow};
 use cosmic_comp_config::output::comp::OutputConfig;
@@ -497,7 +498,7 @@ where
         .common
         .dmabuf_state
         .create_global_with_default_feedback::<State>(dh, &default_feedback);
-    let _drm_global_id = state.common.wl_drm_state.create_global::<State>(
+    state.common.wl_drm_state = Some(WlDrmState::new::<State>(
         dh,
         render_node
             .dev_path_with_type(NodeType::Render)
@@ -508,7 +509,7 @@ where
             ))?,
         renderer.dmabuf_formats(),
         &dmabuf_global,
-    );
+    ));
 
     info!("EGL hardware-acceleration enabled.");
 
@@ -533,14 +534,14 @@ impl State {
             let device = event.device();
             for seat in self.common.shell.read().seats.iter() {
                 let devices = seat.user_data().get::<Devices>().unwrap();
-                if devices.has_device(&device) {
+                if devices.has_device(&device, &crate::input::InputBackendId::Normal) {
                     seat.set_active_output(&output);
                     break;
                 }
             }
         };
 
-        self.process_input_event(event);
+        self.process_input_event(event, crate::input::InputBackendId::Normal);
         // TODO actually figure out the output
         for output in self.common.shell.read().outputs() {
             self.backend.x11().schedule_render(output);

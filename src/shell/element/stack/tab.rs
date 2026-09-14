@@ -8,6 +8,7 @@ use cosmic::{
             layout::{Layout, Limits, Node},
             mouse, overlay, renderer,
             text::{Ellipsize, EllipsizeHeightLimit, Shaping, Wrapping},
+            touch,
             widget::{Id, Widget, operation::Operation, tree::Tree},
         },
         widget::{self, container::draw_background, rule::FillMode, scrollable::AbsoluteOffset},
@@ -377,6 +378,7 @@ where
             if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+                    | event::Event::Touch(touch::Event::FingerPressed { .. })
             ) && let Some(message) = self.press_message.clone()
             {
                 shell.publish(message);
@@ -395,6 +397,7 @@ where
             if matches!(
                 event,
                 event::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                    | event::Event::Touch(touch::Event::FingerLifted { .. })
             ) {
                 shell.publish(Message::activate(self.idx));
                 shell.capture_event();

@@ -41,7 +41,9 @@ use crate::{
             compositor::FRAME_TIME_FILTER,
             corner_radius::{pad_rect, surface_corners, surface_padding},
             data_device::get_dnd_icon,
-            image_copy_capture::{FrameHolder, SessionData, render_session},
+            image_copy_capture::{
+                FrameHolder, SessionData, render_element_buffers, render_session,
+            },
         },
         protocols::workspace::WorkspaceHandle,
     },
@@ -267,7 +269,7 @@ impl IndicatorShader {
             .filter(|(old_settings, _)| &settings == old_settings)
             .is_none()
         {
-            let thickness: f32 = ((thickness as f64 * scale).ceil() / scale) as f32;
+            let thickness: f32 = ((thickness as f64 * scale) / scale) as f32;
             let shader = Self::get(renderer);
 
             let elem = PixelShaderElement::new(
@@ -284,10 +286,10 @@ impl IndicatorShader {
                     Uniform::new(
                         "radius",
                         [
-                            outer_radius[3] as f32,
-                            outer_radius[1] as f32,
                             outer_radius[0] as f32,
+                            outer_radius[1] as f32,
                             outer_radius[2] as f32,
+                            outer_radius[3] as f32,
                         ],
                     ),
                     Uniform::new("scale", scale as f32),
@@ -508,22 +510,35 @@ pub fn cursor_elements<'a, 'frame, R>(
         };
         let location = pointer.current_location() - output.current_location().to_f64();
 
+        // Shake-to-find magnification, applied around the pointer tip.
+        let cursor_magnification = seat
+            .user_data()
+            .get::<cursor::CursorState>()
+            .map_or(1.0, |s| {
+                s.lock().unwrap().animated_magnification(Instant::now())
+            });
+        let cursor_center = location.to_physical(scale).to_i32_round();
+
         if mode != CursorMode::None {
             cursor::draw_cursor(
                 renderer,
                 seat,
                 location,
                 scale.into(),
-                zoom_scale,
+                zoom_scale * cursor_magnification as f64,
                 now,
                 blur_strength,
                 mode != CursorMode::NotDefault,
                 &mut |elem, hotspot| {
                     push(CosmicElement::Cursor(RescaleRenderElement::from_element(
-                        RelocateRenderElement::from_element(
-                            elem,
-                            Point::from((-hotspot.x, -hotspot.y)),
-                            Relocate::Relative,
+                        RescaleRenderElement::from_element(
+                            RelocateRenderElement::from_element(
+                                elem,
+                                Point::from((-hotspot.x, -hotspot.y)),
+                                Relocate::Relative,
+                            ),
+                            cursor_center,
+                            cursor_magnification as f64,
                         ),
                         focal_point
                             .as_logical()
@@ -884,8 +899,7 @@ where
                 let geometry = geometry.to_local(output).as_logical();
 
                 let padded = with_states(layer.wl_surface(), |states| {
-                    surface_padding(states, geometry.size)
-                        .and_then(|padding| pad_rect(geometry, &padding))
+                    surface_padding(states).and_then(|padding| pad_rect(geometry, &padding))
                 })
                 .unwrap_or(geometry);
                 let radii = with_states(layer.wl_surface(), |states| {
@@ -1505,11 +1519,16 @@ where
                             }
                         }
 
-                        Ok(RenderOutputResult {
-                            damage: res.0,
-                            sync,
-                            states: res.1,
-                        })
+                        let buffers = render_element_buffers(renderer, &elements);
+
+                        Ok((
+                            RenderOutputResult {
+                                damage: res.0,
+                                sync,
+                                states: res.1,
+                            },
+                            buffers,
+                        ))
                     },
                 )? {
                     pending_image_copy_data.send_success_when_ready(

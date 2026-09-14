@@ -9,7 +9,9 @@ use std::{
 use crate::{
     backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
     shell::{
-        CosmicSurface, PendingWindow, Shell, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
+        CosmicSurface, PendingWindow, Shell,
+        focus::target::KeyboardFocusTarget,
+        grabs::{GrabType, ReleaseMode},
     },
     state::State,
     utils::prelude::*,
@@ -20,7 +22,7 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         drm::DrmNode,
-        input::{ButtonState, KeyState, Keycode},
+        input::{ButtonState, InputTime, KeyState, Keycode},
         renderer::{
             Bind, Frame, Offscreen, Renderer,
             element::{
@@ -32,7 +34,7 @@ use smithay::{
         },
     },
     desktop::space::SpaceElement,
-    input::{keyboard::ModifiersState, pointer::CursorIcon},
+    input::{keyboard::ModifiersState, pointer::CursorIcon, tablet::TabletSeatTrait},
     reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
     utils::{
         Buffer as BufferCoords, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform,
@@ -115,7 +117,7 @@ impl State {
             &self.common.display_handle,
             None,
             std::iter::empty::<(OsString, OsString)>(),
-            std::iter::empty::<OsString>(),
+            ["-enable-ei-portal"],
             true,
             Stdio::null(),
             Stdio::null(),
@@ -394,8 +396,9 @@ impl Common {
         sym: Keysym,
         code: Keycode,
         state: KeyState,
+        modifiers: ModifiersState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         let config = self.config.cosmic_conf.xwayland_eavesdropping.keyboard;
         if config == EavesdroppingKeyboardMode::None {
@@ -418,7 +421,6 @@ impl Common {
             .last_active()
             .get_keyboard()
             .unwrap();
-        let modifiers = keyboard.modifier_state();
         let is_modifier = sym.is_modifier_key();
 
         let xstate = self.xwayland_state.as_mut().unwrap();
@@ -458,7 +460,7 @@ impl Common {
 
         tracing::trace!("Forwaring key {} {:?} to xwayland", code.raw() - 8, state);
         for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
-            wl_keyboard.key(serial.into(), time, code.raw() - 8, state.into());
+            wl_keyboard.key(serial.into(), time.millis(), code.raw() - 8, state.into());
             if xstate.last_modifier_state != Some(modifiers) {
                 xstate.last_modifier_state = Some(modifiers);
                 wl_keyboard.modifiers(
@@ -478,7 +480,7 @@ impl Common {
         button: u32,
         state: ButtonState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         if !self.config.cosmic_conf.xwayland_eavesdropping.pointer {
             return;
@@ -518,7 +520,7 @@ impl Common {
 
         tracing::trace!("Forwaring ptr button {} {:?} to Xwayland", button, state);
         for wl_pointer in pointer.client_pointers(&xstate.client) {
-            wl_pointer.button(serial.into(), time, button, state.into());
+            wl_pointer.button(serial.into(), time.millis(), button, state.into());
         }
     }
 
@@ -807,14 +809,25 @@ impl XwmHandler for State {
                 *context,
             );
         }
-        if !shell.pending_windows.iter().any(|w| w.surface == window) {
-            let fullscreen = window.is_fullscreen().then(|| seat.active_output());
-            let maximized = window.is_maximized();
+        let fullscreen = window.is_fullscreen().then(|| seat.active_output());
+        let minimized = window.is_hidden();
+        let maximized = window.is_maximized();
+        if let Some(pending) = shell
+            .pending_windows
+            .iter_mut()
+            .find(|w| w.surface == window)
+        {
+            pending.seat = seat;
+            pending.fullscreen = fullscreen;
+            pending.minimized = minimized;
+            pending.maximized = maximized;
+        } else {
             let surface = CosmicSurface::from(window);
             shell.pending_windows.push(PendingWindow {
                 surface,
                 seat,
                 fullscreen,
+                minimized,
                 maximized,
                 sticky: false,
             })
@@ -850,7 +863,7 @@ impl XwmHandler for State {
             if let Some(target) = res {
                 let seat = shell.seats.last_active().clone();
                 std::mem::drop(shell);
-                Shell::set_focus(self, Some(&target), &seat, None, false);
+                Shell::set_focus_on_x11_map(self, &target, &seat, false);
             }
         }
     }
@@ -1034,17 +1047,29 @@ impl XwmHandler for State {
                 true,
             ) {
                 std::mem::drop(shell);
-                if grab.is_touch_grab() {
-                    seat.get_touch()
-                        .unwrap()
-                        .set_grab(self, grab, SERIAL_COUNTER.next_serial())
-                } else {
-                    seat.get_pointer().unwrap().set_grab(
+                match grab.grab_type() {
+                    GrabType::Touch => {
+                        seat.get_touch()
+                            .unwrap()
+                            .set_grab(self, grab, SERIAL_COUNTER.next_serial())
+                    }
+                    GrabType::Pointer => seat.get_pointer().unwrap().set_grab(
                         self,
                         grab,
                         SERIAL_COUNTER.next_serial(),
                         focus,
-                    )
+                    ),
+                    GrabType::TabletTool => seat
+                        .tablet_seat()
+                        .get_tool(grab.tool().unwrap())
+                        .unwrap()
+                        .set_grab(
+                            self,
+                            grab,
+                            InputTime::now(),
+                            SERIAL_COUNTER.next_serial(),
+                            focus,
+                        ),
                 }
             }
         }
@@ -1065,17 +1090,29 @@ impl XwmHandler for State {
                 true,
             ) {
                 std::mem::drop(shell);
-                if grab.is_touch_grab() {
-                    seat.get_touch()
-                        .unwrap()
-                        .set_grab(self, grab, SERIAL_COUNTER.next_serial())
-                } else {
-                    seat.get_pointer().unwrap().set_grab(
+                match grab.grab_type() {
+                    GrabType::Touch => {
+                        seat.get_touch()
+                            .unwrap()
+                            .set_grab(self, grab, SERIAL_COUNTER.next_serial())
+                    }
+                    GrabType::Pointer => seat.get_pointer().unwrap().set_grab(
                         self,
                         grab,
                         SERIAL_COUNTER.next_serial(),
                         focus,
-                    )
+                    ),
+                    GrabType::TabletTool => seat
+                        .tablet_seat()
+                        .get_tool(grab.tool().unwrap())
+                        .unwrap()
+                        .set_grab(
+                            self,
+                            grab,
+                            InputTime::now(),
+                            SERIAL_COUNTER.next_serial(),
+                            focus,
+                        ),
                 }
             }
         }

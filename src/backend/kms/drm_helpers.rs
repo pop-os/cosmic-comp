@@ -75,6 +75,7 @@ pub fn display_configuration(
     // And then cleanup
     if device.is_atomic() {
         let mut req = AtomicModeReq::new();
+        let mut has_changes = false;
         let plane_handles = device.plane_handles()?;
 
         // We cannot just shortcut and use the legacy api for all cleanups because of this.
@@ -95,10 +96,15 @@ pub fn display_configuration(
                     let fb_id = get_prop(device, plane, "FB_ID")?;
                     req.add_property(plane, crtc_id, property::Value::CRTC(None));
                     req.add_property(plane, fb_id, property::Value::Framebuffer(None));
+                    has_changes = true;
                 }
             }
         }
-        device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)?;
+        // Skip an empty commit: a no-op modeset that also fails with EPERM
+        // without DRM master (e.g. a render-only secondary GPU).
+        if has_changes {
+            device.atomic_commit(AtomicCommitFlags::ALLOW_MODESET, req)?;
+        }
     } else {
         for crtc in res_handles.crtcs() {
             #[allow(deprecated)]

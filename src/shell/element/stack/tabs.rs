@@ -31,7 +31,7 @@ use keyframe::{
     functions::{EaseInOutCubic, EaseOutCubic},
 };
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
     time::{Duration, Instant},
 };
 
@@ -757,12 +757,10 @@ where
             state.last_state = Some(current_state.clone());
         }
         let last_state = state.last_state.as_mut().unwrap();
-        let unknown_keys = current_state
-            .keys()
-            .collect::<HashSet<_>>()
-            .symmetric_difference(&last_state.keys().collect::<HashSet<_>>())
-            .next()
-            .is_some();
+        let unknown_keys = current_state.len() != last_state.len()
+            || current_state
+                .keys()
+                .any(|key| !last_state.contains_key(key));
 
         enum Difference {
             NewOrRemoved,

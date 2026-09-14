@@ -4,7 +4,10 @@ use crate::{
         wayland::{SurfaceRenderElement, push_render_elements_from_surface_tree},
     },
     shell::focus::target::PointerFocusTarget,
-    wayland::handlers::{compositor::frame_time_filter_fn, corner_radius::surface_corners},
+    wayland::handlers::{
+        background_effect::ComputedBlurRegionCachedState, compositor::frame_time_filter_fn,
+        corner_radius::surface_corners,
+    },
 };
 use std::{
     borrow::Cow,
@@ -18,8 +21,9 @@ use std::{
 use smithay::{
     backend::{
         drm::DrmNode,
+        input::InputTime,
         renderer::{
-            ImportAll, Renderer,
+            ImportAll, Renderer, buffer_has_alpha,
             element::{Kind, RenderElementStates, surface::KindEvaluation},
             utils::RendererSurfaceStateUserData,
         },
@@ -48,6 +52,7 @@ use smithay::{
         IsAlive, Logical, Physical, Point, Rectangle, Scale, Serial, Size, user_data::UserDataMap,
     },
     wayland::{
+        alpha_modifier::AlphaModifierSurfaceCachedState,
         compositor::{
             SubsurfaceCachedState, SurfaceData, TraversalAction, get_parent, with_states,
             with_surface_tree_downward,
@@ -81,6 +86,39 @@ fn buffer_node(data: &SurfaceData) -> Option<DrmNode> {
         .and_then(|dmabuf| dmabuf.node())
 }
 
+fn is_likely_translucent(alpha: f32, data: &SurfaceData) -> bool {
+    if alpha < 1.0 {
+        return true;
+    }
+
+    let mut alpha_modifier_state = data.cached_state.get::<AlphaModifierSurfaceCachedState>();
+    let alpha_multiplier = alpha_modifier_state
+        .current()
+        .multiplier_f32()
+        .unwrap_or(1.0);
+    if alpha_multiplier < 1.0 {
+        return true;
+    }
+
+    let Some(surface_state) = data.data_map.get::<RendererSurfaceStateUserData>() else {
+        return false;
+    };
+    let surface_state = surface_state.lock().unwrap();
+    if surface_state
+        .buffer()
+        .is_none_or(|buffer| !buffer_has_alpha(buffer).unwrap_or(true))
+    {
+        return false;
+    }
+
+    let mut blur_state = data.cached_state.get::<ComputedBlurRegionCachedState>();
+    blur_state
+        .current()
+        .blur_region
+        .as_ref()
+        .is_some_and(|region| !region.is_empty())
+}
+
 /// Build the [`KindEvaluation`] for a window's surface tree.
 ///
 /// `scanout_node`, when set, is the scan-out target [`DrmNode`] of the output currently being
@@ -89,6 +127,7 @@ fn buffer_node(data: &SurfaceData) -> Option<DrmNode> {
 fn scanout_kind_eval(
     scanout_override: Option<bool>,
     scanout_node: Option<DrmNode>,
+    alpha: f32,
 ) -> KindEvaluation {
     match (scanout_override, scanout_node) {
         // Forced off.
@@ -98,14 +137,14 @@ fn scanout_kind_eval(
         (None, None) => FRAME_TIME_FILTER,
         // Node restriction in effect: only buffers on the scan-out node may be candidates.
         (Some(true), Some(node)) => KindEvaluation::Closure(Box::new(move |data| {
-            if buffer_node(data) == Some(node) {
+            if buffer_node(data) == Some(node) && !is_likely_translucent(alpha, data) {
                 Kind::ScanoutCandidate
             } else {
                 Kind::Unspecified
             }
         })),
         (None, Some(node)) => KindEvaluation::Closure(Box::new(move |data| {
-            if buffer_node(data) == Some(node) {
+            if buffer_node(data) == Some(node) && !is_likely_translucent(alpha, data) {
                 frame_time_filter_fn(data)
             } else {
                 Kind::Unspecified
@@ -804,10 +843,7 @@ impl CosmicSurface {
         self.0
             .send_dmabuf_feedback(output, primary_scan_out_output, |_, data| {
                 if is_fullscreen {
-                    feedback
-                        .primary_scanout_feedback
-                        .as_ref()
-                        .unwrap_or(&feedback.render_feedback)
+                    &feedback.primary_scanout_feedback
                 } else if frame_time_filter_fn(data) == Kind::ScanoutCandidate {
                     feedback
                         .overlay_scanout_feedback
@@ -883,7 +919,7 @@ impl CosmicSurface {
                         radii,
                         None,
                         blur_strength,
-                        scanout_kind_eval(None, scanout_node),
+                        scanout_kind_eval(None, scanout_node, alpha),
                         push,
                         None,
                     )
@@ -928,7 +964,7 @@ impl CosmicSurface {
                     radii,
                     None,
                     blur_strength,
-                    scanout_kind_eval(scanout_override, scanout_node),
+                    scanout_kind_eval(scanout_override, scanout_node, alpha),
                     push_above,
                     push_below,
                 )
@@ -949,7 +985,7 @@ impl CosmicSurface {
                     radii,
                     None,
                     blur_strength,
-                    scanout_kind_eval(scanout_override, scanout_node),
+                    scanout_kind_eval(scanout_override, scanout_node, alpha),
                     push_above,
                     push_below,
                 )
@@ -1053,7 +1089,7 @@ impl KeyboardTarget<State> for CosmicSurface {
         key: KeysymHandle<'_>,
         state: smithay::backend::input::KeyState,
         serial: smithay::utils::Serial,
-        time: u32,
+        time: InputTime,
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {

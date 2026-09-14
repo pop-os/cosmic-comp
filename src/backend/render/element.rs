@@ -41,7 +41,9 @@ where
     Workspace(
         RelocateRenderElement<CropRenderElement<RescaleRenderElement<WorkspaceRenderElement<R>>>>,
     ),
-    Cursor(RescaleRenderElement<RelocateRenderElement<CursorRenderElement<R>>>),
+    Cursor(
+        RescaleRenderElement<RescaleRenderElement<RelocateRenderElement<CursorRenderElement<R>>>>,
+    ),
     Dnd(SurfaceRenderElement<R>),
     MoveGrab(RescaleRenderElement<CosmicMappedRenderElement<R>>),
     Postprocess(
