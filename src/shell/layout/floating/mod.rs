@@ -1618,7 +1618,7 @@ impl FloatingLayout {
                         geometry,
                         indicator_thickness,
                         radius,
-                        alpha,
+                        alpha * active_window_hint.alpha,
                         output_scale,
                         [
                             active_window_hint.red,
