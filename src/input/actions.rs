@@ -10,7 +10,8 @@ use crate::{
     },
     utils::prelude::*,
     wayland::{
-        handlers::xdg_activation::ActivationContext, protocols::workspace::WorkspaceUpdateGuard,
+        handlers::{xdg_activation::ActivationContext, xdg_shell::PopupGrabData},
+        protocols::workspace::WorkspaceUpdateGuard,
     },
 };
 use cosmic_comp_config::{TileBehavior, workspace::WorkspaceLayout};
@@ -19,6 +20,7 @@ use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
     backend::input::InputTime,
+    desktop::PopupUngrabStrategy,
     input::{Seat, pointer::MotionEvent},
     utils::{Point, Serial},
 };
@@ -86,6 +88,15 @@ impl State {
                         &self.common.config,
                         self.common.event_loop_handle.clone(),
                     );
+                }
+                // ungrab the grabbed popups
+                if let Some(mut popup_grab) = seat
+                    .user_data()
+                    .get::<PopupGrabData>()
+                    .and_then(|x| x.take())
+                    && !popup_grab.has_ended()
+                {
+                    popup_grab.ungrab(PopupUngrabStrategy::All);
                 }
                 let pointer = seat.get_pointer().unwrap();
                 let keyboard = seat.get_keyboard().unwrap();
