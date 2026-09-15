@@ -578,10 +578,12 @@ impl PointerGrab<State> for MenuGrab {
                     PointerTarget::motion(&element.iced, &self.seat, state, &new_event);
                 }
             } else {
+                // Keep the root menu hovered while a submenu is open
+                let keep_root = usize::from(elements.len() > 1);
                 elements
                     .iter_mut()
                     .filter(|element| element.pointer_entered)
-                    .skip(1)
+                    .skip(keep_root)
                     .for_each(|element| {
                         PointerTarget::leave(
                             &element.iced,
@@ -1019,10 +1021,11 @@ impl TabletToolGrab<State> for MenuGrab {
                 );
                 self.last_tablet_idx = Some(i);
             } else {
+                let keep_root = usize::from(elements.len() > 1);
                 elements
                     .iter_mut()
                     .filter(|element| element.tablet_entered.is_some())
-                    .skip(1)
+                    .skip(keep_root)
                     .for_each(|element| {
                         TabletToolTarget::proximity_out(
                             &element.iced,
