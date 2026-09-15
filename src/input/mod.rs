@@ -19,7 +19,7 @@ use crate::{
             Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
         },
-        grabs::{ReleaseMode, ResizeEdge},
+        grabs::{MenuGrab, MoveGrab, ReleaseMode, ResizeEdge, ResizeGrab},
         layout::{
             floating::ResizeGrabMarker,
             tiling::{NodeDesc, SwapWindowGrab, TilingLayout},
@@ -49,7 +49,7 @@ use smithay::{
         PointerAxisEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
         TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
     },
-    desktop::{PopupKeyboardGrab, WindowSurfaceType, utils::under_from_surface_tree},
+    desktop::{WindowSurfaceType, utils::under_from_surface_tree},
     input::{
         Seat,
         keyboard::KeyboardHandle,
@@ -2306,17 +2306,15 @@ impl State {
 
         let keyboard = seat.get_keyboard().unwrap();
         let pointer = seat.get_pointer().unwrap();
-        // We're only interested in filtering keyboard grabs if we initiated them.
-        // The easiest way to check that is to check the type of the grab.
-        let keyboard_grabbed = keyboard.with_grab(|_serial, grab| {
-            grab.is::<SwapWindowGrab>() || grab.is::<PopupKeyboardGrab<State>>()
+        // Escape only cancels grabs the compositor started for its own interactions
+        // For keyboard: SwapWindowGrab
+        // For pointer: MoveGrab, ResizeGrab, and MenuGrab
+        let keyboard_grabbed =
+            keyboard.with_grab(|_serial, grab| grab.is::<SwapWindowGrab>()) == Some(true);
+        let pointer_grabbed = pointer.with_grab(|_serial, grab| {
+            grab.is::<MoveGrab>() || grab.is::<ResizeGrab>() || grab.is::<MenuGrab>()
         }) == Some(true);
-        // A virtual-keyboard key can arrive while the seat's pointer is grabbed by that
-        // same on-screen keyboard's own button press (the implicit grab from clicking an OSK
-        // key). That pointer grab must not capture the injected key, otherwise e.g.
-        // pressing esc on a virtual keyboard gets swallowed here
-        let from_vk = matches!(backend_id, InputBackendId::VirtualKeyboard);
-        let is_grabbed = keyboard_grabbed || (pointer.is_grabbed() && !from_vk);
+        let is_grabbed = keyboard_grabbed || pointer_grabbed;
 
         let current_focus = keyboard.current_focus();
         //this should fall back to active output since there may not be a focused output
