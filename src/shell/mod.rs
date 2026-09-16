@@ -2990,6 +2990,7 @@ impl Shell {
         let workspace_empty = workspace.mapped().next().is_none();
         if is_dialog || floating_exception || !workspace.tiling_enabled {
             workspace.floating_layer.map(mapped.clone(), None);
+            workspace.floating_layer.position_x11_transients(&mapped);
         } else {
             for mapped in workspace
                 .mapped()
