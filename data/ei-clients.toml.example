@@ -1,0 +1,48 @@
+# Additional clients allowed on the compositor's D-Bus interfaces:
+#
+#   [[ei.client]]                      "com.system76.CosmicComp.Ei" open an EI
+#                                      (libei) sender socket, i.e. synthesize
+#                                      keyboard, pointer and touch input.
+#   [[a11y_keyboard_monitor.client]]   "org.freedesktop.a11y.KeyboardMonitor"
+#                                      observe and grab keys. Grant this only to
+#                                      assistive tech you trust with every
+#                                      keystroke typed in the session, passwords
+#                                      included.
+#
+# Copy this file to a drop-in directory to activate it.
+# Use `install -m0644`. The compositor ignores a file left group-writable.
+# The compositor reads two drop-in directories, in this order:
+#
+#     /usr/share/cosmic-comp/ei-clients.d/*.toml   # for packages
+#     /etc/cosmic-comp/ei-clients.d/*.toml         # for local administration
+#
+# It applies the files in order of their file name across both directories. A
+# file in /etc replaces a file of the same name under /usr/share, so you can mask
+# a grant shipped by a package with an empty file of that name in /etc.
+#
+# The compositor picks up changes at start-up only.
+# Log out and back in after editing.
+#
+# The compositor always allows its own built-in clients, which need no entry
+# here: the XDG desktop portal implementation and the on-screen keyboard for
+# [ei], Orca for [a11y_keyboard_monitor]. Entries here add access. They cannot
+# narrow or remove a built-in.
+
+# The compositor identifies a client by a well-known bus name it owns on the
+# session bus. The client must request that name before calling GetSenderSocket.
+[[ei.client]]
+bus_name = "org.example.MyRemoteTool"
+
+# `device_types` limits what the client may ask for. Omit it and the client may
+# request every type. Valid values are "keyboard", "pointer" and "touchscreen".
+#
+# The client below can move the pointer, but cannot inject keystrokes.
+[[ei.client]]
+bus_name = "com.example.Kiosk"
+device_types = ["pointer"]
+
+# You name a keyboard monitor the same way. There is no `device_types` here.
+# The interface carries no per-device policy, so a client watches every key
+# or nothing.
+[[a11y_keyboard_monitor.client]]
+bus_name = "org.example.MyScreenReader"

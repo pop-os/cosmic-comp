@@ -10,17 +10,9 @@ use std::{
 };
 use tracing::debug;
 use xkbcommon::xkb::Keysym;
-use zbus::{
-    message::Header,
-    names::{UniqueName, WellKnownName},
-    object_server::SignalEmitter,
-};
+use zbus::{message::Header, names::UniqueName, object_server::SignalEmitter};
 
-use super::name_owners::NameOwners;
-
-static ALLOWED_NAMES: &[WellKnownName] = &[WellKnownName::from_static_str_unchecked(
-    "org.gnome.Orca.KeyboardMonitor",
-)];
+use super::{client_allow_list::NameAllowList, name_owners::NameOwners};
 
 // As defined in at-spi2-core
 const ATSPI_DEVICE_A11Y_MANAGER_VIRTUAL_MOD_START: u32 = 15;
@@ -76,6 +68,7 @@ pub struct A11yKeyboardMonitorState {
     active_virtual_mods: HashSet<Keysym>,
     conn: zbus::Connection,
     name_owners: NameOwners,
+    allow_list: NameAllowList,
 }
 
 impl A11yKeyboardMonitorState {
@@ -83,12 +76,14 @@ impl A11yKeyboardMonitorState {
         conn: &zbus::Connection,
         name_owners: &NameOwners,
         executor: &calloop::futures::Scheduler<()>,
+        allow_list: NameAllowList,
     ) -> zbus::Result<Self> {
         let clients = Arc::new(Mutex::new(Clients::default()));
 
         let keyboard_monitor = KeyboardMonitor {
             clients: clients.clone(),
             name_owners: name_owners.clone(),
+            allow_list: allow_list.clone(),
         };
         conn.object_server()
             .at("/org/freedesktop/a11y/Manager", keyboard_monitor)
@@ -101,6 +96,7 @@ impl A11yKeyboardMonitorState {
             active_virtual_mods: HashSet::new(),
             conn: conn.clone(),
             name_owners: name_owners.clone(),
+            allow_list,
         })
     }
 
@@ -188,22 +184,26 @@ impl A11yKeyboardMonitorState {
     pub fn refresh(&mut self) {
         // Remove clients and associated grabs when unique names are no longer
         // present on bus, or no longer hold approved name on bus.
-        self.clients
-            .lock()
-            .unwrap()
-            .0
-            .retain(|k, _| self.name_owners.check_owner_no_poll(k, ALLOWED_NAMES))
+        self.clients.lock().unwrap().0.retain(|k, _| {
+            self.name_owners
+                .check_owner_no_poll(k, self.allow_list.names())
+        })
     }
 }
 
 struct KeyboardMonitor {
     clients: Arc<Mutex<Clients>>,
     name_owners: NameOwners,
+    allow_list: NameAllowList,
 }
 
 impl KeyboardMonitor {
     async fn check_sender_allowed(&self, sender: &UniqueName<'_>) -> zbus::fdo::Result<()> {
-        if self.name_owners.check_owner(sender, ALLOWED_NAMES).await {
+        if self
+            .name_owners
+            .check_owner(sender, self.allow_list.names())
+            .await
+        {
             Ok(())
         } else {
             Err(zbus::fdo::Error::AccessDenied("Access denied".to_string()))

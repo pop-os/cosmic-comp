@@ -37,6 +37,18 @@ impl Drop for Inner {
 }
 
 impl Inner {
+    /// Which of `allowed_names` the unique name `name` owns, if any.
+    fn matched_name(
+        &self,
+        name: &UniqueName<'_>,
+        allowed_names: &[WellKnownName<'_>],
+    ) -> Option<WellKnownName<'static>> {
+        allowed_names
+            .iter()
+            .find(|n| self.name_owners.get(*n).and_then(|x| x.as_ref()) == Some(name))
+            .map(|n| n.to_owned())
+    }
+
     /// Process all events so far on `stream`, and update `name_owners`.
     fn update_if_needed(&mut self) {
         let mut context = Context::from_waker(&self.waker);
@@ -165,10 +177,24 @@ impl NameOwners {
             // more to check.
             true
         } else {
-            allowed_names
-                .iter()
-                .any(|n| inner.name_owners.get(n).and_then(|x| x.as_ref()) == Some(name))
+            inner.matched_name(name, allowed_names).is_some()
         }
+    }
+
+    /// Which of `allowed_names` the unique name `name` owns, if any.
+    ///
+    /// Look up per-client policy with this after an allow check has passed.
+    pub fn matched_name_no_poll(
+        &self,
+        name: &UniqueName<'_>,
+        allowed_names: &[WellKnownName<'_>],
+    ) -> Option<WellKnownName<'static>> {
+        let mut inner = self.0.lock().unwrap();
+        inner.update_if_needed();
+        if !inner.unique_names.contains(name) {
+            return None;
+        }
+        inner.matched_name(name, allowed_names)
     }
 
     /// Lazily populate `name_owenrs` with owners of well known names
