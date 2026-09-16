@@ -13,10 +13,22 @@ pub struct WorkspaceConfig {
     pub action_on_typing: Action,
     #[serde(default = "default_wraparound")]
     pub workspace_wraparound: bool,
+    #[serde(default = "default_grid_columns")]
+    pub workspace_grid_columns: u32,
+    #[serde(default = "default_grid_rows")]
+    pub workspace_grid_rows: u32,
 }
 
 fn default_wraparound() -> bool {
     true
+}
+
+fn default_grid_columns() -> u32 {
+    3
+}
+
+fn default_grid_rows() -> u32 {
+    2
 }
 
 impl Default for WorkspaceConfig {
@@ -26,6 +38,8 @@ impl Default for WorkspaceConfig {
             workspace_layout: WorkspaceLayout::default(),
             action_on_typing: Action::default(),
             workspace_wraparound: default_wraparound(),
+            workspace_grid_columns: default_grid_columns(),
+            workspace_grid_rows: default_grid_rows(),
         }
     }
 }
@@ -42,6 +56,7 @@ pub enum WorkspaceLayout {
     #[default]
     Vertical,
     Horizontal,
+    Grid,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
