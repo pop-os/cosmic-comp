@@ -5424,7 +5424,7 @@ fn render_new_tree_windows<R>(
             renderer,
             render_loc,
             output_scale.into(),
-            1.0,
+            window.effective_render_alpha(1.0),
             None,
             scanout_node,
             false,

@@ -653,6 +653,8 @@ impl CosmicMapped {
             return None;
         }
 
+        let alpha = self.active_window().effective_render_alpha(alpha);
+
         match &self.element {
             CosmicMappedInternal::Stack(s) => s
                 .shadow_render_element::<R, CosmicMappedRenderElement<R>>(
@@ -694,6 +696,8 @@ impl CosmicMapped {
         R::TextureId: Send + Clone + 'static,
         CosmicMappedRenderElement<R>: RenderElement<R>,
     {
+        let alpha = self.active_window().effective_render_alpha(alpha);
+
         #[cfg(feature = "debug")]
         if let Some(debug) = self.debug.lock().unwrap().as_mut() {
             let window = self.active_window();
