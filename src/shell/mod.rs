@@ -3211,7 +3211,7 @@ impl Shell {
 
         if &from_output == to_output
             && to_idx.checked_sub(1).is_some_and(|idx| idx == from_idx)
-            && to_idx == self.workspaces.len(to_output) - 1
+            && to_idx == self.workspaces.len(to_output).saturating_sub(1)
             && self
                 .workspaces
                 .get(from_idx, &from_output)
