@@ -342,7 +342,7 @@ impl FloatingLayout {
         &mut self,
         mapped: impl Into<CosmicMapped>,
         position: impl Into<Option<Point<i32, Local>>>,
-    ) {
+    ) -> Rectangle<i32, Local> {
         let mapped = mapped.into();
         let position = position.into();
 
@@ -412,7 +412,7 @@ impl FloatingLayout {
         position: Option<Point<i32, Local>>,
         size: Option<Size<i32, Logical>>,
         prev: Option<Rectangle<i32, Local>>,
-    ) {
+    ) -> Rectangle<i32, Local> {
         let already_mapped = self.space.element_geometry(&mapped).map(RectExt::as_local);
         let mut win_geo = mapped.geometry().as_local();
 
@@ -603,9 +603,10 @@ impl FloatingLayout {
 
                 pos
             });
+        win_geo.loc = position;
 
         mapped.set_tiled(false);
-        mapped.set_geometry(Rectangle::new(position, win_geo.size).to_global(&output));
+        mapped.set_geometry(win_geo.to_global(&output));
         mapped.configure();
 
         if let Some(previous_geometry) = prev.or(already_mapped) {
@@ -619,6 +620,8 @@ impl FloatingLayout {
         }
         self.space.map_element(mapped, position.as_logical(), false);
         self.space.refresh();
+
+        win_geo
     }
 
     pub fn remap_minimized(
