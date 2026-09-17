@@ -1462,11 +1462,18 @@ impl State {
                     };
                     let under = State::surface_under(position, &output, &shell)
                         .map(|(target, pos)| (target, pos.as_logical()));
+                    let focus_target = State::element_under(position, &output, &shell, &seat);
 
                     std::mem::drop(shell);
 
                     let serial = SERIAL_COUNTER.next_serial();
                     let touch = seat.get_touch().unwrap();
+                    // change the keyboard focus unless the touch is grabbed, like pointer buttons
+                    if !touch.is_grabbed()
+                        && let Some(target) = focus_target.as_ref()
+                    {
+                        Shell::set_focus(self, Some(target), &seat, Some(serial), false);
+                    }
                     touch.down(
                         self,
                         under,
