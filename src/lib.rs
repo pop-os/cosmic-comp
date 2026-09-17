@@ -43,6 +43,7 @@ pub mod dbus;
 pub mod debug;
 pub mod hooks;
 pub mod input;
+pub mod input_capture;
 pub mod libei;
 mod logger;
 pub mod session;
@@ -180,6 +181,9 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     // Set up the libei sender side before the backend spawns Xwayland.
     let ei_sender = libei::setup_ei(&event_loop.handle());
     state.common.dbus_state.set_ei_sender(ei_sender);
+    // Set up the EIS receiver side used by the XDG InputCapture portal.
+    let input_capture = input_capture::setup(&event_loop.handle());
+    state.common.dbus_state.set_input_capture(input_capture);
 
     // init backend
     backend::init_backend_auto(&display, &mut event_loop, &mut state)?;

@@ -306,6 +306,7 @@ pub struct Common {
     pub overlap_notify_state: OverlapNotifyState,
     pub a11y_state: A11yState,
     pub dbus_state: DBusState,
+    pub(crate) input_capture: crate::input_capture::InputCaptureState,
     pub keyboard_layout_state: KeyboardLayoutState,
     pub background_effect_state: BackgroundEffectState,
 
@@ -834,6 +835,7 @@ impl State {
                 xwayland_shell_state,
                 pointer_focus_state: None,
                 dbus_state,
+                input_capture: crate::input_capture::InputCaptureState::default(),
                 keyboard_layout_state,
                 session_lock_layer_state,
 

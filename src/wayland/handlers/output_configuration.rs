@@ -238,6 +238,7 @@ impl State {
         drop(backend);
         if !test_only {
             crate::libei::refresh_absolute_pointer_regions(self);
+            self.input_capture_output_changed();
         }
 
         true
