@@ -50,12 +50,14 @@ use crate::{
         handlers::image_copy_capture::{
             SessionData, SessionUserData, constraints_for_output, constraints_for_toplevel,
         },
+        protocols::toplevel_info::WindowIcon,
         protocols::workspace::WorkspaceHandle,
     },
 };
 
 use super::{
-    super::data_device::get_dnd_icon, cursor_capture_constraints, user_data::SessionHolder,
+    super::data_device::get_dnd_icon, MAX_CAPTURE_PIXELS, cursor_capture_constraints,
+    user_data::SessionHolder,
 };
 
 pub fn render_element_buffers<R, E>(
@@ -73,6 +75,136 @@ where
             Some(UnderlyingStorage::Memory(_)) | None => None,
         })
         .collect()
+}
+
+pub(super) fn render_icon_argb8888(icon: &WindowIcon, width: u32, height: u32) -> Option<Vec<u8>> {
+    let pixel_count = usize::try_from(width)
+        .ok()?
+        .checked_mul(usize::try_from(height).ok()?)?;
+    if pixel_count == 0 || pixel_count > MAX_CAPTURE_PIXELS {
+        return None;
+    }
+
+    let source = icon.best_rgba(width, height)?;
+    let source_width = source.width();
+    let source_height = source.height();
+    let (scaled_width, scaled_height) = if u64::from(width) * u64::from(source_height)
+        <= u64::from(height) * u64::from(source_width)
+    {
+        (
+            width,
+            ((u64::from(source_height) * u64::from(width)) / u64::from(source_width)).max(1) as u32,
+        )
+    } else {
+        (
+            ((u64::from(source_width) * u64::from(height)) / u64::from(source_height)).max(1)
+                as u32,
+            height,
+        )
+    };
+    let mut source_pixels = source.pixels().to_vec();
+    for pixel in source_pixels.chunks_exact_mut(4) {
+        let alpha = pixel[3];
+        for channel in &mut pixel[..3] {
+            *channel = ((u16::from(*channel) * u16::from(alpha) + 127) / 255) as u8;
+        }
+    }
+    let image = image::RgbaImage::from_raw(source_width, source_height, source_pixels)?;
+    let image = image::imageops::resize(
+        &image,
+        scaled_width,
+        scaled_height,
+        image::imageops::FilterType::Triangle,
+    );
+
+    let mut output = vec![0; pixel_count.checked_mul(4)?];
+    let offset_x = usize::try_from((width - scaled_width) / 2).ok()?;
+    let offset_y = usize::try_from((height - scaled_height) / 2).ok()?;
+    let target_width = usize::try_from(width).ok()?;
+    for (x, y, pixel) in image.enumerate_pixels() {
+        let [red, green, blue, alpha] = pixel.0;
+        let index = ((offset_y + usize::try_from(y).ok()?) * target_width
+            + offset_x
+            + usize::try_from(x).ok()?)
+            * 4;
+        let argb = (u32::from(alpha) << 24)
+            | (u32::from(red) << 16)
+            | (u32::from(green) << 8)
+            | u32::from(blue);
+        output[index..index + 4].copy_from_slice(&argb.to_ne_bytes());
+    }
+    Some(output)
+}
+
+pub(super) fn render_icon_to_buffer(frame: Frame, icon: &WindowIcon, width: u32, height: u32) {
+    let Some(pixels) = render_icon_argb8888(icon, width, height) else {
+        frame.fail(CaptureFailureReason::Stopped);
+        return;
+    };
+    let buffer = frame.buffer();
+    let copied = with_buffer_contents_mut(&buffer, |ptr, len, data| {
+        let Ok(buffer_width) = u32::try_from(data.width) else {
+            return false;
+        };
+        let Ok(buffer_height) = u32::try_from(data.height) else {
+            return false;
+        };
+        if buffer_width != width
+            || buffer_height != height
+            || data.format != smithay::reexports::wayland_server::protocol::wl_shm::Format::Argb8888
+        {
+            return false;
+        }
+        let Ok(offset) = usize::try_from(data.offset) else {
+            return false;
+        };
+        let Ok(stride) = usize::try_from(data.stride) else {
+            return false;
+        };
+        let Some(row_len) = usize::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(4))
+        else {
+            return false;
+        };
+        let Ok(height) = usize::try_from(height) else {
+            return false;
+        };
+        let Some(end) = height
+            .checked_sub(1)
+            .and_then(|rows| rows.checked_mul(stride))
+            .and_then(|span| span.checked_add(row_len))
+            .and_then(|span| offset.checked_add(span))
+        else {
+            return false;
+        };
+        if stride < row_len || end > len {
+            return false;
+        }
+        for row in 0..height {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    pixels.as_ptr().add(row * row_len),
+                    ptr.add(offset + row * stride),
+                    row_len,
+                );
+            }
+        }
+        true
+    });
+
+    if matches!(copied, Ok(true)) {
+        let size = Size::<i32, BufferCoords>::new(width as i32, height as i32);
+        frame.success(
+            Transform::Normal,
+            vec![Rectangle::from_size(size)],
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO),
+        );
+    } else {
+        frame.fail(CaptureFailureReason::Unknown);
+    }
 }
 
 pub struct PendingImageCopyData {

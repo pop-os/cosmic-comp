@@ -2,6 +2,7 @@ use super::{
     workspace::{WorkspaceHandle, WorkspaceHandler},
 };
 use crate::shell::element::surface::WeakCosmicSurface;
+use crate::wayland::protocols::toplevel_info::WindowIcon;
 use cosmic_protocols::image_capture_source::v1::server::{
     zcosmic_workspace_image_capture_source_manager_v1::{
         Request as CosmicWorkspaceSourceRequest, ZcosmicWorkspaceImageCaptureSourceManagerV1,
@@ -33,6 +34,11 @@ pub enum ImageCaptureSourceKind {
     Output(WeakOutput),
     Workspace(WorkspaceHandle),
     Toplevel(WeakCosmicSurface),
+    ToplevelIcon {
+        icon: WindowIcon,
+        width: u32,
+        height: u32,
+    },
     Destroyed,
 }
 
@@ -45,6 +51,24 @@ impl ImageCaptureSourceKind {
             .cloned()
             .unwrap_or(Self::Destroyed)
     }
+}
+
+pub fn init_image_capture_source<D>(
+    source_handle: New<ExtImageCaptureSourceV1>,
+    kind: ImageCaptureSourceKind,
+    data_init: &mut DataInit<'_, D>,
+) where
+    D: Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData> + 'static,
+{
+    let source = ImageCaptureSource::new();
+    source.user_data().insert_if_missing(|| kind);
+    let instance = data_init.init(
+        source_handle,
+        ImageCaptureSourceData {
+            source: source.clone(),
+        },
+    );
+    source.add_instance(&instance);
 }
 
 impl CosmicImageCaptureSourceState {
@@ -122,15 +146,7 @@ where
                 Some(workspace) => ImageCaptureSourceKind::Workspace(workspace),
                 None => ImageCaptureSourceKind::Destroyed,
             };
-            let source = ImageCaptureSource::new();
-            source.user_data().insert_if_missing(|| data);
-            let instance = data_init.init(
-                source_handle,
-                ImageCaptureSourceData {
-                    source: source.clone(),
-                },
-            );
-            source.add_instance(&instance);
+            init_image_capture_source(source_handle, data, data_init);
         }
     }
 }
