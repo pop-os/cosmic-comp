@@ -207,7 +207,7 @@ pub fn tab_items(
                         .tiling_layer
                         .map(mapped, Some(focus_stack.iter()), None);
                 } else {
-                    workspace.floating_layer.map(mapped, None)
+                    workspace.floating_layer.map(mapped, None);
                 }
             });
         }),
