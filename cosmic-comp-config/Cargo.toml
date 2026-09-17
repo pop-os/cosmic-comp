@@ -19,3 +19,6 @@ tracing = { version = "0.1.44", features = [
 default = []
 output = ["ron", "tracing"]
 randr = ["cosmic-randr-shell", "output"]
+
+[dev-dependencies]
+ron = "0.12"

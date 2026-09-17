@@ -118,6 +118,9 @@ version = "0.2.0"
 features = ["svg"]
 optional = true
 
+[dev-dependencies]
+tempfile = "3"
+
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["systemd"]
