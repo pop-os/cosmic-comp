@@ -15,6 +15,9 @@ tracing = { version = "0.1.44", features = [
     "release_max_level_info",
 ], optional = true }
 
+[dev-dependencies]
+ron = "0.12"
+
 [features]
 default = []
 output = ["ron", "tracing"]

@@ -714,12 +714,17 @@ impl CosmicStack {
             let appearance = p.appearance_conf.lock().unwrap();
             let tiled = p.tiled.load(Ordering::Acquire);
 
-            if windows[active].is_maximized(false) {
+            let maximized = windows[active].is_maximized(false);
+            if maximized && !appearance.clip_maximized_windows {
                 return None;
             }
 
-            let round = appearance.clip_tiled_windows || !tiled;
-            if tiled && !appearance.shadow_tiled_windows {
+            let round = if maximized {
+                appearance.clip_maximized_windows
+            } else {
+                appearance.clip_tiled_windows || !tiled
+            };
+            if !maximized && tiled && !appearance.shadow_tiled_windows {
                 return None;
             }
             let radii = if round {
@@ -802,7 +807,11 @@ impl CosmicStack {
             let theme = p.theme.lock().unwrap();
             let tiled = p.tiled.load(Ordering::Acquire);
             let maximized = windows[active].is_maximized(false);
-            let round = (appearance.clip_tiled_windows || !tiled) && !maximized;
+            let round = if maximized {
+                appearance.clip_maximized_windows
+            } else {
+                appearance.clip_tiled_windows || !tiled
+            };
             round.then(|| {
                 theme
                     .cosmic()
@@ -816,7 +825,8 @@ impl CosmicStack {
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
             let theme = p.theme.lock().unwrap();
-            let maximized = windows[active].is_maximized(false);
+            let sharp_corners = windows[active].is_maximized(false)
+                && !p.appearance_conf.lock().unwrap().clip_maximized_windows;
 
             let mut geo = SpaceElement::geometry(&windows[active]).to_f64();
             geo.loc += location.to_f64().to_logical(scale);
@@ -828,7 +838,7 @@ impl CosmicStack {
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Stack(Arc::downgrade(&self.0.0)));
 
-            if !maximized {
+            if !sharp_corners {
                 let (r, g, b, a) = theme.cosmic().bg_divider().into_components();
                 push_above(CosmicStackRenderElement::Border(IndicatorShader::element(
                     renderer,
@@ -1000,7 +1010,11 @@ impl CosmicStack {
             let appearance = p.appearance_conf.lock().unwrap();
             let maximized = active_window.is_maximized(false);
 
-            let round = (appearance.clip_tiled_windows || !is_tiled) && !maximized;
+            let round = if maximized {
+                appearance.clip_maximized_windows
+            } else {
+                appearance.clip_tiled_windows || !is_tiled
+            };
             let radii = p
                 .theme
                 .lock()
@@ -1368,10 +1382,13 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 .into(),
         ];
 
-        let radius = if windows[active].is_maximized(false)
-            || (stack.tiled.load(Ordering::Acquire)
-                && !stack.appearance_conf.lock().unwrap().clip_tiled_windows)
-        {
+        let appearance = *stack.appearance_conf.lock().unwrap();
+        let sharp_corners = if windows[active].is_maximized(false) {
+            !appearance.clip_maximized_windows
+        } else {
+            stack.tiled.load(Ordering::Acquire) && !appearance.clip_tiled_windows
+        };
+        let radius = if sharp_corners {
             Radius::from(0.0)
         } else {
             let radii = stack

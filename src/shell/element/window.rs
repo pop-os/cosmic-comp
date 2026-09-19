@@ -416,12 +416,17 @@ impl CosmicWindow {
             let appearance = p.appearance_conf.lock().unwrap();
             let theme = p.theme.lock().unwrap();
 
-            if p.window.is_maximized(false) {
+            let is_maximized = p.window.is_maximized(false);
+            if is_maximized && !appearance.clip_maximized_windows {
                 return None;
             }
 
-            let clip = (!is_tiled && appearance.clip_floating_windows)
-                || (is_tiled && appearance.clip_tiled_windows);
+            let clip = if is_maximized {
+                appearance.clip_maximized_windows
+            } else {
+                (!is_tiled && appearance.clip_floating_windows)
+                    || (is_tiled && appearance.clip_tiled_windows)
+            };
             let should_draw_shadow = if is_tiled {
                 appearance.shadow_tiled_windows
             } else {
@@ -505,9 +510,12 @@ impl CosmicWindow {
                 *p.appearance_conf.lock().unwrap(),
             )
         });
-        let clip = ((!is_tiled && appearance.clip_floating_windows)
-            || (is_tiled && appearance.clip_tiled_windows))
-            && !is_maximized;
+        let clip = if is_maximized {
+            appearance.clip_maximized_windows
+        } else {
+            (!is_tiled && appearance.clip_floating_windows)
+                || (is_tiled && appearance.clip_tiled_windows)
+        };
         if has_ssd && !clip {
             // bottom corners
             radii[2] = 0;
@@ -539,7 +547,7 @@ impl CosmicWindow {
             geo.size = geo.size.clamp(Size::default(), max_size.to_f64());
         }
 
-        if (has_ssd || clip) && !is_maximized {
+        if (has_ssd || clip) && (!is_maximized || appearance.clip_maximized_windows) {
             let window_key =
                 CosmicMappedKey(CosmicMappedKeyInner::Window(Arc::downgrade(&self.0.0)));
 
@@ -668,11 +676,19 @@ impl CosmicWindow {
             let is_tiled = p.is_tiled();
             let appearance = p.appearance_conf.lock().unwrap();
 
-            let clip = ((!is_tiled && appearance.clip_floating_windows)
-                || (is_tiled && appearance.clip_tiled_windows))
-                && !p.window.is_maximized(false);
-            let round =
-                (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
+            let is_maximized = p.window.is_maximized(false);
+            let (clip, round) = if is_maximized {
+                (
+                    appearance.clip_maximized_windows,
+                    appearance.clip_maximized_windows,
+                )
+            } else {
+                (
+                    (!is_tiled && appearance.clip_floating_windows)
+                        || (is_tiled && appearance.clip_tiled_windows),
+                    !is_tiled || appearance.clip_tiled_windows,
+                )
+            };
             let radii = if round {
                 {
                     p.theme
@@ -846,7 +862,13 @@ impl Program for CosmicWindowInternal {
     }
 
     fn background_color(&self, theme: &cosmic::Theme) -> Color {
-        if self.window.is_maximized(false) {
+        // This fill spans the full rectangle (translucent when frosted, opaque
+        // otherwise), so it would square off the corners again once maximized
+        // windows are clipped. Fall through to TRANSPARENT as floating windows
+        // already do.
+        if self.window.is_maximized(false)
+            && !self.appearance_conf.lock().unwrap().clip_maximized_windows
+        {
             theme
                 .cosmic()
                 .background(theme.cosmic().frosted_windows)
@@ -867,8 +889,12 @@ pub struct DefaultDecorations;
 
 impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
     fn view(&self, win: &CosmicWindowInternal) -> cosmic::Element<'_, Message> {
-        let sharp_corners = win.window.is_maximized(false)
-            || (win.is_tiled() && !win.appearance_conf.lock().unwrap().clip_tiled_windows);
+        let appearance = *win.appearance_conf.lock().unwrap();
+        let sharp_corners = if win.window.is_maximized(false) {
+            !appearance.clip_maximized_windows
+        } else {
+            win.is_tiled() && !appearance.clip_tiled_windows
+        };
 
         let mut header = cosmic::widget::header_bar()
             .title(win.last_title.lock().unwrap().clone())

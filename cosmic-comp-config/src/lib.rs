@@ -54,6 +54,8 @@ pub struct AppearanceConfig {
     pub clip_floating_windows: bool,
     pub clip_tiled_windows: bool,
     pub shadow_tiled_windows: bool,
+    #[serde(default)]
+    pub clip_maximized_windows: bool,
 }
 
 impl Default for AppearanceConfig {
@@ -62,6 +64,7 @@ impl Default for AppearanceConfig {
             clip_floating_windows: true,
             clip_tiled_windows: true,
             shadow_tiled_windows: false,
+            clip_maximized_windows: false,
         }
     }
 }
@@ -262,4 +265,56 @@ pub enum XwaylandDescaling {
     Disabled,
     #[default]
     Fractional,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Configs written before `clip_maximized_windows` existed must still load.
+    ///
+    /// `appearance_settings` is persisted as a single RON struct, so a newly
+    /// added field without `#[serde(default)]` makes every pre-existing config
+    /// fail to deserialize and silently fall back to `Default`, discarding the
+    /// user's other appearance choices.
+    #[test]
+    fn appearance_config_accepts_legacy_config_without_clip_maximized_windows() {
+        let legacy = "(
+            clip_floating_windows: true,
+            clip_tiled_windows: false,
+            shadow_tiled_windows: true,
+        )";
+
+        let config: AppearanceConfig =
+            ron::from_str(legacy).expect("legacy appearance config must still deserialize");
+
+        assert!(config.clip_floating_windows);
+        assert!(!config.clip_tiled_windows);
+        assert!(config.shadow_tiled_windows);
+        assert!(
+            !config.clip_maximized_windows,
+            "maximized windows must stay sharp unless explicitly opted in"
+        );
+    }
+
+    /// The opted-in form, as written to `appearance_settings` on disk.
+    #[test]
+    fn appearance_config_accepts_clip_maximized_windows() {
+        let opted_in = "(
+            clip_floating_windows: true,
+            clip_tiled_windows: true,
+            shadow_tiled_windows: false,
+            clip_maximized_windows: true,
+        )";
+
+        let config: AppearanceConfig =
+            ron::from_str(opted_in).expect("opted-in appearance config must deserialize");
+
+        assert!(config.clip_maximized_windows);
+    }
+
+    #[test]
+    fn appearance_config_defaults_keep_maximized_windows_sharp() {
+        assert!(!AppearanceConfig::default().clip_maximized_windows);
+    }
 }
