@@ -833,16 +833,6 @@ impl WorkspaceSet {
                 })
             })
     }
-
-    pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
-        self.sticky_layer
-            .mapped()
-            .chain(self.minimized_windows.iter().flat_map(|m| m.mapped()))
-            .chain(self.workspaces.iter().flat_map(|w| {
-                w.mapped()
-                    .chain(w.minimized_windows.iter().flat_map(|m| m.mapped()))
-            }))
-    }
 }
 
 #[derive(Debug)]
@@ -2230,6 +2220,20 @@ impl Shell {
         })
     }
 
+    fn parent_of(&self, window: &CosmicSurface) -> Option<KeyboardFocusTarget> {
+        self.mapped()
+            .find(|mapped| mapped.active_window().is_parent_of(window))
+            .cloned()
+            .map(KeyboardFocusTarget::Element)
+            .or_else(|| {
+                self.workspaces
+                    .spaces()
+                    .flat_map(|workspace| workspace.get_fullscreen_surfaces())
+                    .find(|fullscreen| fullscreen.surface.is_parent_of(window))
+                    .map(|fullscreen| KeyboardFocusTarget::Fullscreen(fullscreen.surface.clone()))
+            })
+    }
+
     fn modal_child_for(&self, parent: &CosmicSurface) -> Option<CosmicMapped> {
         // `FloatingLayout::mapped()` iterates top-to-bottom.
         self.mapped()
@@ -2998,13 +3002,33 @@ impl Shell {
         };
 
         let pending_activation = self.pending_activations.remove(&(&window).into());
-        let workspace_handle = match pending_activation {
-            Some(ActivationContext::Workspace(handle)) => Some(handle),
-            _ => None,
-        };
-
         let should_be_fullscreen = output.is_some();
-        let mut output = output.unwrap_or_else(|| seat.active_output());
+        let parent_placement = (!should_be_fullscreen)
+            .then(|| self.parent_of(&window))
+            .flatten()
+            .and_then(|parent| {
+                let surface = parent.wl_surface()?;
+                let (handle, parent_output) = match self.workspace_for_surface(&surface) {
+                    Some((handle, output)) => (Some(handle), output),
+                    None => (None, self.visible_output_for_surface(&surface)?.clone()),
+                };
+                let anchor = window
+                    .is_modal_dialog()
+                    .then(|| self.focused_geometry(&parent))
+                    .flatten();
+                Some((handle, parent_output, anchor))
+            });
+
+        let (workspace_handle, mut output, parent_geometry) = match parent_placement {
+            Some(placement) => placement,
+            None => {
+                let handle = match pending_activation {
+                    Some(ActivationContext::Workspace(handle)) => Some(handle),
+                    _ => None,
+                };
+                (handle, output.unwrap_or_else(|| seat.active_output()), None)
+            }
+        };
 
         // this is beyond stupid, just to make the borrow checker happy
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
@@ -3024,19 +3048,7 @@ impl Shell {
         }
 
         let active_handle = self.active_space(&output).unwrap().handle;
-        let modal_anchor = window
-            .is_modal_dialog()
-            .then(|| {
-                let parent = self
-                    .workspaces
-                    .sets
-                    .get(&output)?
-                    .mapped()
-                    .find(|mapped| mapped.active_window().is_parent_of(&window))?;
-                self.element_geometry(parent)
-                    .map(|geometry| geometry.to_local(&output))
-            })
-            .flatten();
+        let modal_anchor = parent_geometry.map(|geometry| geometry.to_local(&output));
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
             self.workspaces
                 .spaces()
@@ -5285,7 +5297,15 @@ impl Shell {
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
-        self.workspaces.sets.values().flat_map(WorkspaceSet::mapped)
+        self.workspaces.iter().flat_map(|(_, set)| {
+            set.sticky_layer
+                .mapped()
+                .chain(set.minimized_windows.iter().flat_map(|m| m.mapped()))
+                .chain(set.workspaces.iter().flat_map(|w| {
+                    w.mapped()
+                        .chain(w.minimized_windows.iter().flat_map(|m| m.mapped()))
+                }))
+        })
     }
 }
 
