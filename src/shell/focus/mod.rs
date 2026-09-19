@@ -507,6 +507,10 @@ fn update_focus_state(
 }
 
 fn raise_modal_with_ancestors(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
+    if !floating_layer.mapped().any(|m| m == focused) {
+        return;
+    }
+
     let mut root = focused.clone();
     // X11 `WM_TRANSIENT_FOR` is not validated and can form a cycle
     let mut visited = vec![focused.clone()];
