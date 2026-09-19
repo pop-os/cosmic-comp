@@ -533,8 +533,9 @@ fn raise_modal_with_ancestors(floating_layer: &mut FloatingLayout, focused: &Cos
         root = parent;
     }
     raise_with_children(floating_layer, &root, &root == focused, &mut Vec::new());
+    // Keep the focused modal and its children on top of the family
     if &root != focused {
-        floating_layer.space.raise_element(focused, true);
+        raise_with_children(floating_layer, focused, true, &mut Vec::new());
     }
 }
 
