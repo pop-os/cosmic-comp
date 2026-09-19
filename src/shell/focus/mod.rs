@@ -525,7 +525,7 @@ fn raise_modal_with_ancestors(floating_layer: &mut FloatingLayout, focused: &Cos
     }
     raise_with_children(floating_layer, &root, &root == focused, &mut Vec::new());
     if &root != focused {
-        floating_layer.space.raise_element(focused, true);
+        raise_with_children(floating_layer, focused, true, &mut Vec::new());
     }
 }
 
