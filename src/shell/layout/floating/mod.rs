@@ -1474,6 +1474,10 @@ impl FloatingLayout {
     }
 
     pub fn shake(&mut self, mapped: &CosmicMapped) {
+        if mapped.is_maximized(true) || mapped.is_fullscreen(true) {
+            return;
+        }
+
         if let Some(geometry) = self.element_geometry(mapped)
             && !self.animations.contains_key(mapped)
         {
