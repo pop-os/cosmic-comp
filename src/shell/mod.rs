@@ -4418,6 +4418,9 @@ impl Shell {
         }
 
         let mut start_data = check_grab_preconditions(seat, None, None)?;
+        if self.block_by_modal_child(&mapped.active_window()) {
+            return None;
+        }
 
         let (floating_layer, geometry) = if let Some(set) = self
             .workspaces
