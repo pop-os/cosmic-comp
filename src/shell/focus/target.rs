@@ -16,21 +16,30 @@ use crate::{
 };
 use id_tree::NodeId;
 use smithay::{
-    backend::input::{InputTime, KeyState},
+    backend::input::{InputTime, KeyState, TabletToolDescriptor},
     desktop::{LayerSurface, PopupKind, WindowSurface, WindowSurfaceType, space::SpaceElement},
     input::{
         Seat,
         dnd::{DndFocus, OfferData, Source},
         keyboard::{KeyboardTarget, KeysymHandle, ModifiersState},
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            MotionEvent as PointerMotionEvent, PointerTarget, RelativeMotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
+        tablet::{
+            Tablet,
+            tool::{
+                AxisFrame as ToolAxisFrame, ButtonEvent as ToolButtonEvent,
+                DownEvent as ToolDownEvent, MotionEvent as ToolMotionEvent, TabletToolHandle,
+                TabletToolTarget, UpEvent as ToolUpEvent,
+            },
         },
         touch::{
-            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
-            TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, FrameMarker, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchTarget, UpEvent as TouchUpEvent,
         },
     },
     reexports::wayland_server::{
@@ -164,6 +173,17 @@ impl PointerFocusTarget {
         }
     }
 
+    fn inner_tablet_tool_target(&self) -> &dyn TabletToolTarget<State> {
+        match self {
+            PointerFocusTarget::WlSurface { surface, .. } => surface,
+            PointerFocusTarget::X11Surface { surface, .. } => surface,
+            PointerFocusTarget::StackUI(u) => u,
+            PointerFocusTarget::WindowUI(u) => u,
+            PointerFocusTarget::ResizeFork(f) => f,
+            PointerFocusTarget::ZoomUI(e) => e,
+        }
+    }
+
     pub fn under_surface<P: Into<Point<f64, Logical>>>(
         surface: &CosmicSurface,
         point: P,
@@ -284,6 +304,16 @@ impl PointerFocusTarget {
         for session in cursor_sessions {
             session.set_cursor_pos(cursor_pos);
             session.set_cursor_hotspot(cursor_hotspot);
+        }
+    }
+
+    pub fn supports_tool(&self, tool_handle: &TabletToolHandle<State>) -> bool {
+        match self {
+            Self::WlSurface { surface, .. } if surface.client().is_some() => tool_handle
+                .client_tools(&surface.client().unwrap())
+                .next()
+                .is_some(),
+            _ => true,
         }
     }
 }
@@ -409,10 +439,10 @@ impl PointerTarget<State> for PointerFocusTarget {
         self.inner_pointer_target()
             .relative_motion(seat, data, event);
     }
-    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
+    fn button(&self, seat: &Seat<State>, data: &mut State, event: &PointerButtonEvent) {
         self.inner_pointer_target().button(seat, data, event);
     }
-    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
+    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: PointerAxisFrame) {
         self.inner_pointer_target().axis(seat, data, frame);
     }
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
@@ -498,12 +528,102 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
 }
 
+impl TabletToolTarget<State> for PointerFocusTarget {
+    fn proximity_in(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        tablet: &Tablet,
+        serial: Serial,
+    ) {
+        self.inner_tablet_tool_target()
+            .proximity_in(seat, data, tool_descriptor, tablet, serial);
+    }
+
+    fn proximity_out(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+    ) {
+        self.inner_tablet_tool_target()
+            .proximity_out(seat, data, tool_descriptor);
+    }
+
+    fn down(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &ToolDownEvent,
+    ) {
+        self.inner_tablet_tool_target()
+            .down(seat, data, tool_descriptor, event);
+    }
+
+    fn up(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &ToolUpEvent,
+    ) {
+        self.inner_tablet_tool_target()
+            .up(seat, data, tool_descriptor, event);
+    }
+
+    fn motion(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &ToolMotionEvent,
+    ) {
+        self.inner_tablet_tool_target()
+            .motion(seat, data, tool_descriptor, event);
+    }
+
+    fn axis(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        frame: ToolAxisFrame,
+    ) {
+        self.inner_tablet_tool_target()
+            .axis(seat, data, tool_descriptor, frame);
+    }
+
+    fn button(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &ToolButtonEvent,
+    ) {
+        self.inner_tablet_tool_target()
+            .button(seat, data, tool_descriptor, event);
+    }
+
+    fn frame(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        time: InputTime,
+    ) {
+        self.inner_tablet_tool_target()
+            .frame(seat, data, tool_descriptor, time);
+    }
+}
+
 impl TouchTarget<State> for PointerFocusTarget {
-    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &TouchDownEvent) {
         self.inner_touch_target().down(seat, data, event);
     }
 
-    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent) {
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &TouchUpEvent) {
         self.inner_touch_target().up(seat, data, event);
     }
 

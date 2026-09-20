@@ -11,19 +11,31 @@ use cosmic_comp_config::{ZoomConfig, ZoomMovement};
 use cosmic_config::ConfigSet;
 use keyframe::{ease, functions::Linear};
 use smithay::{
-    backend::{input::InputTime, renderer::ImportMem},
+    backend::{
+        input::{InputTime, TabletToolDescriptor},
+        renderer::ImportMem,
+    },
     desktop::space::SpaceElement,
     input::{
         Seat,
         pointer::{
-            AxisFrame, ButtonEvent, Focus, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            MotionEvent as PointerMotionEvent, PointerTarget, RelativeMotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent, Focus,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, MotionEvent as PointerMotionEvent,
+            PointerTarget, RelativeMotionEvent,
+        },
+        tablet::{
+            Tablet, TabletSeatTrait,
+            tool::{
+                AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
+                DownEvent as TabletDownEvent, MotionEvent as TabletMotionEvent, TabletToolTarget,
+                UpEvent as TabletUpEvent,
+            },
         },
         touch::{
-            DownEvent, FrameMarker, MotionEvent as TouchMotionEvent, OrientationEvent, ShapeEvent,
-            TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, FrameMarker, MotionEvent as TouchMotionEvent,
+            OrientationEvent, ShapeEvent, TouchTarget, UpEvent as TouchUpEvent,
         },
     },
     output::Output,
@@ -33,6 +45,7 @@ use tracing::error;
 
 use crate::{
     backend::render::element::AsGlowRenderer,
+    shell::grabs::GrabType,
     state::State,
     utils::{
         iced::{IcedElement, IcedRenderElement, Program},
@@ -698,15 +711,27 @@ impl Program for ZoomProgram {
                                 );
 
                                 std::mem::drop(shell);
-                                if grab.is_touch_grab() {
-                                    seat.get_touch().unwrap().set_grab(state, grab, serial);
-                                } else {
-                                    seat.get_pointer().unwrap().set_grab(
+                                match grab.grab_type() {
+                                    GrabType::Touch => {
+                                        seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                    }
+                                    GrabType::Pointer => seat.get_pointer().unwrap().set_grab(
                                         state,
                                         grab,
                                         serial,
                                         Focus::Clear,
-                                    );
+                                    ),
+                                    GrabType::TabletTool => seat
+                                        .tablet_seat()
+                                        .get_tool(grab.tool().unwrap())
+                                        .unwrap()
+                                        .set_grab(
+                                            state,
+                                            grab,
+                                            InputTime::now(),
+                                            serial,
+                                            Focus::Clear,
+                                        ),
                                 }
                             }
                         }
@@ -785,15 +810,27 @@ impl Program for ZoomProgram {
                                 );
 
                                 std::mem::drop(shell);
-                                if grab.is_touch_grab() {
-                                    seat.get_touch().unwrap().set_grab(state, grab, serial);
-                                } else {
-                                    seat.get_pointer().unwrap().set_grab(
+                                match grab.grab_type() {
+                                    GrabType::Touch => {
+                                        seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                    }
+                                    GrabType::Pointer => seat.get_pointer().unwrap().set_grab(
                                         state,
                                         grab,
                                         serial,
                                         Focus::Clear,
-                                    );
+                                    ),
+                                    GrabType::TabletTool => seat
+                                        .tablet_seat()
+                                        .get_tool(grab.tool().unwrap())
+                                        .unwrap()
+                                        .set_grab(
+                                            state,
+                                            grab,
+                                            InputTime::now(),
+                                            serial,
+                                            Focus::Clear,
+                                        ),
                                 }
                             }
                         }
@@ -883,14 +920,14 @@ impl PointerTarget<State> for ZoomFocusTarget {
         }
     }
 
-    fn button(&self, seat: &Seat<State>, data: &mut State, event: &ButtonEvent) {
+    fn button(&self, seat: &Seat<State>, data: &mut State, event: &PointerButtonEvent) {
         match self {
             ZoomFocusTarget::Main(elem) => PointerTarget::button(elem, seat, data, event),
             ZoomFocusTarget::Menu(elem) => PointerTarget::button(elem, seat, data, event),
         }
     }
 
-    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: AxisFrame) {
+    fn axis(&self, seat: &Seat<State>, data: &mut State, frame: PointerAxisFrame) {
         match self {
             ZoomFocusTarget::Main(elem) => PointerTarget::axis(elem, seat, data, frame),
             ZoomFocusTarget::Menu(elem) => PointerTarget::axis(elem, seat, data, frame),
@@ -1032,14 +1069,14 @@ impl PointerTarget<State> for ZoomFocusTarget {
 }
 
 impl TouchTarget<State> for ZoomFocusTarget {
-    fn down(&self, seat: &Seat<State>, data: &mut State, event: &DownEvent) {
+    fn down(&self, seat: &Seat<State>, data: &mut State, event: &TouchDownEvent) {
         match self {
             ZoomFocusTarget::Main(elem) => TouchTarget::down(elem, seat, data, event),
             ZoomFocusTarget::Menu(elem) => TouchTarget::down(elem, seat, data, event),
         }
     }
 
-    fn up(&self, seat: &Seat<State>, data: &mut State, event: &UpEvent) {
+    fn up(&self, seat: &Seat<State>, data: &mut State, event: &TouchUpEvent) {
         match self {
             ZoomFocusTarget::Main(elem) => TouchTarget::up(elem, seat, data, event),
             ZoomFocusTarget::Menu(elem) => TouchTarget::up(elem, seat, data, event),
@@ -1085,6 +1122,144 @@ impl TouchTarget<State> for ZoomFocusTarget {
         match self {
             ZoomFocusTarget::Main(elem) => TouchTarget::last_frame(elem, seat, data),
             ZoomFocusTarget::Menu(elem) => TouchTarget::last_frame(elem, seat, data),
+        }
+    }
+}
+
+impl TabletToolTarget<State> for ZoomFocusTarget {
+    fn proximity_in(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        tablet: &Tablet,
+        serial: Serial,
+    ) {
+        match self {
+            ZoomFocusTarget::Main(elem) => {
+                TabletToolTarget::proximity_in(elem, seat, data, tool_descriptor, tablet, serial)
+            }
+            ZoomFocusTarget::Menu(elem) => {
+                TabletToolTarget::proximity_in(elem, seat, data, tool_descriptor, tablet, serial)
+            }
+        }
+    }
+
+    fn proximity_out(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+    ) {
+        match self {
+            ZoomFocusTarget::Main(elem) => {
+                TabletToolTarget::proximity_out(elem, seat, data, tool_descriptor)
+            }
+            ZoomFocusTarget::Menu(elem) => {
+                TabletToolTarget::proximity_out(elem, seat, data, tool_descriptor)
+            }
+        }
+    }
+
+    fn down(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &TabletDownEvent,
+    ) {
+        match self {
+            ZoomFocusTarget::Main(elem) => {
+                TabletToolTarget::down(elem, seat, data, tool_descriptor, event)
+            }
+            ZoomFocusTarget::Menu(elem) => {
+                TabletToolTarget::down(elem, seat, data, tool_descriptor, event)
+            }
+        }
+    }
+
+    fn up(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &TabletUpEvent,
+    ) {
+        match self {
+            ZoomFocusTarget::Main(elem) => {
+                TabletToolTarget::up(elem, seat, data, tool_descriptor, event)
+            }
+            ZoomFocusTarget::Menu(elem) => {
+                TabletToolTarget::up(elem, seat, data, tool_descriptor, event)
+            }
+        }
+    }
+
+    fn motion(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &TabletMotionEvent,
+    ) {
+        match self {
+            ZoomFocusTarget::Main(elem) => {
+                TabletToolTarget::motion(elem, seat, data, tool_descriptor, event)
+            }
+            ZoomFocusTarget::Menu(elem) => {
+                TabletToolTarget::motion(elem, seat, data, tool_descriptor, event)
+            }
+        }
+    }
+
+    fn axis(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        frame: TabletAxisFrame,
+    ) {
+        match self {
+            ZoomFocusTarget::Main(elem) => {
+                TabletToolTarget::axis(elem, seat, data, tool_descriptor, frame)
+            }
+            ZoomFocusTarget::Menu(elem) => {
+                TabletToolTarget::axis(elem, seat, data, tool_descriptor, frame)
+            }
+        }
+    }
+
+    fn button(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        event: &TabletButtonEvent,
+    ) {
+        match self {
+            ZoomFocusTarget::Main(elem) => {
+                TabletToolTarget::button(elem, seat, data, tool_descriptor, event)
+            }
+            ZoomFocusTarget::Menu(elem) => {
+                TabletToolTarget::button(elem, seat, data, tool_descriptor, event)
+            }
+        }
+    }
+
+    fn frame(
+        &self,
+        seat: &Seat<State>,
+        data: &mut State,
+        tool_descriptor: &TabletToolDescriptor,
+        time: InputTime,
+    ) {
+        match self {
+            ZoomFocusTarget::Main(elem) => {
+                TabletToolTarget::frame(elem, seat, data, tool_descriptor, time)
+            }
+            ZoomFocusTarget::Menu(elem) => {
+                TabletToolTarget::frame(elem, seat, data, tool_descriptor, time)
+            }
         }
     }
 }

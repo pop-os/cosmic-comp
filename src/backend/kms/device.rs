@@ -693,7 +693,7 @@ impl Device {
                 )
                 .with_context(|| {
                     format!(
-                        "Failed to optain file descriptor for drm device: {}",
+                        "Failed to obtain file descriptor for drm device: {}",
                         path.display()
                     )
                 })?,

@@ -247,10 +247,10 @@ impl BlurElement {
             Uniform::new(
                 "corner_radius",
                 [
-                    radii[3] as f32,
-                    radii[1] as f32,
                     radii[0] as f32,
+                    radii[1] as f32,
                     radii[2] as f32,
+                    radii[3] as f32,
                 ],
             ),
             Uniform::new(

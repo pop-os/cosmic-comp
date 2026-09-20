@@ -124,7 +124,9 @@ pub fn setup_ei(
                         data.update_ei_input_method();
                         // Notify the remaining libei clients of the now-cleared modifier state
                         let seat = data.common.shell.read().seats.last_active().clone();
-                        data.broadcast_ei_keyboard_modifiers(&seat);
+                        if let Some(keyboard) = seat.get_keyboard() {
+                            data.broadcast_ei_keyboard_modifiers(&keyboard);
+                        }
                     }
                     EiInputEvent::Event(event) => {
                         use smithay::backend::input::{InputEvent, KeyboardKeyEvent};

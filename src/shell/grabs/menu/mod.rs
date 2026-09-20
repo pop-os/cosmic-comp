@@ -19,22 +19,33 @@ use cosmic::{
 };
 use smithay::{
     backend::{
-        input::{ButtonState, TouchSlot},
+        input::{ButtonState, InputTime, TabletToolDescriptor, TouchSlot},
         renderer::ImportMem,
     },
     desktop::space::SpaceElement,
     input::{
         Seat,
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent as PointerMotionEvent, PointerGrab,
-            PointerInnerHandle, PointerTarget, RelativeMotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
+            MotionEvent as PointerMotionEvent, PointerGrab, PointerInnerHandle, PointerTarget,
+            RelativeMotionEvent,
+        },
+        tablet::{
+            TabletSeatHandler,
+            tool::{
+                AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
+                DownEvent as TabletDownEvent, GrabStartData as TabletGrabStartData,
+                MotionEvent as TabletMotionEvent, ProximityInEvent, ProximityOutEvent,
+                TabletToolGrab, TabletToolInnerHandle, TabletToolTarget, UpEvent as TabletUpEvent,
+            },
         },
         touch::{
-            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
-            TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, GrabStartData as TouchGrabStartData,
+            MotionEvent as TouchMotionEvent, TouchGrab, TouchInnerHandle, TouchTarget,
+            UpEvent as TouchUpEvent,
         },
     },
     output::Output,
@@ -43,7 +54,7 @@ use smithay::{
 
 use crate::{
     backend::render::element::AsGlowRenderer,
-    shell::{SeatExt, focus::target::PointerFocusTarget},
+    shell::{SeatExt, focus::target::PointerFocusTarget, grabs::GrabType},
     state::State,
     utils::{
         iced::{IcedElement, IcedRenderElement, Program},
@@ -350,6 +361,7 @@ impl Program for ContextMenu {
                                 position,
                                 pointer_entered: false,
                                 touch_entered: None,
+                                tablet_entered: None,
                             })
                         }
                     });
@@ -508,6 +520,7 @@ pub struct Element {
     position: Point<i32, Global>,
     pointer_entered: bool,
     touch_entered: Option<TouchSlot>,
+    tablet_entered: Option<TabletToolDescriptor>,
 }
 
 pub struct MenuGrab {
@@ -516,6 +529,7 @@ pub struct MenuGrab {
     seat: Seat<State>,
     screen_space_relative: Option<Output>,
     scale: Arc<Mutex<f64>>,
+    last_tablet_idx: Option<usize>,
 }
 
 impl PointerGrab<State> for MenuGrab {
@@ -598,7 +612,7 @@ impl PointerGrab<State> for MenuGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         let any_entered = self
             .elements
@@ -632,7 +646,7 @@ impl PointerGrab<State> for MenuGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        details: AxisFrame,
+        details: PointerAxisFrame,
     ) {
         handle.axis(state, details);
     }
@@ -729,7 +743,7 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &DownEvent,
+        event: &TouchDownEvent,
     ) {
         {
             let mut guard = self.elements.lock().unwrap();
@@ -757,7 +771,7 @@ impl TouchGrab<State> for MenuGrab {
             }) {
                 let element = &mut elements[i];
 
-                let new_event = DownEvent {
+                let new_event = TouchDownEvent {
                     slot: event.slot,
                     location: event_location - element.position.as_logical().to_f64(),
                     serial: event.serial,
@@ -772,7 +786,12 @@ impl TouchGrab<State> for MenuGrab {
         handle.down(data, None, event);
     }
 
-    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &TouchUpEvent,
+    ) {
         {
             let elements = self.elements.lock().unwrap();
             for element in elements.iter().filter(|elem| {
@@ -843,6 +862,248 @@ impl TouchGrab<State> for MenuGrab {
             GrabStartData::Touch(start_data) => start_data,
             _ => unreachable!(),
         }
+    }
+
+    fn unset(&mut self, _data: &mut State) {}
+}
+
+impl TabletToolGrab<State> for MenuGrab {
+    fn start_data(&self) -> &TabletGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::TabletTool { data, .. } => data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn proximity_in(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &ProximityInEvent,
+    ) {
+        {
+            let location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if data.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            let mut elements = self.elements.lock().unwrap();
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(location.to_i32_floor())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = TabletMotionEvent {
+                    location: location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+
+                TabletToolTarget::proximity_in(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                    &handle.current_tablet(),
+                    event.serial,
+                );
+                element.tablet_entered = Some(handle.descriptor().clone());
+                TabletToolTarget::motion(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                    &new_event,
+                );
+                self.last_tablet_idx = Some(i);
+            }
+        }
+        handle.proximity_in(data, None, event);
+    }
+
+    fn proximity_out(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &ProximityOutEvent,
+    ) {
+        {
+            let mut elements = self.elements.lock().unwrap();
+            for element in elements.iter_mut().filter(|elem| {
+                elem.tablet_entered
+                    .as_ref()
+                    .is_some_and(|tool| tool == handle.descriptor())
+            }) {
+                TabletToolTarget::proximity_out(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                );
+                element.tablet_entered.take();
+            }
+            self.last_tablet_idx.take();
+        }
+        handle.unset_grab(self, data, event.serial, event.time, true);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &TabletMotionEvent,
+    ) {
+        {
+            let location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if data.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            let mut elements = self.elements.lock().unwrap();
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(location.to_i32_floor())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = TabletMotionEvent {
+                    location: location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+
+                if element.tablet_entered.is_none() {
+                    TabletToolTarget::proximity_in(
+                        &element.iced,
+                        &self.seat,
+                        data,
+                        handle.descriptor(),
+                        &handle.current_tablet(),
+                        event.serial,
+                    );
+                    element.tablet_entered = Some(handle.descriptor().clone());
+                }
+                TabletToolTarget::motion(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                    &new_event,
+                );
+                self.last_tablet_idx = Some(i);
+            } else {
+                elements
+                    .iter_mut()
+                    .filter(|element| element.tablet_entered.is_some())
+                    .skip(1)
+                    .for_each(|element| {
+                        TabletToolTarget::proximity_out(
+                            &element.iced,
+                            &self.seat,
+                            data,
+                            handle.descriptor(),
+                        );
+                    });
+                self.last_tablet_idx.take();
+            }
+        }
+        handle.motion(data, None, event);
+    }
+
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletDownEvent,
+    ) {
+        let mut guard = self.elements.lock().unwrap();
+        let elements = &mut *guard;
+
+        if let Some(elem) = self.last_tablet_idx.and_then(|i| elements.get_mut(i))
+            && elem
+                .tablet_entered
+                .as_ref()
+                .is_some_and(|desc| desc == handle.descriptor())
+        {
+            TabletToolTarget::down(&elem.iced, &self.seat, data, handle.descriptor(), event);
+        } else {
+            handle.down(data, event);
+        }
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletUpEvent,
+    ) {
+        let mut guard = self.elements.lock().unwrap();
+        let elements = &mut *guard;
+
+        if let Some(elem) = self.last_tablet_idx.and_then(|i| elements.get_mut(i))
+            && elem
+                .tablet_entered
+                .as_ref()
+                .is_some_and(|desc| desc == handle.descriptor())
+        {
+            TabletToolTarget::up(&elem.iced, &self.seat, data, handle.descriptor(), event);
+        } else {
+            handle.up(data, event);
+        }
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletButtonEvent,
+    ) {
+        handle.button(data, event);
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        frame: TabletAxisFrame,
+    ) {
+        handle.axis(data, frame);
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        time: InputTime,
+    ) {
+        handle.frame(data, time);
     }
 
     fn unset(&mut self, _data: &mut State) {}
@@ -1051,6 +1312,7 @@ impl MenuGrab {
             position,
             pointer_entered: false,
             touch_entered: None,
+            tablet_entered: None,
         }]));
 
         let scale = Arc::new(Mutex::new(screen_space_relative.unwrap_or(1.)));
@@ -1075,6 +1337,7 @@ impl MenuGrab {
             seat: seat.clone(),
             screen_space_relative,
             scale,
+            last_tablet_idx: None,
         }
     }
 
@@ -1085,10 +1348,15 @@ impl MenuGrab {
         }
     }
 
-    pub fn is_touch_grab(&self) -> bool {
-        match self.start_data {
-            GrabStartData::Touch(_) => true,
-            GrabStartData::Pointer(_) => false,
+    pub fn grab_type(&self) -> GrabType {
+        self.start_data.type_()
+    }
+
+    pub fn tool(&self) -> Option<&TabletToolDescriptor> {
+        if let GrabStartData::TabletTool { tool, .. } = &self.start_data {
+            Some(tool)
+        } else {
+            None
         }
     }
 }

@@ -418,6 +418,12 @@ where
                         handle.closed();
                     }
                 }
+                // Remove the foreign handle too, so new subscribers cannot
+                // discover a toplevel whose window has already been destroyed.
+                if let Some(handle) = state.foreign_handle.take() {
+                    self.foreign_toplevel_list.remove_toplevel(&handle);
+                }
+                *state = Default::default();
                 dirty = true;
                 false
             }

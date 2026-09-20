@@ -1,7 +1,9 @@
 use cosmic_settings_config::shortcuts::Action;
 use smithay::{
-    backend::input::InputTime, input::pointer::MotionEvent,
-    reexports::wayland_server::protocol::wl_surface::WlSurface, utils::SERIAL_COUNTER,
+    backend::input::InputTime,
+    input::{pointer::MotionEvent, tablet::TabletSeatTrait},
+    reexports::wayland_server::protocol::wl_surface::WlSurface,
+    utils::SERIAL_COUNTER,
     wayland::seat::WaylandFocus,
 };
 
@@ -11,7 +13,7 @@ use crate::{
     shell::{
         CosmicSurface, PointGlobalExt, Shell,
         element::{CosmicMapped, CosmicWindow},
-        grabs::ReleaseMode,
+        grabs::{GrabType, ReleaseMode},
     },
     state::State,
     utils::{prelude::SeatExt, screenshot::screenshot_window},
@@ -353,19 +355,20 @@ pub fn window_items(
 
                     std::mem::drop(shell);
                     if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(
-                                state,
-                                grab,
-                                SERIAL_COUNTER.next_serial(),
-                            )
-                        } else {
-                            seat.get_pointer().unwrap().set_grab(
-                                state,
-                                grab,
-                                SERIAL_COUNTER.next_serial(),
-                                focus,
-                            );
+                        let serial = SERIAL_COUNTER.next_serial();
+                        match grab.grab_type() {
+                            GrabType::Touch => {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial)
+                            }
+                            GrabType::Pointer => seat
+                                .get_pointer()
+                                .unwrap()
+                                .set_grab(state, grab, serial, focus),
+                            GrabType::TabletTool => seat
+                                .tablet_seat()
+                                .get_tool(grab.tool().unwrap())
+                                .unwrap()
+                                .set_grab(state, grab, InputTime::now(), serial, focus),
                         }
                     }
                 }
@@ -389,21 +392,29 @@ pub fn window_items(
                         std::mem::drop(shell);
                         if let Some(((target, loc), (grab, focus))) = res {
                             let serial = SERIAL_COUNTER.next_serial();
-                            if grab.is_touch_grab() {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial);
-                            } else {
-                                let pointer = seat.get_pointer().unwrap();
-                                pointer.motion(
-                                    state,
-                                    target,
-                                    &MotionEvent {
-                                        location: loc.as_logical().to_f64(),
-                                        serial,
-                                        time: InputTime::now(),
-                                    },
-                                );
-                                pointer.frame(state);
-                                pointer.set_grab(state, grab, serial, focus);
+                            match grab.grab_type() {
+                                GrabType::Touch => {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                }
+                                GrabType::TabletTool => seat
+                                    .tablet_seat()
+                                    .get_tool(grab.tool().unwrap())
+                                    .unwrap()
+                                    .set_grab(state, grab, InputTime::now(), serial, focus),
+                                GrabType::Pointer => {
+                                    let pointer = seat.get_pointer().unwrap();
+                                    pointer.motion(
+                                        state,
+                                        target,
+                                        &MotionEvent {
+                                            location: loc.as_logical().to_f64(),
+                                            serial,
+                                            time: InputTime::now(),
+                                        },
+                                    );
+                                    pointer.frame(state);
+                                    pointer.set_grab(state, grab, serial, focus);
+                                }
                             }
                         }
                     });
@@ -424,21 +435,30 @@ pub fn window_items(
                         std::mem::drop(shell);
                         if let Some(((target, loc), (grab, focus))) = res {
                             let serial = SERIAL_COUNTER.next_serial();
-                            if grab.is_touch_grab() {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial);
-                            } else {
-                                let pointer = seat.get_pointer().unwrap();
-                                pointer.motion(
-                                    state,
-                                    target,
-                                    &MotionEvent {
-                                        location: loc.as_logical().to_f64(),
-                                        serial,
-                                        time: InputTime::now(),
-                                    },
-                                );
-                                pointer.frame(state);
-                                pointer.set_grab(state, grab, serial, focus);
+                            match grab.grab_type() {
+                                GrabType::Touch => {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                }
+                                GrabType::Pointer => {
+                                    let pointer = seat.get_pointer().unwrap();
+                                    pointer.motion(
+                                        state,
+                                        target,
+                                        &MotionEvent {
+                                            location: loc.as_logical().to_f64(),
+                                            serial,
+                                            time: InputTime::now(),
+                                        },
+                                    );
+                                    pointer.frame(state);
+                                    pointer.set_grab(state, grab, serial, focus);
+                                }
+                                GrabType::TabletTool => {
+                                    seat.tablet_seat()
+                                        .get_tool(grab.tool().unwrap())
+                                        .unwrap()
+                                        .set_grab(state, grab, InputTime::now(), serial, focus);
+                                }
                             }
                         }
                     });
@@ -459,21 +479,30 @@ pub fn window_items(
                         std::mem::drop(shell);
                         if let Some(((target, loc), (grab, focus))) = res {
                             let serial = SERIAL_COUNTER.next_serial();
-                            if grab.is_touch_grab() {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial);
-                            } else {
-                                let pointer = seat.get_pointer().unwrap();
-                                pointer.motion(
-                                    state,
-                                    target,
-                                    &MotionEvent {
-                                        location: loc.as_logical().to_f64(),
-                                        serial,
-                                        time: InputTime::now(),
-                                    },
-                                );
-                                pointer.frame(state);
-                                pointer.set_grab(state, grab, serial, focus);
+                            match grab.grab_type() {
+                                GrabType::Touch => {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                }
+                                GrabType::Pointer => {
+                                    let pointer = seat.get_pointer().unwrap();
+                                    pointer.motion(
+                                        state,
+                                        target,
+                                        &MotionEvent {
+                                            location: loc.as_logical().to_f64(),
+                                            serial,
+                                            time: InputTime::now(),
+                                        },
+                                    );
+                                    pointer.frame(state);
+                                    pointer.set_grab(state, grab, serial, focus);
+                                }
+                                GrabType::TabletTool => {
+                                    seat.tablet_seat()
+                                        .get_tool(grab.tool().unwrap())
+                                        .unwrap()
+                                        .set_grab(state, grab, InputTime::now(), serial, focus);
+                                }
                             }
                         }
                     });
@@ -494,21 +523,29 @@ pub fn window_items(
                         std::mem::drop(shell);
                         if let Some(((target, loc), (grab, focus))) = res {
                             let serial = SERIAL_COUNTER.next_serial();
-                            if grab.is_touch_grab() {
-                                seat.get_touch().unwrap().set_grab(state, grab, serial);
-                            } else {
-                                let pointer = seat.get_pointer().unwrap();
-                                pointer.motion(
-                                    state,
-                                    target,
-                                    &MotionEvent {
-                                        location: loc.as_logical().to_f64(),
-                                        serial,
-                                        time: InputTime::now(),
-                                    },
-                                );
-                                pointer.frame(state);
-                                pointer.set_grab(state, grab, serial, focus);
+                            match grab.grab_type() {
+                                GrabType::Touch => {
+                                    seat.get_touch().unwrap().set_grab(state, grab, serial)
+                                }
+                                GrabType::Pointer => {
+                                    let pointer = seat.get_pointer().unwrap();
+                                    pointer.motion(
+                                        state,
+                                        target,
+                                        &MotionEvent {
+                                            location: loc.as_logical().to_f64(),
+                                            serial,
+                                            time: InputTime::now(),
+                                        },
+                                    );
+                                    pointer.frame(state);
+                                    pointer.set_grab(state, grab, serial, focus);
+                                }
+                                GrabType::TabletTool => seat
+                                    .tablet_seat()
+                                    .get_tool(grab.tool().unwrap())
+                                    .unwrap()
+                                    .set_grab(state, grab, InputTime::now(), serial, focus),
                             }
                         }
                     });
@@ -628,19 +665,20 @@ pub fn fullscreen_items(window: &CosmicSurface, config: &Config) -> impl Iterato
 
                     std::mem::drop(shell);
                     if let Some((grab, focus)) = res {
-                        if grab.is_touch_grab() {
-                            seat.get_touch().unwrap().set_grab(
-                                state,
-                                grab,
-                                SERIAL_COUNTER.next_serial(),
-                            )
-                        } else {
-                            seat.get_pointer().unwrap().set_grab(
-                                state,
-                                grab,
-                                SERIAL_COUNTER.next_serial(),
-                                focus,
-                            );
+                        let serial = SERIAL_COUNTER.next_serial();
+                        match grab.grab_type() {
+                            GrabType::Touch => {
+                                seat.get_touch().unwrap().set_grab(state, grab, serial)
+                            }
+                            GrabType::Pointer => seat
+                                .get_pointer()
+                                .unwrap()
+                                .set_grab(state, grab, serial, focus),
+                            GrabType::TabletTool => seat
+                                .tablet_seat()
+                                .get_tool(grab.tool().unwrap())
+                                .unwrap()
+                                .set_grab(state, grab, InputTime::now(), serial, focus),
                         }
                     }
                 }
