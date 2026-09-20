@@ -1450,12 +1450,9 @@ impl State {
                             .unwrap_or_else(|| seat.active_output());
                         (output, position)
                     } else {
-                        let Some(output) =
-                            mapped_output_for_device(&self.common.config, &shell, &event.device())
-                                .cloned()
-                        else {
-                            return;
-                        };
+                        let output = mapped_output_for_device(&self.common.config, &shell, &event.device())
+                            .cloned()
+                            .unwrap_or_else(|| seat.active_output());
                         let position =
                             transform_output_mapped_position(&output, &event, shell.zoom_state());
                         (output, position)
@@ -1501,12 +1498,9 @@ impl State {
                             .unwrap_or_else(|| seat.active_output());
                         (output, position)
                     } else {
-                        let Some(output) =
-                            mapped_output_for_device(&self.common.config, &shell, &event.device())
-                                .cloned()
-                        else {
-                            return;
-                        };
+                        let output = mapped_output_for_device(&self.common.config, &shell, &event.device())
+                            .cloned()
+                            .unwrap_or_else(|| seat.active_output());
                         let position =
                             transform_output_mapped_position(&output, &event, shell.zoom_state());
                         (output, position)
@@ -1593,12 +1587,9 @@ impl State {
                 {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
-                    let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
-                            .cloned()
-                    else {
-                        return;
-                    };
+                    let output = mapped_output_for_device(&self.common.config, &shell, &event.device())
+                        .cloned()
+                        .unwrap_or_else(|| seat.active_output());
 
                     let current_output = seat.active_output();
                     let position =
@@ -1697,12 +1688,9 @@ impl State {
                 {
                     self.common.idle_notifier_state.notify_activity(&seat);
                     notify_cursor_activity(self, &seat);
-                    let Some(output) =
-                        mapped_output_for_device(&self.common.config, &shell, &event.device())
-                            .cloned()
-                    else {
-                        return;
-                    };
+                    let output = mapped_output_for_device(&self.common.config, &shell, &event.device())
+                        .cloned()
+                        .unwrap_or_else(|| seat.active_output());
 
                     let current_output = seat.active_output();
                     let position =
