@@ -1450,9 +1450,12 @@ impl State {
                             .unwrap_or_else(|| seat.active_output());
                         (output, position)
                     } else {
-                        let output = mapped_output_for_device(&self.common.config, &shell, &event.device())
-                            .cloned()
-                            .unwrap_or_else(|| seat.active_output());
+                        let Some(output) =
+                            mapped_output_for_device(&self.common.config, &shell, &event.device())
+                                .cloned()
+                        else {
+                            return;
+                        };
                         let position =
                             transform_output_mapped_position(&output, &event, shell.zoom_state());
                         (output, position)
@@ -1498,9 +1501,12 @@ impl State {
                             .unwrap_or_else(|| seat.active_output());
                         (output, position)
                     } else {
-                        let output = mapped_output_for_device(&self.common.config, &shell, &event.device())
-                            .cloned()
-                            .unwrap_or_else(|| seat.active_output());
+                        let Some(output) =
+                            mapped_output_for_device(&self.common.config, &shell, &event.device())
+                                .cloned()
+                        else {
+                            return;
+                        };
                         let position =
                             transform_output_mapped_position(&output, &event, shell.zoom_state());
                         (output, position)
