@@ -667,7 +667,7 @@ impl State {
             .unwrap();
 
         let clock = Clock::new();
-        let config = Config::load(&handle);
+        let config = Config::load(&handle, kiosk_command.is_some());
         let compositor_state = CompositorState::new::<Self>(dh);
         let corner_radius_state = CornerRadiusState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
