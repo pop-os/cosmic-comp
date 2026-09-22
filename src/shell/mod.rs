@@ -620,6 +620,7 @@ impl WorkspaceSet {
             self.workspaces[self.active].refresh();
         }
         self.sticky_layer.refresh();
+        self.minimized_windows.retain(|w| w.alive());
     }
 
     fn add_empty_workspace(&mut self, state: &mut WorkspaceUpdateGuard<State>) {
@@ -938,6 +939,9 @@ impl Workspaces {
             return;
         }
 
+        if let Some(zoom_state) = output.user_data().get::<Mutex<OutputZoomState>>() {
+            zoom_state.lock().unwrap().output_leave(output);
+        }
         if let Some(set) = self.sets.shift_remove(output) {
             {
                 let map = layer_map_for_output(output);
@@ -1566,10 +1570,8 @@ impl Common {
 
     pub fn remove_output(&mut self, output: &Output) {
         let mut shell = self.shell.write();
-        let shell_ref = &mut *shell;
-        shell_ref.workspaces.remove_output(
+        shell.remove_output(
             output,
-            shell_ref.seats.iter(),
             &mut self.workspace_state.update(),
             &self.xdg_activation_state,
         );
@@ -2576,6 +2578,23 @@ impl Shell {
         self.zoom_state.as_ref()
     }
 
+    pub fn remove_output(
+        &mut self,
+        output: &Output,
+        workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
+        xdg_activation_state: &XdgActivationState,
+    ) {
+        self.workspaces.remove_output(
+            output,
+            self.seats.iter(),
+            workspace_state,
+            xdg_activation_state,
+        );
+        if let Some(session_lock) = &mut self.session_lock {
+            session_lock.surfaces.remove(output);
+        }
+    }
+
     fn refresh(
         &mut self,
         xdg_activation_state: &XdgActivationState,
@@ -2646,6 +2665,16 @@ impl Shell {
             .retain(|pending| pending.surface.alive());
         self.pending_windows
             .retain(|pending| pending.surface.alive());
+        self.pending_activations.retain(|key, _| match key {
+            ActivationKey::Wayland(surface) => {
+                use smithay::reexports::wayland_server::Resource;
+                surface.is_alive()
+            }
+            ActivationKey::X11(_) => self
+                .pending_windows
+                .iter()
+                .any(|p| &ActivationKey::from(&p.surface) == key),
+        });
     }
 
     pub fn update_pointer_position(&mut self, location: Point<f64, Local>, output: &Output) {

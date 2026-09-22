@@ -83,6 +83,34 @@ pub struct KmsState {
 
     pub syncobj_state: Option<DrmSyncobjState>,
     pub dmabuf_global: Option<DmabufGlobal>,
+    renderer_cleanup: RendererCleanupSchedule,
+}
+
+#[derive(Debug, Default)]
+struct RendererCleanupSchedule {
+    pending: bool,
+}
+
+impl RendererCleanupSchedule {
+    fn schedule(&mut self) {
+        self.pending = true;
+    }
+
+    fn run_if_active<E>(
+        &mut self,
+        session_active: bool,
+        cleanup: impl FnOnce() -> Result<(), E>,
+    ) -> Result<(), E> {
+        if !self.pending || !session_active {
+            return Ok(());
+        }
+        self.pending = false;
+        if let Err(err) = cleanup() {
+            self.pending = true;
+            return Err(err);
+        }
+        Ok(())
+    }
 }
 
 pub struct KmsGuard<'a> {
@@ -141,6 +169,7 @@ pub fn init_backend(
 
         syncobj_state: None,
         dmabuf_global: None,
+        renderer_cleanup: RendererCleanupSchedule::default(),
     });
 
     // manually add already present gpus
@@ -709,6 +738,28 @@ impl KmsState {
         Ok(node)
     }
 
+    /// Request a drain of the main-thread renderers' destruction queues on the next refresh.
+    ///
+    /// Destroying a surface or buffer drops the textures these renderers imported from it,
+    /// which only *queues* the GL deletions on their contexts; the queues are flushed by
+    /// rendering or an explicit drain. Those renderers may not draw again for a long time,
+    /// so until the drain runs the dead client's buffers stay pinned in VRAM.
+    pub fn schedule_renderer_cleanup(&mut self) {
+        self.renderer_cleanup.schedule();
+    }
+
+    /// Drain the GL destruction queues of the main-thread renderers, if scheduled.
+    pub fn run_scheduled_renderer_cleanup(&mut self) {
+        if let Err(err) = self
+            .renderer_cleanup
+            .run_if_active(self.session.is_active(), || {
+                self.api.cleanup_texture_cache()
+            })
+        {
+            debug!(?err, "Failed to drain main-thread renderer cleanup queue");
+        }
+    }
+
     pub fn schedule_render(&mut self, output: &Output) {
         for surface in self
             .drm_devices
@@ -881,6 +932,27 @@ impl KmsGuard<'_> {
     }
 
     pub fn apply_config_for_outputs(
+        &mut self,
+        test_only: bool,
+        loop_handle: &LoopHandle<'static, State>,
+        screen_filter: &ScreenFilter,
+        shell: Arc<parking_lot::RwLock<Shell>>,
+        startup_done: Arc<AtomicBool>,
+        clock: &Clock<Monotonic>,
+    ) -> Result<(), anyhow::Error> {
+        let result = self.try_apply_config_for_outputs(
+            test_only,
+            loop_handle,
+            screen_filter,
+            shell,
+            startup_done,
+            clock,
+        );
+        self.invalidate_renderer_caches();
+        result
+    }
+
+    fn try_apply_config_for_outputs(
         &mut self,
         test_only: bool,
         loop_handle: &LoopHandle<'static, State>,
@@ -1295,5 +1367,98 @@ impl KmsGuard<'_> {
         }
 
         Ok(())
+    }
+
+    /// Drop all cached imports held by the main-thread renderers, along with the
+    /// framebuffers cached for copying between a render and a target node.
+    ///
+    /// Unlike the per-output render threads (which draw every frame), these renderers
+    /// only draw during output (re-)configuration. Between those infrequent draws their
+    /// import caches provide no benefit yet keep live clients' buffers pinned in VRAM;
+    /// the next render re-imports what it needs. Imports belonging to clients that have
+    /// already exited are released by the destruction-scheduled drain.
+    fn invalidate_renderer_caches(&mut self) {
+        if !self.session.is_active() {
+            return;
+        }
+        if let Err(err) = self.api.invalidate_caches() {
+            debug!(?err, "Failed to invalidate main-thread renderer caches");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RendererCleanupSchedule;
+
+    #[test]
+    fn repeated_cleanup_requests_are_batched() {
+        let mut cleanup = RendererCleanupSchedule::default();
+        cleanup.schedule();
+        cleanup.schedule();
+        let mut calls = 0;
+
+        cleanup
+            .run_if_active(true, || {
+                calls += 1;
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        cleanup
+            .run_if_active(true, || {
+                calls += 1;
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn inactive_session_defers_renderer_cleanup() {
+        let mut cleanup = RendererCleanupSchedule::default();
+        cleanup.schedule();
+        let mut calls = 0;
+
+        cleanup
+            .run_if_active(false, || {
+                calls += 1;
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        assert_eq!(calls, 0);
+
+        cleanup
+            .run_if_active(true, || {
+                calls += 1;
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn failed_cleanup_can_be_rescheduled() {
+        let mut cleanup = RendererCleanupSchedule::default();
+        cleanup.schedule();
+        let mut calls = 0;
+
+        assert!(
+            cleanup
+                .run_if_active(true, || {
+                    calls += 1;
+                    Err("cleanup failed")
+                })
+                .is_err()
+        );
+        cleanup
+            .run_if_active(true, || {
+                calls += 1;
+                Ok::<_, &str>(())
+            })
+            .unwrap();
+
+        assert_eq!(calls, 2);
     }
 }
