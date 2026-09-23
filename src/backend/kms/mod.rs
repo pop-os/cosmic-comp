@@ -42,7 +42,7 @@ use smithay::{
         wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1::TrancheFlags,
         wayland_server::{Client, DisplayHandle},
     },
-    utils::{Clock, DevPath, Monotonic, Size},
+    utils::{Clock, DevPath, Monotonic},
     wayland::{
         dmabuf::{DmabufFeedbackBuilder, DmabufGlobal},
         drm_syncobj::{DrmSyncobjState, supports_syncobj_eventfd},
@@ -61,6 +61,7 @@ use std::{
 
 mod device;
 mod drm_helpers;
+mod fallback_modes;
 pub mod render;
 mod surface;
 use device::*;
@@ -1036,21 +1037,25 @@ impl KmsGuard<'_> {
 
                 let drm = &mut device.drm;
                 let conn = surface.connector;
-                let conn_info = drm.device().get_connector(conn, false)?;
-                let mode = conn_info
-                    .modes()
-                    .iter()
-                    // match the size
-                    .filter(|mode| {
-                        let (x, y) = mode.size();
-                        Size::from((x as i32, y as i32)) == output_config.mode_size()
+                let mode = surface
+                    .output
+                    .user_data()
+                    .get::<std::cell::RefCell<ConnectorModes>>()
+                    .and_then(|modes| {
+                        modes.borrow().resolve(
+                            (output_config.mode_size().w, output_config.mode_size().h),
+                            output_config.0.mode.1,
+                        )
                     })
-                    // and then select the closest refresh rate (e.g. to match 59.98 as 60)
-                    .min_by_key(|mode| {
-                        let refresh_rate = drm_helpers::calculate_refresh_rate(**mode);
-                        (output_config.0.mode.1.unwrap() as i32 - refresh_rate as i32).abs()
-                    })
-                    .ok_or(anyhow::anyhow!("Unable to find matching mode"))?;
+                    .ok_or(anyhow::anyhow!("Unable to find matching advertised mode"))?;
+
+                // A fallback timing is only advertised when this property and
+                // its Full aspect enum are available. Set it before Smithay
+                // creates the MODE_ID blob so the atomic modeset uses panel
+                // fitting rather than plane scaling.
+                if !test_only && mode.is_fallback() {
+                    set_fallback_scaling(drm.device(), conn)?;
+                }
 
                 if !test_only {
                     if !surface.is_active() {
@@ -1109,7 +1114,7 @@ impl KmsGuard<'_> {
                             let compositor = drm
                                 .initialize_output(
                                     *crtc,
-                                    *mode,
+                                    mode.mode,
                                     &[conn],
                                     &surface.output,
                                     Some(planes.clone()),
@@ -1217,7 +1222,7 @@ impl KmsGuard<'_> {
                             elements.add_output(crtc, CLEAR_COLOR, output_elements);
                         }
 
-                        drm.use_mode(&surface.crtc, *mode, &mut renderer, &elements)
+                        drm.use_mode(&surface.crtc, mode.mode, &mut renderer, &elements)
                             .context("Failed to apply new mode")?;
                     }
                 }
