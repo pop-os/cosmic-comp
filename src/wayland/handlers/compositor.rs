@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
+use crate::{
+    shell::grabs::SeatMoveGrabState,
+    state::ClientState,
+    utils::prelude::*,
+    wayland::{
+        handlers::xdg_toplevel_icon::icon_for_surface, protocols::toplevel_info::WindowIconState,
+    },
+};
 use calloop::Interest;
 use smithay::{
     backend::{
@@ -271,6 +278,23 @@ impl CompositorHandler for State {
         let mapped = self.send_initial_configure_and_map(surface);
 
         let mut shell = self.common.shell.write();
+
+        if let Some(window) = shell.element_for_surface(surface).and_then(|element| {
+            element.windows().find_map(|(window, _)| {
+                (window.wl_surface().as_deref() == Some(surface)).then_some(window)
+            })
+        }) && window.x11_surface().is_none()
+        {
+            let icon = icon_for_surface(surface);
+            window
+                .user_data()
+                .insert_if_missing(WindowIconState::default);
+            window
+                .user_data()
+                .get::<WindowIconState>()
+                .unwrap()
+                .set(icon);
+        }
 
         // schedule a new render
         if let Some(output) = shell.visible_output_for_surface(surface) {

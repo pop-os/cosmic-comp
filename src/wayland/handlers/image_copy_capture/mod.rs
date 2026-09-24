@@ -45,8 +45,26 @@ pub use self::render::*;
 use self::user_data::*;
 pub use self::user_data::{FrameHolder, ImageCopySessions, SessionData, SessionHolder};
 
+const MAX_CAPTURE_PIXELS: usize = 16 * 1024 * 1024;
+
 fn default_cursor_size() -> Size<i32, BufferCoords> {
     Size::new(64, 64)
+}
+
+fn icon_capture_constraints(width: u32, height: u32) -> Option<BufferConstraints> {
+    let width = i32::try_from(width).ok()?;
+    let height = i32::try_from(height).ok()?;
+    let pixels = usize::try_from(width)
+        .ok()?
+        .checked_mul(usize::try_from(height).ok()?)?;
+    if pixels == 0 || pixels > MAX_CAPTURE_PIXELS {
+        return None;
+    }
+    Some(BufferConstraints {
+        size: Size::new(width, height),
+        shm: vec![ShmFormat::Argb8888],
+        dma: None,
+    })
 }
 
 fn seat_for_wl_pointer<'a>(shell: &'a Shell, pointer: &WlPointer) -> Option<&'a Seat<State>> {
@@ -97,15 +115,24 @@ impl ImageCopyCaptureHandler for State {
                     None
                 }
             }
+            ImageCaptureSourceKind::ToplevelIcon { width, height, .. } => {
+                icon_capture_constraints(width, height)
+            }
             ImageCaptureSourceKind::Destroyed => None,
         }
     }
 
     fn cursor_capture_constraints(
         &mut self,
-        _source: &ImageCaptureSource,
+        source: &ImageCaptureSource,
         pointer: &WlPointer,
     ) -> Option<BufferConstraints> {
+        if matches!(
+            ImageCaptureSourceKind::from_source(source),
+            ImageCaptureSourceKind::ToplevelIcon { .. } | ImageCaptureSourceKind::Destroyed
+        ) {
+            return None;
+        }
         let shell = self.common.shell.read();
         let seat = seat_for_wl_pointer(&shell, pointer)?;
         let cursor_geometry = seat.cursor_geometry((0.0, 0.0), self.common.clock.now());
@@ -157,6 +184,9 @@ impl ImageCopyCaptureHandler for State {
                     )))
                 });
                 toplevel.add_session(session);
+            }
+            ImageCaptureSourceKind::ToplevelIcon { .. } => {
+                self.common.icon_capture_sessions.push(session);
             }
             ImageCaptureSourceKind::Destroyed => {
                 session.stop();
@@ -281,6 +311,9 @@ impl ImageCopyCaptureHandler for State {
 
                 toplevel.add_cursor_session(session);
             }
+            ImageCaptureSourceKind::ToplevelIcon { .. } => {
+                session.stop();
+            }
             ImageCaptureSourceKind::Destroyed => {
                 session.stop();
             }
@@ -307,6 +340,11 @@ impl ImageCopyCaptureHandler for State {
 
                 render_window_to_buffer(self, session, frame, &toplevel)
             }
+            ImageCaptureSourceKind::ToplevelIcon {
+                icon,
+                width,
+                height,
+            } => render_icon_to_buffer(frame, &icon, width, height),
             ImageCaptureSourceKind::Destroyed => {
                 frame.fail(CaptureFailureReason::Stopped);
             }
@@ -356,6 +394,11 @@ impl ImageCopyCaptureHandler for State {
                     toplevel.remove_session(&session);
                 }
             }
+            ImageCaptureSourceKind::ToplevelIcon { .. } => {
+                self.common
+                    .icon_capture_sessions
+                    .retain(|stored| stored != &session);
+            }
             ImageCaptureSourceKind::Destroyed => {}
         }
     }
@@ -383,6 +426,7 @@ impl ImageCopyCaptureHandler for State {
                     toplevel.remove_cursor_session(&session)
                 }
             }
+            ImageCaptureSourceKind::ToplevelIcon { .. } => {}
             ImageCaptureSourceKind::Destroyed => {}
         }
     }
