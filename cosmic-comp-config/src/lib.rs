@@ -92,6 +92,8 @@ pub struct CosmicCompConfig {
     pub autotile_behavior: TileBehavior,
     /// Active hint enabled
     pub active_hint: bool,
+    /// Duration of the focus indicator fade transition in milliseconds (0 = disabled)
+    pub focus_transition_ms: u64,
     /// Enables changing keyboard focus to windows when the cursor passes into them
     pub focus_follows_cursor: bool,
     /// Enables warping the cursor to the focused window when focus changes due to keyboard input
@@ -140,6 +142,7 @@ impl Default for CosmicCompConfig {
             autotile: Default::default(),
             autotile_behavior: Default::default(),
             active_hint: true,
+            focus_transition_ms: 0,
             focus_follows_cursor: false,
             cursor_follows_focus: false,
             focus_follows_cursor_delay: 250,
