@@ -57,7 +57,7 @@ use smithay::{
     utils::{IsAlive, Logical, Point, Rectangle, SERIAL_COUNTER, Scale},
 };
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     sync::{Mutex, atomic::Ordering},
     time::Instant,
 };
@@ -374,7 +374,8 @@ pub struct MoveGrab {
     start_data: GrabStartData,
     seat: Seat<State>,
     cursor_output: Output,
-    window_outputs: HashSet<Output>,
+    // overlapped outputs and the element-relative overlap
+    window_outputs: HashMap<Output, Rectangle<i32, Logical>>,
     previous: ManagedLayer,
     release: ReleaseMode,
     edge_snap_threshold: f64,
@@ -448,16 +449,28 @@ impl MoveGrab {
             }
 
             for output in shell.outputs() {
-                if let Some(overlap) = output.geometry().as_logical().intersection(window_geo) {
-                    if self.window_outputs.insert(output.clone()) {
-                        self.window.output_enter(output, overlap);
-                        if let Some(indicator) =
-                            grab_state.stacking_indicator.as_ref().map(|x| &x.0)
-                        {
-                            indicator.output_enter(output);
+                if let Some(mut overlap) = output.geometry().as_logical().intersection(window_geo) {
+                    // output_enter expects an element-relative overlap
+                    overlap.loc -= window_geo.loc;
+                    match self.window_outputs.insert(output.clone(), overlap) {
+                        None => {
+                            self.window.output_enter(output, overlap);
+                            if let Some(indicator) =
+                                grab_state.stacking_indicator.as_ref().map(|x| &x.0)
+                            {
+                                indicator.output_enter(output);
+                            }
                         }
+                        Some(old_overlap) if old_overlap != overlap => {
+                            for (window, offset) in self.window.windows() {
+                                let mut overlap = overlap;
+                                overlap.loc -= offset;
+                                window.output_enter(output, overlap);
+                            }
+                        }
+                        Some(_) => {}
                     }
-                } else if self.window_outputs.remove(output) {
+                } else if self.window_outputs.remove(output).is_some() {
                     self.window.output_leave(output);
                     if let Some(indicator) = grab_state.stacking_indicator.as_ref().map(|x| &x.0) {
                         indicator.output_leave(output);
@@ -474,7 +487,7 @@ impl MoveGrab {
                         size,
                         state.common.theme.clone(),
                     );
-                    for output in &self.window_outputs {
+                    for output in self.window_outputs.keys() {
                         element.output_enter(output);
                     }
                     (element, geo.loc.as_logical())
@@ -837,9 +850,10 @@ impl MoveGrab {
     ) -> MoveGrab {
         // false-positive: `Output`s hash is based on it's inner ptr
         #[allow(clippy::mutable_key_type)]
-        let mut outputs = HashSet::new();
-        outputs.insert(cursor_output.clone());
-        window.output_enter(&cursor_output, window.geometry()); // not accurate but...
+        let mut outputs = HashMap::new();
+        let overlap = window.geometry();
+        outputs.insert(cursor_output.clone(), overlap);
+        window.output_enter(&cursor_output, overlap);
         window.moved_since_mapped.store(true, Ordering::SeqCst);
 
         let grab_state = MoveGrabState {
@@ -923,7 +937,7 @@ impl Drop for MoveGrab {
                     let mut shell = state.common.shell.write();
 
                     let workspace_handle = shell.active_space(&output).unwrap().handle;
-                    for old_output in window_outputs.iter().filter(|o| *o != &output) {
+                    for old_output in window_outputs.keys().filter(|o| *o != &output) {
                         grab_state.window.output_leave(old_output);
                     }
 
