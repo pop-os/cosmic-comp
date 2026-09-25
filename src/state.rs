@@ -1006,6 +1006,24 @@ impl Common {
             with_surfaces_surface_tree(lock_surface.wl_surface(), processor(None))
         }
 
+        // Grabbed windows are rendered on every output they overlap (see
+        // `MoveGrabState::render`), not only on the seat's active output, so
+        // every output has to visit them here. Otherwise the output a window is
+        // dragged away from stops updating (and never drops) its primary
+        // scan-out claim once the cursor leaves it, and the stale claim keeps
+        // winning the comparison in `update_surface_primary_scanout_output`
+        // for the rest of the grab. The new output then never sends frame
+        // callbacks, which stalls clients that throttle on them.
+        for seat in shell.seats.iter() {
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
+                && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
+            {
+                for (window, _) in grab_state.element().windows() {
+                    window.with_surfaces(processor(None));
+                }
+            }
+        }
+
         for seat in shell
             .seats
             .iter()
@@ -1016,15 +1034,6 @@ impl Common {
             // cursor ...
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
                 with_surfaces_surface_tree(&wl_surface, processor(None));
-            }
-
-            // grabs
-            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
-                && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
-            {
-                for (window, _) in grab_state.element().windows() {
-                    window.with_surfaces(processor(None));
-                }
             }
 
             if let Some(icon) = get_dnd_icon(seat) {
@@ -1159,7 +1168,10 @@ impl Common {
                     },
                 );
             }
+        }
 
+        // See `update_primary_output`: grabbed windows are visited for every output.
+        for seat in shell.seats.iter() {
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
                 && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
             {
@@ -1377,15 +1389,6 @@ impl Common {
                 )
             }
 
-            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
-                && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
-            {
-                for (window, _) in grab_state.element().windows() {
-                    let throttle = throttle(&window, window.x11_surface().is_some());
-                    window.send_frame(output, time, throttle, should_send);
-                }
-            }
-
             if let Some(icon) = get_dnd_icon(seat) {
                 send_frames_surface_tree(
                     &icon.surface,
@@ -1394,6 +1397,21 @@ impl Common {
                     Some(Duration::ZERO),
                     should_send,
                 )
+            }
+        }
+
+        // See `update_primary_output`: grabbed windows are visited for every
+        // output. `should_send` makes sure only the primary scan-out output
+        // sends the callbacks (X11 windows, which are never throttled, may get
+        // them from every output they currently overlap).
+        for seat in shell.seats.iter() {
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
+                && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
+            {
+                for (window, _) in grab_state.element().windows() {
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
+                }
             }
         }
 
