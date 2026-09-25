@@ -27,6 +27,7 @@ use smithay::{
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
             XdgShellState,
+            dialog::{ToplevelDialogHint, XdgDialogHandler},
         },
     },
 };
@@ -440,5 +441,11 @@ impl XdgShellHandler for State {
                 .unwrap()
                 .set_grab(self, grab, serial, focus)
         }
+    }
+}
+
+impl XdgDialogHandler for State {
+    fn dialog_hint_changed(&mut self, _toplevel: ToplevelSurface, _hint: ToplevelDialogHint) {
+        Shell::redirect_blocked_focus(self);
     }
 }

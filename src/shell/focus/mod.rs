@@ -202,6 +202,20 @@ impl Shell {
         serial: Option<Serial>,
         update_cursor: bool,
     ) {
+        let redirect =
+            target.and_then(|target| state.common.shell.read().resolve_modal_redirect(target));
+        if let Some(dialog) = redirect.as_ref()
+            && dialog.is_minimized()
+        {
+            state.common.shell.write().unminimize_request(
+                &dialog.active_window(),
+                seat,
+                &state.common.event_loop_handle,
+            );
+        }
+        let redirect = redirect.map(KeyboardFocusTarget::Element);
+        let target = redirect.as_ref().or(target);
+
         let focus_target = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(FocusTarget::Window(mapped.clone())),
             Some(KeyboardFocusTarget::Fullscreen(surface)) => {
@@ -240,6 +254,31 @@ impl Shell {
         }
 
         Shell::set_focus(state, Some(target), seat, None, update_cursor);
+    }
+
+    pub fn redirect_blocked_focus(state: &mut State) {
+        let seats = state
+            .common
+            .shell
+            .read()
+            .seats
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        for seat in seats {
+            let Some(target) = seat.get_keyboard().unwrap().current_focus() else {
+                continue;
+            };
+            if state
+                .common
+                .shell
+                .read()
+                .resolve_modal_redirect(&target)
+                .is_some()
+            {
+                Shell::set_focus(state, Some(&target), &seat, None, false);
+            }
+        }
     }
 
     pub fn append_focus_stack(&mut self, target: impl Into<FocusTarget>, seat: &Seat<State>) {
@@ -311,7 +350,7 @@ impl Shell {
         for output in self.outputs().cloned().collect::<Vec<_>>().into_iter() {
             let set = self.workspaces.sets.get_mut(&output).unwrap();
             for focused in focused_windows.iter() {
-                raise_with_children(&mut set.sticky_layer, focused);
+                raise_modal_with_ancestors(&mut set.sticky_layer, focused);
             }
             for window in set.sticky_layer.mapped() {
                 window.set_activated(focused_windows.contains(window));
@@ -341,7 +380,7 @@ impl Shell {
                 fs.surface.send_configure();
             }
             for focused in focused_windows.iter() {
-                raise_with_children(&mut workspace.floating_layer, focused);
+                raise_modal_with_ancestors(&mut workspace.floating_layer, focused);
             }
             for window in workspace.mapped() {
                 window.set_activated(focused_windows.contains(window));
@@ -476,33 +515,53 @@ fn update_focus_state(
     }
 }
 
-fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
-    if floating_layer.mapped().any(|m| m == focused) {
-        floating_layer.space.raise_element(focused, true);
+fn raise_modal_with_ancestors(floating_layer: &mut FloatingLayout, focused: &CosmicMapped) {
+    if !floating_layer.mapped().any(|m| m == focused) {
+        return;
+    }
+
+    let mut root = focused.clone();
+    // X11 `WM_TRANSIENT_FOR` is not validated and can form a cycle
+    let mut visited = vec![focused.clone()];
+    while root.active_window().is_modal_dialog() {
+        let window = root.active_window();
+        let Some(parent) = floating_layer
+            .mapped()
+            .find(|m| m.active_window().is_parent_of(&window))
+            .filter(|parent| !visited.contains(parent))
+            .cloned()
+        else {
+            break;
+        };
+        visited.push(parent.clone());
+        root = parent;
+    }
+    raise_with_children(floating_layer, &root, &root == focused, &mut Vec::new());
+    if &root != focused {
+        raise_with_children(floating_layer, focused, true, &mut Vec::new());
+    }
+}
+
+fn raise_with_children(
+    floating_layer: &mut FloatingLayout,
+    focused: &CosmicMapped,
+    activate: bool,
+    raised: &mut Vec<CosmicMapped>,
+) {
+    if !raised.contains(focused) && floating_layer.mapped().any(|m| m == focused) {
+        floating_layer.space.raise_element(focused, activate);
+        raised.push(focused.clone());
+        let window = focused.active_window();
         for element in floating_layer
             .space
             .elements()
             .filter(|elem| elem != &focused)
-            .filter(|elem| {
-                let parent = elem
-                    .active_window()
-                    .0
-                    .toplevel()
-                    .and_then(|toplevel| toplevel.parent());
-                parent.is_some_and(|parent| {
-                    focused
-                        .active_window()
-                        .wl_surface()
-                        .map(Cow::into_owned)
-                        .map(|focused| parent == focused)
-                        .unwrap_or(false)
-                })
-            })
+            .filter(|elem| window.is_parent_of(&elem.active_window()))
             .cloned()
             .collect::<Vec<_>>()
             .into_iter()
         {
-            raise_with_children(floating_layer, &element);
+            raise_with_children(floating_layer, &element, false, raised);
         }
     }
 }
@@ -510,6 +569,26 @@ fn raise_with_children(floating_layer: &mut FloatingLayout, focused: &CosmicMapp
 impl Common {
     #[profiling::function]
     pub fn refresh_focus(state: &mut State) {
+        let focus_overrides =
+            std::mem::take(&mut state.common.shell.write().pending_focus_overrides);
+        for focus_override in focus_overrides {
+            let mapped = state
+                .common
+                .shell
+                .read()
+                .element_for_surface(&focus_override.surface)
+                .cloned();
+            if let Some(mapped) = mapped {
+                Shell::set_focus(
+                    state,
+                    Some(&KeyboardFocusTarget::Element(mapped)),
+                    &focus_override.seat,
+                    None,
+                    false,
+                );
+            }
+        }
+
         let seats = state
             .common
             .shell

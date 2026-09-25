@@ -777,7 +777,9 @@ impl Program for CosmicWindowInternal {
                 if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write();
-                        shell.minimize_request(&surface)
+                        if !shell.block_by_modal_child(&surface) {
+                            shell.minimize_request(&surface)
+                        }
                     });
                 }
             }
@@ -785,7 +787,9 @@ impl Program for CosmicWindowInternal {
                 if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write();
-                        if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
+                        if let Some(mapped) = shell.element_for_surface(&surface).cloned()
+                            && !shell.block_by_modal_child(&surface)
+                        {
                             let seat = shell.seats.last_active().clone();
                             shell.maximize_toggle(&mapped, &seat, &state.common.event_loop_handle)
                         }

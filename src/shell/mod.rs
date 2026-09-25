@@ -268,6 +268,12 @@ pub struct PendingWindow {
 }
 
 #[derive(Debug)]
+struct PendingFocusOverride {
+    surface: CosmicSurface,
+    seat: Seat<State>,
+}
+
+#[derive(Debug)]
 pub struct PendingLayer {
     pub surface: LayerSurface,
     pub seat: Seat<State>,
@@ -305,6 +311,7 @@ pub struct Shell {
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
+    pending_focus_overrides: Vec<PendingFocusOverride>,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -1752,6 +1759,7 @@ impl Shell {
             appearance_conf: config.cosmic_conf.appearance_settings,
             zoom_state: None,
             tiling_exceptions,
+            pending_focus_overrides: Vec::new(),
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -2217,6 +2225,102 @@ impl Shell {
                         .find_map(|w| w.element_for_surface(surface))
                 })
         })
+    }
+
+    fn parent_of(&self, window: &CosmicSurface) -> Option<KeyboardFocusTarget> {
+        self.mapped()
+            .find(|mapped| mapped.active_window().is_parent_of(window))
+            .cloned()
+            .map(KeyboardFocusTarget::Element)
+            .or_else(|| {
+                self.workspaces
+                    .spaces()
+                    .flat_map(|workspace| workspace.get_fullscreen_surfaces())
+                    .find(|fullscreen| fullscreen.surface.is_parent_of(window))
+                    .map(|fullscreen| KeyboardFocusTarget::Fullscreen(fullscreen.surface.clone()))
+            })
+    }
+
+    fn modal_child_for(&self, parent: &CosmicSurface) -> Option<CosmicMapped> {
+        // `FloatingLayout::mapped()` iterates top-to-bottom.
+        self.mapped()
+            .find(|mapped| {
+                let window = mapped.active_window();
+                window.is_modal_dialog() && parent.is_parent_of(&window)
+            })
+            .cloned()
+    }
+
+    fn deepest_modal_child_for(&self, parent: &CosmicSurface) -> Option<CosmicMapped> {
+        // X11 `WM_TRANSIENT_FOR` is not validated and can form a cycle
+        let mut visited = vec![parent.clone()];
+        let mut dialog = None;
+
+        while let Some(child) = self
+            .modal_child_for(visited.last().unwrap())
+            .filter(|child| !visited.contains(&child.active_window()))
+        {
+            visited.push(child.active_window());
+            dialog = Some(child);
+        }
+
+        dialog
+    }
+
+    pub fn block_by_modal_child<S>(&mut self, surface: &S) -> bool
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        let parent = self
+            .element_for_surface(surface)
+            .map(|mapped| mapped.active_window())
+            .or_else(|| {
+                self.workspaces
+                    .spaces()
+                    .flat_map(|workspace| workspace.get_fullscreen_surfaces())
+                    .find(|fullscreen| &fullscreen.surface == surface)
+                    .map(|fullscreen| fullscreen.surface.clone())
+            });
+        let Some(dialog) = parent.and_then(|parent| self.deepest_modal_child_for(&parent)) else {
+            return false;
+        };
+        self.shake_modal_dialog(&dialog);
+        true
+    }
+
+    fn modal_parent_to_refocus<S>(&self, surface: &S, seat: &Seat<State>) -> Option<CosmicSurface>
+    where
+        CosmicSurface: PartialEq<S>,
+    {
+        let dialog = self.element_for_surface(surface)?.active_window();
+        if !dialog.is_modal_dialog() {
+            return None;
+        }
+
+        let focused_on_dialog = matches!(
+            seat.get_keyboard().and_then(|k| k.current_focus()),
+            Some(KeyboardFocusTarget::Element(m)) if &m.active_window() == surface
+        );
+        if !focused_on_dialog {
+            return None;
+        }
+
+        self.mapped()
+            .find(|m| m.active_window().is_parent_of(&dialog))
+            .map(|parent| parent.active_window())
+    }
+
+    pub fn shake_modal_dialog(&mut self, mapped: &CosmicMapped) {
+        for set in self.workspaces.sets.values_mut() {
+            set.sticky_layer.shake(mapped);
+            for workspace in set.workspaces.iter_mut() {
+                workspace.floating_layer.shake(mapped);
+            }
+        }
+    }
+
+    pub fn resolve_modal_redirect(&self, target: &KeyboardFocusTarget) -> Option<CosmicMapped> {
+        self.deepest_modal_child_for(&target.active_window()?)
     }
 
     pub fn is_surface_mapped<S>(&self, surface: &S) -> bool
@@ -2905,13 +3009,33 @@ impl Shell {
         };
 
         let pending_activation = self.pending_activations.remove(&(&window).into());
-        let workspace_handle = match pending_activation {
-            Some(ActivationContext::Workspace(handle)) => Some(handle),
-            _ => None,
-        };
-
         let should_be_fullscreen = output.is_some();
-        let mut output = output.unwrap_or_else(|| seat.active_output());
+        let parent_placement = (!should_be_fullscreen)
+            .then(|| self.parent_of(&window))
+            .flatten()
+            .and_then(|parent| {
+                let surface = parent.wl_surface()?;
+                let (handle, parent_output) = match self.workspace_for_surface(&surface) {
+                    Some((handle, output)) => (Some(handle), output),
+                    None => (None, self.visible_output_for_surface(&surface)?.clone()),
+                };
+                let anchor = window
+                    .is_modal_dialog()
+                    .then(|| self.focused_geometry(&parent))
+                    .flatten();
+                Some((handle, parent_output, anchor))
+            });
+
+        let (workspace_handle, mut output, parent_geometry) = match parent_placement {
+            Some(placement) => placement,
+            None => {
+                let handle = match pending_activation {
+                    Some(ActivationContext::Workspace(handle)) => Some(handle),
+                    _ => None,
+                };
+                (handle, output.unwrap_or_else(|| seat.active_output()), None)
+            }
+        };
 
         // this is beyond stupid, just to make the borrow checker happy
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
@@ -2931,6 +3055,7 @@ impl Shell {
         }
 
         let active_handle = self.active_space(&output).unwrap().handle;
+        let modal_anchor = parent_geometry.map(|geometry| geometry.to_local(&output));
         let workspace = if let Some(handle) = workspace_handle.filter(|handle| {
             self.workspaces
                 .spaces()
@@ -2996,7 +3121,13 @@ impl Shell {
 
         let workspace_empty = workspace.mapped().next().is_none();
         if is_dialog || floating_exception || !workspace.tiling_enabled {
-            workspace.floating_layer.map(mapped.clone(), None);
+            if let Some(anchor) = modal_anchor {
+                workspace
+                    .floating_layer
+                    .map_centered_on(mapped.clone(), anchor);
+            } else {
+                workspace.floating_layer.map(mapped.clone(), None);
+            }
         } else {
             for mapped in workspace
                 .mapped()
@@ -3099,6 +3230,17 @@ impl Shell {
     where
         CosmicSurface: PartialEq<S>,
     {
+        // the focus stack may hold an unrelated window above the parent of a closing modal dialog
+        let seats = self.seats.iter().cloned().collect::<Vec<_>>();
+        for seat in seats {
+            if let Some(parent) = self.modal_parent_to_refocus(surface, &seat) {
+                self.pending_focus_overrides.push(PendingFocusOverride {
+                    seat,
+                    surface: parent,
+                });
+            }
+        }
+
         for set in self.workspaces.sets.values_mut() {
             let sticky_res = set.sticky_layer.mapped().find_map(|m| {
                 m.windows()
@@ -3796,6 +3938,9 @@ impl Shell {
 
         let mut start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
+        if self.block_by_modal_child(surface) {
+            return None;
+        }
 
         if client_initiated
             && start_data.distance(seat.get_pointer().unwrap().current_location()) < 1.
@@ -4068,11 +4213,9 @@ impl Shell {
                 .to_global(&set.output);
             Some(geometry)
         } else if let Some(workspace) = self.space_for(mapped) {
-            let geometry = workspace
+            workspace
                 .element_geometry(mapped)
-                .unwrap()
-                .to_global(workspace.output());
-            Some(geometry)
+                .map(|geometry| geometry.to_global(workspace.output()))
         } else {
             None
         }
@@ -4275,6 +4418,9 @@ impl Shell {
         }
 
         let mut start_data = check_grab_preconditions(seat, None, None)?;
+        if self.block_by_modal_child(&mapped.active_window()) {
+            return None;
+        }
 
         let (floating_layer, geometry) = if let Some(set) = self
             .workspaces
@@ -4555,6 +4701,9 @@ impl Shell {
         let serial = serial.into();
         let start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
+        if self.block_by_modal_child(surface) {
+            return None;
+        }
         let mapped = self.element_for_surface(surface).cloned()?;
         if mapped.is_maximized(true) {
             return None;
