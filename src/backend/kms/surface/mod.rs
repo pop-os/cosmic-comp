@@ -1284,7 +1284,9 @@ impl SurfaceThreadState {
                 &self.screen_filter,
             );
 
-            if let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr)) {
+            if self.output.adaptive_sync_support() != Some(VrrSupport::NotSupported)
+                && let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr))
+            {
                 warn!("Unable to set adaptive VRR state: {}", err);
             }
             compositor.render_frame(
@@ -1296,7 +1298,9 @@ impl SurfaceThreadState {
                     .difference(remove_frame_flags),
             )
         } else {
-            if let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr)) {
+            if self.output.adaptive_sync_support() != Some(VrrSupport::NotSupported)
+                && let Err(err) = compositor.with_compositor(|c| c.use_vrr(vrr))
+            {
                 warn!("Unable to set adaptive VRR state: {}", err);
             }
             compositor.render_frame(
