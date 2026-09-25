@@ -189,24 +189,31 @@ impl State {
                     0 => 9,
                     x => x - 1,
                 };
-                let _ = self.common.shell.write().activate(
+                let res = self.common.shell.write().activate(
                     &current_output,
                     workspace as usize,
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
                 );
+                if res.is_ok() {
+                    self.reconcile_focus_to_pointer(seat);
+                }
             }
 
             Action::LastWorkspace => {
                 let current_output = seat.active_output();
                 let mut shell = self.common.shell.write();
                 let workspace = shell.workspaces.len(&current_output).saturating_sub(1);
-                let _ = shell.activate(
+                let res = shell.activate(
                     &current_output,
                     workspace,
                     WorkspaceDelta::new_shortcut(),
                     &mut self.common.workspace_state.update(),
                 );
+                drop(shell);
+                if res.is_ok() {
+                    self.reconcile_focus_to_pointer(seat);
+                }
             }
 
             Action::NextWorkspace => {
@@ -246,6 +253,8 @@ impl State {
                         direction,
                         true,
                     )
+                } else if next.is_ok() {
+                    self.reconcile_focus_to_pointer(seat);
                 }
             }
 
@@ -286,6 +295,8 @@ impl State {
                         direction,
                         true,
                     )
+                } else if previous.is_ok() {
+                    self.reconcile_focus_to_pointer(seat);
                 };
             }
 
