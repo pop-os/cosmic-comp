@@ -50,15 +50,21 @@ impl A11yHandler for State {
         }
     }
 
-    fn request_screen_filter(&mut self, filter: Option<ColorFilter>) {
+    fn request_screen_filter_select(&mut self, filter: ColorFilter) {
+        let mut config = self.common.config.dynamic_conf.screen_filter_mut();
+        (*config).color_filter = filter;
+        self.common.a11y_state.set_screen_filter(filter);
+    }
+
+    fn request_screen_filter_state(&mut self, enabled: bool) {
         let mut config = self.common.config.dynamic_conf.screen_filter_mut();
         let mut updated = (*config).clone();
-        updated.color_filter = filter;
+        updated.color_filter_enabled = enabled;
         if let Err(err) = self.backend.update_screen_filter(&updated) {
             warn!("Failed to apply screen color filter: {}", err);
         } else {
             *config = updated;
-            self.common.a11y_state.set_screen_filter(filter);
+            self.common.a11y_state.set_screen_filter_state(enabled);
         }
     }
 }
