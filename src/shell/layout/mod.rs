@@ -101,3 +101,25 @@ pub fn has_floating_exception(exceptions: &TilingExceptions, window: &CosmicSurf
 
     false
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitialWindowLayer {
+    Below,
+    Floating,
+    Tiling,
+}
+
+pub fn initial_window_layer(
+    is_below: bool,
+    is_dialog: bool,
+    floating_exception: bool,
+    tiling_enabled: bool,
+) -> InitialWindowLayer {
+    if is_below {
+        InitialWindowLayer::Below
+    } else if is_dialog || floating_exception || !tiling_enabled {
+        InitialWindowLayer::Floating
+    } else {
+        InitialWindowLayer::Tiling
+    }
+}
