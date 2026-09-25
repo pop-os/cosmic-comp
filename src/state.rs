@@ -1014,6 +1014,17 @@ impl Common {
             with_surfaces_surface_tree(lock_surface.wl_surface(), processor(None))
         }
 
+        // grabbed windows can be on any output, not just the active one
+        for seat in shell.seats.iter() {
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
+                && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
+            {
+                for (window, _) in grab_state.element().windows() {
+                    window.with_surfaces(processor(None));
+                }
+            }
+        }
+
         for seat in shell
             .seats
             .iter()
@@ -1024,15 +1035,6 @@ impl Common {
             // cursor ...
             if let CursorImageStatus::Surface(wl_surface) = cursor_status {
                 with_surfaces_surface_tree(&wl_surface, processor(None));
-            }
-
-            // grabs
-            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
-                && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
-            {
-                for (window, _) in grab_state.element().windows() {
-                    window.with_surfaces(processor(None));
-                }
             }
 
             if let Some(icon) = get_dnd_icon(seat) {
@@ -1167,7 +1169,9 @@ impl Common {
                     },
                 );
             }
+        }
 
+        for seat in shell.seats.iter() {
             if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
                 && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
             {
@@ -1385,15 +1389,6 @@ impl Common {
                 )
             }
 
-            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
-                && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
-            {
-                for (window, _) in grab_state.element().windows() {
-                    let throttle = throttle(&window, window.x11_surface().is_some());
-                    window.send_frame(output, time, throttle, should_send);
-                }
-            }
-
             if let Some(icon) = get_dnd_icon(seat) {
                 send_frames_surface_tree(
                     &icon.surface,
@@ -1402,6 +1397,17 @@ impl Common {
                     Some(Duration::ZERO),
                     should_send,
                 )
+            }
+        }
+
+        for seat in shell.seats.iter() {
+            if let Some(move_grab) = seat.user_data().get::<SeatMoveGrabState>()
+                && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
+            {
+                for (window, _) in grab_state.element().windows() {
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
+                }
             }
         }
 
