@@ -3567,12 +3567,8 @@ impl Shell {
                 ),
                 _ => (None, false, None),
             };
-            to_workspace.floating_layer.map(mapped.clone(), position);
+            let geometry = to_workspace.floating_layer.map(mapped.clone(), position);
             if was_maximized {
-                let geometry = to_workspace
-                    .floating_layer
-                    .element_geometry(mapped)
-                    .unwrap();
                 *mapped.maximized_state.lock().unwrap() = Some(MaximizedState {
                     original_geometry: geometry,
                     original_layer: ManagedLayer::Floating,
@@ -4846,7 +4842,9 @@ impl Shell {
                         .map(mapped.clone(), Some(focus_stack.iter()), None);
                 }
                 ManagedLayer::Sticky => unreachable!(),
-                _ => workspace.floating_layer.map(mapped.clone(), geometry.loc),
+                _ => {
+                    workspace.floating_layer.map(mapped.clone(), geometry.loc);
+                }
             }
 
             let mut state = mapped.maximized_state.lock().unwrap();
