@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{borrow::Borrow, collections::HashMap, sync::Mutex};
+use std::{borrow::Borrow, sync::Mutex};
+
+use indexmap::IndexMap;
 
 use smithay::{
     backend::{
@@ -459,7 +461,7 @@ fn constraints_for_renderer(
                 .dmabuf_render_formats()
                 .iter()
                 .fold(
-                    HashMap::<Fourcc, Vec<Modifier>>::new(),
+                    IndexMap::<Fourcc, Vec<Modifier>>::new(),
                     |mut map, format| {
                         map.entry(format.code).or_default().push(format.modifier);
                         map
