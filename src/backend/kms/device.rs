@@ -707,12 +707,33 @@ impl Device {
         let (render_node, render_formats, texture_formats, is_software) = {
             let egl = init_egl(&gbm)?;
 
-            let render_node = egl
+            let egl_render_node = egl
                 .device
                 .try_get_render_node()
                 .ok()
-                .and_then(std::convert::identity)
-                .unwrap_or(dev_node);
+                .and_then(std::convert::identity);
+            // Display-only devices without a render node of their own (vkms,
+            // or SoC display controllers driven by Mesa's kmsro) report the
+            // render node of the GPU Mesa pairs them with. That node already
+            // identifies the GPU's device, and two devices sharing it breaks
+            // the per-node renderer bookkeeping: outputs on the display-only
+            // device never get a renderer. Identify them by their own node.
+            let own_render_node = dev_node
+                .node_with_type(NodeType::Render)
+                .and_then(Result::ok);
+            let render_node = match egl_render_node {
+                Some(node) if own_render_node.is_none() && node != dev_node => {
+                    info!(
+                        "{} renders through {}, using its own node {}",
+                        path.display(),
+                        node,
+                        dev_node
+                    );
+                    dev_node
+                }
+                Some(node) => node,
+                None => dev_node,
+            };
             let render_formats = egl.context.dmabuf_render_formats().clone();
             let texture_formats = egl.context.dmabuf_texture_formats().clone();
 
