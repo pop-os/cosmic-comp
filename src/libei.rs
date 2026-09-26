@@ -15,9 +15,11 @@ use crate::state::{BackendData, State};
 use crate::utils::{geometry::RectGlobalExt, prelude::OutputExt};
 
 // Requested device types for an EI connection, mirroring the XDG RemoteDesktop portal `DeviceType` bitmask
-const DEVICE_TYPE_KEYBOARD: u32 = 1;
-const DEVICE_TYPE_POINTER: u32 = 2;
-const DEVICE_TYPE_TOUCHSCREEN: u32 = 4;
+pub const DEVICE_TYPE_KEYBOARD: u32 = 1;
+pub const DEVICE_TYPE_POINTER: u32 = 2;
+pub const DEVICE_TYPE_TOUCHSCREEN: u32 = 4;
+pub const DEVICE_TYPE_ALL: u32 =
+    DEVICE_TYPE_KEYBOARD | DEVICE_TYPE_POINTER | DEVICE_TYPE_TOUCHSCREEN;
 
 // Name of the EI absolute-pointer device. Shared so the connect path and the
 // re-advertise-on-output-change path recreate the same device.

@@ -4,14 +4,11 @@ use std::{
 };
 
 use smithay::reexports::calloop;
-use zbus::names::{UniqueName, WellKnownName};
+use tracing::warn;
+use zbus::names::UniqueName;
 
-use super::name_owners::NameOwners;
-
-static ALLOWED_NAMES: &[WellKnownName] = &[
-    WellKnownName::from_static_str_unchecked("org.freedesktop.impl.portal.desktop.cosmic"),
-    WellKnownName::from_static_str_unchecked("com.system76.CosmicOSK"),
-];
+use super::{client_allow_list::EiAllowList, name_owners::NameOwners};
+use crate::libei::DEVICE_TYPE_ALL;
 
 /// Channel for handing the EI socketpair (and requested device types)
 /// It's `None` until the EI sender side has been set up
@@ -20,15 +17,25 @@ type EiSender = Arc<Mutex<Option<calloop::channel::Sender<crate::libei::EiReques
 struct Ei {
     ei_sender: EiSender,
     name_owners: NameOwners,
+    allow_list: EiAllowList,
 }
 
 impl Ei {
-    async fn check_sender_allowed(&self, sender: &UniqueName<'_>) -> zbus::fdo::Result<()> {
-        if self.name_owners.check_owner(sender, ALLOWED_NAMES).await {
-            Ok(())
-        } else {
-            Err(zbus::fdo::Error::AccessDenied("Access denied".to_string()))
+    /// Check `sender` against the allow list, returning the device types it may request.
+    async fn check_sender_allowed(&self, sender: &UniqueName<'_>) -> zbus::fdo::Result<u32> {
+        if !self
+            .name_owners
+            .check_owner(sender, self.allow_list.names())
+            .await
+        {
+            return Err(zbus::fdo::Error::AccessDenied("Access denied".to_string()));
         }
+        // `check_owner` has already polled the owners, so the second lookup is cache-only.
+        Ok(self
+            .name_owners
+            .matched_name_no_poll(sender, self.allow_list.names())
+            .and_then(|name| self.allow_list.device_types_for(&name))
+            .unwrap_or(DEVICE_TYPE_ALL))
     }
 }
 
@@ -40,8 +47,27 @@ impl Ei {
         device_types: u32,
         #[zbus(header)] header: zbus::message::Header<'_>,
     ) -> zbus::fdo::Result<zbus::zvariant::OwnedFd> {
+        let mut device_types = device_types;
         if let Some(sender) = header.sender() {
-            self.check_sender_allowed(sender).await?;
+            // Cap the capabilities with the configured list
+            let permitted = self.check_sender_allowed(sender).await?;
+            let allowed = device_types & permitted;
+            if allowed != device_types {
+                warn!(
+                    requested = format!("{device_types:#b}"),
+                    permitted = format!("{permitted:#b}"),
+                    "Restricting EI device types for {sender}",
+                );
+                // The mask covers nothing the client asked for, so there is nothing useful
+                // to hand back.
+                if allowed == 0 {
+                    return Err(zbus::fdo::Error::AccessDenied(
+                        "None of the requested device types are permitted for this client"
+                            .to_string(),
+                    ));
+                }
+            }
+            device_types = allowed;
         }
 
         let (comp_stream, client_stream) = UnixStream::pair().map_err(|err| {
@@ -67,10 +93,12 @@ pub async fn init(
     conn: &zbus::Connection,
     name_owners: &NameOwners,
     ei_sender: EiSender,
+    allow_list: EiAllowList,
 ) -> zbus::Result<()> {
     let ei = Ei {
         ei_sender,
         name_owners: name_owners.clone(),
+        allow_list,
     };
     conn.object_server()
         .at("/com/system76/CosmicComp/Ei", ei)
