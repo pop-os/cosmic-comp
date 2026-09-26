@@ -67,7 +67,31 @@ use device::*;
 pub(crate) use surface::Surface;
 pub use surface::Timings;
 
+fn primary_master_failure_requires_retry(is_primary: bool, acquired: bool) -> bool {
+    is_primary && !acquired
+}
+
 use super::render::{CLEAR_COLOR, CursorMode, output_elements};
+
+#[cfg(test)]
+mod tests {
+    use super::primary_master_failure_requires_retry;
+
+    #[test]
+    fn primary_master_failure_is_retryable() {
+        assert!(primary_master_failure_requires_retry(true, false));
+    }
+
+    #[test]
+    fn secondary_master_failure_does_not_block_startup() {
+        assert!(!primary_master_failure_requires_retry(false, false));
+    }
+
+    #[test]
+    fn acquired_primary_master_does_not_require_retry() {
+        assert!(!primary_master_failure_requires_retry(true, true));
+    }
+}
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -156,6 +180,24 @@ pub fn init_backend(
         warn!("Failed to determine primary gpu: {}", err);
     }
     state.update_default_feedback();
+
+    let primary_node = *state.backend.kms().primary_node.read().unwrap();
+    if let Some(primary_node) = primary_node {
+        let primary_device = state
+            .backend
+            .kms()
+            .drm_devices
+            .values()
+            .find(|device| device.inner.render_node == primary_node)
+            .context("Primary render device is not available")?;
+
+        if primary_master_failure_requires_retry(true, primary_device.has_drm_master()) {
+            anyhow::bail!(
+                "Unable to acquire DRM master for primary device {}; retrying compositor startup",
+                primary_device.inner.dev_node
+            );
+        }
+    }
 
     if let Err(err) = state.refresh_output_config() {
         info!(
