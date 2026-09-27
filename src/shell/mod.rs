@@ -128,6 +128,68 @@ const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 const GESTURE_MAX_LENGTH: f64 = 150.0;
 const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
 const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
+
+fn x11_position_hint(window: &CosmicSurface, output: &Output) -> Option<Point<i32, Local>> {
+    let position = window
+        .x11_surface()?
+        .size_hints()?
+        .position
+        .map(|(_, x, y)| (x, y));
+    position_hint_to_local(position, output)
+}
+
+fn position_hint_to_local(
+    position: Option<(i32, i32)>,
+    output: &Output,
+) -> Option<Point<i32, Local>> {
+    let position = Point::<i32, Logical>::from(position?);
+    Some(position.as_global().to_local(output))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::position_hint_to_local;
+    use smithay::{
+        output::{Mode, Output, PhysicalProperties, Scale, Subpixel},
+        utils::Transform,
+    };
+
+    fn output_at(x: i32, y: i32) -> Output {
+        let output = Output::new(
+            "test".to_owned(),
+            PhysicalProperties {
+                size: (0, 0).into(),
+                subpixel: Subpixel::Unknown,
+                make: "test".to_owned(),
+                model: "test".to_owned(),
+                serial_number: "test".to_owned(),
+            },
+        );
+        let mode = Mode {
+            size: (1920, 1080).into(),
+            refresh: 60_000,
+        };
+        output.add_mode(mode);
+        output.change_current_state(
+            Some(mode),
+            Some(Transform::Normal),
+            Some(Scale::Integer(1)),
+            Some((x, y).into()),
+        );
+        output
+    }
+
+    #[test]
+    fn ignores_windows_without_a_position_hint() {
+        assert_eq!(position_hint_to_local(None, &output_at(0, 0)), None);
+    }
+
+    #[test]
+    fn converts_a_global_hint_to_output_local_coordinates() {
+        let position = position_hint_to_local(Some((2420, 132)), &output_at(1920, 100));
+        assert_eq!(position, Some((500, 32).into()));
+    }
+}
 const MOVE_GRAB_Y_OFFSET: f64 = 16.;
 const ACTIVATION_TOKEN_EXPIRE_TIME: Duration = Duration::from_secs(5);
 
@@ -2996,7 +3058,10 @@ impl Shell {
 
         let workspace_empty = workspace.mapped().next().is_none();
         if is_dialog || floating_exception || !workspace.tiling_enabled {
-            workspace.floating_layer.map(mapped.clone(), None);
+            let initial_position = x11_position_hint(&window, &output);
+            workspace
+                .floating_layer
+                .map(mapped.clone(), initial_position);
         } else {
             for mapped in workspace
                 .mapped()
