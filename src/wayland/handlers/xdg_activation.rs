@@ -243,7 +243,7 @@ impl State {
             {
                 for mapped in current_workspace
                     .mapped()
-                    .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                    .filter(|m| m.maximized_state.lock().unwrap().is_some() && *m != &element)
                     .cloned()
                     .collect::<Vec<_>>()
                     .into_iter()

@@ -21,6 +21,11 @@ pub fn set_all_surfaces_dpms_on(state: &mut State) {
     }
 
     if changed {
+        // Powering an output on because of input is activity. Without this the idle
+        // notifier stays idled, the idle daemon never sees `resumed`, and nothing
+        // powers the output off again until real input arrives.
+        let seat = state.common.shell.read().seats.last_active().clone();
+        state.common.idle_notifier_state.notify_activity(&seat);
         OutputPowerState::refresh(state);
     }
 }

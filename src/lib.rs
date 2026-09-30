@@ -289,7 +289,7 @@ Project home page: https://github.com/pop-os/cosmic-comp
 Options:
   -h, --help          Show this message
   --no-xwayland       Run without Xwayland
-  -v, --version       Show the version of cosmic-comp"#
+  -V, --version       Show the version of cosmic-comp"#
     );
 }
 
