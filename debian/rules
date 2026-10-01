@@ -9,10 +9,10 @@ CLEAN ?= 1
 
 override_dh_auto_clean:
 ifeq ($(CLEAN),1)
-	ischroot && make clean || make distclean
+	just clean
 endif
 ifeq ($(VENDOR),1)
-	ischroot || make vendor
+	ischroot || just rootdir=debian/cosmic-comp debug=$(DEBUG) vendor=$(VENDOR)
 endif
 
 override_dh_installinit:
@@ -20,3 +20,4 @@ override_dh_installinit:
 
 override_dh_systemd_start:
 	dh_systemd_start -r
+
