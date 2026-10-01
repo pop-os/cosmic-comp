@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Cosmic (Compositor Only)
+Comment=This session logs you into a bare cosmic-comp session
+Exec=/usr/bin/cosmic-comp-service
+Type=Application
+DesktopNames=pop:COSMIC
+X-GDM-SessionRegisters=false
