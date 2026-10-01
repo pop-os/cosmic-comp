@@ -172,7 +172,7 @@ pub enum ColorFilter {
 }
 
 impl Config {
-    pub fn load(loop_handle: &LoopHandle<'_, State>) -> Config {
+    pub fn load(loop_handle: &LoopHandle<'_, State>, kiosk_mode: bool) -> Config {
         let config = cosmic_config::Config::new("com.system76.CosmicComp", 1).unwrap();
         let source = cosmic_config::calloop::ConfigWatchSource::new(&config).unwrap();
         loop_handle
@@ -248,40 +248,48 @@ impl Config {
 
         // Source key bindings from com.system76.CosmicSettings.Shortcuts
         let settings_context = shortcuts::context().expect("Failed to load shortcuts config");
-        let system_actions = shortcuts::system_actions(&settings_context);
-        let shortcuts = shortcuts::shortcuts(&settings_context);
+        let mut system_actions = Default::default();
+        let mut shortcuts = Default::default();
+        // Kiosk mode disables shortcuts
+        if !kiosk_mode {
+            system_actions = shortcuts::system_actions(&settings_context);
+            shortcuts = shortcuts::shortcuts(&settings_context);
 
-        // Listen for updates to the keybindings config.
-        match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
-            Ok(source) => {
-                if let Err(err) = loop_handle.insert_source(source, |(config, keys), (), state| {
-                    for key in keys {
-                        match key.as_str() {
-                            // Reload the keyboard shortcuts config.
-                            "custom" | "defaults" => {
-                                state.common.config.shortcuts = shortcuts::shortcuts(&config);
+            // Listen for updates to the keybindings config.
+            match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
+                Ok(source) => {
+                    if let Err(err) =
+                        loop_handle.insert_source(source, |(config, keys), (), state| {
+                            for key in keys {
+                                match key.as_str() {
+                                    // Reload the keyboard shortcuts config.
+                                    "custom" | "defaults" => {
+                                        state.common.config.shortcuts =
+                                            shortcuts::shortcuts(&config);
+                                    }
+
+                                    "system_actions" => {
+                                        state.common.config.system_actions =
+                                            shortcuts::system_actions(&config);
+                                    }
+
+                                    _ => (),
+                                }
                             }
-
-                            "system_actions" => {
-                                state.common.config.system_actions =
-                                    shortcuts::system_actions(&config);
-                            }
-
-                            _ => (),
-                        }
+                        })
+                    {
+                        warn!(
+                            ?err,
+                            "Failed to watch com.system76.CosmicSettings.Shortcuts config"
+                        );
                     }
-                }) {
-                    warn!(
-                        ?err,
-                        "Failed to watch com.system76.CosmicSettings.Shortcuts config"
-                    );
                 }
-            }
-            Err(err) => warn!(
-                ?err,
-                "failed to create config watch source for com.system76.CosmicSettings.Shortcuts"
-            ),
-        };
+                Err(err) => warn!(
+                    ?err,
+                    "failed to create config watch source for com.system76.CosmicSettings.Shortcuts"
+                ),
+            };
+        }
 
         let window_rules_context =
             window_rules::context().expect("Failed to load window rules config");
