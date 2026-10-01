@@ -28,7 +28,7 @@ use smithay::{
             gbm::{GbmAllocator, GbmBuffer},
         },
         drm::{
-            DrmDeviceFd, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
+            DrmDeviceFd, DrmError, DrmEventMetadata, DrmEventTime, DrmNode, VrrSupport,
             compositor::{
                 BlitFrameResultError, FrameError, FrameFlags, PrimaryPlaneElement,
                 RenderFrameResult,
@@ -139,6 +139,8 @@ pub struct SurfaceThreadState {
     compositor: Option<GbmDrmOutput>,
 
     state: QueueState,
+    /// Consecutive redraws that failed before KMS took the frame.
+    redraw_failures: u32,
     timings: Timings,
     frame_callback_seq: usize,
     thread_sender: Sender<SurfaceCommand>,
@@ -178,6 +180,26 @@ pub type GbmDrmOutput = DrmOutput<
     )>,
     DrmDeviceFd,
 >;
+
+/// Consecutive failed redraws after which a surface stops rendering, until its output is
+/// configured again.
+const MAX_REDRAW_FAILURES: u32 = 12;
+const MAX_REDRAW_RETRY_DELAY: Duration = Duration::from_secs(4);
+
+/// Whether the error chain contains smithay's `DrmError`, i.e. KMS rejected the frame.
+fn is_rejected_by_kms(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| cause.is::<DrmError>())
+}
+
+/// Delay before retrying after `failures` consecutive failures (>= 1), starting at one frame time.
+fn redraw_retry_delay(refresh_interval: Duration, failures: u32) -> Duration {
+    let frame_time = Some(refresh_interval)
+        .filter(|interval| !interval.is_zero())
+        .unwrap_or(Duration::from_millis(16));
+    frame_time
+        .saturating_mul(2u32.saturating_pow(failures - 1))
+        .min(MAX_REDRAW_RETRY_DELAY)
+}
 
 #[derive(Debug, Default)]
 pub enum QueueState {
@@ -538,6 +560,7 @@ fn surface_thread(
         vrr_mode: AdaptiveSync::Disabled,
 
         state: QueueState::Idle,
+        redraw_failures: 0,
         timings: Timings::new(None, None, false, target_node),
         frame_callback_seq: 0,
         thread_sender,
@@ -638,6 +661,8 @@ fn surface_thread(
                             state.loop_handle.remove(queued_render);
                         }
                     };
+                    // Each wake gets the full back-off before giving up.
+                    state.redraw_failures = 0;
                 }
             }
             Event::Msg(ThreadCommand::AllowFrameFlags(flag, mut flags)) => {
@@ -667,6 +692,15 @@ fn surface_thread(
 
 impl SurfaceThreadState {
     fn suspend(&mut self, tx: SyncSender<()>) {
+        self.deactivate();
+        let _ = tx.send(());
+    }
+
+    /// Drops the `DrmOutput`, so `apply_config_for_outputs` sees the surface as inactive and
+    /// re-initializes it.
+    fn deactivate(&mut self) {
+        // Clear `active` first: the reverse order lets the main thread `use_mode` a crtc
+        // smithay already dropped.
         self.active.store(false, Ordering::SeqCst);
         let _ = self.compositor.take();
 
@@ -684,8 +718,6 @@ impl SurfaceThreadState {
                 self.loop_handle.remove(queued_render);
             }
         };
-
-        let _ = tx.send(());
     }
 
     fn resume(&mut self, compositor: GbmDrmOutput) {
@@ -718,6 +750,15 @@ impl SurfaceThreadState {
         } else if crate::utils::env::bool_var("COSMIC_DISABLE_OVERLAY_SCANOUT").unwrap_or(false) {
             self.frame_flags
                 .remove(FrameFlags::ALLOW_OVERLAY_PLANE_SCANOUT);
+        }
+        if self.redraw_failures > 0 {
+            let name = self.output.name();
+            warn!(
+                ?name,
+                failures = self.redraw_failures,
+                "Rendering re-initialized"
+            );
+            self.redraw_failures = 0;
         }
         self.compositor = Some(compositor);
     }
@@ -952,11 +993,8 @@ impl SurfaceThreadState {
         let token = self
             .loop_handle
             .insert_source(timer, move |_time, _, state| {
-                if let Err(err) = state.redraw(estimated_presentation) {
-                    let name = state.output.name();
-                    warn!(?name, "Failed to submit rendering: {:?}", err);
-                    state.queue_redraw(true);
-                }
+                let result = state.redraw(estimated_presentation);
+                state.on_redraw_result(result);
                 TimeoutAction::Drop
             })
             .expect("Failed to schedule render");
@@ -987,6 +1025,71 @@ impl SurfaceThreadState {
             }
             _ => unreachable!(),
         }
+    }
+
+    fn on_redraw_result(&mut self, result: Result<()>) {
+        // Waiting for a vblank means KMS took the frame, even if a later step failed.
+        let submitted = matches!(self.state, QueueState::WaitingForVBlank { .. });
+        if submitted && self.redraw_failures > 0 {
+            let name = self.output.name();
+            warn!(
+                ?name,
+                failures = self.redraw_failures,
+                "Rendering recovered"
+            );
+            self.redraw_failures = 0;
+        }
+        let Err(err) = result else {
+            return;
+        };
+        let name = self.output.name();
+        if submitted {
+            warn!(?name, "Failed to submit rendering: {:?}", err);
+            self.queue_redraw(true);
+            return;
+        }
+
+        self.redraw_failures = self.redraw_failures.saturating_add(1);
+        // Give up only when KMS rejects the frame: other errors, like a renderer lost to a GPU
+        // reset, clear by themselves.
+        let rejected_by_kms = is_rejected_by_kms(&err);
+        if rejected_by_kms && self.redraw_failures >= MAX_REDRAW_FAILURES {
+            error!(
+                ?name,
+                failures = self.redraw_failures,
+                "Failed to submit rendering, giving up until the output is configured again: {:?}",
+                err
+            );
+            self.deactivate();
+            return;
+        }
+        if self.redraw_failures == 1 {
+            warn!(
+                ?name,
+                "Failed to submit rendering, retrying with back-off: {:?}", err
+            );
+        }
+
+        let delay = redraw_retry_delay(self.timings.refresh_interval(), self.redraw_failures);
+        let token = self
+            .loop_handle
+            .insert_source(Timer::from_duration(delay), |_, _, state| {
+                state.queue_redraw(true);
+                TimeoutAction::Drop
+            })
+            .expect("Failed to schedule render");
+        // Park the retry where the queued render goes, so redraw requests in between wait for it.
+        self.state = match mem::take(&mut self.state) {
+            QueueState::Idle | QueueState::Queued(_) => QueueState::Queued(token),
+            QueueState::WaitingForEstimatedVBlank(estimated_vblank)
+            | QueueState::WaitingForEstimatedVBlankAndQueued {
+                estimated_vblank, ..
+            } => QueueState::WaitingForEstimatedVBlankAndQueued {
+                estimated_vblank,
+                queued_render: token,
+            },
+            QueueState::WaitingForVBlank { .. } => unreachable!(),
+        };
     }
 
     #[profiling::function]
@@ -1956,4 +2059,59 @@ fn postprocess_elements<'a>(
     )
     .map(CosmicElement::<GlMultiRenderer>::Postprocess)
     .collect::<Vec<_>>()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use smithay::reexports::drm::control::from_u32;
+
+    type TestFrameError = FrameError<std::io::Error, std::io::Error, std::io::Error>;
+
+    #[test]
+    fn retry_delay_doubles_from_one_frame_time_up_to_the_cap() {
+        let delays: Vec<u64> = (1..=MAX_REDRAW_FAILURES)
+            .map(|n| redraw_retry_delay(Duration::from_millis(10), n).as_millis() as u64)
+            .collect();
+        let expected = [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 4000, 4000, 4000];
+        assert_eq!(delays, expected);
+    }
+
+    #[test]
+    fn retry_delay_handles_unknown_refresh_and_endless_failures() {
+        assert_eq!(
+            redraw_retry_delay(Duration::ZERO, 1),
+            Duration::from_millis(16)
+        );
+        for failures in [33, u32::MAX] {
+            assert_eq!(
+                redraw_retry_delay(Duration::from_millis(10), failures),
+                MAX_REDRAW_RETRY_DELAY
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_submit_is_a_kms_rejection() {
+        // Same shape as the `queue_frame` failure in `redraw`.
+        let result: Result<(), TestFrameError> = Err(FrameError::DrmError(DrmError::TestFailed(
+            from_u32(1).unwrap(),
+        )));
+        let err = result
+            .with_context(|| "Failed to submit result for display")
+            .unwrap_err();
+        assert!(is_rejected_by_kms(&err));
+    }
+
+    #[test]
+    fn other_errors_are_not_kms_rejections() {
+        let result: Result<(), TestFrameError> = Err(FrameError::NoFreeSlotsError);
+        let no_slots = result
+            .with_context(|| "Failed to submit result for display")
+            .unwrap_err();
+        assert!(!is_rejected_by_kms(&no_slots));
+
+        let no_renderer = anyhow::format_err!("Failed to create renderer: {:?}", "no device");
+        assert!(!is_rejected_by_kms(&no_renderer));
+    }
 }
