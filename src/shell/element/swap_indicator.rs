@@ -105,7 +105,6 @@ impl Program for SwapIndicatorInternal {
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
         .padding(16)
-        .apply(container)
         .class(theme::Container::custom(|theme| {
             let mut background = theme.cosmic().accent_color();
             if theme.transparent {
