@@ -181,8 +181,8 @@ pub type GbmDrmOutput = DrmOutput<
     DrmDeviceFd,
 >;
 
-/// Consecutive failed redraws after which a surface stops rendering, until its output is
-/// configured again.
+/// Consecutive failed redraws after which a surface stops rendering, until the next wake or
+/// output configuration.
 const MAX_REDRAW_FAILURES: u32 = 12;
 const MAX_REDRAW_RETRY_DELAY: Duration = Duration::from_secs(4);
 
@@ -1057,7 +1057,7 @@ impl SurfaceThreadState {
             error!(
                 ?name,
                 failures = self.redraw_failures,
-                "Failed to submit rendering, giving up until the output is configured again: {:?}",
+                "Failed to submit rendering, giving up until the next wake or output configuration: {:?}",
                 err
             );
             self.deactivate();
