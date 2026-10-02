@@ -785,6 +785,7 @@ dependencies = [
  "iced_tiny_skia",
  "id_tree",
  "indexmap 2.13.0",
+ "inputplumber-zbus",
  "jiff",
  "keyframe",
  "libcosmic",
@@ -2622,6 +2623,14 @@ name = "input-sys"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36eee07d8e02bd95bf52b2e642cf13d33701b94c6e4b04fbf1d1fb07e9cb19e7"
+
+[[package]]
+name = "inputplumber-zbus"
+version = "0.1.0"
+source = "git+https://github.com/pop-os/inputplumber-zbus#34336591e37971b398869e374ed0ff0c20d9acf6"
+dependencies = [
+ "zbus",
+]
 
 [[package]]
 name = "intl-memoizer"
