@@ -17,7 +17,7 @@ use crate::{
         tablet_emu::PointerEmulationGrab,
     },
     shell::{
-        SeatExt, Trigger,
+        ModalBehavior, SeatExt, Trigger,
         focus::{
             Stage, render_input_order,
             target::{KeyboardFocusTarget, PointerFocusTarget},
@@ -946,6 +946,7 @@ impl State {
                                                         &state.common.config,
                                                         &state.common.event_loop_handle,
                                                         false,
+                                                        ModalBehavior::Block,
                                                     );
                                                     drop(shell);
                                                     dispatch_grab(
@@ -1016,6 +1017,7 @@ impl State {
                                                             .cosmic_conf
                                                             .edge_snap_threshold,
                                                         false,
+                                                        ModalBehavior::Block,
                                                     );
                                                     drop(shell);
                                                     dispatch_grab(
@@ -1033,6 +1035,10 @@ impl State {
                                 }
                             }
 
+                            let redirect = self.common.shell.read().resolve_modal_redirect(&target);
+                            if let Some(dialog) = redirect {
+                                self.common.shell.write().shake_modal_dialog(&dialog);
+                            }
                             Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
                         }
                     }
