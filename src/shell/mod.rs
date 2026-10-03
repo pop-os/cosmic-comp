@@ -324,6 +324,14 @@ pub struct SessionLock {
     pub surfaces: HashMap<Output, LockSurface>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModalBehavior {
+    /// Reject the request and shake the dialog if the window has a modal child.
+    Block,
+    /// Apply the request regardless of modal children.
+    Ignore,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum WorkspaceDelta {
     Shortcut(Instant),
@@ -2268,10 +2276,13 @@ impl Shell {
         dialog
     }
 
-    pub fn block_by_modal_child<S>(&mut self, surface: &S) -> bool
+    fn block_by_modal_child<S>(&mut self, surface: &S, modal: ModalBehavior) -> bool
     where
         CosmicSurface: PartialEq<S>,
     {
+        if modal == ModalBehavior::Ignore {
+            return false;
+        }
         let parent = self
             .element_for_surface(surface)
             .map(|mapped| mapped.active_window())
@@ -3150,11 +3161,11 @@ impl Shell {
         }
 
         if should_be_maximized {
-            self.maximize_request(&mapped, &seat, false, loop_handle);
+            self.maximize_request(&mapped, &seat, false, loop_handle, ModalBehavior::Ignore);
         }
 
         if should_be_minimized {
-            self.minimize_request(&window);
+            self.minimize_request(&window, ModalBehavior::Ignore);
         }
 
         let new_target = if should_be_minimized {
@@ -3929,6 +3940,7 @@ impl Shell {
         config: &Config,
         evlh: &LoopHandle<'static, State>,
         client_initiated: bool,
+        modal: ModalBehavior,
     ) -> Option<(MoveGrab, Focus)> {
         if self.overview_mode().0.is_active() {
             return None;
@@ -3939,7 +3951,7 @@ impl Shell {
 
         let mut start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
-        if self.block_by_modal_child(surface) {
+        if self.block_by_modal_child(surface, modal) {
             return None;
         }
 
@@ -3954,6 +3966,7 @@ impl Shell {
                     serial,
                     release,
                     move_out_of_stack,
+                    modal,
                 ),
                 Focus::Keep,
             ));
@@ -4387,7 +4400,7 @@ impl Shell {
                         .as_ref()
                         .is_some_and(|state| state.original_layer == ManagedLayer::Tiling)
                     {
-                        self.unmaximize_request(&mapped);
+                        self.unmaximize_request(&mapped, ModalBehavior::Ignore);
                     }
 
                     let workspace = self.active_space_mut(&output).unwrap();
@@ -4407,6 +4420,7 @@ impl Shell {
         seat: &Seat<State>,
         edge: ResizeEdge,
         edge_snap_threshold: u32,
+        modal: ModalBehavior,
     ) -> Option<(
         (
             Option<(PointerFocusTarget, Point<f64, Logical>)>,
@@ -4419,7 +4433,7 @@ impl Shell {
         }
 
         let mut start_data = check_grab_preconditions(seat, None, None)?;
-        if self.block_by_modal_child(&mapped.active_window()) {
+        if self.block_by_modal_child(&mapped.active_window(), modal) {
             return None;
         }
 
@@ -4502,21 +4516,28 @@ impl Shell {
         window: &CosmicMapped,
         seat: &Seat<State>,
         loop_handle: &LoopHandle<'static, State>,
+        modal: ModalBehavior,
     ) {
+        if self.block_by_modal_child(&window.active_window(), modal) {
+            return;
+        }
         if window.is_maximized(true) {
-            self.unmaximize_request(window);
+            self.unmaximize_request(window, ModalBehavior::Ignore);
         } else {
             if window.is_fullscreen(true) {
                 return;
             }
-            self.maximize_request(window, seat, true, loop_handle);
+            self.maximize_request(window, seat, true, loop_handle, ModalBehavior::Ignore);
         }
     }
 
-    pub fn minimize_request<S>(&mut self, surface: &S)
+    pub fn minimize_request<S>(&mut self, surface: &S, modal: ModalBehavior)
     where
         CosmicSurface: PartialEq<S>,
     {
+        if self.block_by_modal_child(surface, modal) {
+            return;
+        }
         if let Some((set, mapped)) = self.workspaces.sets.values_mut().find_map(|set| {
             let mapped = set
                 .sticky_layer
@@ -4611,7 +4632,11 @@ impl Shell {
         seat: &Seat<State>,
         animate: bool,
         loop_handle: &LoopHandle<'static, State>,
+        modal: ModalBehavior,
     ) {
+        if self.block_by_modal_child(&mapped.active_window(), modal) {
+            return;
+        }
         self.unminimize_request(&mapped.active_window(), seat, loop_handle);
 
         let (original_layer, floating_layer, original_geometry) = if let Some(set) = self
@@ -4646,7 +4671,14 @@ impl Shell {
         }
     }
 
-    pub fn unmaximize_request(&mut self, mapped: &CosmicMapped) -> Option<Size<i32, Logical>> {
+    pub fn unmaximize_request(
+        &mut self,
+        mapped: &CosmicMapped,
+        modal: ModalBehavior,
+    ) -> Option<Size<i32, Logical>> {
+        if self.block_by_modal_child(&mapped.active_window(), modal) {
+            return None;
+        }
         if let Some(set) = self.workspaces.sets.values_mut().find(|set| {
             set.sticky_layer.mapped().any(|m| m == mapped)
                 || set
@@ -4698,11 +4730,12 @@ impl Shell {
         edges: ResizeEdge,
         edge_snap_threshold: u32,
         client_initiated: bool,
+        modal: ModalBehavior,
     ) -> Option<(ResizeGrab, Focus)> {
         let serial = serial.into();
         let start_data =
             check_grab_preconditions(seat, serial, client_initiated.then_some(surface))?;
-        if self.block_by_modal_child(surface) {
+        if self.block_by_modal_child(surface, modal) {
             return None;
         }
         let mapped = self.element_for_surface(surface).cloned()?;
@@ -4907,7 +4940,7 @@ impl Shell {
             };
 
             if was_maximized && let Some(KeyboardFocusTarget::Element(mapped)) = res.as_ref() {
-                self.maximize_request(mapped, seat, false, loop_handle);
+                self.maximize_request(mapped, seat, false, loop_handle, ModalBehavior::Ignore);
             }
 
             res
@@ -5043,10 +5076,14 @@ impl Shell {
         surface: &S,
         output: Output,
         _loop_handle: &LoopHandle<'static, State>,
+        modal: ModalBehavior,
     ) -> Option<KeyboardFocusTarget>
     where
         CosmicSurface: PartialEq<S>,
     {
+        if self.block_by_modal_child(surface, modal) {
+            return None;
+        }
         let mapped = self.element_for_surface(surface).cloned()?;
         let seat = self.seats.last_active().clone();
         let window;
@@ -5174,10 +5211,14 @@ impl Shell {
         &mut self,
         surface: &S,
         loop_handle: &LoopHandle<'static, State>,
+        modal: ModalBehavior,
     ) -> Option<KeyboardFocusTarget>
     where
         CosmicSurface: PartialEq<S>,
     {
+        if self.block_by_modal_child(surface, modal) {
+            return None;
+        }
         let maybe_workspace = self.workspaces.iter_mut().find_map(|(_, s)| {
             s.workspaces
                 .iter_mut()

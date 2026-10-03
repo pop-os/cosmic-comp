@@ -33,7 +33,7 @@ use smithay::{
 };
 
 use crate::{
-    shell::{CosmicMapped, ManagedLayer},
+    shell::{CosmicMapped, ManagedLayer, ModalBehavior},
     state::State,
     utils::prelude::Global,
 };
@@ -650,6 +650,7 @@ impl MoveGrab {
         serial: Option<Serial>,
         release: ReleaseMode,
         move_out_of_stack: bool,
+        modal: ModalBehavior,
     ) -> MoveGrab {
         let surface = surface.clone();
         let seat_clone = seat.clone();
@@ -665,6 +666,7 @@ impl MoveGrab {
                     &data.common.config,
                     &data.common.event_loop_handle,
                     false,
+                    modal,
                 )
             },
             seat.clone(),
