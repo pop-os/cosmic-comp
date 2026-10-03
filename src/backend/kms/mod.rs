@@ -654,10 +654,10 @@ impl KmsState {
         let device_node = dmabuf
             .node()
             .unwrap_or_else(|| self.primary_node.read().unwrap().unwrap());
-        let mut device = self
+        let mut device_idx = self
             .drm_devices
-            .values_mut()
-            .find(|dev| dev.inner.render_node == device_node)
+            .values()
+            .position(|dev| dev.inner.render_node == device_node)
             .ok_or(anyhow::anyhow!(
                 "Unable to find device for node: {}",
                 device_node
@@ -666,13 +666,25 @@ impl KmsState {
         // If device advertised to client doesn't support format/modifier, select
         // first device that does. This is needed for image-copy from
         // output/toplevel on a different node.
-        if dmabuf.node().is_none() && !device.texture_formats.contains(&dmabuf.format()) {
-            device = self
+        //
+        // If no device advertises it, keep the original device and let EGL
+        // decide: drivers without modifier support (e.g. virgl) only advertise
+        // implicit modifiers, while clients like Chromium send an explicit
+        // LINEAR modifier that still imports fine.
+        if dmabuf.node().is_none()
+            && !self.drm_devices[device_idx]
+                .texture_formats
+                .contains(&dmabuf.format())
+        {
+            if let Some(idx) = self
                 .drm_devices
-                .values_mut()
-                .find(|device| device.texture_formats.contains(&dmabuf.format()))
-                .context("Dmabuf cannot be imported on any gpu")?;
+                .values()
+                .position(|device| device.texture_formats.contains(&dmabuf.format()))
+            {
+                device_idx = idx;
+            }
         }
+        let device = &mut self.drm_devices[device_idx];
 
         let new_client = if let Some(client) = client {
             let new = device.inner.active_clients.insert(client.id());
