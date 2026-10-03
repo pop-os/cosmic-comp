@@ -34,6 +34,7 @@ use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::Tiling
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
 use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
 use keyframe::{ease, functions::EaseInOutCubic};
+use smallvec::{SmallVec, smallvec};
 use smithay::{
     backend::{
         input::{TabletToolDescriptor, TouchSlot},
@@ -2253,7 +2254,7 @@ impl Shell {
 
     fn deepest_modal_child_for(&self, parent: &CosmicSurface) -> Option<CosmicMapped> {
         // X11 `WM_TRANSIENT_FOR` is not validated and can form a cycle
-        let mut visited = vec![parent.clone()];
+        let mut visited: SmallVec<[CosmicSurface; 4]> = smallvec![parent.clone()];
         let mut dialog = None;
 
         while let Some(child) = self

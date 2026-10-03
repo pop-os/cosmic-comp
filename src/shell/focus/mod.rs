@@ -8,6 +8,7 @@ use crate::{
     },
 };
 use indexmap::IndexSet;
+use smallvec::{SmallVec, smallvec};
 use smithay::{
     backend::input::InputTime,
     desktop::{
@@ -522,7 +523,7 @@ fn raise_modal_with_ancestors(floating_layer: &mut FloatingLayout, focused: &Cos
 
     let mut root = focused.clone();
     // X11 `WM_TRANSIENT_FOR` is not validated and can form a cycle
-    let mut visited = vec![focused.clone()];
+    let mut visited: SmallVec<[CosmicMapped; 4]> = smallvec![focused.clone()];
     while root.active_window().is_modal_dialog() {
         let window = root.active_window();
         let Some(parent) = floating_layer
@@ -536,10 +537,10 @@ fn raise_modal_with_ancestors(floating_layer: &mut FloatingLayout, focused: &Cos
         visited.push(parent.clone());
         root = parent;
     }
-    raise_with_children(floating_layer, &root, &root == focused, &mut Vec::new());
+    raise_with_children(floating_layer, &root, &root == focused);
     // Keep the focused modal and its children on top of the family
     if &root != focused {
-        raise_with_children(floating_layer, focused, true, &mut Vec::new());
+        raise_with_children(floating_layer, focused, true);
     }
 }
 
@@ -547,7 +548,16 @@ fn raise_with_children(
     floating_layer: &mut FloatingLayout,
     focused: &CosmicMapped,
     activate: bool,
-    raised: &mut Vec<CosmicMapped>,
+) {
+    let mut raised = SmallVec::<[CosmicMapped; 4]>::new_const();
+    raise_with_children_internal(floating_layer, focused, activate, &mut raised)
+}
+
+fn raise_with_children_internal(
+    floating_layer: &mut FloatingLayout,
+    focused: &CosmicMapped,
+    activate: bool,
+    raised: &mut SmallVec<[CosmicMapped; 4]>,
 ) {
     if !raised.contains(focused) && floating_layer.mapped().any(|m| m == focused) {
         floating_layer.space.raise_element(focused, activate);
@@ -562,7 +572,7 @@ fn raise_with_children(
             .collect::<Vec<_>>()
             .into_iter()
         {
-            raise_with_children(floating_layer, &element, false, raised);
+            raise_with_children_internal(floating_layer, &element, false, raised);
         }
     }
 }
