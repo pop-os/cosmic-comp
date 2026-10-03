@@ -3253,7 +3253,12 @@ impl Shell {
             }
         }
 
-        for set in self.workspaces.sets.values_mut() {
+        for set in self
+            .workspaces
+            .sets
+            .values_mut()
+            .chain(self.workspaces.backup_set.as_mut())
+        {
             let sticky_res = set.sticky_layer.mapped().find_map(|m| {
                 m.windows()
                     .position(|(s, _)| &s == surface)
