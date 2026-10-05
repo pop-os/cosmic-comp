@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{collections::HashSet, sync::Mutex};
+use std::{
+    collections::HashSet,
+    io::Read,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use smithay::{
     output::Output,
     reexports::{
-        wayland_protocols::ext::foreign_toplevel_list::v1::server::{
-            ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
-            ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
+        wayland_protocols::ext::{
+            foreign_toplevel_list::v1::server::{
+                ext_foreign_toplevel_handle_v1::ExtForeignToplevelHandleV1,
+                ext_foreign_toplevel_list_v1::ExtForeignToplevelListV1,
+            },
+            image_capture_source::v1::server::ext_image_capture_source_v1::ExtImageCaptureSourceV1,
         },
         wayland_server::{
             Client, DataInit, Dispatch, DisplayHandle, GlobalDispatch, New, Resource, Weak,
@@ -16,21 +24,32 @@ use smithay::{
         },
     },
     utils::{IsAlive, Logical, Rectangle, user_data::UserDataMap},
-    wayland::foreign_toplevel_list::{
-        ForeignToplevelHandle, ForeignToplevelListGlobalData, ForeignToplevelListHandler,
-        ForeignToplevelListState,
+    wayland::{
+        foreign_toplevel_list::{
+            ForeignToplevelHandle, ForeignToplevelListGlobalData, ForeignToplevelListHandler,
+            ForeignToplevelListState,
+        },
+        image_capture_source::ImageCaptureSourceData,
     },
 };
 
 use crate::utils::prelude::{Global, OutputExt, RectGlobalExt};
 
-use super::workspace::{WorkspaceHandle, WorkspaceHandler, WorkspaceState};
+use super::{
+    image_capture_source::{ImageCaptureSourceKind, init_image_capture_source},
+    workspace::{WorkspaceHandle, WorkspaceHandler, WorkspaceState},
+};
 
 use cosmic_protocols::toplevel_info::v1::server::{
     zcosmic_toplevel_handle_v1::{self, State as States, ZcosmicToplevelHandleV1},
     zcosmic_toplevel_info_v1::{self, ZcosmicToplevelInfoV1},
 };
 use tracing::error;
+
+pub(crate) const MAX_RASTER_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_RASTER_SOURCES: usize = 16;
+pub(crate) const MAX_RASTER_SOURCE_PIXELS: usize = 4 * 1024 * 1024;
+const MAX_ICON_FILE_BYTES: usize = MAX_RASTER_BYTES;
 
 pub trait Window: IsAlive + Clone + PartialEq + Send {
     fn title(&self) -> String;
@@ -42,7 +61,241 @@ pub trait Window: IsAlive + Clone + PartialEq + Send {
     fn is_sticky(&self) -> bool;
     fn is_resizing(&self) -> bool;
     fn global_geometry(&self) -> Option<Rectangle<i32, Global>>;
+    fn icon(&self) -> Option<WindowIcon>;
     fn user_data(&self) -> &UserDataMap;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RgbaIcon {
+    width: u32,
+    height: u32,
+    pixels: Arc<[u8]>,
+}
+
+impl RgbaIcon {
+    pub fn new(width: u32, height: u32, pixels: Vec<u8>) -> Option<Self> {
+        let pixel_count = usize::try_from(width)
+            .ok()?
+            .checked_mul(usize::try_from(height).ok()?)?;
+        if width == 0
+            || height == 0
+            || pixel_count > MAX_RASTER_SOURCE_PIXELS
+            || pixels.len() != pixel_count.checked_mul(4)?
+        {
+            return None;
+        }
+
+        Some(Self {
+            width,
+            height,
+            pixels: pixels.into(),
+        })
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowIcon {
+    name: Option<String>,
+    rgba: Arc<[RgbaIcon]>,
+}
+
+impl WindowIcon {
+    pub fn new(name: Option<String>, mut rgba: Vec<RgbaIcon>) -> Option<Self> {
+        let name = name.filter(|name| !name.is_empty());
+        rgba.sort_by(|left, right| {
+            let area = |icon: &RgbaIcon| u64::from(icon.width) * u64::from(icon.height);
+            area(right).cmp(&area(left))
+        });
+        rgba.dedup_by_key(|icon| (icon.width, icon.height));
+        let mut total_bytes = 0usize;
+        rgba.retain(|icon| {
+            if total_bytes
+                .checked_add(icon.pixels.len())
+                .is_none_or(|total| total > MAX_RASTER_BYTES)
+            {
+                return false;
+            }
+            total_bytes += icon.pixels.len();
+            true
+        });
+        rgba.truncate(MAX_RASTER_SOURCES);
+        if name.is_none() && rgba.is_empty() {
+            return None;
+        }
+        Some(Self {
+            name,
+            rgba: rgba.into(),
+        })
+    }
+
+    pub fn from_rgba(width: u32, height: u32, pixels: Vec<u8>) -> Option<Self> {
+        Self::new(None, vec![RgbaIcon::new(width, height, pixels)?])
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    pub fn best_rgba(&self, width: u32, height: u32) -> Option<&RgbaIcon> {
+        let area = |icon: &&RgbaIcon| u64::from(icon.width) * u64::from(icon.height);
+        self.rgba
+            .iter()
+            .filter(|icon| icon.width >= width && icon.height >= height)
+            .min_by_key(area)
+            .or_else(|| self.rgba.iter().max_by_key(area))
+    }
+}
+
+fn decode_png_icon(data: &[u8]) -> Option<RgbaIcon> {
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(data));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().ok()?;
+    let output_len = reader.output_buffer_size()?;
+    if output_len > MAX_RASTER_BYTES {
+        return None;
+    }
+
+    let mut decoded = vec![0; output_len];
+    let info = reader.next_frame(&mut decoded).ok()?;
+    let decoded = &decoded[..info.buffer_size()];
+    let pixel_count = usize::try_from(info.width)
+        .ok()?
+        .checked_mul(usize::try_from(info.height).ok()?)?;
+    if pixel_count > MAX_RASTER_SOURCE_PIXELS {
+        return None;
+    }
+    let mut rgba = Vec::with_capacity(pixel_count.checked_mul(4)?);
+    match info.color_type {
+        png::ColorType::Rgba => rgba.extend_from_slice(decoded),
+        png::ColorType::Rgb => {
+            for pixel in decoded.chunks_exact(3) {
+                rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+            }
+        }
+        png::ColorType::GrayscaleAlpha => {
+            for pixel in decoded.chunks_exact(2) {
+                rgba.extend_from_slice(&[pixel[0], pixel[0], pixel[0], pixel[1]]);
+            }
+        }
+        png::ColorType::Grayscale => {
+            for value in decoded {
+                rgba.extend_from_slice(&[*value, *value, *value, 255]);
+            }
+        }
+        png::ColorType::Indexed => return None,
+    }
+    RgbaIcon::new(info.width, info.height, rgba)
+}
+
+fn rasterize_svg_icon(data: &[u8], requested_longest_side: u32) -> Option<RgbaIcon> {
+    let tree = resvg::usvg::Tree::from_data(data, &resvg::usvg::Options::default()).ok()?;
+    let svg_size = tree.size();
+    let longest_side = svg_size.width().max(svg_size.height());
+    if !longest_side.is_finite() || longest_side <= 0.0 {
+        return None;
+    }
+
+    // RgbaIcon bounds retained source storage to four megapixels. Capping the
+    // longest side at 2048 keeps even a square vector source within that bound;
+    // image-copy-capture performs any remaining scaling to the requested size.
+    let target = requested_longest_side.clamp(1, 2048) as f32;
+    let scale = target / longest_side;
+    let width = (svg_size.width() * scale).round().max(1.0) as u32;
+    let height = (svg_size.height() * scale).round().max(1.0) as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+
+    let mut rgba = pixmap.take();
+    for pixel in rgba.chunks_exact_mut(4) {
+        let alpha = pixel[3];
+        for channel in &mut pixel[..3] {
+            *channel = if alpha == 0 {
+                0
+            } else {
+                u8::try_from((u32::from(*channel) * 255 + u32::from(alpha) / 2) / u32::from(alpha))
+                    .unwrap_or(255)
+            };
+        }
+    }
+    RgbaIcon::new(width, height, rgba)
+}
+
+fn rasterize_icon_path(path: &Path, data: &[u8], requested_longest_side: u32) -> Option<RgbaIcon> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "png" => decode_png_icon(data),
+        "svg" => rasterize_svg_icon(data, requested_longest_side),
+        _ => None,
+    }
+}
+
+fn read_icon_file(path: &Path) -> Option<Vec<u8>> {
+    let file = std::fs::File::open(path).ok()?;
+    if file.metadata().ok()?.len() > u64::try_from(MAX_ICON_FILE_BYTES).ok()? {
+        return None;
+    }
+    let mut data = Vec::new();
+    file.take(u64::try_from(MAX_ICON_FILE_BYTES).ok()?.checked_add(1)?)
+        .read_to_end(&mut data)
+        .ok()?;
+    (data.len() <= MAX_ICON_FILE_BYTES).then_some(data)
+}
+
+fn icon_for_capture_with(
+    icon: WindowIcon,
+    width: u32,
+    height: u32,
+    resolve_name: impl FnOnce(&str, u16) -> Option<RgbaIcon>,
+) -> Option<WindowIcon> {
+    if icon.best_rgba(width, height).is_some() {
+        return Some(icon);
+    }
+
+    let name = icon.name()?.to_owned();
+    let requested_size = width.max(height).clamp(1, 2048) as u16;
+    let rgba = resolve_name(&name, requested_size)?;
+    WindowIcon::new(Some(name), vec![rgba])
+}
+
+fn icon_for_capture(icon: WindowIcon, width: u32, height: u32) -> Option<WindowIcon> {
+    let theme = cosmic::icon_theme::default();
+    icon_for_capture_with(icon, width, height, |name, requested_size| {
+        let path = freedesktop_icons::lookup(name)
+            .with_size(requested_size)
+            .with_theme(&theme)
+            .force_svg()
+            .find()?;
+        let data = read_icon_file(&path)?;
+        rasterize_icon_path(&path, &data, u32::from(requested_size))
+    })
+}
+
+#[derive(Default)]
+pub struct WindowIconState(Mutex<Option<WindowIcon>>);
+
+impl WindowIconState {
+    pub fn get(&self) -> Option<WindowIcon> {
+        self.0.lock().unwrap().clone()
+    }
+
+    pub fn set(&self, icon: Option<WindowIcon>) {
+        *self.0.lock().unwrap() = icon;
+    }
 }
 
 #[derive(Debug)]
@@ -102,6 +355,7 @@ pub struct ToplevelHandleStateInner<W: Window> {
     title: String,
     app_id: String,
     states: Option<Vec<States>>,
+    icon: Option<Option<WindowIcon>>,
     pub(super) window: Option<W>,
 }
 pub type ToplevelHandleState<W> = Mutex<ToplevelHandleStateInner<W>>;
@@ -116,6 +370,7 @@ impl<W: Window> ToplevelHandleStateInner<W> {
             title: String::new(),
             app_id: String::new(),
             states: None,
+            icon: None,
             window: Some(window.clone()),
         })
     }
@@ -129,8 +384,15 @@ impl<W: Window> ToplevelHandleStateInner<W> {
             title: String::new(),
             app_id: String::new(),
             states: None,
+            icon: None,
             window: None,
         })
+    }
+}
+
+fn invalidate_toplevel_handle<W: Window + 'static>(handle: &ZcosmicToplevelHandleV1) {
+    if let Some(data) = handle.data::<ToplevelHandleState<W>>() {
+        data.lock().unwrap().window = None;
     }
 }
 
@@ -243,6 +505,7 @@ where
     D: GlobalDispatch<ZcosmicToplevelInfoV1, ToplevelInfoGlobalData>
         + Dispatch<ZcosmicToplevelInfoV1, ()>
         + Dispatch<ZcosmicToplevelHandleV1, ToplevelHandleState<W>>
+        + Dispatch<ExtImageCaptureSourceV1, ImageCaptureSourceData>
         + ToplevelInfoHandler<Window = W>
         + 'static,
     W: Window,
@@ -250,13 +513,44 @@ where
     fn request(
         _state: &mut D,
         _client: &Client,
-        _obj: &ZcosmicToplevelHandleV1,
+        obj: &ZcosmicToplevelHandleV1,
         request: zcosmic_toplevel_handle_v1::Request,
-        _data: &ToplevelHandleState<W>,
+        data: &ToplevelHandleState<W>,
         _dh: &DisplayHandle,
-        _data_init: &mut DataInit<'_, D>,
+        data_init: &mut DataInit<'_, D>,
     ) {
-        if let zcosmic_toplevel_handle_v1::Request::Destroy = request {}
+        match request {
+            zcosmic_toplevel_handle_v1::Request::Destroy => {}
+            zcosmic_toplevel_handle_v1::Request::CreateIconSource {
+                source,
+                width,
+                height,
+            } => {
+                let kind = if width == 0 || height == 0 {
+                    obj.post_error(
+                        zcosmic_toplevel_handle_v1::Error::InvalidIconSize,
+                        "icon capture dimensions must be non-zero".to_owned(),
+                    );
+                    ImageCaptureSourceKind::Destroyed
+                } else {
+                    data.lock()
+                        .unwrap()
+                        .window
+                        .as_ref()
+                        .and_then(Window::icon)
+                        .and_then(|icon| icon_for_capture(icon, width, height))
+                        .map_or(ImageCaptureSourceKind::Destroyed, |icon| {
+                            ImageCaptureSourceKind::ToplevelIcon {
+                                icon,
+                                width,
+                                height,
+                            }
+                        })
+                };
+                init_image_capture_source(source, kind, data_init);
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn destroyed(
@@ -318,7 +612,7 @@ where
         F: for<'a> Fn(&'a Client) -> bool + Send + Sync + Clone + 'static,
     {
         let global = dh.create_global::<D, ZcosmicToplevelInfoV1, _>(
-            3,
+            4,
             ToplevelInfoGlobalData {
                 filter: Box::new(client_filter.clone()),
             },
@@ -362,6 +656,7 @@ where
         if let Some(state) = toplevel.user_data().get::<ToplevelState>() {
             let mut state_inner = state.lock().unwrap();
             for (_info, handle) in &state_inner.instances {
+                invalidate_toplevel_handle::<W>(handle);
                 // don't send events to stopped instances
                 if handle.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
                     && self
@@ -408,6 +703,7 @@ where
                 true
             } else {
                 for (_info, handle) in &state.instances {
+                    invalidate_toplevel_handle::<W>(handle);
                     // don't send events to stopped instances
                     if handle.version() < zcosmic_toplevel_info_v1::REQ_GET_COSMIC_TOPLEVEL_SINCE
                         && self
@@ -537,6 +833,13 @@ where
         None
     };
 
+    let new_icon = (instance.version() >= zcosmic_toplevel_handle_v1::EVT_ICON_CHANGED_SINCE
+        && handle_state
+            .icon
+            .as_ref()
+            .is_none_or(|icon| icon != &window.icon()))
+    .then(|| window.icon());
+
     let geometry_changed = if !window.is_resizing() {
         let geometry = window.global_geometry();
         if handle_state.geometry != geometry {
@@ -557,6 +860,7 @@ where
     if new_title.is_none()
         && new_app_id.is_none()
         && new_states.is_none()
+        && new_icon.is_none()
         && !geometry_changed
         && !outputs_changed
         && !workspaces_changed
@@ -595,6 +899,17 @@ where
             .flat_map(|state| (*state as u32).to_ne_bytes())
             .collect::<Vec<u8>>();
         instance.state(states);
+        changed = true;
+    }
+
+    if let Some(icon) = new_icon {
+        match &icon {
+            Some(icon) => instance.icon_changed(icon.name().map(str::to_owned)),
+            None => {
+                instance.icon_removed();
+            }
+        }
+        handle_state.icon = Some(icon);
         changed = true;
     }
 
