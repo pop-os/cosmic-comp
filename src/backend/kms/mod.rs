@@ -615,7 +615,13 @@ impl State {
                 .clone();
 
             let mut feedback =
-                DmabufFeedbackBuilder::new(primary_node.dev_id(), primary_formats.clone());
+                DmabufFeedbackBuilder::new(primary_node.dev_id(), primary_formats.clone())
+                    .add_preference_tranche(
+                        primary_node.dev_id(),
+                        TrancheFlags::Sampling,
+                        primary_formats.iter().cloned(),
+                        3..=6,
+                    );
             for dev in kms
                 .drm_devices
                 .values()
