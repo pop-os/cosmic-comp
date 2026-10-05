@@ -52,6 +52,25 @@ pub use self::grabs::*;
 pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
 
+fn centered_transient_location(
+    parent: Rectangle<i32, Local>,
+    child_size: Size<i32, Local>,
+    bounds: Rectangle<i32, Local>,
+) -> Point<i32, Local> {
+    let centered = parent.loc
+        + Point::from((
+            (parent.size.w - child_size.w) / 2,
+            (parent.size.h - child_size.h) / 2,
+        ));
+    let max_x = (bounds.loc.x + bounds.size.w - child_size.w).max(bounds.loc.x);
+    let max_y = (bounds.loc.y + bounds.size.h - child_size.h).max(bounds.loc.y);
+
+    Point::from((
+        centered.x.clamp(bounds.loc.x, max_x),
+        centered.y.clamp(bounds.loc.y, max_y),
+    ))
+}
+
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
     pub(crate) space: Space<CosmicMapped>,
@@ -347,6 +366,51 @@ impl FloatingLayout {
         let position = position.into();
 
         self.map_internal(mapped, position, None, None)
+    }
+
+    pub(in crate::shell) fn position_x11_transients(&mut self, mapped: &CosmicMapped) {
+        let Some(mapped_id) = mapped
+            .active_window()
+            .x11_surface()
+            .map(|surface| surface.window_id())
+        else {
+            return;
+        };
+
+        let elements = self.space.elements().cloned().collect::<Vec<_>>();
+        let relations = elements
+            .iter()
+            .filter_map(|child| {
+                let child_surface = child.active_window();
+                let child_surface = child_surface.x11_surface()?;
+                let parent_id = child_surface.is_transient_for()?;
+                if child_surface.window_id() != mapped_id && parent_id != mapped_id {
+                    return None;
+                }
+
+                let parent = elements.iter().find(|parent| {
+                    parent
+                        .active_window()
+                        .x11_surface()
+                        .is_some_and(|surface| surface.window_id() == parent_id)
+                })?;
+                (parent != child).then(|| (child.clone(), parent.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        let output = self.space.outputs().next().unwrap().clone();
+        let bounds = layer_map_for_output(&output)
+            .non_exclusive_zone()
+            .as_local();
+        for (child, parent) in relations {
+            let Some(parent_geometry) = self.space.element_geometry(&parent).map(RectExt::as_local)
+            else {
+                continue;
+            };
+            let child_size = self.space.element_geometry(&child).unwrap().size.as_local();
+            let location = centered_transient_location(parent_geometry, child_size, bounds);
+            self.map_internal(child, Some(location), None, None);
+        }
     }
 
     pub fn map_maximized(
