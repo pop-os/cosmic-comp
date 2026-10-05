@@ -2827,6 +2827,19 @@ impl State {
                             .cloned()
                             .map(KeyboardFocusTarget::LockSurface)));
                     }
+                    Stage::Approval(approval) => {
+                        // Approval mode: only the approval window takes focus
+                        return ControlFlow::Break(Ok(approval.and_then(|(window, location)| {
+                            let root = window.wl_surface()?.into_owned();
+                            under_from_surface_tree(
+                                &root,
+                                global_pos.as_logical(),
+                                location.as_logical(),
+                                WindowSurfaceType::ALL,
+                            )
+                            .map(|_| KeyboardFocusTarget::Approval(window))
+                        })));
+                    }
                     Stage::LayerPopup {
                         layer,
                         popup,
@@ -2982,6 +2995,27 @@ impl State {
                             } else {
                                 None
                             }
+                        })));
+                    }
+                    Stage::Approval(approval) => {
+                        // Approval mode: the pointer reaches the approval window or nothing
+                        return ControlFlow::Break(Ok(approval.and_then(|(window, location)| {
+                            let root = window.wl_surface()?.into_owned();
+                            under_from_surface_tree(
+                                &root,
+                                global_pos.as_logical(),
+                                location.as_logical(),
+                                WindowSurfaceType::ALL,
+                            )
+                            .map(|(surface, surface_loc)| {
+                                (
+                                    PointerFocusTarget::WlSurface {
+                                        surface,
+                                        toplevel: Some(window.into()),
+                                    },
+                                    surface_loc.as_global().to_f64(),
+                                )
+                            })
                         })));
                     }
                     Stage::LayerPopup {

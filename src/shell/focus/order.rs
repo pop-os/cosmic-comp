@@ -13,7 +13,7 @@ use smithay::{
 use crate::{
     backend::render::ElementFilter,
     shell::{
-        SeatExt, Shell, Workspace, WorkspaceDelta,
+        CosmicSurface, SeatExt, Shell, Workspace, WorkspaceDelta,
         focus::target::KeyboardFocusTarget,
         layout::{floating::FloatingLayout, tiling::ANIMATION_DURATION},
     },
@@ -28,6 +28,9 @@ use crate::{
 pub enum Stage<'a> {
     ZoomUI,
     SessionLock(Option<&'a LockSurface>),
+    /// Approval mode: the approval window and where its surface goes, on the output that shows it.
+    /// Input reaches nothing below this stage.
+    Approval(Option<(CosmicSurface, Point<i32, Global>)>),
     LayerPopup {
         layer: LayerSurface,
         popup: &'a PopupKind,
@@ -175,6 +178,11 @@ fn render_input_order_internal<R: 'static>(
             })?;
         }
         return ControlFlow::Continue(());
+    }
+
+    // Approval mode: the approval window is above everything, overlay layer surfaces included
+    if shell.approval_active() {
+        callback(Stage::Approval(shell.approval_on(output)))?;
     }
 
     // Overlay-level layer shell

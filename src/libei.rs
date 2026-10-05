@@ -128,6 +128,16 @@ pub fn setup_ei(
                             data.broadcast_ei_keyboard_modifiers(&keyboard);
                         }
                     }
+                    EiInputEvent::Event(_)
+                    | EiInputEvent::TextKeysym { .. }
+                    | EiInputEvent::TextUtf8 { .. }
+                        if !crate::shell::approval::ei_allowed(
+                            data.common.shell.read().approval_active(),
+                        ) =>
+                    {
+                        // Approval mode: no input injected through libei reaches any surface
+                        tracing::debug!("approval mode: dropped input injected through libei");
+                    }
                     EiInputEvent::Event(event) => {
                         use smithay::backend::input::{InputEvent, KeyboardKeyEvent};
                         match event {

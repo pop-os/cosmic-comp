@@ -845,6 +845,13 @@ where
                     elements.extend(crop_to_output(elem.into()).map(Into::into))
                 })
             }
+            Stage::Approval(approval) => {
+                if let Some((window, location)) = approval {
+                    approval_elements(renderer, output, &window, location, &mut |elem| {
+                        elements.extend(crop_to_output(elem.into()).map(Into::into))
+                    })
+                }
+            }
             Stage::LayerPopup {
                 popup,
                 location,
@@ -1105,6 +1112,38 @@ fn session_lock_elements<R>(
             [0; 4],
             None,
             blur_strength,
+            FRAME_TIME_FILTER,
+            push,
+            None,
+        )
+    }
+}
+
+/// The approval window's surfaces, at `location` (approval mode, see `shell::approval`).
+fn approval_elements<R>(
+    renderer: &mut R,
+    output: &Output,
+    window: &crate::shell::CosmicSurface,
+    location: Point<i32, Global>,
+    push: &mut dyn FnMut(SurfaceRenderElement<R>),
+) where
+    R: AsGlowRenderer,
+    R::TextureId: Clone + 'static,
+{
+    if let Some(surface) = smithay::wayland::seat::WaylandFocus::wl_surface(window) {
+        let scale = Scale::from(output.current_scale().fractional_scale());
+        let local = (location - output.geometry().loc).as_logical();
+        push_render_elements_from_surface_tree(
+            renderer,
+            &surface,
+            local.to_physical_precise_round(scale),
+            bbox_from_surface_tree(&surface, local).to_f64(),
+            scale,
+            1.0,
+            false,
+            [0; 4],
+            None,
+            0,
             FRAME_TIME_FILTER,
             push,
             None,

@@ -402,6 +402,18 @@ impl State {
             {
                 let window = pending.surface.clone();
                 window.on_commit();
+                // Approval mode: the approver's window goes above everything, not on a workspace
+                if crate::shell::approval::is_approver(&self.common.display_handle, &window) {
+                    let target = shell.map_approval(window);
+                    let seat = shell.seats.last_active().clone();
+                    let outputs = shell.outputs().cloned().collect::<Vec<_>>();
+                    std::mem::drop(shell);
+                    Shell::set_focus(self, Some(&target), &seat, None, true);
+                    for output in &outputs {
+                        self.backend.schedule_render(output);
+                    }
+                    return true;
+                }
                 let res = shell.map_window(
                     &window,
                     &mut self.common.toplevel_info_state,

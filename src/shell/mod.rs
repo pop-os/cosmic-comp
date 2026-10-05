@@ -96,6 +96,7 @@ use crate::{
     },
 };
 
+pub mod approval;
 pub mod element;
 pub mod focus;
 pub mod grabs;
@@ -284,6 +285,8 @@ pub struct Shell {
     pub pending_activations: HashMap<ActivationKey, ActivationContext>,
     pub override_redirect_windows: Vec<X11Surface>,
     pub session_lock: Option<SessionLock>,
+    /// The approval windows, newest last (approval mode, see [`approval`]).
+    pub approval: Vec<CosmicSurface>,
     pub seats: Seats,
     pub previous_workspace_idx: Option<(Serial, WeakOutput, usize)>,
     pub xwayland_keyboard_grab: Option<XWaylandKeyboardGrab<State>>,
@@ -1739,6 +1742,7 @@ impl Shell {
             pending_activations: HashMap::new(),
             override_redirect_windows: Vec::new(),
             session_lock: None,
+            approval: Vec::new(),
             previous_workspace_idx: None,
             xwayland_keyboard_grab: None,
 
@@ -2005,6 +2009,7 @@ impl Shell {
                 .iter()
                 .find_map(|(output, s)| (s == &surface).then_some(output))
                 .cloned(),
+            KeyboardFocusTarget::Approval(_) => Some(seat.active_output()),
             KeyboardFocusTarget::Popup(_) => unreachable!(),
         }
     }

@@ -125,6 +125,8 @@ logind = ["logind-zbus"]
 systemd = ["libsystemd", "logind", "tracing-journald"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
 profile-with-tracy-gpu = ["profile-with-tracy", "smithay/tracy_gpu_profiling"]
+# Lets libei input reach surfaces while an approval window is up (test images only).
+test-input = []
 
 [profile.dev.package.tiny-skia]
 opt-level = 2

@@ -99,6 +99,8 @@ pub enum KeyboardFocusTarget {
     LayerSurface(LayerSurface),
     Popup(PopupKind),
     LockSurface(LockSurface),
+    /// The approval window while approval mode is on (see `shell::approval`).
+    Approval(CosmicSurface),
 }
 
 // TODO: This should be TryFrom, but PopupGrab needs to be able to convert. Fix this in smithay
@@ -144,6 +146,10 @@ impl From<KeyboardFocusTarget> for PointerFocusTarget {
             KeyboardFocusTarget::LockSurface(lock) => PointerFocusTarget::WlSurface {
                 surface: lock.wl_surface().clone(),
                 toplevel: None,
+            },
+            KeyboardFocusTarget::Approval(window) => PointerFocusTarget::WlSurface {
+                surface: window.wl_surface().unwrap().into_owned(),
+                toplevel: Some(window.into()),
             },
             _ => unreachable!("A group cannot start a popup grab"),
         }
@@ -327,6 +333,7 @@ impl KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => Some(l.wl_surface()),
             KeyboardFocusTarget::Popup(p) => Some(p.wl_surface()),
             KeyboardFocusTarget::LockSurface(l) => Some(l.wl_surface()),
+            KeyboardFocusTarget::Approval(w) => Some(w),
         }
     }
 
@@ -422,6 +429,7 @@ impl IsAlive for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => l.alive(),
             KeyboardFocusTarget::Popup(p) => p.alive(),
             KeyboardFocusTarget::LockSurface(l) => l.alive(),
+            KeyboardFocusTarget::Approval(w) => w.alive(),
         }
     }
 }
@@ -865,6 +873,7 @@ impl WaylandFocus for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
             KeyboardFocusTarget::Popup(p) => Some(Cow::Borrowed(p.wl_surface())),
             KeyboardFocusTarget::LockSurface(l) => Some(Cow::Borrowed(l.wl_surface())),
+            KeyboardFocusTarget::Approval(w) => WaylandFocus::wl_surface(w),
         }
     }
     fn same_client_as(&self, object_id: &ObjectId) -> bool {
@@ -875,6 +884,7 @@ impl WaylandFocus for KeyboardFocusTarget {
             KeyboardFocusTarget::LayerSurface(l) => l.wl_surface().id().same_client_as(object_id),
             KeyboardFocusTarget::Popup(p) => p.wl_surface().id().same_client_as(object_id),
             KeyboardFocusTarget::LockSurface(l) => l.wl_surface().id().same_client_as(object_id),
+            KeyboardFocusTarget::Approval(w) => WaylandFocus::same_client_as(w, object_id),
         }
     }
 }

@@ -654,6 +654,11 @@ fn focus_target_is_valid(
         return matches!(target, KeyboardFocusTarget::LockSurface(_));
     }
 
+    // While an approval window is up, only it can be focused (approval mode)
+    if shell.approval_active() {
+        return matches!(&target, KeyboardFocusTarget::Approval(window) if shell.approval.contains(window));
+    }
+
     // If an exclusive layer shell surface exists (on any output), only exclusive
     // shell surfaces can have focus, on the highest layer with exclusive surfaces.
     // Popups are judged by their root surface, so an exclusive surface can
@@ -733,6 +738,7 @@ fn focus_target_is_valid(
         }
         KeyboardFocusTarget::Popup(_) => true,
         KeyboardFocusTarget::LockSurface(_) => false,
+        KeyboardFocusTarget::Approval(_) => false,
     }
 }
 

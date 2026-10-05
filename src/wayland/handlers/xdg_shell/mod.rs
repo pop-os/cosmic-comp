@@ -377,6 +377,17 @@ impl XdgShellHandler for State {
                 .pending_windows
                 .retain(|pending| pending.surface != surface);
 
+            // An approval window that closes ends approval mode once none is left
+            let approvals = shell.approval.len();
+            shell
+                .approval
+                .retain(|w| *w != surface && smithay::utils::IsAlive::alive(w));
+            if shell.approval.len() != approvals {
+                for output in shell.outputs() {
+                    self.backend.schedule_render(output);
+                }
+            }
+
             let output = shell
                 .visible_output_for_surface(surface.wl_surface())
                 .cloned();
