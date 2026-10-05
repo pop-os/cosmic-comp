@@ -113,6 +113,7 @@ use smithay::{
         virtual_keyboard::VirtualKeyboardManagerState,
         xdg_activation::XdgActivationState,
         xdg_foreign::XdgForeignState,
+        xdg_toplevel_icon::XdgToplevelIconManager,
         xwayland_keyboard_grab::XWaylandKeyboardGrabState,
         xwayland_shell::XWaylandShellState,
     },
@@ -316,6 +317,7 @@ pub struct Common {
     pub toplevel_management_state: ToplevelManagementState,
     pub xdg_activation_state: XdgActivationState,
     pub xdg_foreign_state: XdgForeignState,
+    pub xdg_toplevel_icon_manager: XdgToplevelIconManager,
     pub workspace_state: WorkspaceState<State>,
     pub xwayland_scale: Option<f64>,
     pub xwayland_state: Option<XWaylandState>,
@@ -747,6 +749,7 @@ impl State {
         );
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
+        let xdg_toplevel_icon_manager = XdgToplevelIconManager::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(dh, client_not_sandboxed);
         let toplevel_management_state = ToplevelManagementState::new::<State, _>(
             dh,
@@ -825,6 +828,7 @@ impl State {
                 toplevel_info_state,
                 toplevel_management_state,
                 xdg_activation_state,
+                xdg_toplevel_icon_manager,
                 xdg_foreign_state,
                 workspace_state,
                 background_effect_state,
