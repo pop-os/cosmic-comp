@@ -235,8 +235,6 @@ where
 
     let buffer = frame.buffer();
 
-    // A new offscreen target, or leaving shared-memory capture, invalidates
-    // every client buffer that was copied from the previous target.
     let mut invalidate_buffers = false;
     if matches!(buffer_type(&buffer), Some(BufferType::Shm)) {
         let size = buffer_dimensions(&buffer).ok_or(DTError::OutputNoMode(OutputNoMode))?;
@@ -264,22 +262,15 @@ where
                 .map_err(DTError::Rendering)?;
             session_user_data.offscreen =
                 Some((renderer.glow_renderer().context_id(), renderbuffer));
-            // The new offscreen has never been drawn, and neither have the
-            // client buffers that will be copied from it.
             invalidate_buffers = true;
         }
     } else if session_user_data.offscreen.take().is_some() {
-        // The session switched from shared memory to a DMA-BUF. The shared
-        // offscreen is gone, so copies made from it no longer count.
         invalidate_buffers = true;
     }
     if invalidate_buffers {
         session_user_data.clear_capture_buffers();
     }
 
-    // Age belongs to the buffer being filled, not to the session. Clients
-    // rotate several buffers; the ones this session has not drawn yet are
-    // still uninitialized and must be rendered in full.
     let age = session_user_data.capture_buffer_age(&buffer);
 
     let result = {
@@ -297,9 +288,6 @@ where
             frame.damage(),
         )?;
 
-        // No damage on a buffer this session has never drawn means the
-        // client would display an uninitialized buffer. Ask it to retry
-        // rather than reporting that empty buffer as a successful frame.
         if result.damage.is_none() && age == 0 {
             frame.fail(CaptureFailureReason::Unknown);
             return Ok(None);
