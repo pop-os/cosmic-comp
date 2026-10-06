@@ -9,6 +9,7 @@ use smithay::{
         gles::{GlesRenderbuffer, GlesTexture},
     },
     output::Output,
+    reexports::wayland_server::{Resource, protocol::wl_buffer::WlBuffer},
     wayland::image_copy_capture::{
         CursorSession, CursorSessionRef, Frame, FrameRef, Session, SessionRef,
     },
@@ -24,6 +25,14 @@ pub type SessionData = Mutex<SessionUserData>;
 pub struct SessionUserData {
     pub dt: OutputDamageTracker,
     pub offscreen: Option<(ContextId<GlesTexture>, GlesRenderbuffer)>,
+    /// Monotonic count of capture frames in this session.
+    frame: u64,
+    /// Last frame at which each client buffer was known to hold the captured image.
+    ///
+    /// Smithay's damage age is per framebuffer. A capture client rotates several
+    /// buffers, so a session-wide age of 1 reports buffers that were never drawn
+    /// as already current.
+    buffer_frame: Vec<(WlBuffer, u64)>,
 }
 
 impl SessionUserData {
@@ -31,7 +40,44 @@ impl SessionUserData {
         SessionUserData {
             dt: tracker,
             offscreen: None,
+            frame: 0,
+            buffer_frame: Vec::new(),
         }
+    }
+
+    /// Age to pass to the damage tracker for `buffer`.
+    ///
+    /// `0` forces a full redraw and is returned until this buffer has completed
+    /// a capture. Later frames return how many captures have happened since.
+    pub fn capture_buffer_age(&mut self, buffer: &WlBuffer) -> usize {
+        self.buffer_frame.retain(|(stored, _)| stored.is_alive());
+        self.frame = self.frame.saturating_add(1);
+        let now = self.frame;
+        self.buffer_frame
+            .iter()
+            .find(|(stored, _)| stored == buffer)
+            .map(|(_, rendered_at)| {
+                usize::try_from(now.saturating_sub(*rendered_at)).unwrap_or(usize::MAX)
+            })
+            .unwrap_or(0)
+    }
+
+    /// Record that `buffer` now holds the image captured on the current frame.
+    pub fn note_capture_buffer(&mut self, buffer: WlBuffer) {
+        let now = self.frame;
+        if let Some((_, rendered_at)) = self
+            .buffer_frame
+            .iter_mut()
+            .find(|(stored, _)| stored == &buffer)
+        {
+            *rendered_at = now;
+        } else {
+            self.buffer_frame.push((buffer, now));
+        }
+    }
+
+    pub fn clear_capture_buffers(&mut self) {
+        self.buffer_frame.clear();
     }
 }
 

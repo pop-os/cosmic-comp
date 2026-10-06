@@ -235,7 +235,9 @@ where
 
     let buffer = frame.buffer();
 
-    let mut age = 1;
+    // A new offscreen target, or leaving shared-memory capture, invalidates
+    // every client buffer that was copied from the previous target.
+    let mut invalidate_buffers = false;
     if matches!(buffer_type(&buffer), Some(BufferType::Shm)) {
         let size = buffer_dimensions(&buffer).ok_or(DTError::OutputNoMode(OutputNoMode))?;
         let format = with_buffer_contents(&buffer, |_, _, data| {
@@ -245,53 +247,77 @@ where
         .map_err(|_| DTError::OutputNoMode(OutputNoMode))?;
 
         // Re-allocate if context id, size, or format are different
-        session_user_data
+        if session_user_data
             .offscreen
             .take_if(|(context_id, renderbuffer)| {
                 renderer.glow_renderer().context_id() != *context_id
                     || renderbuffer.size() != size
                     || renderbuffer.format() != Some(format)
-            });
+            })
+            .is_some()
+        {
+            invalidate_buffers = true;
+        }
 
         if session_user_data.offscreen.is_none() {
             let renderbuffer = Offscreen::<GlesRenderbuffer>::create_buffer(renderer, format, size)
                 .map_err(DTError::Rendering)?;
             session_user_data.offscreen =
                 Some((renderer.glow_renderer().context_id(), renderbuffer));
-            // If we're allocating a new offscreen buffer, we need to re-render everything
-            // (or copy the contexts of the shm buffer)
-            age = 0;
+            // The new offscreen has never been drawn, and neither have the
+            // client buffers that will be copied from it.
+            invalidate_buffers = true;
         }
-    } else {
-        // If for some reason a capture session is used for shm, but then changes to dmabuf capture,
-        // remove the offscreen buffer.
-        session_user_data.offscreen = None;
+    } else if session_user_data.offscreen.take().is_some() {
+        // The session switched from shared memory to a DMA-BUF. The shared
+        // offscreen is gone, so copies made from it no longer count.
+        invalidate_buffers = true;
+    }
+    if invalidate_buffers {
+        session_user_data.clear_capture_buffers();
     }
 
-    let SessionUserData { dt, offscreen } = &mut *session_user_data;
-    let mut fb = offscreen
-        .as_mut()
-        .map(|(_, tex)| renderer.bind(tex).map_err(DTError::Rendering))
-        .transpose()?;
-    let (result, buffers) = render_fn(
-        &frame.buffer(),
-        renderer,
-        fb.as_mut(),
-        dt,
-        age,
-        frame.damage(),
-    )?;
+    // Age belongs to the buffer being filled, not to the session. Clients
+    // rotate several buffers; the ones this session has not drawn yet are
+    // still uninitialized and must be rendered in full.
+    let age = session_user_data.capture_buffer_age(&buffer);
 
-    submit_buffer(
-        frame,
-        renderer,
-        fb.as_mut(),
-        transform,
-        result.damage.map(|x| x.as_slice()),
-        result.sync,
-        buffers,
-    )
-    .map_err(DTError::Rendering)
+    let result = {
+        let SessionUserData { dt, offscreen, .. } = &mut *session_user_data;
+        let mut fb = offscreen
+            .as_mut()
+            .map(|(_, tex)| renderer.bind(tex).map_err(DTError::Rendering))
+            .transpose()?;
+        let (result, buffers) = render_fn(
+            &frame.buffer(),
+            renderer,
+            fb.as_mut(),
+            dt,
+            age,
+            frame.damage(),
+        )?;
+
+        // No damage on a buffer this session has never drawn means the
+        // client would display an uninitialized buffer. Ask it to retry
+        // rather than reporting that empty buffer as a successful frame.
+        if result.damage.is_none() && age == 0 {
+            frame.fail(CaptureFailureReason::Unknown);
+            return Ok(None);
+        }
+
+        submit_buffer(
+            frame,
+            renderer,
+            fb.as_mut(),
+            transform,
+            result.damage.map(|x| x.as_slice()),
+            result.sync,
+            buffers,
+        )
+        .map_err(DTError::Rendering)?
+    };
+    session_user_data.note_capture_buffer(buffer);
+    Ok(result)
 }
 
 pub fn render_workspace_to_buffer(
