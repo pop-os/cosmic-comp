@@ -18,13 +18,10 @@ use cosmic::{
             },
         },
         id::Id,
-        widget::{
-            self,
-            container::{Catalog, draw_background},
-        },
+        widget::rule,
     },
     theme,
-    widget::icon::from_name,
+    widget::{button, container, icon::from_name},
 };
 use keyframe::{
     ease,
@@ -165,7 +162,7 @@ where
             Element::new(tab.internal(i))
         });
 
-        let tabs_rule = widget::rule::vertical(4).class(if tabs.len() - 1 == active {
+        let tabs_rule = rule::vertical(4).class(if tabs.len() - 1 == active {
             if activated {
                 TabRuleTheme::ActiveActivated
             } else {
@@ -185,26 +182,26 @@ where
             .size(16)
             .prefer_svg(true)
             .icon()
-            .apply(widget::button)
-            .class(theme::iced::Button::Text)
+            .apply(button::custom)
+            .class(theme::Button::Icon)
             .on_press(Message::scroll_back());
 
         let next_button = from_name("go-next-symbolic")
             .size(16)
             .prefer_svg(true)
             .icon()
-            .apply(widget::button)
-            .class(theme::iced::Button::Text)
+            .apply(button::custom)
+            .class(theme::Button::Icon)
             .on_press(Message::scroll_further());
 
         let mut elements = Vec::with_capacity(tabs.len() + 5);
 
-        elements.push(widget::rule::vertical(4).class(rule_style).into());
+        elements.push(rule::vertical(4).class(rule_style).into());
         elements.push(prev_button.into());
         elements.extend(tabs);
         elements.push(tabs_rule.into());
         elements.push(next_button.into());
-        elements.push(widget::rule::vertical(4).class(rule_style).into());
+        elements.push(rule::vertical(4).class(rule_style).into());
 
         Tabs {
             elements,
@@ -517,9 +514,9 @@ where
                 height: b.bounds().height,
             });
 
-        let background_style = Catalog::style(
+        let background_style = container::Catalog::style(
             theme,
-            &theme::Container::custom(|_theme| widget::container::Style {
+            &theme::Container::custom(|_theme| container::Style {
                 snap: true,
                 icon_color: None,
                 text_color: None,
@@ -532,7 +529,7 @@ where
                 shadow: Default::default(),
             }),
         );
-        draw_background(renderer, &background_style, bounds);
+        container::draw_background(renderer, &background_style, bounds);
 
         let scrolling = content_bounds.width.floor() > bounds.width;
         if scrolling {

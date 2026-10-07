@@ -29,9 +29,9 @@ use cosmic::{
         core::{Background, Border, Color, Length, border::Radius},
         id::Id,
         runtime::Task,
-        widget::{self as iced_widget, scrollable::AbsoluteOffset},
+        widget::scrollable::AbsoluteOffset,
     },
-    theme, widget as cosmic_widget,
+    theme, widget,
 };
 use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts;
@@ -1305,18 +1305,18 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
     fn view(&self, stack: &CosmicStackInternal) -> cosmic::Element<'_, Message> {
         let windows = stack.windows.lock().unwrap();
         if stack.geometry.lock().unwrap().is_none() {
-            return iced_widget::row(Vec::new()).into();
+            return widget::space().into();
         };
         let active = stack.active.load(Ordering::SeqCst);
         let group_focused = stack.group_focused.load(Ordering::SeqCst);
 
-        let elements = vec![
-            cosmic_widget::icon::from_name("window-stack-symbolic")
+        let elements = [
+            widget::icon::from_name("window-stack-symbolic")
                 .size(16)
                 .prefer_svg(true)
                 .icon()
                 .class(if group_focused {
-                    theme::Svg::custom(|theme| iced_widget::svg::Style {
+                    theme::Svg::custom(|theme| widget::svg::Style {
                         color: Some(if theme.cosmic().is_dark {
                             Color::BLACK
                         } else {
@@ -1326,10 +1326,10 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 } else {
                     theme::Svg::Default
                 })
-                .apply(iced_widget::container)
-                .padding([4, 24])
-                .align_y(Alignment::Center)
-                .apply(iced_widget::mouse_area)
+                .apply(widget::container)
+                .center_y(24)
+                .center_x(64)
+                .apply(widget::mouse_area)
                 .on_press(Message::DragStart)
                 .on_right_press(Message::Menu)
                 .into(),
@@ -1361,11 +1361,10 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 .height(Length::Fill)
                 .width(Length::Fill),
             ),
-            iced_widget::space::horizontal()
-                .width(Length::Fixed(0.0))
-                .apply(iced_widget::container)
-                .padding([64, 24])
-                .apply(iced_widget::mouse_area)
+            widget::space()
+                .height(24)
+                .width(64)
+                .apply(widget::mouse_area)
                 .on_press(Message::DragStart)
                 .on_right_press(Message::Menu)
                 .into(),
@@ -1388,10 +1387,10 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
         };
         let group_focused = stack.group_focused.load(Ordering::SeqCst);
 
-        iced_widget::row(elements)
+        widget::row(elements)
             .height(TAB_HEIGHT as u16)
             .width(Length::Fill)
-            .apply(iced_widget::container)
+            .apply(widget::container)
             .align_y(Alignment::Center)
             .class(theme::Container::custom(move |theme| {
                 let cosmic_theme = theme.cosmic();
@@ -1405,7 +1404,7 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                     background.alpha = cosmic_theme.alpha_map.blurred_alpha(cosmic_theme.frosted);
                 }
 
-                iced_widget::container::Style {
+                widget::container::Style {
                     snap: true,
                     icon_color: Some(
                         cosmic_theme
