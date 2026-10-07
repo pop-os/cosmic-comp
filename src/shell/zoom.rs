@@ -3,7 +3,7 @@ use std::{sync::Mutex, time::Instant};
 use calloop::LoopHandle;
 use cosmic::{
     Apply,
-    iced::{Alignment, Background, Border, Length, alignment::Vertical, widget as iced_widget},
+    iced::{Alignment, Background, Border, Length},
     theme,
     widget::{self, icon::Named},
 };
@@ -480,12 +480,12 @@ impl Program for ZoomProgram {
     type Message = ZoomMessage;
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        widget::row::with_children(vec![
+        widget::row::with_children([
             widget::button::icon(Named::new("list-remove-symbolic").size(16).prefer_svg(true))
                 .on_press(ZoomMessage::Decrease)
                 .into(),
             widget::text(format!("{}%", (self.level * 100.).round()))
-                .align_y(Vertical::Center)
+                .align_y(Alignment::Center)
                 .width(Length::Shrink)
                 .into(),
             widget::button::icon(Named::new("list-add-symbolic").size(16).prefer_svg(true))
@@ -518,7 +518,7 @@ impl Program for ZoomProgram {
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
             let component = &cosmic.background(theme.transparent).component;
-            iced_widget::container::Style {
+            widget::container::Style {
                 snap: true,
                 icon_color: Some(component.on.into()),
                 text_color: Some(component.on.into()),
