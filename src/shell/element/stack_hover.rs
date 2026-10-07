@@ -10,10 +10,9 @@ use cosmic::{
     iced::{
         Alignment,
         core::{Background, Border, Color, Length},
-        widget::{container, row},
     },
     theme,
-    widget::{icon::from_name, space, text},
+    widget::{container, icon::from_name, row, space, text},
 };
 use smithay::{
     backend::renderer::ImportMem,
@@ -89,13 +88,13 @@ impl Program for StackHoverInternal {
     type Message = ();
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        row(vec![
+        row([
             from_name("window-stack-symbolic")
                 .size(32)
                 .prefer_svg(true)
                 .icon()
                 .into(),
-            space::horizontal().width(16).into(),
+            space().width(16).into(),
             text::title3(fl!("stack-windows")).into(),
         ])
         .align_y(Alignment::Center)
