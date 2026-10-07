@@ -828,6 +828,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     .collect::<Vec<_>>();
                 for seat in seats.into_iter() {
                     if let Some(keyboard) = seat.get_keyboard() {
+                        crate::wayland::handlers::virtual_keyboard::clear_active_virtual_keyboard_keymap(&seat);
                         let old_modifier_state = keyboard.modifier_state();
                         keyboard.change_repeat_info(
                             (value.repeat_rate as i32).abs(), // Negative values are illegal
