@@ -284,6 +284,12 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
+                    crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap::<B>(
+                        self,
+                        &seat,
+                        &event.device(),
+                    );
+
                     let keycode = event.key_code();
                     let state = event.state();
                     trace!(?keycode, ?state, "key");
