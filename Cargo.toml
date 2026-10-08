@@ -42,6 +42,7 @@ i18n-embed-fl = "0.10"
 iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic" }
 iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = ["geometry"] }
 indexmap = "2.13"
+inputplumber-zbus = { git = "https://github.com/pop-os/inputplumber-zbus", optional = true }
 keyframe = "1.1.1"
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
 libsystemd = { version = "0.7", optional = true }
@@ -120,7 +121,8 @@ optional = true
 
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
-default = ["systemd"]
+default = ["inputplumber", "systemd"]
+inputplumber = ["dep:inputplumber-zbus"]
 logind = ["logind-zbus"]
 systemd = ["libsystemd", "logind", "tracing-journald"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
