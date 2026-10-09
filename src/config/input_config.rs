@@ -80,6 +80,7 @@ pub fn for_device(device: &InputDevice) -> InputConfig {
             None
         },
         map_to_output: None,
+        gestures: None,
     }
 }
 

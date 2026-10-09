@@ -31,6 +31,8 @@ pub struct InputConfig {
     pub tap_config: Option<TapConfig>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub map_to_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub gestures: Option<TouchpadGestures>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -212,5 +214,57 @@ mod TapButtonMapDef {
             Some(_) | None => None,
         };
         Option::serialize(&arg, ser)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub enum GestureAction {
+    None,
+    WorkspaceOverview,
+    AppLibrary,
+    PrevWorkspace,
+    NextWorkspace,
+    WindowSwitcher,
+    WindowSwitcherPrevious,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct GestureConfig {
+    pub swipe_up: GestureAction,
+    pub swipe_down: GestureAction,
+    pub swipe_left: GestureAction,
+    pub swipe_right: GestureAction,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct TouchpadGestures {
+    pub three_finger: GestureConfig,
+    pub four_finger: GestureConfig,
+}
+
+impl TouchpadGestures {
+    pub fn default_for_layout(layout: crate::workspace::WorkspaceLayout) -> Self {
+        Self {
+            three_finger: GestureConfig {
+                swipe_up: GestureAction::AppLibrary,
+                swipe_down: GestureAction::None,
+                swipe_left: GestureAction::WindowSwitcherPrevious,
+                swipe_right: GestureAction::WindowSwitcher,
+            },
+            four_finger: match layout {
+                crate::workspace::WorkspaceLayout::Horizontal => GestureConfig {
+                    swipe_up: GestureAction::AppLibrary,
+                    swipe_down: GestureAction::WorkspaceOverview,
+                    swipe_left: GestureAction::NextWorkspace,
+                    swipe_right: GestureAction::PrevWorkspace,
+                },
+                crate::workspace::WorkspaceLayout::Vertical => GestureConfig {
+                    swipe_up: GestureAction::PrevWorkspace,
+                    swipe_down: GestureAction::NextWorkspace,
+                    swipe_left: GestureAction::AppLibrary,
+                    swipe_right: GestureAction::WorkspaceOverview,
+                },
+            },
+        }
     }
 }
