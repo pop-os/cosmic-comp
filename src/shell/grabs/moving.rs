@@ -169,7 +169,7 @@ impl MoveGrabState {
                     .as_local(),
                     self.indicator_thickness,
                     radius,
-                    alpha,
+                    alpha * active_window_hint.alpha,
                     output_scale.x,
                     [
                         active_window_hint.red,
@@ -253,7 +253,7 @@ impl MoveGrabState {
                         theme.radius_s()[2] as u8,
                         theme.radius_s()[3] as u8,
                     ],
-                    1.0,
+                    active_window_hint.alpha,
                     output_scale.x,
                     [
                         active_window_hint.red,
