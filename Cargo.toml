@@ -42,7 +42,6 @@ i18n-embed-fl = "0.10"
 iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic" }
 iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = ["geometry"] }
 indexmap = "2.13"
-inputplumber-zbus = { git = "https://github.com/pop-os/inputplumber-zbus", optional = true }
 keyframe = "1.1.1"
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
 libsystemd = { version = "0.7", optional = true }
@@ -83,10 +82,14 @@ rand = "0.10"
 clap_lex = "1.0"
 parking_lot = "0.12.5"
 logind-zbus = { version = "5.3.2", optional = true }
+futures = "0.3"
 futures-executor = { version = "0.3.32" }
 futures-util = "0.3.32"
 glam = { version = "0.33", default-features = false, features = ["std"] }
 smallvec = "1.15.2"
+# InputPlumber feature
+inputplumber-zbus = { git = "https://github.com/pop-os/inputplumber-zbus", optional = true }
+packed_struct = { version = "0.10", optional = true }
 
 [dependencies.id_tree]
 branch = "feature/copy_clone"
@@ -122,7 +125,7 @@ optional = true
 [features]
 debug = ["egui", "egui_plot", "smithay-egui", "anyhow/backtrace"]
 default = ["inputplumber", "systemd"]
-inputplumber = ["dep:inputplumber-zbus"]
+inputplumber = ["dep:inputplumber-zbus", "dep:packed_struct"]
 logind = ["logind-zbus"]
 systemd = ["libsystemd", "logind", "tracing-journald"]
 profile-with-tracy = ["profiling/profile-with-tracy", "tracy-client/default"]
@@ -140,6 +143,7 @@ opt-level = 2
 [profile.fastdebug]
 debug = true
 inherits = "release"
+lto = false
 
 [profile.release]
 lto = "fat"

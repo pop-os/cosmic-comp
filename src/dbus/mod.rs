@@ -17,7 +17,7 @@ pub mod a11y_keyboard_monitor;
 use a11y_keyboard_monitor::A11yKeyboardMonitorState;
 pub mod ei;
 #[cfg(feature = "inputplumber")]
-pub mod input_plumber;
+pub mod inputplumber;
 #[cfg(feature = "logind")]
 pub mod logind;
 mod name_owners;
@@ -116,7 +116,7 @@ async fn init_system(state: &DBusState) -> zbus::Result<()> {
     {
         let conn = conn.clone();
         state.spawn(async move {
-            if let Err(err) = input_plumber::task(conn).await {
+            if let Err(err) = inputplumber::task(conn).await {
                 tracing::warn!(?err, "failed to initialize input plumber state");
             }
         });
