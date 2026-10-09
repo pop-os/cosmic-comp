@@ -174,7 +174,7 @@ pub fn tab_items(
     let screenshot_clone = tab.clone();
     let close_clone = tab.clone();
 
-    vec![
+    [
         Item::new(fl!("window-menu-unstack"), move |handle| {
             let mapped = unstack_clone_stack.clone();
             let surface = unstack_clone_tab.clone();
@@ -251,7 +251,7 @@ pub fn window_items(
     let sticky_clone = window.clone();
     let close_clone = window.clone();
 
-    vec![
+    [
         (!is_stacked).then_some(
             Item::new(fl!("window-menu-stack"), move |handle| {
                 let mapped = stack_clone.clone();

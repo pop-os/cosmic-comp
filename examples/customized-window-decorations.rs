@@ -51,11 +51,10 @@ impl<Internal, Message: std::clone::Clone + 'static, Lower: Decorations<Internal
     fn view(&self, window: &Internal) -> cosmic::Element<'_, Message> {
         let orig = self.lower.view(window);
         widget::row([
-            widget::column([canvas(Circle {
+            widget::container(canvas(Circle {
                 radius: (self.height as f32 / 2.) * 0.8,
                 color: Color::from_rgba(1.0, 0.0, 0.0, 1.0),
-            })
-            .into()])
+            }))
             .width(self.height as f32)
             .into(),
             orig,
