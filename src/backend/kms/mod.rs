@@ -56,7 +56,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, RwLock, atomic::AtomicBool},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod device;
@@ -68,6 +68,9 @@ pub(crate) use surface::Surface;
 pub use surface::Timings;
 
 use super::render::{CLEAR_COLOR, CursorMode, output_elements};
+
+const DEVICE_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+const DEVICE_BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub struct KmsState {
@@ -144,12 +147,43 @@ pub fn init_backend(
     });
 
     // manually add already present gpus
+    //
+    // Taking a device fails with EBUSY while the compositor we replace is still shutting
+    // down. Coming up with no device at all is fatal, so retry for a bounded time.
+    let mut pending = udev_dispatcher
+        .as_source_ref()
+        .device_list()
+        .map(|(dev, path)| (dev, path.to_owned()))
+        .collect::<Vec<_>>();
+
     let mut outputs = Vec::new();
-    for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
-        match state.device_added(dev, path, dh) {
-            Ok(added) => outputs.extend(added),
-            Err(err) => warn!("Failed to add device {}: {:?}", path.display(), err),
+    let deadline = Instant::now() + DEVICE_BUSY_TIMEOUT;
+    loop {
+        let mut errors = Vec::new();
+        pending.retain(|(dev, path)| match state.device_added(*dev, path, dh) {
+            Ok(added) => {
+                outputs.extend(added);
+                false
+            }
+            Err(err) => {
+                errors.push((path.clone(), err));
+                true
+            }
+        });
+
+        // never delay startup once some device came up, a secondary gpu may keep failing
+        if pending.is_empty() || !outputs.is_empty() || Instant::now() >= deadline {
+            for (path, err) in errors {
+                warn!("Failed to add device {}: {:?}", path.display(), err);
+            }
+            break;
         }
+
+        info!(
+            "No drm device available yet, retrying in {:?}",
+            DEVICE_BUSY_RETRY_INTERVAL
+        );
+        std::thread::sleep(DEVICE_BUSY_RETRY_INTERVAL);
     }
 
     if let Err(err) = state.select_primary_gpu(dh) {
