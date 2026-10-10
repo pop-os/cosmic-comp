@@ -140,6 +140,15 @@ pub struct TilingLayout {
     pub appearance: AppearanceConfig,
 }
 
+/// Spacing parameters of a layout, from the theme and the appearance config
+#[derive(Debug, Clone, Copy)]
+struct Gaps {
+    outer: i32,
+    inner: i32,
+    /// Lay out a lone window edge to edge, like a maximized one
+    maximize_single: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PillIndicator {
     Outer(Direction),
@@ -369,6 +378,15 @@ impl TilingLayout {
             last_overview_hover: None,
             theme,
             appearance,
+        }
+    }
+
+    pub fn set_appearance(&mut self, appearance: AppearanceConfig) {
+        let relayout =
+            self.appearance.maximize_single_tiled_window != appearance.maximize_single_tiled_window;
+        self.appearance = appearance;
+        if relayout {
+            self.recalculate();
         }
     }
 
@@ -2998,12 +3016,24 @@ impl TilingLayout {
     fn update_positions(
         output: &Output,
         tree: &mut Tree<Data>,
-        gaps: (i32, i32),
+        gaps: Gaps,
     ) -> Option<TilingBlocker> {
         if let Some(root_id) = tree.root_node_id() {
             let mut configures = Vec::new();
 
-            let (outer, inner) = gaps;
+            // a lone window fills the whole zone, like a maximized one
+            let single = gaps.maximize_single
+                && tree
+                    .traverse_pre_order(root_id)
+                    .unwrap()
+                    .filter(|node| !node.data().is_group())
+                    .count()
+                    == 1;
+            let (outer, inner) = if single {
+                (0, 0)
+            } else {
+                (gaps.outer, gaps.inner)
+            };
             let mut geo = layer_map_for_output(output).non_exclusive_zone().as_local();
             geo.loc.x += outer;
             geo.loc.y += outer;
@@ -3117,6 +3147,7 @@ impl TilingLayout {
                             }
                         },
                         Data::Mapped { mapped, .. } => {
+                            mapped.set_auto_maximized(single);
                             if !(mapped.is_fullscreen(true) || mapped.is_maximized(true)) {
                                 mapped.set_tiled(true);
                                 let internal_geometry = geo.to_global(output);
@@ -3271,7 +3302,7 @@ impl TilingLayout {
                 }
             }
 
-            let (_, inner) = self.gaps();
+            let inner = self.gaps().inner;
             let mut result = None;
             let mut fork = None;
             let mut lookup = Some(root.clone());
@@ -4321,9 +4352,13 @@ impl TilingLayout {
         );
     }
 
-    fn gaps(&self) -> (i32, i32) {
+    fn gaps(&self) -> Gaps {
         let g = self.theme.cosmic().gaps;
-        (g.0 as i32, g.1 as i32)
+        Gaps {
+            outer: g.0 as i32,
+            inner: g.1 as i32,
+            maximize_single: self.appearance.maximize_single_tiled_window,
+        }
     }
 }
 
@@ -5478,7 +5513,10 @@ fn render_new_tree_windows<R>(
             if swap_desc.as_ref().map(|desc| &desc.node) == Some(&node_id)
                 || focused.as_ref() == Some(&node_id)
             {
-                if indicator_thickness > 0 || data.is_group() {
+                // no focus ring around an auto-maximized window, it would peek out under the panel
+                let auto_maximized = !is_overview
+                    && matches!(data, Data::Mapped { mapped, .. } if mapped.is_auto_maximized());
+                if (indicator_thickness > 0 && !auto_maximized) || data.is_group() {
                     let mut geo = geo;
 
                     let scale = geo.size.to_f64() / original_geo.size.to_f64();
