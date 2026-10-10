@@ -1201,7 +1201,7 @@ impl Workspaces {
             set.sticky_layer.appearance = self.appearance;
             for workspace in set.workspaces.iter_mut() {
                 workspace.floating_layer.appearance = self.appearance;
-                workspace.tiling_layer.appearance = self.appearance;
+                workspace.tiling_layer.set_appearance(self.appearance);
             }
         }
 
