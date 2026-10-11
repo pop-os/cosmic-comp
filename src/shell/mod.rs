@@ -79,8 +79,7 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
-use tracing::error;
-use tracing::warn;
+use tracing::{error, warn};
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -3057,27 +3056,31 @@ impl Shell {
                     _ => None,
                 };
 
-                // NOTE: if the pinned workspace is not active, it will not be made active.
-                let pinned_workspace_name =
+                // NOTE: if the assigned workspace is not active, it will not be made active.
+                let assigned_workspace_name =
                     layout::get_workspace_assignment(&self.workspace_assignments, &window);
 
-                let pinned_workspace_handle = pinned_workspace_name //
-                    .as_deref()
-                    .and_then(|target_name| {
+                let assigned_workspace_handle =
+                    assigned_workspace_name.as_deref().and_then(|target_name| {
                         self.workspaces
                             .spaces()
                             .find(|ws| ws.name.as_deref() == Some(target_name))
                             .map(|ws| ws.handle)
                     });
 
-                if let Some(name) = pinned_workspace_name
-                    && pinned_workspace_handle.is_none()
+                if let Some(name) = assigned_workspace_name
+                    && assigned_workspace_handle.is_none()
                 {
-                    warn!("Assigned workspace name not found: {}", name);
+                    warn!(
+                        "Assigned workspace name: {} not found for appid: {} and title: {}",
+                        name,
+                        window.app_id(),
+                        window.title()
+                    );
                 };
 
                 (
-                    pinned_workspace_handle.or(handle),
+                    assigned_workspace_handle.or(handle),
                     output.unwrap_or_else(|| seat.active_output()),
                     None,
                 )

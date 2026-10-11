@@ -106,7 +106,7 @@ pub fn has_floating_exception(exceptions: &TilingExceptions, window: &CosmicSurf
 }
 
 #[derive(Debug, Clone)]
-pub struct WorkspaceAssignment {
+struct WorkspaceAssignment {
     app_id: Regex,
     title: Regex,
     workspace_name: String,
@@ -123,6 +123,7 @@ impl WorkspaceAssignments {
         I: Iterator<Item = &'a cosmic_settings_config::window_rules::WorkspaceAssignment>,
     {
         let assignments = assignments_config
+            .filter(|assignment| assignment.enabled)
             .filter_map(|assignment| {
                 let app_id = match Regex::new(&assignment.appid) {
                     Ok(r) => r,
@@ -156,9 +157,12 @@ pub fn get_workspace_assignment(
     assignments: &WorkspaceAssignments,
     window: &CosmicSurface,
 ) -> Option<String> {
+    let app_id = window.app_id();
+    let title = window.title();
+
     assignments
         .assignments
         .iter()
-        .find(|a| a.app_id.is_match(&window.app_id()) && a.title.is_match(&window.title()))
+        .find(|a| a.app_id.is_match(&app_id) && a.title.is_match(&title))
         .map(|a| a.workspace_name.clone())
 }
