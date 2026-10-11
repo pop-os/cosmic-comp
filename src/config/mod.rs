@@ -74,7 +74,7 @@ pub struct Config {
     pub tiling_exceptions: Vec<ApplicationException>,
     /// System actions from `com.system76.CosmicSettings.Shortcuts`
     pub system_actions: BTreeMap<shortcuts::action::System, String>,
-    // Workspace assignments from `com.system76.CosmicSettings.WindowRules`
+    /// Workspace assignments from `com.system76.CosmicSettings.WindowRules`
     pub workspace_assignments: Vec<WorkspaceAssignment>,
 }
 
@@ -322,11 +322,7 @@ impl Config {
                                     state.common.config.tiling_exceptions.iter(),
                                 );
                             }
-                            // TODO(karlskewes): Confirm
-                            // "..WindowRules/v1/workspace_assignment_defaults" is likely and
-                            // match on it here. Or should use simpler
-                            // "..WindowRules/v1/workspace_assignment" filename.
-                            "workspace_assignment_custom" => {
+                            "workspace_assignment" => {
                                 let assignments = window_rules::workspace_assignments(&config);
                                 state.common.config.workspace_assignments = assignments;
                                 state.common.shell.write().update_workspace_assignments(
