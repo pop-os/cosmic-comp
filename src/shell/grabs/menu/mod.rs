@@ -11,11 +11,11 @@ use cosmic::{
     Apply as _, Task,
     iced::{
         Alignment, Background,
-        core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
-        widget::{self as iced_widget, Row, text::Style as TextStyle},
+        core::{Border, Length, Rectangle as IcedRectangle},
+        widget::{Row, text::Style as TextStyle},
     },
     theme,
-    widget::{button, divider, icon::from_name, menu::menu_column::MenuColumn, space, text},
+    widget::{self, button, divider, icon::from_name, menu::menu_column::MenuColumn, space, text},
 };
 use smithay::{
     backend::{
@@ -408,8 +408,8 @@ impl Program for ContextMenu {
                 Item::Separator => divider::horizontal::light()
                     .class(theme::Rule::Default)
                     .into(),
-                Item::Submenu { title, .. } => Row::with_children(vec![
-                    space::horizontal().width(16).into(),
+                Item::Submenu { title, .. } => Row::with_children([
+                    space().width(16).into(),
                     text::body(title).width(mode).into(),
                     from_name("go-next-symbolic")
                         .size(16)
@@ -437,12 +437,12 @@ impl Program for ContextMenu {
                                 .size(16)
                                 .prefer_svg(true)
                                 .icon()
-                                .class(theme::Svg::custom(|theme| iced_widget::svg::Style {
+                                .class(theme::Svg::custom(|theme| widget::svg::Style {
                                     color: Some(theme.cosmic().accent.base.into()),
                                 }))
                                 .into()
                         } else {
-                            space::horizontal().width(16).into()
+                            space().width(16).into()
                         },
                         text::body(title)
                             .width(mode)
@@ -459,12 +459,12 @@ impl Program for ContextMenu {
                                 theme::Text::Default
                             })
                             .into(),
-                        space::horizontal().width(16).into(),
+                        space().width(16).into(),
                     ];
                     if let Some(shortcut) = shortcut.as_ref() {
                         components.push(
                             text::body(shortcut)
-                                .align_x(Horizontal::Right)
+                                .align_x(Alignment::End)
                                 .width(Length::Shrink)
                                 .class(theme::Text::Custom(|theme| {
                                     let mut color = theme.cosmic().background(false).component.on;
@@ -492,12 +492,12 @@ impl Program for ContextMenu {
             }
         }))
         .width(Length::Shrink)
-        .apply(iced_widget::container)
+        .apply(widget::container)
         .padding(1)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
             let component = &cosmic.background(theme.cosmic().frosted_windows).component;
-            iced_widget::container::Style {
+            widget::container::Style {
                 snap: true,
                 icon_color: Some(cosmic.accent.base.into()),
                 text_color: Some(component.on.into()),
