@@ -129,11 +129,18 @@ pub struct CosmicStackInternal {
     geometry: Mutex<Option<Rectangle<i32, Global>>>,
     mask: Mutex<Option<tiny_skia::Mask>>,
     tiled: AtomicBool,
+    /// Only tiled window of its workspace, laid out and drawn like a maximized one
+    auto_maximized: AtomicBool,
     theme: Mutex<cosmic::Theme>,
     appearance_conf: Mutex<AppearanceConfig>,
 }
 
 impl CosmicStackInternal {
+    /// returns if `window` is maximized or the stack auto-maximized, and should be drawn as such
+    fn looks_maximized(&self, window: &CosmicSurface) -> bool {
+        window.is_maximized(false) || self.auto_maximized.load(Ordering::Acquire)
+    }
+
     pub fn swap_focus(&self, focus: Option<Focus>) -> Option<Focus> {
         let value = focus.map_or(0, |x| x as u8);
         unsafe { Focus::from_u8(self.pointer_entered.swap(value, Ordering::SeqCst)) }
@@ -189,6 +196,7 @@ impl CosmicStack {
                 geometry: Mutex::new(None),
                 mask: Mutex::new(None),
                 tiled: AtomicBool::new(false),
+                auto_maximized: AtomicBool::new(false),
                 theme: Mutex::new(theme.clone()),
                 appearance_conf: Mutex::new(appearance),
             },
@@ -516,8 +524,22 @@ impl CosmicStack {
     }
 
     pub fn set_tiled(&self, tiled: bool) {
+        self.0.with_program(|p| {
+            p.tiled.store(tiled, Ordering::Release);
+            if !tiled {
+                p.auto_maximized.store(false, Ordering::Release);
+            }
+        });
+    }
+
+    pub fn set_auto_maximized(&self, auto_maximized: bool) {
         self.0
-            .with_program(|p| p.tiled.store(tiled, Ordering::Release));
+            .with_program(|p| p.auto_maximized.store(auto_maximized, Ordering::Release));
+    }
+
+    pub fn is_auto_maximized(&self) -> bool {
+        self.0
+            .with_program(|p| p.auto_maximized.load(Ordering::Acquire))
     }
 
     pub fn surfaces(&self) -> impl Iterator<Item = CosmicSurface> {
@@ -715,7 +737,7 @@ impl CosmicStack {
             let appearance = p.appearance_conf.lock().unwrap();
             let tiled = p.tiled.load(Ordering::Acquire);
 
-            if windows[active].is_maximized(false) {
+            if p.looks_maximized(&windows[active]) {
                 return None;
             }
 
@@ -802,7 +824,7 @@ impl CosmicStack {
             let appearance = p.appearance_conf.lock().unwrap();
             let theme = p.theme.lock().unwrap();
             let tiled = p.tiled.load(Ordering::Acquire);
-            let maximized = windows[active].is_maximized(false);
+            let maximized = p.looks_maximized(&windows[active]);
             let round = (appearance.clip_tiled_windows || !tiled) && !maximized;
             round.then(|| {
                 theme
@@ -817,7 +839,7 @@ impl CosmicStack {
             let windows = p.windows.lock().unwrap();
             let active = p.active.load(Ordering::SeqCst);
             let theme = p.theme.lock().unwrap();
-            let maximized = windows[active].is_maximized(false);
+            let maximized = p.looks_maximized(&windows[active]);
 
             let mut geo = SpaceElement::geometry(&windows[active]).to_f64();
             geo.loc += location.to_f64().to_logical(scale);
@@ -1000,7 +1022,7 @@ impl CosmicStack {
             let active_window = &p.windows.lock().unwrap()[p.active.load(Ordering::SeqCst)];
             let is_tiled = p.tiled.load(Ordering::Acquire);
             let appearance = p.appearance_conf.lock().unwrap();
-            let maximized = active_window.is_maximized(false);
+            let maximized = p.looks_maximized(active_window);
 
             let round = (appearance.clip_tiled_windows || !is_tiled) && !maximized;
             let radii = p
@@ -1371,7 +1393,7 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 .into(),
         ];
 
-        let radius = if windows[active].is_maximized(false)
+        let radius = if stack.looks_maximized(&windows[active])
             || (stack.tiled.load(Ordering::Acquire)
                 && !stack.appearance_conf.lock().unwrap().clip_tiled_windows)
         {

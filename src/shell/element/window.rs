@@ -98,6 +98,8 @@ pub struct CosmicWindowInternal {
     pointer_entered: AtomicU8,
     last_title: Mutex<String>,
     tiled: AtomicBool,
+    /// Only tiled window of its workspace, laid out and drawn like a maximized one
+    auto_maximized: AtomicBool,
     theme: Mutex<cosmic::Theme>,
     appearance_conf: Mutex<AppearanceConfig>,
 }
@@ -191,6 +193,11 @@ impl CosmicWindowInternal {
         self.tiled.load(Ordering::Acquire)
     }
 
+    /// returns if the window is maximized or auto-maximized, and should be drawn as such
+    fn looks_maximized(&self) -> bool {
+        self.window.is_maximized(false) || self.auto_maximized.load(Ordering::Acquire)
+    }
+
     fn has_tiled_state(&self) -> bool {
         self.window.is_tiled(false).unwrap_or(false)
     }
@@ -219,6 +226,7 @@ impl CosmicWindow {
                 pointer_entered: AtomicU8::new(0),
                 last_title: Mutex::new(last_title),
                 tiled: AtomicBool::new(false),
+                auto_maximized: AtomicBool::new(false),
                 theme: Mutex::new(theme.clone()),
                 appearance_conf: Mutex::new(appearance),
             },
@@ -417,7 +425,7 @@ impl CosmicWindow {
             let appearance = p.appearance_conf.lock().unwrap();
             let theme = p.theme.lock().unwrap();
 
-            if p.window.is_maximized(false) {
+            if p.looks_maximized() {
                 return None;
             }
 
@@ -495,7 +503,7 @@ impl CosmicWindow {
             (
                 p.has_ssd(false),
                 p.is_tiled(),
-                p.window.is_maximized(false),
+                p.looks_maximized(),
                 p.theme
                     .lock()
                     .unwrap()
@@ -657,10 +665,23 @@ impl CosmicWindow {
     pub fn set_tiled(&self, tiled: bool) {
         self.0.with_program(|p| {
             p.tiled.store(tiled, Ordering::Release);
+            if !tiled {
+                p.auto_maximized.store(false, Ordering::Release);
+            }
             if !p.appearance_conf.lock().unwrap().clip_floating_windows {
                 p.window.set_tiled(tiled);
             }
         });
+    }
+
+    pub fn set_auto_maximized(&self, auto_maximized: bool) {
+        self.0
+            .with_program(|p| p.auto_maximized.store(auto_maximized, Ordering::Release));
+    }
+
+    pub fn is_auto_maximized(&self) -> bool {
+        self.0
+            .with_program(|p| p.auto_maximized.load(Ordering::Acquire))
     }
 
     pub fn corner_radius(&self, geometry_size: Size<i32, Logical>, default_radius: u8) -> [u8; 4] {
@@ -668,12 +689,12 @@ impl CosmicWindow {
             let has_ssd = p.has_ssd(false);
             let is_tiled = p.is_tiled();
             let appearance = p.appearance_conf.lock().unwrap();
+            let maximized = p.looks_maximized();
 
             let clip = ((!is_tiled && appearance.clip_floating_windows)
                 || (is_tiled && appearance.clip_tiled_windows))
-                && !p.window.is_maximized(false);
-            let round =
-                (!is_tiled || appearance.clip_tiled_windows) && !p.window.is_maximized(false);
+                && !maximized;
+            let round = (!is_tiled || appearance.clip_tiled_windows) && !maximized;
             let radii = if round {
                 {
                     p.theme
@@ -853,7 +874,7 @@ impl Program for CosmicWindowInternal {
     }
 
     fn background_color(&self, theme: &cosmic::Theme) -> Color {
-        if self.window.is_maximized(false) {
+        if self.looks_maximized() {
             theme
                 .cosmic()
                 .background(theme.cosmic().frosted_windows)
@@ -874,7 +895,7 @@ pub struct DefaultDecorations;
 
 impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
     fn view(&self, win: &CosmicWindowInternal) -> cosmic::Element<'_, Message> {
-        let sharp_corners = win.window.is_maximized(false)
+        let sharp_corners = win.looks_maximized()
             || (win.is_tiled() && !win.appearance_conf.lock().unwrap().clip_tiled_windows);
 
         let mut header = cosmic::widget::header_bar()
