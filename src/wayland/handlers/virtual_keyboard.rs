@@ -4,9 +4,12 @@ use crate::{config::xkb_config_to_wl, input::InputBackendId, state::State};
 use smithay::{
     backend::input::{InputBackend, InputEvent},
     input::Seat,
-    wayland::virtual_keyboard::{
-        VirtualKeyboardBackend, VirtualKeyboardDevice, VirtualKeyboardHandler,
-        VirtualKeyboardSpecialEvent,
+    wayland::{
+        input_method::InputMethodSeat,
+        virtual_keyboard::{
+            VirtualKeyboardBackend, VirtualKeyboardDevice, VirtualKeyboardHandler,
+            VirtualKeyboardSpecialEvent,
+        },
     },
 };
 use std::{any::Any, cell::RefCell, sync::Arc};
@@ -23,6 +26,17 @@ pub fn clear_active_virtual_keyboard_keymap(seat: &Seat<State>) {
         .user_data()
         .get_or_insert(SeatVirtualKeyboardData::default);
     *data.active_virtual_keyboard_keymap.borrow_mut() = None;
+}
+
+pub fn should_bypass_grab<B: InputBackend>(seat: &Seat<State>, device: &B::Device) -> bool
+where
+    <B as InputBackend>::Device: 'static,
+{
+    if let Some(device) = <dyn Any>::downcast_ref::<VirtualKeyboardDevice>(device) {
+        seat.input_method().keyboard_grab_client() == device.client()
+    } else {
+        false
+    }
 }
 
 pub fn update_virtual_keyboard_keymap<B: InputBackend>(
