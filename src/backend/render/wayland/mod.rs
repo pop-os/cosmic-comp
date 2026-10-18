@@ -11,9 +11,12 @@ use smithay::{
 };
 use tracing::warn;
 
-use crate::backend::render::{
-    element::AsGlowRenderer,
-    wayland::{blur_effect::BlurElement, clipped_surface::ClippedSurfaceRenderElement},
+use crate::{
+    backend::render::{
+        element::AsGlowRenderer,
+        wayland::{blur_effect::BlurElement, clipped_surface::ClippedSurfaceRenderElement},
+    },
+    wayland::handlers::corner_radius::surface_corners,
 };
 
 pub mod blur_effect;
@@ -76,15 +79,22 @@ pub fn push_render_elements_from_surface_tree<R>(
             let mut blur = Ok(None);
 
             if let Some(data) = data {
-                let has_view = if let Some(view) = data.lock().unwrap().view() {
+                let view = data.lock().unwrap().view();
+                if let Some(view) = view {
                     location += view.offset.to_f64().to_physical(scale);
+                }
 
-                    true
-                } else {
-                    false
-                };
+                // Subsurfaces may request their own corner radius, which clips them to
+                // their own bounds instead of the geometry of the main surface.
+                let own_clip = view.filter(|_| surface != main_surface).and_then(|view| {
+                    let radii = surface_corners(states, view.dst)?;
+                    radii.iter().any(|r| *r != 0).then(|| {
+                        let geo = Rectangle::new(location.to_logical(scale), view.dst.to_f64());
+                        (geo, radii)
+                    })
+                });
 
-                if has_view {
+                if view.is_some() {
                     match WaylandSurfaceRenderElement::from_surface(
                         renderer, surface, states, location, alpha, kind,
                     ) {
@@ -98,17 +108,29 @@ pub fn push_render_elements_from_surface_tree<R>(
                                 radii,
                                 blur_strength,
                             );
-                            let elem: SurfaceRenderElement<R> = if radii.iter().any(|r| *r != 0)
-                                && should_clip
-                                && ClippedSurfaceRenderElement::will_clip(
-                                    &surface, scale, geometry, radii,
-                                ) {
-                                ClippedSurfaceRenderElement::new(
-                                    renderer, surface, scale, geometry, radii,
-                                )
-                                .into()
-                            } else {
-                                surface.into()
+                            let elem: SurfaceRenderElement<R> = match own_clip {
+                                Some((own_geo, own_radii))
+                                    if ClippedSurfaceRenderElement::will_clip(
+                                        &surface, scale, own_geo, own_radii,
+                                    ) =>
+                                {
+                                    ClippedSurfaceRenderElement::new(
+                                        renderer, surface, scale, own_geo, own_radii,
+                                    )
+                                    .into()
+                                }
+                                None if radii.iter().any(|r| *r != 0)
+                                    && should_clip
+                                    && ClippedSurfaceRenderElement::will_clip(
+                                        &surface, scale, geometry, radii,
+                                    ) =>
+                                {
+                                    ClippedSurfaceRenderElement::new(
+                                        renderer, surface, scale, geometry, radii,
+                                    )
+                                    .into()
+                                }
+                                _ => surface.into(),
                             };
                             if let Some(push_below) = push_below.as_mut()
                                 && passed_main

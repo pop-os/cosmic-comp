@@ -1,6 +1,9 @@
 use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_layer_v1::{
     self, CosmicCornerRadiusLayerV1,
 };
+use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_subsurface_v1::{
+    self, CosmicCornerRadiusSubsurfaceV1,
+};
 use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1;
 use cosmic_protocols::corner_radius::v1::server::{
     cosmic_corner_radius_manager_v1, cosmic_corner_radius_toplevel_v1,
@@ -12,9 +15,9 @@ use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_lay
 use smithay::reexports::wayland_server::New;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{HookId, Logical, Rectangle};
-use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::compositor::{BufferAssignment, Cacheable, SurfaceAttributes};
+use smithay::wayland::compositor::{SUBSURFACE_ROLE, add_pre_commit_hook, get_role};
 use smithay::wayland::shell::wlr_layer::WlrLayerShellHandler;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgShellSurfaceUserData};
 use smithay::wayland::viewporter::ViewportCachedState;
@@ -30,6 +33,7 @@ use wayland_backend::server::GlobalId;
 
 type ToplevelHookId = Mutex<Option<(HookId, Weak<CosmicCornerRadiusToplevelV1>)>>;
 type LayerHookId = Mutex<Option<(HookId, Weak<CosmicCornerRadiusLayerV1>)>>;
+type SubsurfaceRadiusId = Mutex<Option<Weak<CosmicCornerRadiusSubsurfaceV1>>>;
 
 #[derive(Debug)]
 pub struct CornerRadiusState {
@@ -46,12 +50,15 @@ impl CornerRadiusState {
                 cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1,
                 CornerRadiusData,
             > + Dispatch<cosmic_corner_radius_layer_v1::CosmicCornerRadiusLayerV1, CornerRadiusData>
-            + CornerRadiusHandler
+            + Dispatch<
+                cosmic_corner_radius_subsurface_v1::CosmicCornerRadiusSubsurfaceV1,
+                CornerRadiusData,
+            > + CornerRadiusHandler
             + 'static,
     {
         let global = dh
             .create_global::<D, cosmic_corner_radius_manager_v1::CosmicCornerRadiusManagerV1, _>(
-                2,
+                3,
                 (),
             );
         CornerRadiusState {
@@ -80,7 +87,10 @@ where
         + Dispatch<cosmic_corner_radius_manager_v1::CosmicCornerRadiusManagerV1, ()>
         + Dispatch<cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1, CornerRadiusData>
         + Dispatch<cosmic_corner_radius_layer_v1::CosmicCornerRadiusLayerV1, CornerRadiusData>
-        + CornerRadiusHandler
+        + Dispatch<
+            cosmic_corner_radius_subsurface_v1::CosmicCornerRadiusSubsurfaceV1,
+            CornerRadiusData,
+        > + CornerRadiusHandler
         + 'static,
 {
     fn bind(
@@ -105,7 +115,10 @@ where
         + Dispatch<cosmic_corner_radius_manager_v1::CosmicCornerRadiusManagerV1, ()>
         + Dispatch<cosmic_corner_radius_toplevel_v1::CosmicCornerRadiusToplevelV1, CornerRadiusData>
         + Dispatch<cosmic_corner_radius_layer_v1::CosmicCornerRadiusLayerV1, CornerRadiusData>
-        + CornerRadiusHandler
+        + Dispatch<
+            cosmic_corner_radius_subsurface_v1::CosmicCornerRadiusSubsurfaceV1,
+            CornerRadiusData,
+        > + CornerRadiusHandler
         + 'static,
 {
     fn request(
@@ -226,6 +239,45 @@ where
                     }
                 } // TODO: can this fail?
             }
+            cosmic_corner_radius_manager_v1::Request::GetCornerRadiusSubsurface { id, surface } => {
+                if get_role(&surface) != Some(SUBSURFACE_ROLE) {
+                    resource.post_error(
+                        cosmic_corner_radius_manager_v1::Error::NoRole as u32,
+                        "wl_surface does not have the wl_subsurface role".to_string(),
+                    );
+                }
+                let radius_exists = with_states(&surface, |surface_data| {
+                    surface_data
+                        .data_map
+                        .get::<SubsurfaceRadiusId>()
+                        .is_some_and(|obj| {
+                            obj.lock()
+                                .unwrap()
+                                .as_ref()
+                                .is_some_and(|obj| obj.upgrade().is_ok())
+                        })
+                });
+                if radius_exists {
+                    resource.post_error(
+                        cosmic_corner_radius_manager_v1::Error::CornerRadiusExists as u32,
+                        format!(
+                            "{resource:?} CosmicCornerRadiusSubsurfaceV1 object already exists for the surface"
+                        ),
+                    );
+                }
+                let data = Mutex::new(CornerRadiusInternal {
+                    surface: CornerRadiusSurface::Subsurface(surface.downgrade()),
+                    corners: None,
+                    padding: None,
+                });
+                let obj = data_init.init(id, data);
+                with_states(&surface, |surface_data| {
+                    let obj_ref = surface_data
+                        .data_map
+                        .get_or_insert_threadsafe(|| SubsurfaceRadiusId::new(None));
+                    *obj_ref.lock().unwrap() = Some(obj.downgrade());
+                });
+            }
             _ => unimplemented!(),
         }
     }
@@ -325,7 +377,9 @@ where
                         .ok()
                         .and_then(|popup| state.xdg_shell_state().get_popup(&popup))
                         .map(|popup| popup.wl_surface().clone()),
-                    CornerRadiusSurface::Layer(_) => unreachable!(),
+                    CornerRadiusSurface::Layer(_) | CornerRadiusSurface::Subsurface(_) => {
+                        unreachable!()
+                    }
                 }) else {
                     return;
                 };
@@ -364,7 +418,9 @@ where
                         .ok()
                         .and_then(|popup| state.xdg_shell_state().get_popup(&popup))
                         .map(|popup| popup.wl_surface().clone()),
-                    CornerRadiusSurface::Layer(_) => unreachable!(),
+                    CornerRadiusSurface::Layer(_) | CornerRadiusSurface::Subsurface(_) => {
+                        unreachable!()
+                    }
                 }) else {
                     resource.post_error(
                         cosmic_corner_radius_toplevel_v1::Error::ToplevelDestroyed as u32,
@@ -396,7 +452,9 @@ where
                         .ok()
                         .and_then(|popup| state.xdg_shell_state().get_popup(&popup))
                         .map(|popup| popup.wl_surface().clone()),
-                    CornerRadiusSurface::Layer(_) => unreachable!(),
+                    CornerRadiusSurface::Layer(_) | CornerRadiusSurface::Subsurface(_) => {
+                        unreachable!()
+                    }
                 }) else {
                     resource.post_error(
                         cosmic_corner_radius_toplevel_v1::Error::ToplevelDestroyed as u32,
@@ -609,6 +667,95 @@ where
     }
 }
 
+impl<D>
+    Dispatch<
+        cosmic_corner_radius_subsurface_v1::CosmicCornerRadiusSubsurfaceV1,
+        CornerRadiusData,
+        D,
+    > for CornerRadiusState
+where
+    D: Dispatch<
+            cosmic_corner_radius_subsurface_v1::CosmicCornerRadiusSubsurfaceV1,
+            CornerRadiusData,
+        > + CornerRadiusHandler
+        + 'static,
+{
+    fn request(
+        state: &mut D,
+        _client: &Client,
+        resource: &cosmic_corner_radius_subsurface_v1::CosmicCornerRadiusSubsurfaceV1,
+        request: <cosmic_corner_radius_subsurface_v1::CosmicCornerRadiusSubsurfaceV1 as Resource>::Request,
+        data: &CornerRadiusData,
+        _dhandle: &DisplayHandle,
+        _data_init: &mut smithay::reexports::wayland_server::DataInit<'_, D>,
+    ) {
+        let mut guard = data.lock().unwrap();
+        let CornerRadiusSurface::Subsurface(surface) = &guard.surface else {
+            unreachable!("corner_radius_subsurface without subsurface?");
+        };
+        let surface = surface.upgrade().ok();
+
+        match request {
+            cosmic_corner_radius_subsurface_v1::Request::Destroy => {
+                guard.corners = None;
+                let Some(surface) = surface else {
+                    return;
+                };
+                with_states(&surface, |surface_data| {
+                    if let Some(obj) = surface_data.data_map.get::<SubsurfaceRadiusId>() {
+                        *obj.lock().unwrap() = None;
+                    }
+                    let mut cached = surface_data.cached_state.get::<CacheableCorners>();
+                    *cached.pending() = CacheableCorners(None);
+                });
+                drop(guard);
+
+                state.unset_corner_radius(data);
+            }
+            cosmic_corner_radius_subsurface_v1::Request::SetRadius {
+                top_left,
+                top_right,
+                bottom_right,
+                bottom_left,
+            } => {
+                let Some(surface) = surface else {
+                    resource.post_error(
+                        cosmic_corner_radius_subsurface_v1::Error::SurfaceDestroyed as u32,
+                        format!("{resource:?} No surface found"),
+                    );
+                    return;
+                };
+                guard.set_corner_radius(top_left, top_right, bottom_right, bottom_left);
+                with_states(&surface, |surface_data| {
+                    let mut cached = surface_data.cached_state.get::<CacheableCorners>();
+                    *cached.pending() = CacheableCorners(guard.corners);
+                });
+                drop(guard);
+
+                state.set_corner_radius(data);
+            }
+            cosmic_corner_radius_subsurface_v1::Request::UnsetRadius => {
+                let Some(surface) = surface else {
+                    resource.post_error(
+                        cosmic_corner_radius_subsurface_v1::Error::SurfaceDestroyed as u32,
+                        format!("{resource:?} No surface found"),
+                    );
+                    return;
+                };
+                guard.corners = None;
+                with_states(&surface, |surface_data| {
+                    let mut cached = surface_data.cached_state.get::<CacheableCorners>();
+                    *cached.pending() = CacheableCorners(None);
+                });
+                drop(guard);
+
+                state.unset_corner_radius(data);
+            }
+            _ => unimplemented!(),
+        }
+    }
+}
+
 fn xdg_radius_hook<D: 'static>(_state: &mut D, _dh: &DisplayHandle, surface: &WlSurface) {
     with_states(surface, |surface_data| {
         let corners = *surface_data
@@ -742,6 +889,7 @@ pub enum CornerRadiusSurface {
     Toplevel(Weak<XdgToplevel>),
     Popup(Weak<XdgPopup>),
     Layer(Weak<ZwlrLayerSurfaceV1>),
+    Subsurface(Weak<WlSurface>),
 }
 
 #[derive(Debug)]
@@ -832,6 +980,9 @@ macro_rules! delegate_corner_radius {
         ] => $crate::wayland::protocols::corner_radius::CornerRadiusState);
         smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
             cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_layer_v1::CosmicCornerRadiusLayerV1: CornerRadiusData
+        ] => $crate::wayland::protocols::corner_radius::CornerRadiusState);
+        smithay::reexports::wayland_server::delegate_dispatch!($(@< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? $ty: [
+            cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_subsurface_v1::CosmicCornerRadiusSubsurfaceV1: CornerRadiusData
         ] => $crate::wayland::protocols::corner_radius::CornerRadiusState);
     };
 }
