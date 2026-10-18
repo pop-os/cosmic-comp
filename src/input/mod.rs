@@ -692,7 +692,7 @@ impl State {
                     let serial = SERIAL_COUNTER.next_serial();
                     ptr.motion(
                         self,
-                        under,
+                        new_under.clone(),
                         &PointerMotionEvent {
                             location: position.as_logical(),
                             serial,
