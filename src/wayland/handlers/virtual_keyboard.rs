@@ -75,15 +75,25 @@ impl VirtualKeyboardHandler for State {
                 // Handled by `update_virtual_keyboard_keymap`
                 VirtualKeyboardSpecialEvent::KeymapChanged { device: _ } => {}
                 VirtualKeyboardSpecialEvent::Modifiers {
-                    device: _,
+                    device,
                     mods_depressed,
                     mods_latched,
                     mods_locked,
                     group,
                 } => {
-                    let Some(keyboard) =
-                        self.common.shell.read().seats.last_active().get_keyboard()
-                    else {
+                    let seat = {
+                        let shell = self.common.shell.read();
+                        shell
+                            .seats
+                            .for_device(device, &InputBackendId::VirtualKeyboard)
+                            .unwrap_or_else(|| shell.seats.last_active())
+                            .clone()
+                    };
+                    // The masks are relative to the device's keymap, so it has to be
+                    // active before they are applied. Otherwise the keymap switch on
+                    // the next key event would reset the xkb state and drop them.
+                    update_virtual_keyboard_keymap::<VirtualKeyboardBackend>(self, &seat, device);
+                    let Some(keyboard) = seat.get_keyboard() else {
                         return;
                     };
                     keyboard.with_xkb_state(self, |mut context| {
