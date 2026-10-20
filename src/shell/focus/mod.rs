@@ -367,6 +367,7 @@ impl Shell {
             }
 
             let workspace = &mut set.workspaces[set.active];
+
             for fs in workspace.get_fullscreen_surfaces() {
                 let is_focused = self.seats.iter().any(|seat| {
                     if let Some(KeyboardFocusTarget::Fullscreen(s)) =
@@ -380,6 +381,47 @@ impl Shell {
                 fs.surface.set_activated(is_focused);
                 fs.surface.send_configure();
             }
+
+            let overview_is_open = crate::utils::quirks::workspace_overview_is_open(&output);
+            let has_foreground_fullscreen = !overview_is_open
+                && self.seats.iter().any(|seat| {
+                    if let Some(fs) = workspace.get_fullscreen(seat) {
+                        let focus_stack = workspace.focus_stack.get(seat);
+                        let last_focused = focus_stack.last();
+                        let focus_stack_is_valid_fullscreen =
+                            last_focused.is_some_and(|target| match target {
+                                FocusTarget::Fullscreen(s) => s == &fs.surface,
+                                FocusTarget::Window(w) => w.active_window() == fs.surface,
+                            });
+
+                        let seat_active_here = seat
+                            .focused_output()
+                            .is_some_and(|active_output| active_output == output);
+
+                        let is_foreground = if seat_active_here {
+                            seat.get_keyboard()
+                                .and_then(|k| k.current_focus())
+                                .and_then(|focus| focus.active_window())
+                                .is_some_and(|surface| surface == fs.surface)
+                        } else {
+                            focus_stack_is_valid_fullscreen
+                        };
+
+                        if is_foreground {
+                            output.set_fullscreen_occupied(Some(fs.surface.clone()));
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                });
+
+            if !has_foreground_fullscreen {
+                output.set_fullscreen_occupied(None);
+            }
+
             for focused in focused_windows.iter() {
                 raise_modal_with_ancestors(&mut workspace.floating_layer, focused);
             }
