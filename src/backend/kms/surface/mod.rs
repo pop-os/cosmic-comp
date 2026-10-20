@@ -912,7 +912,9 @@ impl SurfaceThreadState {
             QueueState::WaitingForEstimatedVBlankAndQueued { .. } => unreachable!(),
         };
 
-        if redraw_needed || self.shell.read().output_animations_going(&self.output) {
+        if redraw_needed
+            || (!self.timings.vrr() && self.shell.read().output_animations_going(&self.output))
+        {
             let vblank_frame = tracy_client::Client::running()
                 .unwrap()
                 .non_continuous_frame(self.vblank_frame_name);
@@ -939,7 +941,8 @@ impl SurfaceThreadState {
 
         self.frame_callback_seq = self.frame_callback_seq.wrapping_add(1);
 
-        if force || self.shell.read().output_animations_going(&self.output) {
+        if force || (!self.timings.vrr() && self.shell.read().output_animations_going(&self.output))
+        {
             self.queue_redraw(false, false);
         }
         self.send_frame_callbacks();
