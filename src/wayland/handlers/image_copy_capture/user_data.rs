@@ -24,6 +24,9 @@ pub type SessionData = Mutex<SessionUserData>;
 pub struct SessionUserData {
     pub dt: OutputDamageTracker,
     pub offscreen: Option<(ContextId<GlesTexture>, GlesRenderbuffer)>,
+    /// Whether the last frame of this session was composited with capture-excluded
+    /// overlays filtered out, see [`SessionUserData::set_filtered`].
+    pub filtered: bool,
 }
 
 impl SessionUserData {
@@ -31,6 +34,16 @@ impl SessionUserData {
         SessionUserData {
             dt: tracker,
             offscreen: None,
+            filtered: false,
+        }
+    }
+
+    /// Switch this session between the backend's blit path and the filtered
+    /// re-render path, starting over from a full redraw when it changes.
+    pub fn set_filtered(&mut self, filtered: bool, output: &Output) {
+        if self.filtered != filtered {
+            *self = SessionUserData::new(OutputDamageTracker::from_output(output));
+            self.filtered = filtered;
         }
     }
 }

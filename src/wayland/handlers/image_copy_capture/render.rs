@@ -268,7 +268,7 @@ where
         session_user_data.offscreen = None;
     }
 
-    let SessionUserData { dt, offscreen } = &mut *session_user_data;
+    let SessionUserData { dt, offscreen, .. } = &mut *session_user_data;
     let mut fb = offscreen
         .as_mut()
         .map(|(_, tex)| renderer.bind(tex).map_err(DTError::Rendering))
@@ -299,6 +299,7 @@ pub fn render_workspace_to_buffer(
     session: &SessionRef,
     frame: Frame,
     handle: WorkspaceHandle,
+    element_filter: ElementFilter,
 ) {
     let shell = state.common.shell.read();
     let Some(workspace) = shell.workspaces.space_for_handle(&handle) else {
@@ -339,6 +340,7 @@ pub fn render_workspace_to_buffer(
         common: &mut Common,
         output: &Output,
         handle: (WorkspaceHandle, usize),
+        element_filter: ElementFilter,
     ) -> Result<
         (
             RenderOutputResult<'d>,
@@ -402,7 +404,7 @@ pub fn render_workspace_to_buffer(
                 None,
                 handle,
                 cursor_mode,
-                ElementFilter::ExcludeWorkspaceOverview,
+                element_filter,
             )?
         } else {
             let target = offscreen.expect("shm buffers should have an offscreen target");
@@ -420,7 +422,7 @@ pub fn render_workspace_to_buffer(
                 None,
                 handle,
                 cursor_mode,
-                ElementFilter::ExcludeWorkspaceOverview,
+                element_filter,
             )?
         };
 
@@ -483,6 +485,7 @@ pub fn render_workspace_to_buffer(
                         common,
                         &output,
                         (handle, idx),
+                        element_filter,
                     )
                 },
             ) {
@@ -511,6 +514,7 @@ pub fn render_workspace_to_buffer(
                         common,
                         &output,
                         (handle, idx),
+                        element_filter,
                     )
                 },
             ) {
