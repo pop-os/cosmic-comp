@@ -142,6 +142,16 @@ impl State {
                     &mut self.common.workspace_state.update(),
                 );
             }
+            SwipeAction::WorkspaceOverview => {
+                if let Some(command) = self
+                    .common
+                    .config
+                    .system_actions
+                    .get(&shortcuts::action::System::WorkspaceOverview)
+                {
+                    self.spawn_command(command.clone());
+                }
+            }
         }
     }
 
