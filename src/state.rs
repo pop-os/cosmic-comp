@@ -9,9 +9,9 @@ use crate::{
     },
     config::{CompOutputConfig, Config, ScreenFilter},
     dbus::DBusState,
-    input::{PointerFocusState, gestures::GestureState},
+    input::{PointerFocusState, gestures::GestureState, update_output_image_copy_cursor_position},
     shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
-    utils::prelude::OutputExt,
+    utils::prelude::{Global, OutputExt, PointExt, PointGlobalExt},
     wayland::{
         handlers::{data_device::get_dnd_icon, image_copy_capture::SessionHolder},
         protocols::{
@@ -33,7 +33,7 @@ use crate::{
 };
 use anyhow::Context;
 use calloop::RegistrationToken;
-use cosmic_comp_config::output::comp::{OutputConfig, OutputState};
+use cosmic_comp_config::output::comp::{AdaptiveSync, OutputConfig, OutputState};
 use i18n_embed::{
     DesktopLanguageRequester,
     fluent::{FluentLanguageLoader, fluent_language_loader},
@@ -59,7 +59,10 @@ use smithay::{
             with_surfaces_surface_tree,
         },
     },
-    input::{SeatState, pointer::CursorImageStatus},
+    input::{
+        Seat, SeatState,
+        pointer::{CursorImageStatus, PointerHandle},
+    },
     output::{Output, Scale, WeakOutput},
     reexports::{
         calloop::{LoopHandle, LoopSignal},
@@ -71,7 +74,7 @@ use smithay::{
             protocol::{wl_shm, wl_surface::WlSurface},
         },
     },
-    utils::{Clock, Monotonic, Point},
+    utils::{Clock, Logical, Monotonic, Point, Rectangle, Size},
     wayland::{
         alpha_modifier::AlphaModifierState,
         background_effect::BackgroundEffectState,
@@ -470,6 +473,138 @@ impl BackendData {
     }
 }
 
+fn relocated_pointer_position(
+    pointer: Point<f64, Global>,
+    old_output_position: Point<i32, Global>,
+    new_output_geometry: Rectangle<i32, Global>,
+    new_logical_size: Size<f64, Logical>,
+) -> Point<f64, Global> {
+    let mut pointer = pointer + (new_output_geometry.loc - old_output_position).to_f64();
+    let output_position = new_output_geometry.loc.to_f64();
+    let max_x =
+        (output_position.x + new_logical_size.w.min(new_output_geometry.size.w as f64)).next_down();
+    let max_y =
+        (output_position.y + new_logical_size.h.min(new_output_geometry.size.h as f64)).next_down();
+    pointer.x = pointer.x.clamp(output_position.x, max_x);
+    pointer.y = pointer.y.clamp(output_position.y, max_y);
+    pointer
+}
+
+fn pointer_relocation(
+    pointer: Point<f64, Global>,
+    old_output_position: Point<i32, Global>,
+    new_output_geometry: Rectangle<i32, Global>,
+    new_logical_size: Size<f64, Logical>,
+) -> Option<Point<f64, Global>> {
+    let relocated = relocated_pointer_position(
+        pointer,
+        old_output_position,
+        new_output_geometry,
+        new_logical_size,
+    );
+    (relocated != pointer).then_some(relocated)
+}
+
+struct PointerPosition {
+    seat: Seat<State>,
+    pointer: PointerHandle<State>,
+    output: Output,
+    location: Point<f64, Global>,
+    output_position: Point<i32, Global>,
+}
+
+struct PointerRelocation {
+    seat: Seat<State>,
+    pointer: PointerHandle<State>,
+    output: Output,
+    old_location: Point<f64, Global>,
+    new_location: Point<f64, Global>,
+}
+
+impl PointerPosition {
+    fn into_relocation(self) -> Option<PointerRelocation> {
+        if self.seat.active_output() != self.output
+            || self
+                .output
+                .user_data()
+                .get::<RefCell<OutputConfig>>()
+                .is_none_or(|config| config.borrow().enabled != OutputState::Enabled)
+        {
+            return None;
+        }
+
+        let new_output_geometry = self.output.geometry();
+        let new_logical_size = self
+            .output
+            .current_mode()
+            .map(|mode| self.output.current_transform().transform_size(mode.size))
+            .unwrap_or_default()
+            .to_f64()
+            .to_logical(self.output.current_scale().fractional_scale());
+        let new_location = pointer_relocation(
+            self.location,
+            self.output_position,
+            new_output_geometry,
+            new_logical_size,
+        )?;
+
+        Some(PointerRelocation {
+            seat: self.seat,
+            pointer: self.pointer,
+            output: self.output,
+            old_location: self.location,
+            new_location,
+        })
+    }
+}
+
+fn apply_with_pointer_relocation<T, E>(
+    relocate: impl FnOnce(),
+    apply: impl FnOnce() -> Result<T, E>,
+    rollback: impl FnOnce(),
+) -> Result<T, E> {
+    relocate();
+    match apply() {
+        Ok(value) => Ok(value),
+        Err(err) => {
+            rollback();
+            Err(err)
+        }
+    }
+}
+
+struct OutputStateSnapshot {
+    output: Output,
+    mode: Option<smithay::output::Mode>,
+    transform: smithay::utils::Transform,
+    scale: Scale,
+    location: Point<i32, Logical>,
+    adaptive_sync: AdaptiveSync,
+}
+
+impl OutputStateSnapshot {
+    fn new(output: &Output) -> Self {
+        Self {
+            output: output.clone(),
+            mode: output.current_mode(),
+            transform: output.current_transform(),
+            scale: output.current_scale(),
+            location: output.current_location(),
+            adaptive_sync: output.adaptive_sync(),
+        }
+    }
+
+    fn restore(self) {
+        self.output.change_current_state(
+            self.mode,
+            Some(self.transform),
+            Some(self.scale),
+            Some(self.location),
+        );
+        self.output.set_adaptive_sync(self.adaptive_sync);
+    }
+}
+
 impl LockedBackend<'_> {
     pub fn all_outputs(&self) -> Vec<Output> {
         match self {
@@ -522,6 +657,30 @@ impl LockedBackend<'_> {
         clock: &Clock<Monotonic>,
     ) -> Result<(), anyhow::Error> {
         let all_outputs = self.all_outputs();
+        let output_states = all_outputs
+            .iter()
+            .map(OutputStateSnapshot::new)
+            .collect::<Vec<_>>();
+        let pointer_positions = if test_only {
+            Vec::new()
+        } else {
+            let shell = shell.read();
+            shell
+                .seats
+                .iter()
+                .filter_map(|seat| {
+                    let pointer = seat.get_pointer().filter(|pointer| !pointer.is_grabbed())?;
+                    let output = seat.active_output();
+                    Some(PointerPosition {
+                        seat: seat.clone(),
+                        location: pointer.current_location().as_global(),
+                        output_position: output.geometry().loc,
+                        output,
+                        pointer,
+                    })
+                })
+                .collect()
+        };
 
         // update outputs, so that `OutputModeSource`s are correct
         for output in &all_outputs {
@@ -552,18 +711,42 @@ impl LockedBackend<'_> {
             output.set_adaptive_sync(final_config.0.vrr);
         }
 
-        match self {
-            LockedBackend::Kms(state) => state.apply_config_for_outputs(
-                test_only,
-                loop_handle,
-                screen_filter,
-                shell.clone(),
-                startup_done,
-                clock,
-            ),
-            LockedBackend::Winit(state) => state.apply_config_for_outputs(test_only),
-            LockedBackend::X11(state) => state.apply_config_for_outputs(test_only),
-        }?;
+        let pointer_relocations = pointer_positions
+            .into_iter()
+            .filter_map(PointerPosition::into_relocation)
+            .collect::<Vec<_>>();
+
+        apply_with_pointer_relocation(
+            || {
+                for relocation in &pointer_relocations {
+                    relocation
+                        .pointer
+                        .set_location(relocation.new_location.as_logical());
+                }
+            },
+            || match self {
+                LockedBackend::Kms(state) => state.apply_config_for_outputs(
+                    test_only,
+                    loop_handle,
+                    screen_filter,
+                    shell.clone(),
+                    startup_done,
+                    clock,
+                ),
+                LockedBackend::Winit(state) => state.apply_config_for_outputs(test_only),
+                LockedBackend::X11(state) => state.apply_config_for_outputs(test_only),
+            },
+            || {
+                for output_state in output_states {
+                    output_state.restore();
+                }
+                for relocation in &pointer_relocations {
+                    relocation
+                        .pointer
+                        .set_location(relocation.old_location.as_logical());
+                }
+            },
+        )?;
 
         let mut shell_ref = shell.write();
         for output in &all_outputs {
@@ -600,6 +783,28 @@ impl LockedBackend<'_> {
 
         // Update layout for changes in resolution, scale, orientation
         shell_ref.workspaces.recalculate();
+
+        for PointerRelocation {
+            seat,
+            output,
+            new_location,
+            ..
+        } in pointer_relocations
+        {
+            if seat.active_output() != output {
+                continue;
+            }
+
+            shell_ref.update_pointer_position(new_location.to_local(&output), &output);
+            update_output_image_copy_cursor_position(
+                &shell_ref,
+                clock,
+                &output,
+                &seat,
+                new_location,
+            );
+        }
+
         let active_outputs = shell_ref.outputs().cloned().collect::<Vec<_>>();
         std::mem::drop(shell_ref);
 
