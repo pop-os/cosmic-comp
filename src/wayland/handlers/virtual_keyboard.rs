@@ -3,7 +3,7 @@
 use crate::{config::xkb_config_to_wl, input::InputBackendId, state::State};
 use smithay::{
     backend::input::{InputBackend, InputEvent},
-    input::Seat,
+    input::{Seat, keyboard::KeymapFile},
     wayland::{
         input_method::InputMethodSeat,
         virtual_keyboard::{
@@ -12,12 +12,12 @@ use smithay::{
         },
     },
 };
-use std::{any::Any, cell::RefCell, sync::Arc};
+use std::{any::Any, cell::RefCell};
 use tracing::error;
 
 #[derive(Default)]
 struct SeatVirtualKeyboardData {
-    active_virtual_keyboard_keymap: RefCell<Option<Arc<str>>>,
+    active_virtual_keyboard_keymap: RefCell<Option<KeymapFile>>,
 }
 
 // Clear stored virtual keyboard keymap, before updating keyboard's keymap
@@ -63,10 +63,10 @@ pub fn update_virtual_keyboard_keymap<B: InputBackend>(
         // No virtual keyboard keymap is active or required
         (None, None) => {}
         // Same virtual keyboard keymap is already active
-        (Some(keymap), Some(active_keymap)) if Arc::ptr_eq(&keymap, active_keymap) => {}
+        (Some(keymap), Some(active_keymap)) if keymap.id() == active_keymap.id() => {}
         // Activate new virtual keyboard keymap
         (Some(keymap), _) => {
-            if let Err(err) = keyboard.set_keymap_from_string(state, keymap.to_string()) {
+            if let Err(err) = keyboard.set_keymap_from_keymap_file(state, keymap.clone()) {
                 error!(?err, "Failed to apply virtual keyboard keymap");
             }
             *active_virtual_keyboard_keymap = Some(keymap);
