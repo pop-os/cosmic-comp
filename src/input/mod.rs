@@ -79,6 +79,7 @@ use smithay::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{PointerConstraint, with_pointer_constraint},
         seat::WaylandFocus,
+        virtual_keyboard::VirtualKeyboardDevice,
     },
 };
 use tracing::{error, trace};
@@ -238,7 +239,18 @@ impl State {
         match event {
             InputEvent::DeviceAdded { device } => {
                 let shell = self.common.shell.read();
-                let seat = shell.seats.last_active();
+                let seat = if let Some(device) =
+                    <dyn Any>::downcast_ref::<VirtualKeyboardDevice>(&device)
+                {
+                    match shell.seats.iter().find(|seat| seat.owns(device.wl_seat())) {
+                        Some(seat) => seat,
+                        None => {
+                            return;
+                        }
+                    }
+                } else {
+                    shell.seats.last_active()
+                };
                 let led_state = seat.get_keyboard().unwrap().led_state();
                 seat.devices().add_device(&device, led_state, &backend_id);
                 if device.has_capability(DeviceCapability::TabletTool) {
@@ -284,7 +296,7 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap::<B>(
+                    crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap(
                         self,
                         &seat,
                         &event.device(),
@@ -299,7 +311,7 @@ impl State {
                     let keyboard = seat.get_keyboard().unwrap();
                     let previous_modifiers = keyboard.modifier_state();
 
-                    if crate::wayland::handlers::virtual_keyboard::should_bypass_grab::<B>(
+                    if crate::wayland::handlers::virtual_keyboard::should_bypass_grab(
                         &seat,
                         &event.device(),
                     ) {

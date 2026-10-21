@@ -2,8 +2,8 @@
 
 use crate::{config::xkb_config_to_wl, input::InputBackendId, state::State};
 use smithay::{
-    backend::input::{InputBackend, InputEvent},
-    input::Seat,
+    backend::input::{Device, InputEvent},
+    input::{Seat, keyboard::KeymapFile},
     wayland::{
         input_method::InputMethodSeat,
         virtual_keyboard::{
@@ -12,12 +12,12 @@ use smithay::{
         },
     },
 };
-use std::{any::Any, cell::RefCell, sync::Arc};
+use std::{any::Any, cell::RefCell};
 use tracing::error;
 
 #[derive(Default)]
 struct SeatVirtualKeyboardData {
-    active_virtual_keyboard_keymap: RefCell<Option<Arc<str>>>,
+    active_virtual_keyboard_keymap: RefCell<Option<KeymapFile>>,
 }
 
 // Clear stored virtual keyboard keymap, before updating keyboard's keymap
@@ -28,9 +28,9 @@ pub fn clear_active_virtual_keyboard_keymap(seat: &Seat<State>) {
     *data.active_virtual_keyboard_keymap.borrow_mut() = None;
 }
 
-pub fn should_bypass_grab<B: InputBackend>(seat: &Seat<State>, device: &B::Device) -> bool
+pub fn should_bypass_grab<Dev: Device>(seat: &Seat<State>, device: &Dev) -> bool
 where
-    <B as InputBackend>::Device: 'static,
+    Dev: 'static,
 {
     if let Some(device) = <dyn Any>::downcast_ref::<VirtualKeyboardDevice>(device) {
         seat.input_method().keyboard_grab_client() == device.client()
@@ -39,12 +39,12 @@ where
     }
 }
 
-pub fn update_virtual_keyboard_keymap<B: InputBackend>(
+pub fn update_virtual_keyboard_keymap<Dev: Device>(
     state: &mut State,
     seat: &Seat<State>,
-    device: &B::Device,
+    device: &Dev,
 ) where
-    <B as InputBackend>::Device: 'static,
+    Dev: 'static,
 {
     let Some(keyboard) = seat.get_keyboard() else {
         return;
@@ -63,10 +63,10 @@ pub fn update_virtual_keyboard_keymap<B: InputBackend>(
         // No virtual keyboard keymap is active or required
         (None, None) => {}
         // Same virtual keyboard keymap is already active
-        (Some(keymap), Some(active_keymap)) if Arc::ptr_eq(&keymap, active_keymap) => {}
+        (Some(keymap), Some(active_keymap)) if keymap.id() == active_keymap.id() => {}
         // Activate new virtual keyboard keymap
         (Some(keymap), _) => {
-            if let Err(err) = keyboard.set_keymap_from_string(state, keymap.to_string()) {
+            if let Err(err) = keyboard.set_keymap_from_keymap_file(state, keymap.clone()) {
                 error!(?err, "Failed to apply virtual keyboard keymap");
             }
             *active_virtual_keyboard_keymap = Some(keymap);
@@ -89,17 +89,17 @@ impl VirtualKeyboardHandler for State {
                 // Handled by `update_virtual_keyboard_keymap`
                 VirtualKeyboardSpecialEvent::KeymapChanged { device: _ } => {}
                 VirtualKeyboardSpecialEvent::Modifiers {
-                    device: _,
+                    device,
                     mods_depressed,
                     mods_latched,
                     mods_locked,
                     group,
                 } => {
-                    let Some(keyboard) =
-                        self.common.shell.read().seats.last_active().get_keyboard()
-                    else {
+                    let Some(seat) = Seat::from_resource(device.wl_seat()) else {
                         return;
                     };
+                    update_virtual_keyboard_keymap(self, &seat, device);
+                    let keyboard = seat.get_keyboard().unwrap();
                     keyboard.with_xkb_state(self, |mut context| {
                         context.set_modifier_mask(
                             *mods_depressed,
