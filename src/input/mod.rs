@@ -2349,7 +2349,7 @@ impl State {
         // Otherwise inject the keysym as a keycode tap via a temporary keymap delivered to just
         // the focused client (reaches non-text-input apps: terminals, games, ...). This never
         // touches the seat's own keyboard state.
-        keyboard.inject_text_keysyms(self, &[keysym]);
+        keyboard.inject_text_keysyms(self, &[keysym], InputTime::now());
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
