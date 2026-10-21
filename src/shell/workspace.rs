@@ -1592,8 +1592,7 @@ impl Workspace {
                                 node: node_id.clone(),
                                 stack_window: if mapped
                                     .stack_ref()
-                                    .map(|stack| !stack.whole_stack_focused())
-                                    .unwrap_or(false)
+                                    .is_some_and(|stack| !stack.whole_stack_focused())
                                 {
                                     Some(mapped.active_window())
                                 } else {

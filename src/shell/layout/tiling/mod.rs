@@ -1423,8 +1423,7 @@ impl TilingLayout {
                 .unwrap()
                 .0
                 .get(&node_id)
-                .map(|node| node.data().is_mapped(Some(mapped)))
-                .unwrap_or(false)
+                .is_ok_and(|node| node.data().is_mapped(Some(mapped)))
         {
             let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
@@ -1856,8 +1855,7 @@ impl TilingLayout {
         if direction == FocusDirection::In {
             if swap_desc
                 .as_ref()
-                .map(|desc| desc.node == last_node_id)
-                .unwrap_or(false)
+                .is_some_and(|desc| desc.node == last_node_id)
             {
                 return FocusResult::Handled; // abort
             }
@@ -1904,15 +1902,11 @@ impl TilingLayout {
             assert!(group_data.is_group());
 
             if direction == FocusDirection::Out {
-                if swap_desc
-                    .as_ref()
-                    .map(|desc| {
-                        tree.traverse_pre_order_ids(group)
-                            .unwrap()
-                            .any(|node| node == desc.node)
-                    })
-                    .unwrap_or(false)
-                {
+                if swap_desc.as_ref().is_some_and(|desc| {
+                    tree.traverse_pre_order_ids(group)
+                        .unwrap()
+                        .any(|node| node == desc.node)
+                }) {
                     return FocusResult::Handled; // abort
                 }
 
@@ -2063,13 +2057,9 @@ impl TilingLayout {
                         }
                         Data::Mapped { mapped, .. } => {
                             if let Some(stack) = mapped.stack_ref()
-                                && swap_desc
-                                    .as_ref()
-                                    .map(|desc| {
-                                        desc.stack_window.is_none()
-                                            && &desc.node == node_id.unwrap()
-                                    })
-                                    .unwrap_or(false)
+                                && swap_desc.as_ref().is_some_and(|desc| {
+                                    desc.stack_window.is_none() && &desc.node == node_id.unwrap()
+                                })
                             {
                                 stack.focus_stack();
                             }
@@ -3847,13 +3837,11 @@ impl TilingLayout {
 
     pub fn has_node(&self, node: &NodeId) -> bool {
         let tree = &self.queue.trees.back().unwrap().0;
-        tree.root_node_id()
-            .map(|root| {
-                tree.traverse_pre_order_ids(root)
-                    .unwrap()
-                    .any(|id| &id == node)
-            })
-            .unwrap_or(false)
+        tree.root_node_id().is_some_and(|root| {
+            tree.traverse_pre_order_ids(root)
+                .unwrap()
+                .any(|id| &id == node)
+        })
     }
 
     pub fn merge(&mut self, mut other: TilingLayout) {
@@ -4349,10 +4337,9 @@ where
             let is_placeholder_sibling = node
                 .parent()
                 .and_then(|parent_id| tree.children_ids(parent_id).ok())
-                .map(|mut siblings| {
+                .is_some_and(|mut siblings| {
                     siblings.any(|child_id| tree.get(child_id).unwrap().data().is_placeholder())
-                })
-                .unwrap_or(false);
+                });
 
             let render_potential_group = swap_desc.is_none()
                 && has_potential_groups
@@ -4487,18 +4474,15 @@ where
                         }
 
                         if mouse_tiling.is_some()
-                            && node
-                                .parent()
-                                .map(|parent_id| {
-                                    matches!(
-                                        tree.get(parent_id).unwrap().data(),
-                                        Data::Group {
-                                            pill_indicator: Some(_),
-                                            ..
-                                        }
-                                    )
-                                })
-                                .unwrap_or(false)
+                            && node.parent().is_some_and(|parent_id| {
+                                matches!(
+                                    tree.get(parent_id).unwrap().data(),
+                                    Data::Group {
+                                        pill_indicator: Some(_),
+                                        ..
+                                    }
+                                )
+                            })
                         {
                             // test if parent pill-indicator is adjacent
                             let parent_id = node.parent().unwrap();
@@ -4621,13 +4605,9 @@ where
                                     geo,
                                     8.,
                                     alpha
-                                        * if focused
-                                            .as_ref()
-                                            .map(|focused| {
-                                                focused == &swap_desc.as_ref().unwrap().node
-                                            })
-                                            .unwrap_or(false)
-                                        {
+                                        * if focused.as_ref().is_some_and(|focused| {
+                                            focused == &swap_desc.as_ref().unwrap().node
+                                        }) {
                                             0.4
                                         } else {
                                             0.15
@@ -4693,11 +4673,7 @@ where
                                     if *pill_idx == idx {
                                         geo.size.h -= 32;
                                     }
-                                    if idx
-                                        .checked_sub(1)
-                                        .map(|idx| idx == *pill_idx)
-                                        .unwrap_or(false)
-                                    {
+                                    if idx.checked_sub(1) == Some(*pill_idx) {
                                         if let Some(renderer) = renderer.as_mut() {
                                             push(
                                                 BackdropShader::element(
@@ -4735,11 +4711,7 @@ where
                                     if *pill_idx == idx {
                                         geo.size.w -= 32;
                                     }
-                                    if idx
-                                        .checked_sub(1)
-                                        .map(|idx| idx == *pill_idx)
-                                        .unwrap_or(false)
-                                    {
+                                    if idx.checked_sub(1) == Some(*pill_idx) {
                                         if let Some(renderer) = renderer.as_mut() {
                                             push(
                                                 BackdropShader::element(
@@ -5144,9 +5116,7 @@ fn render_new_tree_popups<R>(
 {
     let output_scale = output.current_scale().fractional_scale();
 
-    let is_active_output = seat
-        .map(|seat| &seat.active_output() == output)
-        .unwrap_or(false);
+    let is_active_output = seat.is_some_and(|seat| &seat.active_output() == output);
 
     let (_, swap_tree) = overview.1.unzip();
     let swap_desc = swap_desc.filter(|_| is_active_output);
@@ -5241,9 +5211,7 @@ fn render_new_tree_windows<R>(
         geo
     });
 
-    let is_active_output = seat
-        .map(|seat| &seat.active_output() == output)
-        .unwrap_or(false);
+    let is_active_output = seat.is_some_and(|seat| &seat.active_output() == output);
 
     let mut animating_window_upper_elements = Vec::new();
     let mut animating_window_lower_elements = Vec::new();
@@ -5416,8 +5384,7 @@ fn render_new_tree_windows<R>(
                     }
                     if !swap_desc
                         .as_ref()
-                        .map(|desc| desc.stack_window.is_some())
-                        .unwrap_or(false)
+                        .is_some_and(|desc| desc.stack_window.is_some())
                         || focused.as_ref() == Some(&node_id)
                     {
                         indicators.push(CosmicMappedRenderElement::FocusIndicator(
@@ -5450,20 +5417,18 @@ fn render_new_tree_windows<R>(
                                 .as_ref()
                                 .and_then(|swap_desc| swap_desc.stack_window.as_ref())
                                 .zip(focused.as_ref())
-                                .map(|(stack_window, focused_id)| {
-                                    target_tree
-                                        .get(focused_id)
-                                        .ok()
-                                        .map(|focused| match focused.data() {
-                                            Data::Mapped { mapped, .. } => mapped
-                                                .stack_ref()
-                                                .map(|stack| &stack.active() != stack_window)
-                                                .unwrap_or(false),
+                                .is_some_and(|(stack_window, focused_id)| {
+                                    target_tree.get(focused_id).ok().is_some_and(|focused| {
+                                        match focused.data() {
+                                            Data::Mapped { mapped, .. } => {
+                                                mapped.stack_ref().is_some_and(|stack| {
+                                                    &stack.active() != stack_window
+                                                })
+                                            }
                                             _ => false,
-                                        })
-                                        .unwrap_or(false)
-                                })
-                                .unwrap_or(false))
+                                        }
+                                    })
+                                }))
                         && let Some(swap) = swap_indicator.as_mut()
                     {
                         let size = geo.size.as_logical();
@@ -5603,20 +5568,16 @@ fn render_new_tree_windows<R>(
                     .filter(|swap_desc| swap_desc.node == node_id)
                     .and_then(|swap_desc| swap_desc.stack_window.as_ref())
                     .zip(focused.as_ref())
-                    .map(|(stack_window, focused_id)| {
-                        target_tree
-                            .get(focused_id)
-                            .ok()
-                            .map(|focused| match focused.data() {
+                    .is_some_and(|(stack_window, focused_id)| {
+                        target_tree.get(focused_id).ok().is_some_and(|focused| {
+                            match focused.data() {
                                 Data::Mapped { mapped, .. } => mapped
                                     .stack_ref()
-                                    .map(|stack| &stack.active() == stack_window)
-                                    .unwrap_or(false),
+                                    .is_some_and(|stack| &stack.active() == stack_window),
                                 _ => false,
-                            })
-                            .unwrap_or(false)
+                            }
+                        })
                     })
-                    .unwrap_or(false)
                 {
                     let mut active_geo = mapped.active_window_geometry().as_local();
                     active_geo.loc += geo.loc - mapped.geometry().loc.as_local();
@@ -5633,17 +5594,14 @@ fn render_new_tree_windows<R>(
                     )
                 }
 
-                if swap_desc
-                    .as_ref()
-                    .map(|swap_desc| {
-                        (swap_desc.node == node_id
-                            || target_tree.ancestor_ids(&node_id).ok().is_none_or(
-                                |mut ancestors| ancestors.any(|id| &swap_desc.node == id),
-                            ))
-                            && swap_desc.stack_window.is_none()
-                    })
-                    .unwrap_or(false)
-                {
+                if swap_desc.as_ref().is_some_and(|swap_desc| {
+                    (swap_desc.node == node_id
+                        || target_tree
+                            .ancestor_ids(&node_id)
+                            .ok()
+                            .is_none_or(|mut ancestors| ancestors.any(|id| &swap_desc.node == id)))
+                        && swap_desc.stack_window.is_none()
+                }) {
                     swap_elements.extend(upper_elements);
                     swap_elements.extend(shadow_element);
                     swap_elements.extend(lower_elements);
@@ -5781,9 +5739,7 @@ fn render_new_tree(
                 .unwrap_or(*original_geo);
 
             let (geo, alpha, animating) = if let Some((old_geo, alpha)) = old_geo.filter(|_| {
-                swap_desc
-                    .map(|desc| desc.node != node_id && desc.stack_window.is_none())
-                    .unwrap_or(true)
+                swap_desc.is_none_or(|desc| desc.node != node_id && desc.stack_window.is_none())
             }) {
                 (
                     if was_minimized {
