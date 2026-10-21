@@ -763,7 +763,7 @@ fn focus_target_is_valid(
                     shell.outputs().find_map(|o| {
                         layer_map_for_output(o)
                             .layer_for_surface(&root, WindowSurfaceType::ALL)
-                            .map(&is_exclusive_on_layer)
+                            .map(is_exclusive_on_layer)
                     })
                 })
                 .unwrap_or(false),

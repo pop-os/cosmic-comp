@@ -308,22 +308,15 @@ impl CompositorHandler for State {
                     state
                         .element()
                         .windows()
-                        .any(|(s, _)| {
-                            s.wl_surface()
-                                .as_deref()
-                                .map(|s| s == surface)
-                                .unwrap_or(false)
-                        })
+                        .any(|(s, _)| s.wl_surface().as_deref() == Some(surface))
                         .then(|| state.element())
                 });
             if let Some(window) = moved_window {
                 if let Some(stack) = window.stack_ref() {
-                    if let Some(i) = stack.surfaces().position(|s| {
-                        s.wl_surface()
-                            .as_deref()
-                            .map(|s| s == surface)
-                            .unwrap_or(false)
-                    }) {
+                    if let Some(i) = stack
+                        .surfaces()
+                        .position(|s| s.wl_surface().as_deref() == Some(surface))
+                    {
                         stack.remove_idx(i);
                     }
                 } else {

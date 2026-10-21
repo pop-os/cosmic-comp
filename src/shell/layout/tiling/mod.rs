@@ -1423,8 +1423,7 @@ impl TilingLayout {
                 .unwrap()
                 .0
                 .get(&node_id)
-                .map(|node| node.data().is_mapped(Some(mapped)))
-                .unwrap_or(false)
+                .is_ok_and(|node| node.data().is_mapped(Some(mapped)))
         {
             let mut tree = self.queue.trees.back().unwrap().0.copy_clone();
 
@@ -1856,8 +1855,7 @@ impl TilingLayout {
         if direction == FocusDirection::In {
             if swap_desc
                 .as_ref()
-                .map(|desc| desc.node == last_node_id)
-                .unwrap_or(false)
+                .is_some_and(|desc| desc.node == last_node_id)
             {
                 return FocusResult::Handled; // abort
             }
@@ -1904,15 +1902,11 @@ impl TilingLayout {
             assert!(group_data.is_group());
 
             if direction == FocusDirection::Out {
-                if swap_desc
-                    .as_ref()
-                    .map(|desc| {
-                        tree.traverse_pre_order_ids(group)
-                            .unwrap()
-                            .any(|node| node == desc.node)
-                    })
-                    .unwrap_or(false)
-                {
+                if swap_desc.as_ref().is_some_and(|desc| {
+                    tree.traverse_pre_order_ids(group)
+                        .unwrap()
+                        .any(|node| node == desc.node)
+                }) {
                     return FocusResult::Handled; // abort
                 }
 
@@ -2063,13 +2057,9 @@ impl TilingLayout {
                         }
                         Data::Mapped { mapped, .. } => {
                             if let Some(stack) = mapped.stack_ref()
-                                && swap_desc
-                                    .as_ref()
-                                    .map(|desc| {
-                                        desc.stack_window.is_none()
-                                            && &desc.node == node_id.unwrap()
-                                    })
-                                    .unwrap_or(false)
+                                && swap_desc.as_ref().is_some_and(|desc| {
+                                    desc.stack_window.is_none() && &desc.node == node_id.unwrap()
+                                })
                             {
                                 stack.focus_stack();
                             }
@@ -3425,474 +3415,364 @@ impl TilingLayout {
         let location_f64 = location_f64.unwrap();
         let location = location_f64.to_i32_floor();
 
-        if matches!(
+        if !matches!(
             overview.active_trigger(),
             Some(Trigger::Pointer(_) | Trigger::Touch(_) | Trigger::Tool(_, _))
         ) {
-            let non_exclusive_zone = layer_map_for_output(&self.output)
-                .non_exclusive_zone()
-                .as_local();
-            let geometries = geometries_for_groupview(
-                tree,
-                Option::<&mut GlowRenderer>::None,
-                non_exclusive_zone,
-                None,
-                self.output.current_scale().fractional_scale(),
-                1.0,
-                overview.alpha().unwrap(),
-                &self.backdrop_id,
-                Some(None),
-                None,
-                None,
-                self.theme.cosmic(),
-                &mut |_| {},
-            );
+            return;
+        };
+        let non_exclusive_zone = layer_map_for_output(&self.output)
+            .non_exclusive_zone()
+            .as_local();
+        let geometries = geometries_for_groupview(
+            tree,
+            Option::<&mut GlowRenderer>::None,
+            non_exclusive_zone,
+            None,
+            self.output.current_scale().fractional_scale(),
+            1.0,
+            overview.alpha().unwrap(),
+            &self.backdrop_id,
+            Some(None),
+            None,
+            None,
+            self.theme.cosmic(),
+            &mut |_| {},
+        );
 
-            let mut result = None;
-            let mut lookup = Some(root.clone());
-            while let Some(node) = lookup {
-                let data = tree.get(&node).unwrap().data();
-                if geometries
-                    .get(&node)
-                    .map(|geo| geo.contains(location))
-                    .unwrap_or(false)
-                {
-                    result = Some(node.clone());
+        let mut result = None;
+        let mut lookup = Some(root.clone());
+        while let Some(node) = lookup.take() {
+            let data = tree.get(&node).unwrap().data();
+            if geometries
+                .get(&node)
+                .is_some_and(|geo| geo.contains(location))
+            {
+                result = Some(node.clone());
+            }
+
+            if result.is_none()
+                || !data.is_group()
+                || tree.children(&node).unwrap().any(|child| {
+                    matches!(
+                        child.data(),
+                        Data::Placeholder {
+                            type_: PlaceholderType::DropZone,
+                            ..
+                        }
+                    )
+                })
+            {
+                break;
+            }
+            lookup = tree
+                .children_ids(&node)
+                .unwrap()
+                .find(|child_id| {
+                    geometries
+                        .get(*child_id)
+                        .is_some_and(|geo| geo.contains(location))
+                })
+                .cloned();
+        }
+
+        let Some(res_id) = result else { return };
+        let Some(mut last_geo) = geometries.get(&res_id).copied() else {
+            return;
+        };
+        let node = tree.get(&res_id).unwrap();
+        let data = node.data().clone();
+
+        let group_zone = if let Data::Group { orientation, .. } = &data
+            && !node.children().iter().any(|child_id| {
+                tree.get(child_id).ok().is_some_and(|child| {
+                    matches!(
+                        child.data(),
+                        Data::Placeholder {
+                            type_: PlaceholderType::DropZone,
+                            ..
+                        }
+                    )
+                })
+            }) {
+            let mut matched_zone = None;
+            for dir in [
+                Direction::Left,
+                Direction::Up,
+                Direction::Right,
+                Direction::Down,
+            ] {
+                let is_hovered = matches!(
+                    &*last_overview_hover,
+                    Some((_, TargetZone::GroupEdge(id, d))) if *id == res_id && *d == dir
+                );
+                let thickness = if is_hovered { 80 } else { 32 };
+
+                let zone = match dir {
+                    Direction::Left => {
+                        let r = Rectangle::new(last_geo.loc, (thickness, last_geo.size.h).into());
+                        last_geo.loc.x += thickness;
+                        last_geo.size.w -= thickness;
+                        r
+                    }
+                    Direction::Up => {
+                        let r = Rectangle::new(last_geo.loc, (last_geo.size.w, thickness).into());
+                        last_geo.loc.y += thickness;
+                        last_geo.size.h -= thickness;
+                        r
+                    }
+                    Direction::Right => {
+                        let r = Rectangle::new(
+                            (last_geo.loc.x + last_geo.size.w - thickness, last_geo.loc.y).into(),
+                            (thickness, last_geo.size.h).into(),
+                        );
+                        last_geo.size.w -= thickness;
+                        r
+                    }
+                    Direction::Down => {
+                        let r = Rectangle::new(
+                            (last_geo.loc.x, last_geo.loc.y + last_geo.size.h - thickness).into(),
+                            (last_geo.size.w, thickness).into(),
+                        );
+                        last_geo.size.h -= thickness;
+                        r
+                    }
+                };
+
+                if zone.contains(location) {
+                    matched_zone = Some(TargetZone::GroupEdge(res_id.clone(), dir));
+                    break;
+                }
+            }
+
+            matched_zone.or_else(|| {
+                let idx = tree
+                    .children_ids(&res_id)
+                    .unwrap()
+                    .position(|node| {
+                        let Some(geo) = geometries.get(node) else {
+                            return false;
+                        };
+                        match orientation {
+                            Orientation::Vertical => location.x < geo.loc.x,
+                            Orientation::Horizontal => location.y < geo.loc.y,
+                        }
+                    })
+                    .and_then(|x| x.checked_sub(1))
+                    .unwrap_or(0);
+                Some(TargetZone::GroupInterior(res_id.clone(), idx))
+            })
+        } else {
+            None
+        };
+
+        let target_zone = group_zone.unwrap_or_else(|| match &data {
+            Data::Placeholder { .. } => TargetZone::InitialPlaceholder(res_id),
+            Data::Group { .. } | Data::Mapped { .. } => {
+                let id = if data.is_group() {
+                    tree.get(&res_id)
+                        .unwrap()
+                        .children()
+                        .iter()
+                        .find(|child_id| tree.get(child_id).unwrap().data().is_mapped(None))
+                        .expect("Placeholder group without real window?")
+                        .clone()
+                } else {
+                    res_id
+                };
+
+                let third_width = (last_geo.size.w as f64 / 3.0).round() as i32;
+                let third_height = (last_geo.size.h as f64 / 3.0).round() as i32;
+                let stack_region = Rectangle::from_extremities(
+                    (last_geo.loc.x + third_width, last_geo.loc.y + third_height),
+                    (
+                        last_geo.loc.x + 2 * third_width,
+                        last_geo.loc.y + 2 * third_height,
+                    ),
+                );
+
+                if stack_region.contains(location) {
+                    return TargetZone::WindowStack(id, last_geo);
                 }
 
-                lookup = None;
-                if result.is_some() && data.is_group() {
-                    if tree.children(&node).unwrap().any(|child| {
+                let left_right = {
+                    let relative_loc = location_f64.x - last_geo.loc.x as f64;
+                    if relative_loc < last_geo.size.w as f64 / 2.0 {
+                        (Direction::Left, relative_loc / last_geo.size.w as f64)
+                    } else {
+                        (
+                            Direction::Right,
+                            1.0 - (relative_loc / last_geo.size.w as f64),
+                        )
+                    }
+                };
+                let up_down = {
+                    let relative_loc = location_f64.y - last_geo.loc.y as f64;
+                    if relative_loc < last_geo.size.h as f64 / 2.0 {
+                        (Direction::Up, relative_loc / last_geo.size.h as f64)
+                    } else {
+                        (
+                            Direction::Down,
+                            1.0 - (relative_loc / last_geo.size.h as f64),
+                        )
+                    }
+                };
+
+                let direction = if left_right.1 < up_down.1 {
+                    left_right.0
+                } else {
+                    up_down.0
+                };
+
+                TargetZone::WindowSplit(id, direction)
+            }
+        });
+
+        let Some((instant, old_target_zone)) = last_overview_hover else {
+            *last_overview_hover = Some((
+                None,
+                tree.traverse_pre_order_ids(root)
+                    .unwrap()
+                    .find(|id| {
                         matches!(
-                            child.data(),
+                            tree.get(id).unwrap().data(),
+                            Data::Placeholder {
+                                type_: PlaceholderType::GrabbedWindow,
+                                ..
+                            }
+                        )
+                    })
+                    .map(TargetZone::InitialPlaceholder)
+                    .unwrap_or(TargetZone::Initial),
+            ));
+            return;
+        };
+
+        if *old_target_zone == target_zone {
+            *instant = None;
+            return;
+        }
+
+        let Some(since) = *instant else {
+            *instant = Some(Instant::now());
+            return;
+        };
+
+        let delay = match old_target_zone {
+            TargetZone::InitialPlaceholder(_) => INITIAL_MOUSE_ANIMATION_DELAY,
+            _ => MOUSE_ANIMATION_DELAY,
+        };
+        if Instant::now().duration_since(since) <= delay {
+            return;
+        }
+
+        let duration = if target_zone.is_window_zone() && !old_target_zone.is_window_zone() {
+            ANIMATION_DURATION * 2
+        } else {
+            ANIMATION_DURATION
+        };
+
+        let mut tree = tree.copy_clone();
+
+        // remove old placeholders
+        let removed = match old_target_zone {
+            TargetZone::InitialPlaceholder(node_id) => {
+                if tree.get(node_id).is_ok() {
+                    TilingLayout::unmap_internal(&mut tree, node_id);
+                }
+                true
+            }
+            TargetZone::WindowSplit(node_id, _) => {
+                if let Some(children) = tree
+                    .get(node_id)
+                    .ok()
+                    .and_then(|node| node.parent())
+                    .and_then(|parent_id| tree.get(parent_id).ok())
+                    .map(|node| node.children().clone())
+                {
+                    for id in children {
+                        if matches!(
+                            tree.get(&id).unwrap().data(),
                             Data::Placeholder {
                                 type_: PlaceholderType::DropZone,
                                 ..
                             }
-                        )
-                    }) {
-                        break;
-                    }
-                    for child_id in tree.children_ids(&node).unwrap() {
-                        if geometries
-                            .get(child_id)
-                            .map(|geo| geo.contains(location))
-                            .unwrap_or(false)
-                        {
-                            lookup = Some(child_id.clone());
+                        ) {
+                            TilingLayout::unmap_internal(&mut tree, &id);
                             break;
                         }
                     }
                 }
+                true
             }
-
-            if let Some(res_id) = result {
-                let Some(mut last_geometry) = geometries.get(&res_id).copied() else {
-                    return;
-                };
-                let node = tree.get(&res_id).unwrap();
-                let data = node.data().clone();
-
-                let group_zone = if let Data::Group { orientation, .. } = &data {
-                    if node.children().iter().any(|child_id| {
-                        tree.get(child_id)
-                            .ok()
-                            .map(|child| {
-                                matches!(
-                                    child.data(),
-                                    Data::Placeholder {
-                                        type_: PlaceholderType::DropZone,
-                                        ..
-                                    }
-                                )
-                            })
-                            .unwrap_or(false)
-                    }) {
-                        None
-                    } else {
-                        let left_edge = match &*last_overview_hover {
-                            Some((_, TargetZone::GroupEdge(id, Direction::Left)))
-                                if *id == res_id =>
-                            {
-                                let zone = Rectangle::new(
-                                    last_geometry.loc,
-                                    (80, last_geometry.size.h).into(),
-                                );
-                                last_geometry.loc.x += 80;
-                                last_geometry.size.w -= 80;
-                                zone
-                            }
-                            _ => {
-                                let zone = Rectangle::new(
-                                    last_geometry.loc,
-                                    (32, last_geometry.size.h).into(),
-                                );
-                                last_geometry.loc.x += 32;
-                                last_geometry.size.w -= 32;
-                                zone
-                            }
-                        };
-                        let top_edge = match &*last_overview_hover {
-                            Some((_, TargetZone::GroupEdge(id, Direction::Up)))
-                                if *id == res_id =>
-                            {
-                                let zone = Rectangle::new(
-                                    last_geometry.loc,
-                                    (last_geometry.size.w, 80).into(),
-                                );
-                                last_geometry.loc.y += 80;
-                                last_geometry.size.h -= 80;
-                                zone
-                            }
-                            _ => {
-                                let zone = Rectangle::new(
-                                    last_geometry.loc,
-                                    (last_geometry.size.w, 32).into(),
-                                );
-                                last_geometry.loc.y += 32;
-                                last_geometry.size.h -= 32;
-                                zone
-                            }
-                        };
-                        let right_edge = match &*last_overview_hover {
-                            Some((_, TargetZone::GroupEdge(id, Direction::Right)))
-                                if *id == res_id =>
-                            {
-                                let zone = Rectangle::new(
-                                    (
-                                        last_geometry.loc.x + last_geometry.size.w - 80,
-                                        last_geometry.loc.y,
-                                    )
-                                        .into(),
-                                    (80, last_geometry.size.h).into(),
-                                );
-                                last_geometry.size.w -= 80;
-                                zone
-                            }
-                            _ => {
-                                let zone = Rectangle::new(
-                                    (
-                                        last_geometry.loc.x + last_geometry.size.w - 32,
-                                        last_geometry.loc.y,
-                                    )
-                                        .into(),
-                                    (32, last_geometry.size.h).into(),
-                                );
-                                last_geometry.size.w -= 32;
-                                zone
-                            }
-                        };
-                        let bottom_edge = match &*last_overview_hover {
-                            Some((_, TargetZone::GroupEdge(id, Direction::Down)))
-                                if *id == res_id =>
-                            {
-                                let zone = Rectangle::new(
-                                    (
-                                        last_geometry.loc.x,
-                                        last_geometry.loc.y + last_geometry.size.h - 80,
-                                    )
-                                        .into(),
-                                    (last_geometry.size.w, 80).into(),
-                                );
-                                last_geometry.size.h -= 80;
-                                zone
-                            }
-                            _ => {
-                                let zone = Rectangle::new(
-                                    (
-                                        last_geometry.loc.x,
-                                        last_geometry.loc.y + last_geometry.size.h - 32,
-                                    )
-                                        .into(),
-                                    (last_geometry.size.w, 32).into(),
-                                );
-                                last_geometry.size.h -= 32;
-                                zone
-                            }
-                        };
-
-                        if left_edge.contains(location) {
-                            Some(TargetZone::GroupEdge(res_id.clone(), Direction::Left))
-                        } else if right_edge.contains(location) {
-                            Some(TargetZone::GroupEdge(res_id.clone(), Direction::Right))
-                        } else if top_edge.contains(location) {
-                            Some(TargetZone::GroupEdge(res_id.clone(), Direction::Up))
-                        } else if bottom_edge.contains(location) {
-                            Some(TargetZone::GroupEdge(res_id.clone(), Direction::Down))
-                        } else {
-                            let idx = tree
-                                .children_ids(&res_id)
-                                .unwrap()
-                                .position(|node| {
-                                    let Some(geo) = geometries.get(node) else {
-                                        return false;
-                                    };
-                                    match orientation {
-                                        Orientation::Vertical => location.x < geo.loc.x,
-                                        Orientation::Horizontal => location.y < geo.loc.y,
-                                    }
-                                })
-                                .and_then(|x| x.checked_sub(1))
-                                .unwrap_or(0);
-                            Some(TargetZone::GroupInterior(res_id.clone(), idx))
-                        }
-                    }
-                } else {
-                    None
-                };
-
-                let target_zone = group_zone.unwrap_or_else(|| match &data {
-                    Data::Placeholder { .. } => TargetZone::InitialPlaceholder(res_id),
-                    Data::Group { .. } | Data::Mapped { .. } => {
-                        let id = if data.is_group() {
-                            tree.get(&res_id)
-                                .unwrap()
-                                .children()
-                                .iter()
-                                .find(|child_id| tree.get(child_id).unwrap().data().is_mapped(None))
-                                .expect("Placeholder group without real window?")
-                                .clone()
-                        } else {
-                            res_id
-                        };
-
-                        let third_width = (last_geometry.size.w as f64 / 3.0).round() as i32;
-                        let third_height = (last_geometry.size.h as f64 / 3.0).round() as i32;
-                        let stack_region = Rectangle::from_extremities(
-                            (
-                                last_geometry.loc.x + third_width,
-                                last_geometry.loc.y + third_height,
-                            ),
-                            (
-                                last_geometry.loc.x + 2 * third_width,
-                                last_geometry.loc.y + 2 * third_height,
-                            ),
-                        );
-
-                        if stack_region.contains(location) {
-                            TargetZone::WindowStack(id, last_geometry)
-                        } else {
-                            let left_right = {
-                                let relative_loc = location_f64.x - last_geometry.loc.x as f64;
-                                if relative_loc < last_geometry.size.w as f64 / 2.0 {
-                                    (Direction::Left, relative_loc / last_geometry.size.w as f64)
-                                } else {
-                                    (
-                                        Direction::Right,
-                                        1.0 - (relative_loc / last_geometry.size.w as f64),
-                                    )
-                                }
-                            };
-                            let up_down = {
-                                let relative_loc = location_f64.y - last_geometry.loc.y as f64;
-                                if relative_loc < last_geometry.size.h as f64 / 2.0 {
-                                    (Direction::Up, relative_loc / last_geometry.size.h as f64)
-                                } else {
-                                    (
-                                        Direction::Down,
-                                        1.0 - (relative_loc / last_geometry.size.h as f64),
-                                    )
-                                }
-                            };
-
-                            let direction = if left_right.1 < up_down.1 {
-                                left_right.0
-                            } else {
-                                up_down.0
-                            };
-
-                            TargetZone::WindowSplit(id, direction)
-                        }
-                    }
-                });
-
-                match &mut *last_overview_hover {
-                    last_overview_hover @ None => {
-                        *last_overview_hover = Some((
-                            None,
-                            tree.traverse_pre_order_ids(root)
-                                .unwrap()
-                                .find(|id| {
-                                    matches!(
-                                        tree.get(id).unwrap().data(),
-                                        Data::Placeholder {
-                                            type_: PlaceholderType::GrabbedWindow,
-                                            ..
-                                        }
-                                    )
-                                })
-                                .map(TargetZone::InitialPlaceholder)
-                                .unwrap_or(TargetZone::Initial),
-                        ));
-                    }
-                    Some((instant, old_target_zone)) => {
-                        if *old_target_zone != target_zone {
-                            let overdue = if let Some(instant) = instant {
-                                match old_target_zone {
-                                    TargetZone::InitialPlaceholder(_) => {
-                                        Instant::now().duration_since(*instant)
-                                            > INITIAL_MOUSE_ANIMATION_DELAY
-                                    }
-                                    _ => {
-                                        Instant::now().duration_since(*instant)
-                                            > MOUSE_ANIMATION_DELAY
-                                    }
-                                }
-                            } else {
-                                *instant = Some(Instant::now());
-                                false
-                            };
-
-                            if overdue {
-                                let duration = if target_zone.is_window_zone()
-                                    && !old_target_zone.is_window_zone()
-                                {
-                                    ANIMATION_DURATION * 2
-                                } else {
-                                    ANIMATION_DURATION
-                                };
-
-                                let mut tree = tree.copy_clone();
-
-                                // remove old placeholders
-                                let removed = if let TargetZone::InitialPlaceholder(node_id) =
-                                    old_target_zone
-                                {
-                                    if tree.get(node_id).is_ok() {
-                                        TilingLayout::unmap_internal(&mut tree, node_id);
-                                    }
-                                    true
-                                } else if let TargetZone::WindowSplit(node_id, _) = old_target_zone
-                                {
-                                    if let Some(children) = tree
-                                        .get(node_id)
-                                        .ok()
-                                        .and_then(|node| node.parent())
-                                        .and_then(|parent_id| tree.get(parent_id).ok())
-                                        .map(|node| node.children().clone())
-                                    {
-                                        for id in children {
-                                            let matches = matches!(
-                                                tree.get(&id).unwrap().data(),
-                                                Data::Placeholder {
-                                                    type_: PlaceholderType::DropZone,
-                                                    ..
-                                                }
-                                            );
-
-                                            if matches {
-                                                TilingLayout::unmap_internal(&mut tree, &id);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    true
-                                } else if let TargetZone::GroupEdge(node_id, _) = old_target_zone {
-                                    if let Ok(node) = tree.get_mut(node_id) {
-                                        match node.data_mut() {
-                                            Data::Group { pill_indicator, .. } => {
-                                                *pill_indicator = None;
-                                            }
-                                            _ => unreachable!(),
-                                        }
-                                    }
-                                    true
-                                } else if let TargetZone::GroupInterior(node_id, _) =
-                                    old_target_zone
-                                {
-                                    if let Ok(node) = tree.get_mut(node_id) {
-                                        match node.data_mut() {
-                                            Data::Group { pill_indicator, .. } => {
-                                                *pill_indicator = None;
-                                            }
-                                            _ => unreachable!(),
-                                        }
-                                    }
-                                    true
-                                } else {
-                                    false
-                                };
-
-                                // add placeholders
-                                let added = if let TargetZone::WindowSplit(node_id, dir) =
-                                    &target_zone
-                                {
-                                    let id = tree
-                                        .insert(
-                                            Node::new(Data::Placeholder {
-                                                id: Id::new(),
-                                                last_geometry: Rectangle::from_size(
-                                                    (100, 100).into(),
-                                                ),
-                                                type_: PlaceholderType::DropZone,
-                                            }),
-                                            InsertBehavior::UnderNode(node_id),
-                                        )
-                                        .unwrap();
-                                    let orientation =
-                                        if matches!(dir, Direction::Left | Direction::Right) {
-                                            Orientation::Vertical
-                                        } else {
-                                            Orientation::Horizontal
-                                        };
-                                    TilingLayout::new_group(&mut tree, node_id, &id, orientation)
-                                        .unwrap();
-                                    if matches!(dir, Direction::Left | Direction::Up) {
-                                        tree.make_first_sibling(&id).unwrap();
-                                    }
-
-                                    true
-                                } else if let TargetZone::GroupEdge(node_id, direction) =
-                                    &target_zone
-                                {
-                                    if let Ok(node) = tree.get_mut(node_id) {
-                                        match node.data_mut() {
-                                            Data::Group { pill_indicator, .. } => {
-                                                *pill_indicator =
-                                                    Some(PillIndicator::Outer(*direction));
-                                            }
-                                            _ => unreachable!(),
-                                        }
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                } else if let TargetZone::GroupInterior(node_id, idx) = &target_zone
-                                {
-                                    if let Ok(node) = tree.get_mut(node_id) {
-                                        match node.data_mut() {
-                                            Data::Group { pill_indicator, .. } => {
-                                                *pill_indicator = Some(PillIndicator::Inner(*idx));
-                                            }
-                                            _ => unreachable!(),
-                                        }
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                };
-
-                                if removed || added {
-                                    let blocker = TilingLayout::update_positions(
-                                        &self.output,
-                                        &mut tree,
-                                        gaps,
-                                    );
-                                    self.queue.push_tree(tree, duration, blocker);
-                                }
-
-                                *instant = None;
-                                *old_target_zone = target_zone;
-                            }
-                        } else {
-                            *instant = None;
-                        }
+            TargetZone::GroupEdge(node_id, _) | TargetZone::GroupInterior(node_id, _) => {
+                if let Ok(node) = tree.get_mut(node_id) {
+                    match node.data_mut() {
+                        Data::Group { pill_indicator, .. } => *pill_indicator = None,
+                        _ => unreachable!(),
                     }
                 }
+                true
             }
+            _ => false,
+        };
+
+        // add placeholders
+        let added = match &target_zone {
+            TargetZone::WindowSplit(node_id, dir) => {
+                let id = tree
+                    .insert(
+                        Node::new(Data::Placeholder {
+                            id: Id::new(),
+                            last_geometry: Rectangle::from_size((100, 100).into()),
+                            type_: PlaceholderType::DropZone,
+                        }),
+                        InsertBehavior::UnderNode(node_id),
+                    )
+                    .unwrap();
+
+                let orientation = if matches!(dir, Direction::Left | Direction::Right) {
+                    Orientation::Vertical
+                } else {
+                    Orientation::Horizontal
+                };
+
+                TilingLayout::new_group(&mut tree, node_id, &id, orientation).unwrap();
+
+                if matches!(dir, Direction::Left | Direction::Up) {
+                    tree.make_first_sibling(&id).unwrap();
+                }
+
+                true
+            }
+            TargetZone::GroupEdge(node_id, direction) => tree.get_mut(node_id).is_ok_and(|node| {
+                match node.data_mut() {
+                    Data::Group { pill_indicator, .. } => {
+                        *pill_indicator = Some(PillIndicator::Outer(*direction))
+                    }
+                    _ => unreachable!(),
+                }
+                true
+            }),
+            TargetZone::GroupInterior(node_id, idx) => tree.get_mut(node_id).is_ok_and(|node| {
+                match node.data_mut() {
+                    Data::Group { pill_indicator, .. } => {
+                        *pill_indicator = Some(PillIndicator::Inner(*idx))
+                    }
+                    _ => unreachable!(),
+                }
+                true
+            }),
+            _ => false,
+        };
+
+        if removed || added {
+            let blocker = TilingLayout::update_positions(&self.output, &mut tree, gaps);
+            self.queue.push_tree(tree, duration, blocker);
         }
+
+        *instant = None;
+        *old_target_zone = target_zone;
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = (&CosmicMapped, Rectangle<i32, Local>)> {
@@ -3957,13 +3837,11 @@ impl TilingLayout {
 
     pub fn has_node(&self, node: &NodeId) -> bool {
         let tree = &self.queue.trees.back().unwrap().0;
-        tree.root_node_id()
-            .map(|root| {
-                tree.traverse_pre_order_ids(root)
-                    .unwrap()
-                    .any(|id| &id == node)
-            })
-            .unwrap_or(false)
+        tree.root_node_id().is_some_and(|root| {
+            tree.traverse_pre_order_ids(root)
+                .unwrap()
+                .any(|id| &id == node)
+        })
     }
 
     pub fn merge(&mut self, mut other: TilingLayout) {
@@ -4459,10 +4337,9 @@ where
             let is_placeholder_sibling = node
                 .parent()
                 .and_then(|parent_id| tree.children_ids(parent_id).ok())
-                .map(|mut siblings| {
+                .is_some_and(|mut siblings| {
                     siblings.any(|child_id| tree.get(child_id).unwrap().data().is_placeholder())
-                })
-                .unwrap_or(false);
+                });
 
             let render_potential_group = swap_desc.is_none()
                 && has_potential_groups
@@ -4597,18 +4474,15 @@ where
                         }
 
                         if mouse_tiling.is_some()
-                            && node
-                                .parent()
-                                .map(|parent_id| {
-                                    matches!(
-                                        tree.get(parent_id).unwrap().data(),
-                                        Data::Group {
-                                            pill_indicator: Some(_),
-                                            ..
-                                        }
-                                    )
-                                })
-                                .unwrap_or(false)
+                            && node.parent().is_some_and(|parent_id| {
+                                matches!(
+                                    tree.get(parent_id).unwrap().data(),
+                                    Data::Group {
+                                        pill_indicator: Some(_),
+                                        ..
+                                    }
+                                )
+                            })
                         {
                             // test if parent pill-indicator is adjacent
                             let parent_id = node.parent().unwrap();
@@ -4731,13 +4605,9 @@ where
                                     geo,
                                     8.,
                                     alpha
-                                        * if focused
-                                            .as_ref()
-                                            .map(|focused| {
-                                                focused == &swap_desc.as_ref().unwrap().node
-                                            })
-                                            .unwrap_or(false)
-                                        {
+                                        * if focused.as_ref().is_some_and(|focused| {
+                                            focused == &swap_desc.as_ref().unwrap().node
+                                        }) {
                                             0.4
                                         } else {
                                             0.15
@@ -4803,11 +4673,7 @@ where
                                     if *pill_idx == idx {
                                         geo.size.h -= 32;
                                     }
-                                    if idx
-                                        .checked_sub(1)
-                                        .map(|idx| idx == *pill_idx)
-                                        .unwrap_or(false)
-                                    {
+                                    if idx.checked_sub(1) == Some(*pill_idx) {
                                         if let Some(renderer) = renderer.as_mut() {
                                             push(
                                                 BackdropShader::element(
@@ -4845,11 +4711,7 @@ where
                                     if *pill_idx == idx {
                                         geo.size.w -= 32;
                                     }
-                                    if idx
-                                        .checked_sub(1)
-                                        .map(|idx| idx == *pill_idx)
-                                        .unwrap_or(false)
-                                    {
+                                    if idx.checked_sub(1) == Some(*pill_idx) {
                                         if let Some(renderer) = renderer.as_mut() {
                                             push(
                                                 BackdropShader::element(
@@ -5254,9 +5116,7 @@ fn render_new_tree_popups<R>(
 {
     let output_scale = output.current_scale().fractional_scale();
 
-    let is_active_output = seat
-        .map(|seat| &seat.active_output() == output)
-        .unwrap_or(false);
+    let is_active_output = seat.is_some_and(|seat| &seat.active_output() == output);
 
     let (_, swap_tree) = overview.1.unzip();
     let swap_desc = swap_desc.filter(|_| is_active_output);
@@ -5351,9 +5211,7 @@ fn render_new_tree_windows<R>(
         geo
     });
 
-    let is_active_output = seat
-        .map(|seat| &seat.active_output() == output)
-        .unwrap_or(false);
+    let is_active_output = seat.is_some_and(|seat| &seat.active_output() == output);
 
     let mut animating_window_upper_elements = Vec::new();
     let mut animating_window_lower_elements = Vec::new();
@@ -5524,10 +5382,9 @@ fn render_new_tree_windows<R>(
                             indicators.push(backdrop.into());
                         }
                     }
-                    if !swap_desc
+                    if swap_desc
                         .as_ref()
-                        .map(|desc| desc.stack_window.is_some())
-                        .unwrap_or(false)
+                        .is_none_or(|desc| desc.stack_window.is_none())
                         || focused.as_ref() == Some(&node_id)
                     {
                         indicators.push(CosmicMappedRenderElement::FocusIndicator(
@@ -5560,20 +5417,18 @@ fn render_new_tree_windows<R>(
                                 .as_ref()
                                 .and_then(|swap_desc| swap_desc.stack_window.as_ref())
                                 .zip(focused.as_ref())
-                                .map(|(stack_window, focused_id)| {
-                                    target_tree
-                                        .get(focused_id)
-                                        .ok()
-                                        .map(|focused| match focused.data() {
-                                            Data::Mapped { mapped, .. } => mapped
-                                                .stack_ref()
-                                                .map(|stack| &stack.active() != stack_window)
-                                                .unwrap_or(false),
+                                .is_some_and(|(stack_window, focused_id)| {
+                                    target_tree.get(focused_id).ok().is_some_and(|focused| {
+                                        match focused.data() {
+                                            Data::Mapped { mapped, .. } => {
+                                                mapped.stack_ref().is_some_and(|stack| {
+                                                    &stack.active() != stack_window
+                                                })
+                                            }
                                             _ => false,
-                                        })
-                                        .unwrap_or(false)
-                                })
-                                .unwrap_or(false))
+                                        }
+                                    })
+                                }))
                         && let Some(swap) = swap_indicator.as_mut()
                     {
                         let size = geo.size.as_logical();
@@ -5713,20 +5568,16 @@ fn render_new_tree_windows<R>(
                     .filter(|swap_desc| swap_desc.node == node_id)
                     .and_then(|swap_desc| swap_desc.stack_window.as_ref())
                     .zip(focused.as_ref())
-                    .map(|(stack_window, focused_id)| {
-                        target_tree
-                            .get(focused_id)
-                            .ok()
-                            .map(|focused| match focused.data() {
+                    .is_some_and(|(stack_window, focused_id)| {
+                        target_tree.get(focused_id).ok().is_some_and(|focused| {
+                            match focused.data() {
                                 Data::Mapped { mapped, .. } => mapped
                                     .stack_ref()
-                                    .map(|stack| &stack.active() == stack_window)
-                                    .unwrap_or(false),
+                                    .is_some_and(|stack| &stack.active() == stack_window),
                                 _ => false,
-                            })
-                            .unwrap_or(false)
+                            }
+                        })
                     })
-                    .unwrap_or(false)
                 {
                     let mut active_geo = mapped.active_window_geometry().as_local();
                     active_geo.loc += geo.loc - mapped.geometry().loc.as_local();
@@ -5743,17 +5594,14 @@ fn render_new_tree_windows<R>(
                     )
                 }
 
-                if swap_desc
-                    .as_ref()
-                    .map(|swap_desc| {
-                        (swap_desc.node == node_id
-                            || target_tree.ancestor_ids(&node_id).ok().is_none_or(
-                                |mut ancestors| ancestors.any(|id| &swap_desc.node == id),
-                            ))
-                            && swap_desc.stack_window.is_none()
-                    })
-                    .unwrap_or(false)
-                {
+                if swap_desc.as_ref().is_some_and(|swap_desc| {
+                    (swap_desc.node == node_id
+                        || target_tree
+                            .ancestor_ids(&node_id)
+                            .ok()
+                            .is_none_or(|mut ancestors| ancestors.any(|id| &swap_desc.node == id)))
+                        && swap_desc.stack_window.is_none()
+                }) {
                     swap_elements.extend(upper_elements);
                     swap_elements.extend(shadow_element);
                     swap_elements.extend(lower_elements);
@@ -5891,9 +5739,7 @@ fn render_new_tree(
                 .unwrap_or(*original_geo);
 
             let (geo, alpha, animating) = if let Some((old_geo, alpha)) = old_geo.filter(|_| {
-                swap_desc
-                    .map(|desc| desc.node != node_id && desc.stack_window.is_none())
-                    .unwrap_or(true)
+                swap_desc.is_none_or(|desc| desc.node != node_id && desc.stack_window.is_none())
             }) {
                 (
                     if was_minimized {
