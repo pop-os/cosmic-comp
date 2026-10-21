@@ -284,7 +284,7 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap::<B>(
+                    crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap(
                         self,
                         &seat,
                         &event.device(),
@@ -299,7 +299,7 @@ impl State {
                     let keyboard = seat.get_keyboard().unwrap();
                     let previous_modifiers = keyboard.modifier_state();
 
-                    if crate::wayland::handlers::virtual_keyboard::should_bypass_grab::<B>(
+                    if crate::wayland::handlers::virtual_keyboard::should_bypass_grab(
                         &seat,
                         &event.device(),
                     ) {
