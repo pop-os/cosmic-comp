@@ -89,8 +89,7 @@ impl XdgActivationHandler for State {
         let keyboard = seat.get_keyboard().unwrap();
         let valid = keyboard
             .last_enter()
-            .map(|last_enter| serial.is_no_older_than(&last_enter))
-            .unwrap_or(false);
+            .is_some_and(|last_enter| serial.is_no_older_than(&last_enter));
 
         if valid {
             let output = seat.active_output();

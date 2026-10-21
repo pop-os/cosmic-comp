@@ -500,8 +500,7 @@ impl State {
                         if seat
                             .user_data()
                             .get::<ResizeGrabMarker>()
-                            .map(|marker| marker.get())
-                            .unwrap_or(false)
+                            .is_some_and(|marker| marker.get())
                             && output != current_output
                         {
                             ptr.frame(self);
@@ -862,14 +861,11 @@ impl State {
 
                 let current_focus = seat.get_keyboard().unwrap().current_focus();
                 let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
-                    f.wl_surface()
-                        .map(|surface| {
-                            seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                                .map(|inhibitor| inhibitor.is_active())
-                                .unwrap_or(false)
-                                || seat.has_active_xwayland_grab(&surface)
-                        })
-                        .unwrap_or(false)
+                    f.wl_surface().is_some_and(|surface| {
+                        seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                            .is_some_and(|inhibitor| inhibitor.is_active())
+                            || seat.has_active_xwayland_grab(&surface)
+                    })
                 });
 
                 let serial = SERIAL_COUNTER.next_serial();
@@ -2151,14 +2147,11 @@ impl State {
 
         let current_focus = seat.get_keyboard().unwrap().current_focus();
         let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
-            f.wl_surface()
-                .map(|surface| {
-                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                        .map(|inhibitor| inhibitor.is_active())
-                        .unwrap_or(false)
-                        || seat.has_active_xwayland_grab(&surface)
-                })
-                .unwrap_or(false)
+            f.wl_surface().is_some_and(|surface| {
+                seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                    .is_some_and(|inhibitor| inhibitor.is_active())
+                    || seat.has_active_xwayland_grab(&surface)
+            })
         });
         let sym = handle.modified_sym();
 
@@ -2391,14 +2384,11 @@ impl State {
         let focused_output = seat.focused_or_active_output();
 
         let shortcuts_inhibited = current_focus.as_ref().is_some_and(|f| {
-            f.wl_surface()
-                .map(|surface| {
-                    seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
-                        .map(|inhibitor| inhibitor.is_active())
-                        .unwrap_or(false)
-                        || seat.has_active_xwayland_grab(&surface)
-                })
-                .unwrap_or(false)
+            f.wl_surface().is_some_and(|surface| {
+                seat.keyboard_shortcuts_inhibitor_for_surface(&surface)
+                    .is_some_and(|inhibitor| inhibitor.is_active())
+                    || seat.has_active_xwayland_grab(&surface)
+            })
         });
 
         if let Some(a11y_keyboard_monitor) = self.common.dbus_state.a11y_keyboard_monitor() {
@@ -3288,8 +3278,7 @@ pub fn update_output_image_copy_cursor_position(
             let constraints = cursor_capture_constraints(Some(cursor_geometry));
             if session
                 .current_constraints()
-                .map(|current_constraints| current_constraints.size != constraints.size)
-                .unwrap_or(true)
+                .is_none_or(|current_constraints| current_constraints.size != constraints.size)
             {
                 session.update_constraints(constraints);
             }
