@@ -2,7 +2,7 @@
 
 use crate::{config::xkb_config_to_wl, input::InputBackendId, state::State};
 use smithay::{
-    backend::input::{InputBackend, InputEvent},
+    backend::input::{Device, InputEvent},
     input::{Seat, keyboard::KeymapFile},
     wayland::{
         input_method::InputMethodSeat,
@@ -28,9 +28,9 @@ pub fn clear_active_virtual_keyboard_keymap(seat: &Seat<State>) {
     *data.active_virtual_keyboard_keymap.borrow_mut() = None;
 }
 
-pub fn should_bypass_grab<B: InputBackend>(seat: &Seat<State>, device: &B::Device) -> bool
+pub fn should_bypass_grab<Dev: Device>(seat: &Seat<State>, device: &Dev) -> bool
 where
-    <B as InputBackend>::Device: 'static,
+    Dev: 'static,
 {
     if let Some(device) = <dyn Any>::downcast_ref::<VirtualKeyboardDevice>(device) {
         seat.input_method().keyboard_grab_client() == device.client()
@@ -39,12 +39,12 @@ where
     }
 }
 
-pub fn update_virtual_keyboard_keymap<B: InputBackend>(
+pub fn update_virtual_keyboard_keymap<Dev: Device>(
     state: &mut State,
     seat: &Seat<State>,
-    device: &B::Device,
+    device: &Dev,
 ) where
-    <B as InputBackend>::Device: 'static,
+    Dev: 'static,
 {
     let Some(keyboard) = seat.get_keyboard() else {
         return;
