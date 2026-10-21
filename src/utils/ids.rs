@@ -14,7 +14,7 @@ macro_rules! id_gen {
             }
 
             let id = loop {
-                let new_id = $id_name.fetch_update(
+                let new_id = $id_name.try_update(
                     std::sync::atomic::Ordering::SeqCst,
                     std::sync::atomic::Ordering::SeqCst,
                     |mut id| {

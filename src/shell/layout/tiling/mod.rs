@@ -5382,9 +5382,9 @@ fn render_new_tree_windows<R>(
                             indicators.push(backdrop.into());
                         }
                     }
-                    if !swap_desc
+                    if swap_desc
                         .as_ref()
-                        .is_some_and(|desc| desc.stack_window.is_some())
+                        .is_none_or(|desc| desc.stack_window.is_none())
                         || focused.as_ref() == Some(&node_id)
                     {
                         indicators.push(CosmicMappedRenderElement::FocusIndicator(

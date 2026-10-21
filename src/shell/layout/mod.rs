@@ -50,11 +50,7 @@ pub fn is_dialog(window: &CosmicSurface) -> bool {
     let max_size = window.max_size_without_ssd();
     let min_size = window.min_size_without_ssd();
 
-    if min_size.is_some() && min_size == max_size {
-        return true;
-    }
-
-    false
+    min_size.is_some() && min_size == max_size
 }
 
 #[derive(Debug, Clone, Default)]
