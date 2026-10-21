@@ -47,9 +47,9 @@ use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, Device, DeviceCapability,
-        GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
+        Event, GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
         GestureSwipeUpdateEvent as _, InputBackend, InputEvent, InputTime, KeyState,
-        PointerAxisEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
+        KeyboardKeyEvent, PointerAxisEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
         TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
     },
     desktop::{WindowSurfaceType, utils::under_from_surface_tree},
@@ -2208,13 +2208,13 @@ impl State {
         seat: &Seat<State>,
         keycode: Keycode,
         key_state: KeyState,
+        time: InputTime,
         handle_shortcuts: bool,
     ) {
         let Some(keyboard) = seat.get_keyboard() else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
-        let time = InputTime::now();
         let previous_modifiers = keyboard.modifier_state();
         let result = keyboard
             .input_from_source(
@@ -2256,31 +2256,37 @@ impl State {
     pub(crate) fn inject_ei_key(
         &mut self,
         conn: &smithay::reexports::reis::eis::Connection,
-        keycode: Keycode,
-        key_state: KeyState,
+        event: smithay::reexports::reis::request::KeyboardKey,
     ) {
         let seat = self.common.shell.read().seats.last_active().clone();
         let backend_id = InputBackendId::Ei(conn.clone());
         let Some(source) = self.common.ei_keyboard_source.get(conn).copied() else {
             return;
         };
-        self.inject_source_key(source, &backend_id, &seat, keycode, key_state, true);
+        self.inject_source_key(
+            source,
+            &backend_id,
+            &seat,
+            event.key_code(),
+            event.state(),
+            event.time(),
+            true,
+        );
     }
 
     /// Inject a keysym from a libei `ei_text` device.
     pub(crate) fn inject_ei_text_keysym(
         &mut self,
         conn: &smithay::reexports::reis::eis::Connection,
-        keysym: u32,
-        key_state: KeyState,
+        event: smithay::reexports::reis::request::TextKeysym,
     ) {
         use smithay::wayland::input_method::InputMethodSeat;
         use smithay::wayland::text_input::TextInputSeat;
 
-        let keysym = Keysym::new(keysym);
+        let keysym = Keysym::new(event.keysym);
 
         // `ei_text` is a tap: act on the press, ignore the release.
-        if key_state != KeyState::Pressed {
+        if KeyState::from(event.state) != KeyState::Pressed {
             return;
         }
         let seat = self.common.shell.read().seats.last_active().clone();
@@ -2307,6 +2313,7 @@ impl State {
                     &seat,
                     keycode,
                     KeyState::Pressed,
+                    event.time(),
                     true,
                 );
                 self.inject_source_key(
@@ -2315,6 +2322,7 @@ impl State {
                     &seat,
                     keycode,
                     KeyState::Released,
+                    event.time(),
                     true,
                 );
                 return;
@@ -2349,7 +2357,7 @@ impl State {
         // Otherwise inject the keysym as a keycode tap via a temporary keymap delivered to just
         // the focused client (reaches non-text-input apps: terminals, games, ...). This never
         // touches the seat's own keyboard state.
-        keyboard.inject_text_keysyms(self, &[keysym], InputTime::now());
+        keyboard.inject_text_keysyms(self, &[keysym], event.time());
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
