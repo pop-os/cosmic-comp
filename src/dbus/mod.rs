@@ -16,6 +16,8 @@ use tracing::{error, warn};
 pub mod a11y_keyboard_monitor;
 use a11y_keyboard_monitor::A11yKeyboardMonitorState;
 pub mod ei;
+#[cfg(feature = "inputplumber")]
+pub mod inputplumber;
 #[cfg(feature = "logind")]
 pub mod logind;
 mod name_owners;
@@ -112,12 +114,27 @@ async fn init_session(state: &DBusState) -> zbus::Result<()> {
 
 async fn init_system(state: &DBusState) -> zbus::Result<()> {
     let conn = state.system_conn().await?.clone();
-    let evlh = state.0.evlh.clone();
-    state.spawn(async move {
-        if let Err(err) = power_hot_plug_task(conn, evlh).await {
-            tracing::warn!(?err, "Failed to initialize dbus handlers");
-        }
-    });
+
+    {
+        let conn = conn.clone();
+        let evlh = state.0.evlh.clone();
+        state.spawn(async move {
+            if let Err(err) = power_hot_plug_task(conn, evlh).await {
+                tracing::warn!(?err, "Failed to initialize dbus handlers");
+            }
+        });
+    }
+
+    #[cfg(feature = "inputplumber")]
+    {
+        let conn = conn.clone();
+        state.spawn(async move {
+            if let Err(err) = inputplumber::task(conn).await {
+                tracing::warn!(?err, "failed to initialize input plumber state");
+            }
+        });
+    }
+
     Ok(())
 }
 
