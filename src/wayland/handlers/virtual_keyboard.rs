@@ -86,17 +86,17 @@ impl VirtualKeyboardHandler for State {
                 // Handled by `update_virtual_keyboard_keymap`
                 VirtualKeyboardSpecialEvent::KeymapChanged { device: _ } => {}
                 VirtualKeyboardSpecialEvent::Modifiers {
-                    device: _,
+                    device,
                     mods_depressed,
                     mods_latched,
                     mods_locked,
                     group,
                 } => {
-                    let Some(keyboard) =
-                        self.common.shell.read().seats.last_active().get_keyboard()
-                    else {
+                    let Some(seat) = Seat::from_resource(device.wl_seat()) else {
                         return;
                     };
+                    update_virtual_keyboard_keymap(self, &seat, device);
+                    let keyboard = seat.get_keyboard().unwrap();
                     keyboard.with_xkb_state(self, |mut context| {
                         context.set_modifier_mask(
                             *mods_depressed,
