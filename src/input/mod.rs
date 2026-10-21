@@ -284,21 +284,59 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap::<B>(
-                        self,
-                        &seat,
-                        &event.device(),
-                    );
-
+                    let keyboard = seat.get_keyboard().unwrap();
+                    let previous_modifiers = keyboard.modifier_state();
                     let keycode = event.key_code();
+
+                    if previous_modifiers.logo
+                        || previous_modifiers.ctrl
+                        || previous_modifiers.alt
+                        || previous_modifiers.shift
+                    {
+                        let update_keymap =
+                            self.common
+                                .config
+                                .shortcuts
+                                .iter()
+                                .find_map(|(binding, action)| {
+                                    if matches!(
+                                        action,
+                                        cosmic_settings_config::shortcuts::action::Action::System(
+                                            InputSourceSwitch
+                                        )
+                                    ) {
+                                        Some(
+                                            binding.has_modifier()
+                                                && binding
+                                                    .keycode
+                                                    .is_some_and(|kc| kc == keycode.raw())
+                                                && ((binding.modifiers.logo
+                                                    && previous_modifiers.logo)
+                                                    || (binding.modifiers.ctrl
+                                                        && previous_modifiers.ctrl)
+                                                    || (binding.modifiers.alt
+                                                        && previous_modifiers.alt)
+                                                    || (binding.modifiers.shift
+                                                        && previous_modifiers.shift)),
+                                        )
+                                    } else {
+                                        None
+                                    }
+                                });
+
+                        if update_keymap.is_some_and(|v| v == true) {
+                            crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap::<
+                            B,
+                        >(self, &seat, &event.device());
+                        }
+                    }
+
                     let state = event.state();
                     trace!(?keycode, ?state, "key");
 
                     let serial = SERIAL_COUNTER.next_serial();
                     let time = Event::time(&event);
-                    let keyboard = seat.get_keyboard().unwrap();
-                    let previous_modifiers = keyboard.modifier_state();
-
+                    
                     if crate::wayland::handlers::virtual_keyboard::should_bypass_grab::<B>(
                         &seat,
                         &event.device(),
