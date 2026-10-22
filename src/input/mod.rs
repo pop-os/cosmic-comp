@@ -622,7 +622,7 @@ impl State {
                                 PointerFocusTarget::WlSurface { surface, .. } => {
                                     if under_from_surface_tree(
                                         surface,
-                                        position.as_logical() - surface_loc.to_f64(),
+                                        pos.as_logical() - surface_loc.to_f64(),
                                         (0, 0),
                                         WindowSurfaceType::ALL,
                                     )
@@ -634,7 +634,7 @@ impl State {
                                 PointerFocusTarget::X11Surface { surface, .. } => {
                                     if surface
                                         .surface_under(
-                                            position.as_logical() - surface_loc.to_f64(),
+                                            pos.as_logical() - surface_loc.to_f64(),
                                             (0, 0),
                                             WindowSurfaceType::ALL,
                                         )
@@ -692,7 +692,7 @@ impl State {
                     let serial = SERIAL_COUNTER.next_serial();
                     ptr.motion(
                         self,
-                        under,
+                        new_under.clone(),
                         &PointerMotionEvent {
                             location: position.as_logical(),
                             serial,
