@@ -677,7 +677,9 @@ impl Common {
                 let workspace = shell.active_space(&output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
 
-                if focus_stack.last().is_none() {
+                // While the session is locked, the lock surface takes the focus even with no
+                // window to fall back to.
+                if focus_stack.last().is_none() && shell.session_lock.is_none() {
                     continue; // Focus is valid
                 } else {
                     trace!("No previous window, focus fixup");
