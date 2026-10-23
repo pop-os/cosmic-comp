@@ -398,6 +398,13 @@ impl BackendData {
         }
     }
 
+    pub fn schedule_render_for_surface_commit(&mut self, output: &Output, coalescible: bool) {
+        match self {
+            BackendData::Kms(state) if coalescible => state.schedule_render_coalesced(output),
+            _ => self.schedule_render(output),
+        }
+    }
+
     pub fn dmabuf_imported(
         &mut self,
         client: Option<Client>,

@@ -96,6 +96,40 @@ impl State {
                 .for_each(update);
         }
     }
+
+    fn surface_is_decorated(&self, surface: &WlSurface) -> Option<bool> {
+        self.common
+            .shell
+            .read()
+            .element_for_surface(surface)?
+            .windows()
+            .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
+            .map(|(window, _)| window.is_decorated(false))
+    }
+
+    fn refresh_kde_decoration(&mut self, surface: &WlSurface, was_decorated: Option<bool>) {
+        let output = {
+            let shell = self.common.shell.read();
+            let Some(mapped) = shell.element_for_surface(surface) else {
+                return;
+            };
+            let is_decorated = mapped
+                .windows()
+                .find(|(window, _)| window.wl_surface().as_deref() == Some(surface))
+                .map(|(window, _)| window.is_decorated(false));
+            if is_decorated == was_decorated {
+                return;
+            }
+
+            mapped.on_commit(surface);
+            mapped.force_redraw();
+            shell.visible_output_for_surface(surface).cloned()
+        };
+
+        if let Some(output) = output {
+            self.backend.schedule_render(&output);
+        }
+    }
 }
 
 trait FromDecorationPreference {
@@ -220,6 +254,7 @@ impl KdeDecorationHandler for State {
     }
 
     fn new_decoration(&mut self, surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
+        let was_decorated = self.surface_is_decorated(surface);
         let mode = if let Some(mapped) = self.common.shell.read().element_for_surface(surface) {
             if mapped.is_stack() {
                 KdeMode::Server
@@ -244,6 +279,7 @@ impl KdeDecorationHandler for State {
         });
 
         decoration.mode(mode);
+        self.refresh_kde_decoration(surface, was_decorated);
     }
 
     fn request_mode(
@@ -253,6 +289,7 @@ impl KdeDecorationHandler for State {
         mode: WEnum<KdeMode>,
     ) {
         if let WEnum::Value(mode) = mode {
+            let was_decorated = self.surface_is_decorated(surface);
             with_states(surface, |states| {
                 states
                     .data_map
@@ -262,10 +299,12 @@ impl KdeDecorationHandler for State {
                     .mode = Some(mode);
             });
             decoration.mode(mode);
+            self.refresh_kde_decoration(surface, was_decorated);
         }
     }
 
     fn release(&mut self, decoration: &OrgKdeKwinServerDecoration, surface: &WlSurface) {
+        let was_decorated = self.surface_is_decorated(surface);
         with_states(surface, |states| {
             let mut state = states
                 .data_map
@@ -278,5 +317,6 @@ impl KdeDecorationHandler for State {
                 state.mode.take();
             }
         });
+        self.refresh_kde_decoration(surface, was_decorated);
     }
 }
