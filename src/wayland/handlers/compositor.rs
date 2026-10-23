@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{shell::grabs::SeatMoveGrabState, state::ClientState, utils::prelude::*};
+use crate::{
+    shell::grabs::SeatMoveGrabState,
+    state::ClientState,
+    utils::prelude::*,
+    wayland::{
+        handlers::background_effect::ComputedBlurRegionCachedState,
+        protocols::corner_radius::{CacheableCorners, CacheablePadding},
+    },
+};
 use calloop::Interest;
 use smithay::{
     backend::{
@@ -11,23 +19,29 @@ use smithay::{
         },
     },
     desktop::{LayerSurface, PopupKind, WindowSurfaceType, layer_map_for_output},
-    reexports::wayland_server::{Client, Resource, protocol::wl_surface::WlSurface},
+    reexports::wayland_server::{Client, DisplayHandle, Resource, protocol::wl_surface::WlSurface},
     utils::{Clock, Logical, Monotonic, SERIAL_COUNTER, Size, Time},
     wayland::{
+        alpha_modifier::AlphaModifierSurfaceCachedState,
         compositor::{
-            BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+            BufferAssignment, Cacheable, CompositorClientState, CompositorHandler, CompositorState,
+            RectangleKind, RegionAttributes, SUBSURFACE_ROLE, SubsurfaceCachedState,
             SurfaceAttributes, SurfaceData, TraversalAction, add_blocker, add_post_commit_hook,
-            add_pre_commit_hook, with_states, with_surface_tree_downward,
+            add_pre_commit_hook, get_children, get_parent, is_sync_subsurface, with_states,
+            with_surface_tree_downward,
         },
         dmabuf::get_dmabuf,
         drm_syncobj::DrmSyncobjCachedState,
+        presentation::PresentationFeedbackCachedState,
         seat::WaylandFocus,
         shell::{
             wlr_layer::LayerSurfaceAttributes,
             xdg::{
-                ToplevelSurface, XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
+                SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XDG_TOPLEVEL_ROLE,
+                XdgPopupSurfaceRoleAttributes, XdgToplevelSurfaceRoleAttributes,
             },
         },
+        viewporter::ViewportCachedState,
     },
     xwayland::XWaylandClientData,
 };
@@ -164,6 +178,239 @@ pub fn frame_time_filter_fn(states: &SurfaceData) -> Kind {
 
 pub const FRAME_TIME_FILTER: KindEvaluation = KindEvaluation::Dynamic(frame_time_filter_fn);
 
+#[derive(Debug, Default)]
+struct SurfaceCommitClassification {
+    recorded: bool,
+    coalescible: bool,
+    client_scale_bits: Option<u64>,
+    subsurface_tree: Vec<(u32, Option<u32>, i32, i32)>,
+}
+
+impl Cacheable for SurfaceCommitClassification {
+    fn commit(&mut self, _dh: &DisplayHandle) -> Self {
+        std::mem::take(self)
+    }
+
+    fn merge_into(self, into: &mut Self, _dh: &DisplayHandle) {
+        if !self.recorded {
+            return;
+        }
+        if into.recorded {
+            into.coalescible &= self.coalescible;
+            into.client_scale_bits = self.client_scale_bits;
+            into.subsurface_tree = self.subsurface_tree;
+        } else {
+            *into = self;
+        }
+    }
+}
+
+fn regions_equal(a: &Option<RegionAttributes>, b: &Option<RegionAttributes>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) if a.rects.len() == b.rects.len() => {
+            a.rects
+                .iter()
+                .zip(&b.rects)
+                .all(|((a_kind, a_rect), (b_kind, b_rect))| {
+                    matches!(
+                        (a_kind, b_kind),
+                        (RectangleKind::Add, RectangleKind::Add)
+                            | (RectangleKind::Subtract, RectangleKind::Subtract)
+                    ) && a_rect == b_rect
+                })
+        }
+        _ => false,
+    }
+}
+
+fn subsurface_tree(surface: &WlSurface) -> Vec<(u32, Option<u32>, i32, i32)> {
+    let mut root = surface.clone();
+    while let Some(parent) = get_parent(&root) {
+        root = parent;
+    }
+
+    let mut tree = Vec::new();
+    with_surface_tree_downward(
+        &root,
+        None,
+        |surface, _, _| TraversalAction::DoChildren(Some(surface.id().protocol_id())),
+        |surface, states, parent| {
+            let location = parent.map_or((0, 0), |_| {
+                let mut state = states.cached_state.get::<SubsurfaceCachedState>();
+                let location = state.pending().location;
+                (location.x, location.y)
+            });
+            tree.push((surface.id().protocol_id(), *parent, location.0, location.1));
+        },
+        |_, _, _| true,
+    );
+    tree
+}
+
+fn surface_state_unchanged(states: &SurfaceData, frame_callback_required: bool) -> bool {
+    if !matches!(states.role, Some(XDG_TOPLEVEL_ROLE | SUBSURFACE_ROLE)) {
+        return false;
+    }
+
+    let surface_unchanged = {
+        let mut state = states.cached_state.get::<SurfaceAttributes>();
+        let current = {
+            let current = state.current();
+            (
+                current.buffer_scale,
+                current.buffer_transform,
+                current.opaque_region.clone(),
+                current.input_region.clone(),
+            )
+        };
+        let pending = state.pending();
+        (!frame_callback_required || !pending.frame_callbacks.is_empty())
+            && pending.buffer.is_none()
+            && pending.buffer_delta.is_none()
+            && pending.damage.is_empty()
+            && pending.buffer_scale == current.0
+            && pending.buffer_transform == current.1
+            && regions_equal(&pending.opaque_region, &current.2)
+            && regions_equal(&pending.input_region, &current.3)
+    };
+    if !surface_unchanged {
+        return false;
+    }
+
+    let viewport_unchanged = {
+        let mut state = states.cached_state.get::<ViewportCachedState>();
+        let current = {
+            let current = state.current();
+            (current.src, current.dst)
+        };
+        let pending = state.pending();
+        (pending.src, pending.dst) == current
+    };
+    let alpha_unchanged = {
+        let mut state = states.cached_state.get::<AlphaModifierSurfaceCachedState>();
+        let current = state.current().multiplier();
+        state.pending().multiplier() == current
+    };
+    let blur_unchanged = {
+        let mut state = states.cached_state.get::<ComputedBlurRegionCachedState>();
+        let current = state.current().blur_region.clone();
+        state.pending().blur_region == current
+    };
+    let corners_unchanged = {
+        let mut state = states.cached_state.get::<CacheableCorners>();
+        let current = state
+            .current()
+            .0
+            .map(|c| (c.top_left, c.top_right, c.bottom_right, c.bottom_left));
+        state
+            .pending()
+            .0
+            .map(|c| (c.top_left, c.top_right, c.bottom_right, c.bottom_left))
+            == current
+    };
+    let padding_unchanged = {
+        let mut state = states.cached_state.get::<CacheablePadding>();
+        let current = state
+            .current()
+            .0
+            .map(|p| (p.top, p.right, p.bottom, p.left));
+        state
+            .pending()
+            .0
+            .map(|p| (p.top, p.right, p.bottom, p.left))
+            == current
+    };
+    let role_unchanged = match states.role {
+        Some(XDG_TOPLEVEL_ROLE) => {
+            let xdg_surface_unchanged = {
+                let mut state = states.cached_state.get::<SurfaceCachedState>();
+                let current = {
+                    let current = state.current();
+                    (current.geometry, current.min_size, current.max_size)
+                };
+                let pending = state.pending();
+                (pending.geometry, pending.min_size, pending.max_size) == current
+            };
+            let toplevel_unchanged = {
+                let mut state = states.cached_state.get::<ToplevelCachedState>();
+                let current = state.current().last_acked.as_ref().map(|c| c.serial);
+                states
+                    .data_map
+                    .get::<Mutex<XdgToplevelSurfaceRoleAttributes>>()
+                    .and_then(|role| role.lock().unwrap().last_acked.as_ref().map(|c| c.serial))
+                    == current
+            };
+            xdg_surface_unchanged && toplevel_unchanged
+        }
+        Some(SUBSURFACE_ROLE) => {
+            let mut state = states.cached_state.get::<SubsurfaceCachedState>();
+            let current = state.current().location;
+            state.pending().location == current
+        }
+        _ => false,
+    };
+    let no_presentation_feedback = states
+        .cached_state
+        .get::<PresentationFeedbackCachedState>()
+        .pending()
+        .callbacks
+        .is_empty();
+    let no_explicit_sync = {
+        let mut state = states.cached_state.get::<DrmSyncobjCachedState>();
+        let pending = state.pending();
+        pending.acquire_point.is_none() && pending.release_point.is_none()
+    };
+
+    viewport_unchanged
+        && alpha_unchanged
+        && blur_unchanged
+        && corners_unchanged
+        && padding_unchanged
+        && role_unchanged
+        && no_presentation_feedback
+        && no_explicit_sync
+}
+
+fn synchronized_subtree_unchanged(surface: &WlSurface) -> bool {
+    if !with_states(surface, |states| surface_state_unchanged(states, false)) {
+        return false;
+    }
+
+    get_children(surface)
+        .iter()
+        .all(synchronized_subtree_unchanged)
+}
+
+fn synchronized_descendants_unchanged(surface: &WlSurface) -> bool {
+    get_children(surface)
+        .into_iter()
+        .filter(is_sync_subsurface)
+        .all(|child| synchronized_subtree_unchanged(&child))
+}
+
+fn frame_callback_only_commit(
+    states: &SurfaceData,
+    client_scale_bits: Option<u64>,
+    subsurface_tree: &[(u32, Option<u32>, i32, i32)],
+    synchronized_descendants_unchanged: bool,
+) -> bool {
+    if !surface_state_unchanged(states, true) {
+        return false;
+    }
+
+    let (previous_client_scale_bits, previous_subsurface_tree) = {
+        let mut state = states.cached_state.get::<SurfaceCommitClassification>();
+        let current = state.current();
+        (current.client_scale_bits, current.subsurface_tree.clone())
+    };
+
+    client_scale_bits.is_some()
+        && client_scale_bits == previous_client_scale_bits
+        && subsurface_tree == previous_subsurface_tree
+        && synchronized_descendants_unchanged
+}
+
 impl CompositorHandler for State {
     fn compositor_state(&mut self) -> &mut CompositorState {
         &mut self.common.compositor_state
@@ -176,7 +423,28 @@ impl CompositorHandler for State {
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
             let mut acquire_point = None;
+            let client_scale_bits = surface
+                .client()
+                .map(|client| client_compositor_state(&client).client_scale().to_bits());
+            let subsurface_tree = subsurface_tree(surface);
+            let synchronized_descendants_unchanged = synchronized_descendants_unchanged(surface);
             let maybe_dmabuf = with_states(surface, |surface_data| {
+                let coalescible = frame_callback_only_commit(
+                    surface_data,
+                    client_scale_bits,
+                    &subsurface_tree,
+                    synchronized_descendants_unchanged,
+                );
+                *surface_data
+                    .cached_state
+                    .get::<SurfaceCommitClassification>()
+                    .pending() = SurfaceCommitClassification {
+                    recorded: true,
+                    coalescible,
+                    client_scale_bits,
+                    subsurface_tree,
+                };
+
                 acquire_point = surface_data
                     .cached_state
                     .get::<DrmSyncobjCachedState>()
@@ -261,6 +529,17 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        let commit_classification = with_states(surface, |states| {
+            let mut classification = states.cached_state.get::<SurfaceCommitClassification>();
+            let classification = classification.current();
+            let coalescible = classification
+                .recorded
+                .then_some(classification.coalescible);
+            classification.recorded = false;
+            classification.coalescible = false;
+            coalescible
+        });
+
         // first load the buffer for various smithay helper functions (which also initializes the RendererSurfaceState)
         on_commit_buffer_handler::<Self>(surface);
 
@@ -274,7 +553,13 @@ impl CompositorHandler for State {
 
         // schedule a new render
         if let Some(output) = shell.visible_output_for_surface(surface) {
-            self.backend.schedule_render(output);
+            match commit_classification {
+                Some(coalescible) => self
+                    .backend
+                    .schedule_render_for_surface_commit(output, coalescible && !mapped),
+                None if is_sync_subsurface(surface) => {}
+                None => self.backend.schedule_render(output),
+            }
         }
 
         if mapped {
