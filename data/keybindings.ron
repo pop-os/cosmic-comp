@@ -110,6 +110,10 @@
     (modifiers: [Alt, Shift], key: "Tab"): System(WindowSwitcherPrevious),
     (modifiers: [Super], key: "Tab"): System(WindowSwitcher),
     (modifiers: [Super, Shift], key: "Tab"): System(WindowSwitcherPrevious),
+    (modifiers: [Alt], key: "grave"): System(WindowSwitcherSameApp),
+    (modifiers: [Alt], key: "dead_grave"): System(WindowSwitcherSameApp),
+    (modifiers: [Alt, Shift], key: "grave"): System(WindowSwitcherSameAppPrevious),
+    (modifiers: [Alt, Shift], key: "dead_grave"): System(WindowSwitcherSameAppPrevious),
 
     (modifiers: [], key: "Print"): System(Screenshot),
     (modifiers: [], key: "XF86AudioRaiseVolume"): System(VolumeRaise),
