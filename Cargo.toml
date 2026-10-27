@@ -28,9 +28,7 @@ cosmic-settings-config = { git = "https://github.com/pop-os/cosmic-settings-daem
 cosmic-settings-daemon-config = { git = "https://github.com/pop-os/cosmic-settings-daemon", features = [
     "greeter",
 ] }
-cosmic-text = { version = "0.19", features = [
-    "shape-run-cache",
-] }
+cosmic-text = { version = "0.19", features = ["shape-run-cache"] }
 libdisplay-info = "0.3.0"
 egui = { version = "0.31.1", optional = true }
 egui_plot = { version = "0.31.0", optional = true }
@@ -40,7 +38,9 @@ i18n-embed = { version = "0.16", features = [
 ] }
 i18n-embed-fl = "0.10"
 iced_tiny_skia = { git = "https://github.com/pop-os/libcosmic" }
-iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = ["geometry"] }
+iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = [
+    "geometry",
+] }
 indexmap = "2.13"
 keyframe = "1.1.1"
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
@@ -68,6 +68,7 @@ tracing-subscriber = { version = "0.3.22", features = [
     "tracing-log",
 ] }
 tracy-client = { version = "0.18.4", default-features = false }
+wayland-server = { version = "0.31.13", features = ["libwayland_1_23"] }
 wayland-backend = "0.3.12"
 wayland-scanner = "0.31.8"
 xcursor = "0.3.10"
