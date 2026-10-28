@@ -2213,7 +2213,7 @@ impl State {
     ///
     /// `handle_shortcuts` is `false` when synthesizing releases so still-held keys are just
     /// forwarded without re-triggering bindings.
-    pub(crate) fn inject_source_key(
+    pub(crate) fn inject_source_key<Dev: Device + 'static>(
         &mut self,
         source: KeyboardSource,
         backend_id: &InputBackendId,
@@ -2221,8 +2221,13 @@ impl State {
         keycode: Keycode,
         key_state: KeyState,
         time: InputTime,
+        device: &Dev,
         handle_shortcuts: bool,
     ) {
+        crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap(
+            self, seat, device,
+        );
+
         let Some(keyboard) = seat.get_keyboard() else {
             return;
         };
@@ -2282,6 +2287,7 @@ impl State {
             event.key_code(),
             event.state(),
             event.time(),
+            &event.device(),
             true,
         );
     }
@@ -2326,6 +2332,7 @@ impl State {
                     keycode,
                     KeyState::Pressed,
                     event.time(),
+                    &event.device(),
                     true,
                 );
                 self.inject_source_key(
@@ -2335,6 +2342,7 @@ impl State {
                     keycode,
                     KeyState::Released,
                     event.time(),
+                    &event.device(),
                     true,
                 );
                 return;

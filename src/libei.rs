@@ -206,6 +206,12 @@ impl State {
             }
         }
 
+        crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap(
+            self,
+            &seat,
+            &event.device(),
+        );
+
         // Bind the whole chunk to spare keycodes in one temporary keymap per batch (delivered
         // to just the focused client), so we change the keymap ~once per chunk instead of once
         // per character. Leaves the seat's own keyboard state untouched.
