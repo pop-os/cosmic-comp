@@ -681,20 +681,18 @@ where
         .map(|((w, start), idx)| (w.handle, idx, start));
     let workspace = (workspace.handle, idx);
 
-    std::mem::drop(shell_guard);
-
     let element_filter = if workspace_overview_is_open(output) {
         ElementFilter::LayerShellOnly
     } else {
         ElementFilter::All
     };
-    let zoom_state = shell.read().zoom_state().cloned();
+    let zoom_state = shell_guard.zoom_state().cloned();
 
     #[allow(unused_mut)]
     let workspace_elements = workspace_elements(
         _gpu,
         renderer,
-        shell,
+        &shell_guard,
         zoom_state.as_ref(),
         now,
         output,
@@ -718,7 +716,7 @@ where
 pub fn workspace_elements<R>(
     _gpu: Option<&DrmNode>,
     renderer: &mut R,
-    shell: &Arc<parking_lot::RwLock<Shell>>,
+    shell: &Shell,
     zoom_level: Option<&ZoomState>,
     now: Time<Monotonic>,
     output: &Output,
@@ -736,21 +734,13 @@ where
 {
     let mut elements = Vec::<CosmicElement<R>>::new();
 
-    let shell_ref = shell.read();
-    let seats = shell_ref.seats.iter().cloned().collect::<Vec<_>>();
-    if seats.is_empty() {
-        return Ok(Vec::new());
-    }
-    let theme = shell_ref.theme().clone();
+    let theme = shell.theme().clone();
     let blur_strength = (theme.cosmic().frosted as u8 + 1) as usize;
     let scale = output.current_scale().fractional_scale();
-    // we don't want to hold a shell lock across `cursor_elements`,
-    // that is prone to deadlock with the main-thread on some grabs.
-    std::mem::drop(shell_ref);
 
     cursor_elements(
         renderer,
-        seats.iter(),
+        shell.seats.iter(),
         zoom_level,
         &theme,
         blur_strength,
@@ -762,7 +752,6 @@ where
         &mut |elem| elements.push(elem),
     );
 
-    let shell = shell.read();
     let overview = shell.overview_mode();
     let (resize_mode, resize_indicator) = shell.resize_mode();
     let resize_indicator = resize_indicator.map(|indicator| (resize_mode, indicator));
@@ -1584,7 +1573,7 @@ where
     elements.extend(workspace_elements(
         gpu,
         renderer,
-        shell,
+        &shell.read(),
         zoom_level,
         now,
         output,
