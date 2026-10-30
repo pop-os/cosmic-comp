@@ -358,6 +358,23 @@ impl CosmicMapped {
         window.is_tiled(pending)
     }
 
+    /// Only tiled window of its workspace, laid out and drawn like a maximized one
+    pub fn set_auto_maximized(&self, auto_maximized: bool) {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.set_auto_maximized(auto_maximized),
+            CosmicMappedInternal::Window(w) => w.set_auto_maximized(auto_maximized),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn is_auto_maximized(&self) -> bool {
+        match &self.element {
+            CosmicMappedInternal::Stack(s) => s.is_auto_maximized(),
+            CosmicMappedInternal::Window(w) => w.is_auto_maximized(),
+            _ => unreachable!(),
+        }
+    }
+
     pub fn set_fullscreen(&self, fullscreen: bool) {
         for window in match &self.element {
             CosmicMappedInternal::Stack(s) => {
