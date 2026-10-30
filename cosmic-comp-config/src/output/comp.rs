@@ -83,6 +83,13 @@ pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
                 OpenOptions::new().read(true).open(path).unwrap(),
             ) {
                 Ok(mut config) => {
+                    config.config.retain(|info, configs| {
+                        let valid = info.len() == configs.len();
+                        if !valid {
+                            warn!(?info, "Mismatched output group, dropping it");
+                        }
+                        valid
+                    });
                     for (info, config) in config.config.iter_mut() {
                         let config_clone = config.clone();
                         for conf in config.iter_mut() {
