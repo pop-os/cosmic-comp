@@ -13,8 +13,10 @@ use wayland_backend::server::ClientId;
 
 use crate::{
     shell::{
-        element::CosmicStack, focus::FocusTarget, grabs::fullscreen_items,
-        layout::tiling::PlaceholderType,
+        element::CosmicStack,
+        focus::FocusTarget,
+        grabs::fullscreen_items,
+        layout::{WorkspaceAssignments, tiling::PlaceholderType},
     },
     utils,
     wayland::{
@@ -32,7 +34,10 @@ use cosmic_comp_config::{
 use cosmic_config::ConfigSet;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, ResizeDirection};
-use cosmic_settings_config::{shortcuts, window_rules::ApplicationException};
+use cosmic_settings_config::{
+    shortcuts,
+    window_rules::{ApplicationException, WorkspaceAssignment},
+};
 use keyframe::{ease, functions::EaseInOutCubic};
 use smallvec::{SmallVec, smallvec};
 use smithay::{
@@ -74,7 +79,7 @@ use smithay::{
     },
     xwayland::X11Surface,
 };
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::{
     backend::render::animations::spring::{Spring, SpringParams},
@@ -313,6 +318,7 @@ pub struct Shell {
     appearance_conf: AppearanceConfig,
     tiling_exceptions: TilingExceptions,
     pending_focus_overrides: Vec<PendingFocusOverride>,
+    workspace_assignments: WorkspaceAssignments,
 
     #[cfg(feature = "debug")]
     pub debug_active: bool,
@@ -1746,6 +1752,9 @@ impl Shell {
 
         let tiling_exceptions = layout::TilingExceptions::new(config.tiling_exceptions.iter());
 
+        let workspace_assignments =
+            layout::WorkspaceAssignments::new(config.workspace_assignments.iter());
+
         Shell {
             workspaces: Workspaces::new(config, theme.clone()),
             seats: Seats::new(),
@@ -1769,6 +1778,7 @@ impl Shell {
             zoom_state: None,
             tiling_exceptions,
             pending_focus_overrides: Vec::new(),
+            workspace_assignments,
 
             #[cfg(feature = "debug")]
             debug_active: false,
@@ -3045,7 +3055,35 @@ impl Shell {
                     Some(ActivationContext::Workspace(handle)) => Some(handle),
                     _ => None,
                 };
-                (handle, output.unwrap_or_else(|| seat.active_output()), None)
+
+                // NOTE: if the assigned workspace is not active, it will not be made active.
+                let assigned_workspace_name =
+                    layout::get_workspace_assignment(&self.workspace_assignments, &window);
+
+                let assigned_workspace_handle =
+                    assigned_workspace_name.as_deref().and_then(|target_name| {
+                        self.workspaces
+                            .spaces()
+                            .find(|ws| ws.name.as_deref() == Some(target_name))
+                            .map(|ws| ws.handle)
+                    });
+
+                if let Some(name) = assigned_workspace_name
+                    && assigned_workspace_handle.is_none()
+                {
+                    warn!(
+                        "Assigned workspace name: {} not found for appid: {} and title: {}",
+                        name,
+                        window.app_id(),
+                        window.title()
+                    );
+                };
+
+                (
+                    assigned_workspace_handle.or(handle),
+                    output.unwrap_or_else(|| seat.active_output()),
+                    None,
+                )
             }
         };
 
@@ -5278,6 +5316,13 @@ impl Shell {
         I: Iterator<Item = &'a ApplicationException>,
     {
         self.tiling_exceptions = layout::TilingExceptions::new(exceptions);
+    }
+
+    pub fn update_workspace_assignments<'a, I>(&mut self, assignments: I)
+    where
+        I: Iterator<Item = &'a WorkspaceAssignment>,
+    {
+        self.workspace_assignments = layout::WorkspaceAssignments::new(assignments);
     }
 
     pub fn take_presentation_feedback(
