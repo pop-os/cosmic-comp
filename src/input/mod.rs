@@ -47,9 +47,9 @@ use smithay::backend::input::{Switch, SwitchState, SwitchToggleEvent};
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisRelativeDirection, AxisSource, Device, DeviceCapability,
-        GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
+        Event, GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as _,
         GestureSwipeUpdateEvent as _, InputBackend, InputEvent, InputTime, KeyState,
-        PointerAxisEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
+        KeyboardKeyEvent, PointerAxisEvent, ProximityState, TabletToolButtonEvent, TabletToolEvent,
         TabletToolProximityEvent, TabletToolTipEvent, TabletToolTipState, TouchEvent,
     },
     desktop::{WindowSurfaceType, utils::under_from_surface_tree},
@@ -79,6 +79,7 @@ use smithay::{
         keyboard_shortcuts_inhibit::KeyboardShortcutsInhibitorSeat,
         pointer_constraints::{PointerConstraint, with_pointer_constraint},
         seat::WaylandFocus,
+        virtual_keyboard::VirtualKeyboardDevice,
     },
 };
 use tracing::{error, trace};
@@ -238,7 +239,18 @@ impl State {
         match event {
             InputEvent::DeviceAdded { device } => {
                 let shell = self.common.shell.read();
-                let seat = shell.seats.last_active();
+                let seat = if let Some(device) =
+                    <dyn Any>::downcast_ref::<VirtualKeyboardDevice>(&device)
+                {
+                    match shell.seats.iter().find(|seat| seat.owns(device.wl_seat())) {
+                        Some(seat) => seat,
+                        None => {
+                            return;
+                        }
+                    }
+                } else {
+                    shell.seats.last_active()
+                };
                 let led_state = seat.get_keyboard().unwrap().led_state();
                 seat.devices().add_device(&device, led_state, &backend_id);
                 if device.has_capability(DeviceCapability::TabletTool) {
@@ -284,7 +296,7 @@ impl State {
                 if let Some(seat) = maybe_seat {
                     self.common.idle_notifier_state.notify_activity(&seat);
 
-                    crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap::<B>(
+                    crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap(
                         self,
                         &seat,
                         &event.device(),
@@ -299,7 +311,7 @@ impl State {
                     let keyboard = seat.get_keyboard().unwrap();
                     let previous_modifiers = keyboard.modifier_state();
 
-                    if crate::wayland::handlers::virtual_keyboard::should_bypass_grab::<B>(
+                    if crate::wayland::handlers::virtual_keyboard::should_bypass_grab(
                         &seat,
                         &event.device(),
                     ) {
@@ -2194,20 +2206,25 @@ impl State {
     ///
     /// `handle_shortcuts` is `false` when synthesizing releases so still-held keys are just
     /// forwarded without re-triggering bindings.
-    pub(crate) fn inject_source_key(
+    pub(crate) fn inject_source_key<Dev: Device + 'static>(
         &mut self,
         source: KeyboardSource,
         backend_id: &InputBackendId,
         seat: &Seat<State>,
         keycode: Keycode,
         key_state: KeyState,
+        time: InputTime,
+        device: &Dev,
         handle_shortcuts: bool,
     ) {
+        crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap(
+            self, seat, device,
+        );
+
         let Some(keyboard) = seat.get_keyboard() else {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
-        let time = InputTime::now();
         let previous_modifiers = keyboard.modifier_state();
         let result = keyboard
             .input_from_source(
@@ -2249,31 +2266,38 @@ impl State {
     pub(crate) fn inject_ei_key(
         &mut self,
         conn: &smithay::reexports::reis::eis::Connection,
-        keycode: Keycode,
-        key_state: KeyState,
+        event: smithay::reexports::reis::request::KeyboardKey,
     ) {
         let seat = self.common.shell.read().seats.last_active().clone();
         let backend_id = InputBackendId::Ei(conn.clone());
         let Some(source) = self.common.ei_keyboard_source.get(conn).copied() else {
             return;
         };
-        self.inject_source_key(source, &backend_id, &seat, keycode, key_state, true);
+        self.inject_source_key(
+            source,
+            &backend_id,
+            &seat,
+            event.key_code(),
+            event.state(),
+            event.time(),
+            &event.device(),
+            true,
+        );
     }
 
     /// Inject a keysym from a libei `ei_text` device.
     pub(crate) fn inject_ei_text_keysym(
         &mut self,
         conn: &smithay::reexports::reis::eis::Connection,
-        keysym: u32,
-        key_state: KeyState,
+        event: smithay::reexports::reis::request::TextKeysym,
     ) {
         use smithay::wayland::input_method::InputMethodSeat;
         use smithay::wayland::text_input::TextInputSeat;
 
-        let keysym = Keysym::new(keysym);
+        let keysym = Keysym::new(event.keysym);
 
         // `ei_text` is a tap: act on the press, ignore the release.
-        if key_state != KeyState::Pressed {
+        if KeyState::from(event.state) != KeyState::Pressed {
             return;
         }
         let seat = self.common.shell.read().seats.last_active().clone();
@@ -2300,6 +2324,8 @@ impl State {
                     &seat,
                     keycode,
                     KeyState::Pressed,
+                    event.time(),
+                    &event.device(),
                     true,
                 );
                 self.inject_source_key(
@@ -2308,6 +2334,8 @@ impl State {
                     &seat,
                     keycode,
                     KeyState::Released,
+                    event.time(),
+                    &event.device(),
                     true,
                 );
                 return;
@@ -2342,7 +2370,7 @@ impl State {
         // Otherwise inject the keysym as a keycode tap via a temporary keymap delivered to just
         // the focused client (reaches non-text-input apps: terminals, games, ...). This never
         // touches the seat's own keyboard state.
-        keyboard.inject_text_keysyms(self, &[keysym]);
+        keyboard.inject_text_keysyms(self, &[keysym], event.time());
     }
 
     /// Determine is key event should be intercepted as a key binding, or forwarded to surface
