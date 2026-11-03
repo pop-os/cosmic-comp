@@ -674,10 +674,14 @@ impl Common {
                     trace!("Surface dead, focus fixup");
                 }
             } else {
+                let has_lock_surface = shell
+                    .session_lock
+                    .as_ref()
+                    .is_some_and(|lock| lock.surfaces.contains_key(&output));
                 let workspace = shell.active_space(&output).unwrap();
                 let focus_stack = workspace.focus_stack.get(seat);
 
-                if focus_stack.last().is_none() {
+                if focus_stack.last().is_none() && !has_lock_surface {
                     continue; // Focus is valid
                 } else {
                     trace!("No previous window, focus fixup");
