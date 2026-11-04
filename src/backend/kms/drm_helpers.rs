@@ -12,9 +12,10 @@ use smithay::{
         dumbbuffer::DumbBuffer,
         property,
     },
-    utils::Transform,
+    utils::{DevPath, Transform},
 };
 use std::{collections::HashMap, ops::Range};
+use tracing::debug;
 
 pub fn display_configuration(
     device: &mut DrmDevice,
@@ -333,6 +334,18 @@ pub fn set_max_bpc(dev: &impl ControlDevice, conn: connector::Handle, bpc: u32) 
         property::Value::UnsignedRange(val) => val as u32,
         _ => unreachable!(),
     })
+}
+
+pub fn clear_gamma(dev: &impl ControlDevice, crtc: crtc::Handle) -> Result<()> {
+    let prop = match get_prop(dev, crtc, "GAMMA_LUT") {
+        Ok(prop) => prop,
+        Err(_) => {
+            debug!("{:?} Crtc {:?} has no GAMMA_LUT", dev.dev_path(), crtc);
+            return Ok(());
+        }
+    };
+    dev.set_property(crtc, prop, property::Value::Blob(0u64).into())
+        .map_err(Into::<anyhow::Error>::into)
 }
 
 pub fn panel_orientation(dev: &impl ControlDevice, conn: connector::Handle) -> Result<Transform> {
