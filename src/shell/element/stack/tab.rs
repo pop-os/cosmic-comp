@@ -11,10 +11,10 @@ use cosmic::{
             touch,
             widget::{Id, Widget, operation::Operation, tree::Tree},
         },
-        widget::{self, container::draw_background, rule::FillMode, scrollable::AbsoluteOffset},
+        widget::{rule, scrollable::AbsoluteOffset},
     },
     theme,
-    widget::{Icon, icon::from_name, text},
+    widget::{Icon, button, container, icon::from_name, text},
 };
 
 #[derive(Clone, Copy)]
@@ -27,23 +27,23 @@ pub(super) enum TabRuleTheme {
 impl From<TabRuleTheme> for theme::Rule {
     fn from(theme: TabRuleTheme) -> Self {
         match theme {
-            TabRuleTheme::ActiveActivated => Self::custom(|theme| widget::rule::Style {
+            TabRuleTheme::ActiveActivated => Self::custom(|theme| rule::Style {
                 color: theme.cosmic().accent_color().into(),
                 snap: true,
                 radius: 0.0.into(),
-                fill_mode: FillMode::Full,
+                fill_mode: rule::FillMode::Full,
             }),
-            TabRuleTheme::ActiveDeactivated => Self::custom(|theme| widget::rule::Style {
+            TabRuleTheme::ActiveDeactivated => Self::custom(|theme| rule::Style {
                 color: theme.cosmic().palette.neutral_5.into(),
                 snap: true,
                 radius: 0.0.into(),
-                fill_mode: FillMode::Full,
+                fill_mode: rule::FillMode::Full,
             }),
-            TabRuleTheme::Default => Self::custom(|theme| widget::rule::Style {
+            TabRuleTheme::Default => Self::custom(|theme| rule::Style {
                 color: theme.cosmic().palette.neutral_5.into(),
                 snap: true,
                 radius: 8.0.into(),
-                fill_mode: FillMode::Padded(4),
+                fill_mode: rule::FillMode::Padded(4),
             }),
         }
     }
@@ -59,60 +59,56 @@ pub(super) enum TabBackgroundTheme {
 impl From<TabBackgroundTheme> for theme::Container<'_> {
     fn from(background_theme: TabBackgroundTheme) -> Self {
         match background_theme {
-            TabBackgroundTheme::ActiveActivated => {
-                Self::custom(move |theme| widget::container::Style {
-                    snap: true,
-                    icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    text_color: Some(Color::from(theme.cosmic().accent_text_color())),
-                    background: Some(Background::Color({
-                        let mut color = theme
+            TabBackgroundTheme::ActiveActivated => Self::custom(move |theme| container::Style {
+                snap: true,
+                icon_color: Some(Color::from(theme.cosmic().accent_text_color())),
+                text_color: Some(Color::from(theme.cosmic().accent_text_color())),
+                background: Some(Background::Color({
+                    let mut color = theme
+                        .cosmic()
+                        .primary(theme.cosmic().frosted_windows)
+                        .component
+                        .selected;
+                    if theme.cosmic().frosted_windows {
+                        color.alpha = theme
                             .cosmic()
-                            .primary(theme.cosmic().frosted_windows)
-                            .component
-                            .selected;
-                        if theme.cosmic().frosted_windows {
-                            color.alpha = theme
-                                .cosmic()
-                                .alpha_map
-                                .blurred_alpha(theme.cosmic().frosted);
-                        }
-                        color.into()
-                    })),
-                    border: Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                })
-            }
-            TabBackgroundTheme::ActiveDeactivated => {
-                Self::custom(move |theme| widget::container::Style {
-                    snap: true,
-                    icon_color: None,
-                    text_color: None,
-                    background: Some(Background::Color({
-                        let mut color = theme
+                            .alpha_map
+                            .blurred_alpha(theme.cosmic().frosted);
+                    }
+                    color.into()
+                })),
+                border: Border {
+                    radius: 0.0.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
+            }),
+            TabBackgroundTheme::ActiveDeactivated => Self::custom(move |theme| container::Style {
+                snap: true,
+                icon_color: None,
+                text_color: None,
+                background: Some(Background::Color({
+                    let mut color = theme
+                        .cosmic()
+                        .primary(theme.cosmic().frosted_windows)
+                        .component
+                        .base;
+                    if theme.cosmic().frosted_windows {
+                        color.alpha = theme
                             .cosmic()
-                            .primary(theme.cosmic().frosted_windows)
-                            .component
-                            .base;
-                        if theme.cosmic().frosted_windows {
-                            color.alpha = theme
-                                .cosmic()
-                                .alpha_map
-                                .blurred_alpha(theme.cosmic().frosted);
-                        }
-                        color.into()
-                    })),
-                    border: Border {
-                        radius: 0.0.into(),
-                        width: 0.0,
-                        color: Color::TRANSPARENT,
-                    },
-                    shadow: Default::default(),
-                })
-            }
+                            .alpha_map
+                            .blurred_alpha(theme.cosmic().frosted);
+                    }
+                    color.into()
+                })),
+                border: Border {
+                    radius: 0.0.into(),
+                    width: 0.0,
+                    color: Color::TRANSPARENT,
+                },
+                shadow: Default::default(),
+            }),
             TabBackgroundTheme::Default => Self::Transparent,
         }
     }
@@ -201,18 +197,18 @@ impl<Message: TabMessage + 'static> Tab<Message> {
             .size(16)
             .prefer_svg(true)
             .icon()
-            .apply(widget::button)
+            .apply(button::custom)
             .padding(0)
-            .class(theme::iced::Button::Text);
+            .class(theme::Button::Icon);
         if let Some(close_message) = self.close_message {
             close_button = close_button.on_press(close_message);
         }
 
         let items = vec![
-            widget::rule::vertical(4).class(self.rule_theme).into(),
+            rule::vertical(4).class(self.rule_theme).into(),
             self.app_icon
                 .clone()
-                .apply(widget::container)
+                .apply(container)
                 .width(Length::Shrink)
                 .padding([2, 4])
                 .center_y(Length::Fill)
@@ -227,7 +223,7 @@ impl<Message: TabMessage + 'static> Tab<Message> {
                 .width(Length::Fill)
                 .into(),
             close_button
-                .apply(widget::container)
+                .apply(container)
                 .width(Length::Shrink)
                 .padding([2, 4])
                 .center_y(Length::Fill)
@@ -439,7 +435,7 @@ where
         use cosmic::widget::container::Catalog;
         let style = theme.style(&self.background);
 
-        draw_background(renderer, &style, layout.bounds());
+        container::draw_background(renderer, &style, layout.bounds());
 
         for ((child, state), layout) in self
             .elements

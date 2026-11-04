@@ -9,6 +9,7 @@ use crate::{
     },
     hooks::{Decorations, HOOKS},
     shell::{
+        ModalBehavior,
         element::{CosmicMappedKey, CosmicMappedKeyInner},
         focus::target::PointerFocusTarget,
         grabs::{GrabType, ReleaseMode, ResizeEdge},
@@ -28,9 +29,9 @@ use cosmic::{
         core::{Background, Border, Color, Length, border::Radius},
         id::Id,
         runtime::Task,
-        widget::{self as iced_widget, scrollable::AbsoluteOffset},
+        widget::scrollable::AbsoluteOffset,
     },
-    theme, widget as cosmic_widget,
+    theme, widget,
 };
 use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts;
@@ -326,7 +327,7 @@ impl CosmicStack {
                     if !p.group_focused.load(Ordering::SeqCst) {
                         if let Ok(old) =
                             p.active
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                .try_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
                                     val.checked_sub(1)
                                 })
                         {
@@ -353,7 +354,7 @@ impl CosmicStack {
                         let max = p.windows.lock().unwrap().len();
                         if let Ok(old) =
                             p.active
-                                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
+                                .try_update(Ordering::SeqCst, Ordering::SeqCst, |val| {
                                     if val < max - 1 { Some(val + 1) } else { None }
                                 })
                         {
@@ -918,6 +919,7 @@ impl CosmicStack {
                         &state.common.config,
                         &state.common.event_loop_handle,
                         false,
+                        ModalBehavior::Block,
                     );
                     if let Some((grab, focus)) = res {
                         match grab.grab_type() {
@@ -1105,6 +1107,7 @@ impl Program for CosmicStackInternal {
                                 &state.common.config,
                                 &state.common.event_loop_handle,
                                 false,
+                                ModalBehavior::Block,
                             );
                             if let Some((grab, focus)) = res {
                                 match grab.grab_type() {
@@ -1302,18 +1305,18 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
     fn view(&self, stack: &CosmicStackInternal) -> cosmic::Element<'_, Message> {
         let windows = stack.windows.lock().unwrap();
         if stack.geometry.lock().unwrap().is_none() {
-            return iced_widget::row(Vec::new()).into();
+            return widget::space().into();
         };
         let active = stack.active.load(Ordering::SeqCst);
         let group_focused = stack.group_focused.load(Ordering::SeqCst);
 
-        let elements = vec![
-            cosmic_widget::icon::from_name("window-stack-symbolic")
+        let elements = [
+            widget::icon::from_name("window-stack-symbolic")
                 .size(16)
                 .prefer_svg(true)
                 .icon()
                 .class(if group_focused {
-                    theme::Svg::custom(|theme| iced_widget::svg::Style {
+                    theme::Svg::custom(|theme| widget::svg::Style {
                         color: Some(if theme.cosmic().is_dark {
                             Color::BLACK
                         } else {
@@ -1323,10 +1326,10 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 } else {
                     theme::Svg::Default
                 })
-                .apply(iced_widget::container)
-                .padding([4, 24])
-                .align_y(Alignment::Center)
-                .apply(iced_widget::mouse_area)
+                .apply(widget::container)
+                .center_y(24)
+                .center_x(64)
+                .apply(widget::mouse_area)
                 .on_press(Message::DragStart)
                 .on_right_press(Message::Menu)
                 .into(),
@@ -1358,11 +1361,10 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 .height(Length::Fill)
                 .width(Length::Fill),
             ),
-            iced_widget::space::horizontal()
-                .width(Length::Fixed(0.0))
-                .apply(iced_widget::container)
-                .padding([64, 24])
-                .apply(iced_widget::mouse_area)
+            widget::space()
+                .height(24)
+                .width(64)
+                .apply(widget::mouse_area)
                 .on_press(Message::DragStart)
                 .on_right_press(Message::Menu)
                 .into(),
@@ -1385,10 +1387,10 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
         };
         let group_focused = stack.group_focused.load(Ordering::SeqCst);
 
-        iced_widget::row(elements)
+        widget::row(elements)
             .height(TAB_HEIGHT as u16)
             .width(Length::Fill)
-            .apply(iced_widget::container)
+            .apply(widget::container)
             .align_y(Alignment::Center)
             .class(theme::Container::custom(move |theme| {
                 let cosmic_theme = theme.cosmic();
@@ -1402,7 +1404,7 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                     background.alpha = cosmic_theme.alpha_map.blurred_alpha(cosmic_theme.frosted);
                 }
 
-                iced_widget::container::Style {
+                widget::container::Style {
                     snap: true,
                     icon_color: Some(
                         cosmic_theme
@@ -1521,7 +1523,7 @@ impl SpaceElement for CosmicStack {
             let len = windows.len();
             let _ = p
                 .active
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |active| {
                     (active >= len).then_some(len - 1)
                 });
             let active = p.active.load(Ordering::SeqCst);
@@ -1723,6 +1725,7 @@ impl PointerTarget<State> for CosmicStack {
                         },
                         state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
+                        ModalBehavior::Block,
                     );
                     if let Some((grab, focus)) = res
                         && let GrabType::Pointer = grab.grab_type()
@@ -1784,6 +1787,7 @@ impl PointerTarget<State> for CosmicStack {
                         &state.common.config,
                         &state.common.event_loop_handle,
                         false,
+                        ModalBehavior::Block,
                     );
                     if let Some((grab, focus)) = res
                         && let GrabType::Pointer = grab.grab_type()
@@ -1998,6 +2002,7 @@ impl TabletToolTarget<State> for CosmicStack {
                         },
                         state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
+                        ModalBehavior::Block,
                     );
                     if let Some((grab, focus)) = res
                         && let GrabType::TabletTool = grab.grab_type()

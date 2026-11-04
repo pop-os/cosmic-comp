@@ -526,10 +526,16 @@ impl Workspace {
                     .mapped()
                     .chain(self.tiling_layer.mapped().map(|(w, _)| w))
                     .chain(move_mapped.iter())
+                    .chain(
+                        self.minimized_windows
+                            .iter()
+                            .flat_map(MinimizedWindow::mapped),
+                    )
             };
             stack.retain(|w| match w {
                 FocusTarget::Fullscreen(s) => fullscreen_surfaces.contains(&s),
-                FocusTarget::Window(w) => mapped().any(|m| w == m),
+                // Sticky windows live in the `WorkspaceSet` but are shown on whichever workspace is current
+                FocusTarget::Window(w) => w.is_sticky() || mapped().any(|m| w == m),
             });
         }
     }
@@ -1586,8 +1592,7 @@ impl Workspace {
                                 node: node_id.clone(),
                                 stack_window: if mapped
                                     .stack_ref()
-                                    .map(|stack| !stack.whole_stack_focused())
-                                    .unwrap_or(false)
+                                    .is_some_and(|stack| !stack.whole_stack_focused())
                                 {
                                     Some(mapped.active_window())
                                 } else {
@@ -1767,13 +1772,17 @@ impl Workspace {
 
             self.floating_layer.render(
                 renderer,
-                focused.as_ref().and_then(|target| {
-                    if let FocusTarget::Window(mapped) = target {
-                        Some(mapped)
-                    } else {
-                        None
-                    }
-                }),
+                render_focus
+                    .then(|| {
+                        focused.as_ref().and_then(|target| {
+                            if let FocusTarget::Window(mapped) = target {
+                                Some(mapped)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .flatten(),
                 resize_indicator.clone(),
                 indicator_thickness,
                 alpha,

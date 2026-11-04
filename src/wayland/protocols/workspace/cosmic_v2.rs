@@ -288,8 +288,7 @@ pub fn send_workspace_to_client(
 
     if handle_state
         .tiling
-        .map(|state| state != workspace.tiling)
-        .unwrap_or(true)
+        .is_none_or(|state| state != workspace.tiling)
     {
         instance.tiling_state(workspace.tiling);
         handle_state.tiling = Some(workspace.tiling);

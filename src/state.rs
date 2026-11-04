@@ -23,6 +23,7 @@ use crate::{
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
+            session_lock_layer::SessionLockLayerState,
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
             workspace::{WorkspaceState, WorkspaceUpdateGuard},
@@ -102,7 +103,7 @@ use smithay::{
         shell::{
             kde::decoration::KdeDecorationState,
             wlr_layer::WlrLayerShellState,
-            xdg::{XdgShellState, decoration::XdgDecorationState},
+            xdg::{XdgShellState, decoration::XdgDecorationState, dialog::XdgDialogState},
         },
         shm::ShmState,
         single_pixel_buffer::SinglePixelBufferState,
@@ -320,6 +321,7 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
+    pub session_lock_layer_state: SessionLockLayerState,
 
     #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
@@ -665,7 +667,7 @@ impl State {
             .unwrap();
 
         let clock = Clock::new();
-        let config = Config::load(&handle);
+        let config = Config::load(&handle, kiosk_command.is_some());
         let compositor_state = CompositorState::new::<Self>(dh);
         let corner_radius_state = CornerRadiusState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
@@ -743,6 +745,7 @@ impl State {
                 WmCapabilities::WindowMenu,
             ],
         );
+        XdgDialogState::new::<State>(dh);
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(dh, client_not_sandboxed);
@@ -762,6 +765,9 @@ impl State {
         let a11y_state = A11yState::new::<State, _>(dh, client_not_sandboxed);
 
         let dbus_state = DBusState::init(&handle);
+
+        let session_lock_layer_state =
+            SessionLockLayerState::new::<State, _>(dh, client_not_sandboxed);
 
         State {
             common: Common {
@@ -830,6 +836,7 @@ impl State {
                 pointer_focus_state: None,
                 dbus_state,
                 keyboard_layout_state,
+                session_lock_layer_state,
 
                 #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
@@ -968,6 +975,8 @@ impl Common {
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let shell = self.shell.read();
         let processor = |namespace: Option<usize>| {
             move |surface: &WlSurface, states: &SurfaceData| {
@@ -1074,6 +1083,8 @@ impl Common {
         render_element_states: &RenderElementStates,
         mut dmabuf_feedback: impl FnMut(DrmNode) -> Option<SurfaceDmabufFeedback>,
     ) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let shell = self.shell.read();
 
         if let Some(session_lock) = shell.session_lock.as_ref()
@@ -1287,6 +1298,8 @@ impl Common {
 
     #[profiling::function]
     pub fn send_frames(&self, output: &Output, sequence: Option<usize>) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let time = self.clock.now();
         let should_send = |surface: &WlSurface, states: &SurfaceData| {
             // Do the standard primary scanout output check. For pointer surfaces it deduplicates

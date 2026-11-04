@@ -14,10 +14,9 @@ use cosmic::{
     iced::{
         Alignment,
         core::{Background, Border, Color, Length},
-        widget::{container, row, space},
     },
     theme,
-    widget::{icon::from_name, text},
+    widget::{container, icon::from_name, row, space, text},
 };
 use cosmic_settings_config::shortcuts::action::{Action, ResizeDirection};
 use smithay::{
@@ -253,7 +252,7 @@ impl Program for ResizeIndicatorInternal {
     type Message = ();
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        row(vec![
+        row([
             text::heading(&self.shortcut1).into(),
             text::body(fl!("grow-window")).into(),
             space::horizontal().width(40).into(),

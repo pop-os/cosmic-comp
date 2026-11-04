@@ -519,6 +519,7 @@ impl<P: Program + Send + 'static> TabletToolTarget<crate::state::State> for Iced
         _tool_descriptor: &TabletToolDescriptor,
     ) {
         let mut internal = self.0.lock().unwrap();
+        internal.cursor_pos = None;
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));
@@ -728,6 +729,7 @@ impl<P: Program + Send + 'static> PointerTarget<crate::state::State> for IcedEle
         _time: InputTime,
     ) {
         let mut internal = self.0.lock().unwrap();
+        internal.cursor_pos = None;
         internal
             .state
             .queue_event(Event::Mouse(MouseEvent::CursorLeft));

@@ -7,12 +7,9 @@ use crate::{
 use calloop::LoopHandle;
 use cosmic::{
     Apply,
-    iced::{
-        core::{Alignment, Background, Border, Color, Length},
-        widget::{container, row, space},
-    },
+    iced::core::{Alignment, Background, Border, Color, Length},
     theme,
-    widget::{icon::from_name, text},
+    widget::{container, icon::from_name, row, space, text},
 };
 use smithay::{
     backend::renderer::ImportMem,
@@ -91,13 +88,13 @@ impl Program for SwapIndicatorInternal {
     type Message = ();
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        row(vec![
+        row([
             from_name("window-swap-symbolic")
                 .size(32)
                 .prefer_svg(true)
                 .icon()
                 .into(),
-            space::horizontal().width(16).into(),
+            space().width(16).into(),
             text::title3(fl!("swap-windows")).into(),
         ])
         .align_y(Alignment::Center)

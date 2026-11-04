@@ -5,6 +5,7 @@ use crate::{
     },
     hooks::{Decorations, HOOKS},
     shell::{
+        ModalBehavior,
         element::{CosmicMappedKey, CosmicMappedKeyInner},
         focus::target::PointerFocusTarget,
         grabs::{GrabType, ReleaseMode, ResizeEdge},
@@ -753,6 +754,7 @@ impl Program for CosmicWindowInternal {
                             &state.common.config,
                             &state.common.event_loop_handle,
                             false,
+                            ModalBehavior::Block,
                         );
                         if let Some((grab, focus)) = res {
                             match grab.grab_type() {
@@ -777,7 +779,7 @@ impl Program for CosmicWindowInternal {
                 if let Some(surface) = self.window.wl_surface().map(Cow::into_owned) {
                     loop_handle.insert_idle(move |state| {
                         let mut shell = state.common.shell.write();
-                        shell.minimize_request(&surface)
+                        shell.minimize_request(&surface, ModalBehavior::Block)
                     });
                 }
             }
@@ -787,7 +789,12 @@ impl Program for CosmicWindowInternal {
                         let mut shell = state.common.shell.write();
                         if let Some(mapped) = shell.element_for_surface(&surface).cloned() {
                             let seat = shell.seats.last_active().clone();
-                            shell.maximize_toggle(&mapped, &seat, &state.common.event_loop_handle)
+                            shell.maximize_toggle(
+                                &mapped,
+                                &seat,
+                                &state.common.event_loop_handle,
+                                ModalBehavior::Block,
+                            )
                         }
                     });
                 }
@@ -1110,6 +1117,7 @@ impl PointerTarget<State> for CosmicWindow {
                         },
                         state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
+                        ModalBehavior::Block,
                     );
 
                     if let Some((grab, focus)) = res
@@ -1313,6 +1321,7 @@ impl TabletToolTarget<State> for CosmicWindow {
                         },
                         state.common.config.cosmic_conf.edge_snap_threshold,
                         false,
+                        ModalBehavior::Block,
                     );
 
                     if let Some((grab, focus)) = res
