@@ -1569,19 +1569,7 @@ impl Common {
             .user_data()
             .insert_if_missing_threadsafe(|| OutputId(next_output_id()));
 
-        if let Some(state) = shell.zoom_state.as_ref() {
-            output.user_data().insert_if_missing_threadsafe(|| {
-                Mutex::new(OutputZoomState::new(
-                    &state.seat,
-                    output,
-                    1.0,
-                    state.increment,
-                    state.movement,
-                    self.event_loop_handle.clone(),
-                    shell.theme.clone(),
-                ))
-            });
-        }
+        shell.add_output_zoom_state(output, &self.event_loop_handle);
 
         std::mem::drop(shell);
         self.refresh(); // fixes indicies of any moved workspaces
@@ -2592,6 +2580,22 @@ impl Shell {
 
     pub fn appearance_config(&self) -> AppearanceConfig {
         self.appearance_conf
+    }
+
+    pub fn add_output_zoom_state(&self, output: &Output, loop_handle: &LoopHandle<'static, State>) {
+        if let Some(state) = self.zoom_state.as_ref() {
+            output.user_data().insert_if_missing_threadsafe(|| {
+                Mutex::new(OutputZoomState::new(
+                    &state.seat,
+                    output,
+                    1.0,
+                    state.increment,
+                    state.movement,
+                    loop_handle.clone(),
+                    self.theme.clone(),
+                ))
+            });
+        }
     }
 
     pub fn trigger_zoom(
