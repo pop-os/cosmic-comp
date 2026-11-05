@@ -146,8 +146,7 @@ impl OutputExt for Output {
     fn is_enabled(&self) -> bool {
         self.user_data()
             .get::<RefCell<OutputConfig>>()
-            .map(|conf| conf.borrow().enabled != OutputState::Disabled)
-            .unwrap_or(false)
+            .is_some_and(|conf| conf.borrow().enabled != OutputState::Disabled)
     }
 
     fn config(&self) -> Ref<'_, OutputConfig> {

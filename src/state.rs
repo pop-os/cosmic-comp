@@ -103,7 +103,7 @@ use smithay::{
         shell::{
             kde::decoration::KdeDecorationState,
             wlr_layer::WlrLayerShellState,
-            xdg::{XdgShellState, decoration::XdgDecorationState},
+            xdg::{XdgShellState, decoration::XdgDecorationState, dialog::XdgDialogState},
         },
         shm::ShmState,
         single_pixel_buffer::SinglePixelBufferState,
@@ -667,7 +667,7 @@ impl State {
             .unwrap();
 
         let clock = Clock::new();
-        let config = Config::load(&handle);
+        let config = Config::load(&handle, kiosk_command.is_some());
         let compositor_state = CompositorState::new::<Self>(dh);
         let corner_radius_state = CornerRadiusState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
@@ -745,6 +745,7 @@ impl State {
                 WmCapabilities::WindowMenu,
             ],
         );
+        XdgDialogState::new::<State>(dh);
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(dh, client_not_sandboxed);

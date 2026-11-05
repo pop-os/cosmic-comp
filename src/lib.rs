@@ -289,7 +289,7 @@ Project home page: https://github.com/pop-os/cosmic-comp
 Options:
   -h, --help          Show this message
   --no-xwayland       Run without Xwayland
-  -v, --version       Show the version of cosmic-comp"#
+  -V, --version       Show the version of cosmic-comp"#
     );
 }
 
@@ -298,6 +298,9 @@ fn init_wayland_display(
 ) -> Result<(DisplayHandle, OsString)> {
     let display = Display::new().unwrap();
     let handle = display.handle();
+
+    const WAYLAND_DEFAULT_MAX_BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
+    handle.set_default_max_buffer_size(WAYLAND_DEFAULT_MAX_BUFFER_SIZE);
 
     let source = ListeningSocketSource::new_auto().unwrap();
     let socket_name = source.socket_name().to_os_string();

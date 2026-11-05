@@ -619,6 +619,7 @@ where
                     changed = true;
                 } else if geometry_changed && let Some(geo) = geometry {
                     instance.geometry(&wl_output, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h);
+                    changed = true;
                 }
             }
         }

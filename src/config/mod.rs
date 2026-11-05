@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use anyhow::Context;
-use cosmic_config::{ConfigGet, CosmicConfigEntry};
+use cosmic_config::{ConfigGet, ConfigSet, CosmicConfigEntry};
 use cosmic_settings_config::window_rules::ApplicationException;
 use cosmic_settings_config::{Shortcuts, shortcuts, window_rules};
 use serde::{Deserialize, Serialize};
@@ -49,8 +49,8 @@ mod types;
 use cosmic::config::CosmicTk;
 pub use cosmic_comp_config::EdidProduct;
 use cosmic_comp_config::{
-    ActivationPolicy, AppearanceConfig, CosmicCompConfig, DecorationPreference, KeyboardConfig,
-    TileBehavior, XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
+    ActivationPolicy, AppearanceConfig, CosmicCompConfig, CursorHideConfig, DecorationPreference,
+    KeyboardConfig, TileBehavior, XkbConfig, XwaylandDescaling, XwaylandEavesdropping, ZoomConfig,
     input::{DeviceState as InputDeviceState, InputConfig, TouchpadOverride},
     output::comp::{
         OutputConfig, OutputInfo, OutputState, OutputsConfig, TransformDef, load_outputs,
@@ -172,7 +172,7 @@ pub enum ColorFilter {
 }
 
 impl Config {
-    pub fn load(loop_handle: &LoopHandle<'_, State>) -> Config {
+    pub fn load(loop_handle: &LoopHandle<'_, State>, kiosk_mode: bool) -> Config {
         let config = cosmic_config::Config::new("com.system76.CosmicComp", 1).unwrap();
         let source = cosmic_config::calloop::ConfigWatchSource::new(&config).unwrap();
         loop_handle
@@ -182,7 +182,7 @@ impl Config {
             .expect("Failed to add cosmic-config to the event loop");
         let xdg = xdg::BaseDirectories::new();
 
-        let cosmic_comp_config =
+        let mut cosmic_comp_config =
             CosmicCompConfig::get_entry(&config).unwrap_or_else(|(errs, c)| {
                 if cfg!(debug_assertions) {
                     for err in errs {
@@ -191,6 +191,18 @@ impl Config {
                 }
                 c
             });
+
+        // `cursor_hide_timeout` was replaced by the grouped `cursor_hide` key.
+        // Seed the new key once so configs hand-edited before the rename keep
+        // working; the old file is left in place so a downgrade still reads it.
+        if config.get::<CursorHideConfig>("cursor_hide").is_err()
+            && let Ok(legacy) = config.get::<Option<u32>>("cursor_hide_timeout")
+        {
+            cosmic_comp_config.cursor_hide.idle_timeout = legacy;
+            if let Err(err) = config.set("cursor_hide", cosmic_comp_config.cursor_hide) {
+                warn!(?err, "Failed to migrate cursor_hide_timeout to cursor_hide");
+            }
+        }
 
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
@@ -248,40 +260,48 @@ impl Config {
 
         // Source key bindings from com.system76.CosmicSettings.Shortcuts
         let settings_context = shortcuts::context().expect("Failed to load shortcuts config");
-        let system_actions = shortcuts::system_actions(&settings_context);
-        let shortcuts = shortcuts::shortcuts(&settings_context);
+        let mut system_actions = Default::default();
+        let mut shortcuts = Default::default();
+        // Kiosk mode disables shortcuts
+        if !kiosk_mode {
+            system_actions = shortcuts::system_actions(&settings_context);
+            shortcuts = shortcuts::shortcuts(&settings_context);
 
-        // Listen for updates to the keybindings config.
-        match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
-            Ok(source) => {
-                if let Err(err) = loop_handle.insert_source(source, |(config, keys), (), state| {
-                    for key in keys {
-                        match key.as_str() {
-                            // Reload the keyboard shortcuts config.
-                            "custom" | "defaults" => {
-                                state.common.config.shortcuts = shortcuts::shortcuts(&config);
+            // Listen for updates to the keybindings config.
+            match cosmic_config::calloop::ConfigWatchSource::new(&settings_context) {
+                Ok(source) => {
+                    if let Err(err) =
+                        loop_handle.insert_source(source, |(config, keys), (), state| {
+                            for key in keys {
+                                match key.as_str() {
+                                    // Reload the keyboard shortcuts config.
+                                    "custom" | "defaults" => {
+                                        state.common.config.shortcuts =
+                                            shortcuts::shortcuts(&config);
+                                    }
+
+                                    "system_actions" => {
+                                        state.common.config.system_actions =
+                                            shortcuts::system_actions(&config);
+                                    }
+
+                                    _ => (),
+                                }
                             }
-
-                            "system_actions" => {
-                                state.common.config.system_actions =
-                                    shortcuts::system_actions(&config);
-                            }
-
-                            _ => (),
-                        }
+                        })
+                    {
+                        warn!(
+                            ?err,
+                            "Failed to watch com.system76.CosmicSettings.Shortcuts config"
+                        );
                     }
-                }) {
-                    warn!(
-                        ?err,
-                        "Failed to watch com.system76.CosmicSettings.Shortcuts config"
-                    );
                 }
-            }
-            Err(err) => warn!(
-                ?err,
-                "failed to create config watch source for com.system76.CosmicSettings.Shortcuts"
-            ),
-        };
+                Err(err) => warn!(
+                    ?err,
+                    "failed to create config watch source for com.system76.CosmicSettings.Shortcuts"
+                ),
+            };
+        }
 
         let window_rules_context =
             window_rules::context().expect("Failed to load window rules config");
@@ -808,6 +828,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     .collect::<Vec<_>>();
                 for seat in seats.into_iter() {
                     if let Some(keyboard) = seat.get_keyboard() {
+                        crate::wayland::handlers::virtual_keyboard::clear_active_virtual_keyboard_keymap(&seat);
                         let old_modifier_state = keyboard.modifier_state();
                         keyboard.change_repeat_info(
                             (value.repeat_rate as i32).abs(), // Negative values are illegal
@@ -983,15 +1004,21 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                 let new = get_config::<bool>(&config, "cursor_shake_to_find");
                 state.common.config.cosmic_conf.cursor_shake_to_find = new;
             }
-            "cursor_hide_timeout" => {
-                let new = get_config::<Option<u32>>(&config, "cursor_hide_timeout");
-                if new != state.common.config.cosmic_conf.cursor_hide_timeout {
-                    state.common.config.cosmic_conf.cursor_hide_timeout = new;
+            "cursor_hide" => {
+                let new = get_config::<CursorHideConfig>(&config, "cursor_hide");
+                if new != state.common.config.cosmic_conf.cursor_hide {
+                    state.common.config.cosmic_conf.cursor_hide = new;
+                    // Reveal on every change: a visible cursor is the safe state,
+                    // and it avoids stranding a hidden cursor when the trigger
+                    // that hid it is switched off.
                     let seats: Vec<_> = state.common.shell.read().seats.iter().cloned().collect();
                     let mut needs_render = false;
                     for seat in seats {
-                        needs_render |=
-                            crate::backend::render::cursor::notify_cursor_activity(state, &seat);
+                        needs_render |= crate::backend::render::cursor::notify_cursor_activity(
+                            state,
+                            &seat,
+                            crate::backend::render::cursor::PointerEventKind::Motion,
+                        );
                     }
                     if needs_render {
                         let outputs: Vec<_> =

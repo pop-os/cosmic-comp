@@ -322,7 +322,7 @@ impl State {
                         .find_map(|(crtc, surface)| (surface.connector == conn).then_some(crtc))
                         .cloned()
                     {
-                        device.inner.surfaces.remove(&crtc).unwrap();
+                        device.inner.surfaces.remove(&crtc).unwrap().drop_and_join();
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
@@ -508,6 +508,9 @@ impl State {
                             .with_context(|| "Failed to enumerate connector modes")?;
 
                             if let Some(crtc) = maybe_crtc {
+                                drm_helpers::clear_gamma(new_device.drm.device(), crtc)
+                                    .with_context(|| "Failed to set property GAMMA_LUT")?;
+
                                 match Surface::new(
                                     &output,
                                     crtc,
@@ -1059,6 +1062,9 @@ impl InnerDevice {
                 .with_context(|| "Failed to enumerate connector modes")?;
 
             let has_surface = if let Some(crtc) = maybe_crtc {
+                drm_helpers::clear_gamma(drm, crtc)
+                    .with_context(|| "Failed to set property GAMMA_LUT")?;
+
                 match Surface::new(
                     &output,
                     crtc,

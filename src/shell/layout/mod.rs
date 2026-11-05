@@ -4,7 +4,10 @@ use cosmic_settings_config::{shortcuts::action::Orientation, window_rules::Appli
 use regex::{Regex, RegexSet};
 use smithay::{
     desktop::WindowSurface,
-    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
+    wayland::{
+        compositor::with_states,
+        shell::xdg::{XdgToplevelSurfaceData, dialog::ToplevelDialogHint},
+    },
     xwayland::xwm::WmWindowType,
 };
 use tracing::warn;
@@ -25,7 +28,7 @@ pub fn is_dialog(window: &CosmicSurface) -> bool {
                     .unwrap()
                     .lock()
                     .unwrap();
-                attrs.parent.is_some()
+                attrs.parent.is_some() || attrs.dialog_hint == ToplevelDialogHint::Modal
             }) {
                 return true;
             }
@@ -47,11 +50,7 @@ pub fn is_dialog(window: &CosmicSurface) -> bool {
     let max_size = window.max_size_without_ssd();
     let min_size = window.min_size_without_ssd();
 
-    if min_size.is_some() && min_size == max_size {
-        return true;
-    }
-
-    false
+    min_size.is_some() && min_size == max_size
 }
 
 #[derive(Debug, Clone, Default)]
