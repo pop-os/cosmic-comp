@@ -1236,13 +1236,14 @@ impl State {
                         );
                         // Decide on action if first update
                         if first_update {
-                            let mut natural_scroll = false;
-                            if let Some(scroll_config) =
+                            let natural_scroll = if let Some(scroll_config) =
                                 &self.common.config.cosmic_conf.input_touchpad.scroll_config
                                 && let Some(natural) = scroll_config.natural_scroll
                             {
-                                natural_scroll = natural;
-                            }
+                                natural
+                            } else {
+                                true
+                            };
                             activate_action = match gesture_state.fingers {
                                 3 => None, // TODO: 3 finger gestures
                                 4 => {
