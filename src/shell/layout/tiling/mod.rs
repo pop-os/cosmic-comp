@@ -64,7 +64,7 @@ use smithay::{
     output::Output,
     reexports::wayland_server::Client,
     utils::{IsAlive, Logical, Physical, Point, Rectangle, Scale, Size},
-    wayland::{compositor::add_blocker, seat::WaylandFocus},
+    wayland::seat::WaylandFocus,
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -3121,11 +3121,7 @@ impl TilingLayout {
 
             if !configures.is_empty() {
                 let blocker = TilingBlocker::new(configures);
-                for (surface, _) in &blocker.necessary_acks {
-                    if let Some(surface) = surface.wl_surface() {
-                        add_blocker(&surface, blocker.clone());
-                    }
-                }
+                blocker.add_blockers();
                 return Some(blocker);
             }
         }
