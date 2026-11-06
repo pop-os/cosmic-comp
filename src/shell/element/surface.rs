@@ -213,7 +213,7 @@ struct GlobalGeometry(Mutex<Option<Rectangle<i32, Global>>>);
 
 impl CosmicSurface {
     pub fn title(&self) -> String {
-        match self.0.underlying_surface() {
+        let title = match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
                 states
                     .data_map
@@ -226,7 +226,8 @@ impl CosmicSurface {
                     .unwrap_or_default()
             }),
             WindowSurface::X11(surface) => surface.title().replace('\0', ""),
-        }
+        };
+        title.replace(['\u{2029}', '\u{85}', '\u{1c}', '\u{1d}', '\u{1e}'], " ")
     }
 
     pub fn corner_radius(&self, geometry_size: Size<i32, Logical>) -> Option<[u8; 4]> {
