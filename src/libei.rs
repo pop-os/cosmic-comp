@@ -3,7 +3,8 @@ use std::os::unix::net::UnixStream;
 use reis::eis;
 use smithay::reexports::reis;
 
-use smithay::backend::libei::{EiInput, EiInputEvent, EiRegion};
+use smithay::backend::input::InputTime;
+use smithay::backend::libei::{EiInput, EiInputEvent, EiRegion, SpecialEvent};
 use smithay::input::keyboard::Keysym;
 use smithay::reexports::calloop;
 use smithay::wayland::input_method::InputMethodSeat;
@@ -138,6 +139,18 @@ pub fn setup_ei(
                                     event.state(),
                                 );
                             }
+                            InputEvent::Special(event) => match event {
+                                SpecialEvent::TextKeysym(event) => {
+                                    data.inject_ei_text_keysym(
+                                        connection.eis_connection(),
+                                        event.keysym,
+                                        event.state.into(),
+                                    );
+                                }
+                                SpecialEvent::TextUtf8(event) => {
+                                    data.inject_ei_text(&event.text);
+                                }
+                            },
                             other => {
                                 let backend_id =
                                     InputBackendId::Ei(connection.eis_connection().clone());
@@ -149,12 +162,6 @@ pub fn setup_ei(
                                 }
                             }
                         }
-                    }
-                    EiInputEvent::TextKeysym { keysym, state } => {
-                        data.inject_ei_text_keysym(connection.eis_connection(), keysym, state);
-                    }
-                    EiInputEvent::TextUtf8 { text } => {
-                        data.inject_ei_text(&text);
                     }
                 })
             {
@@ -224,7 +231,7 @@ impl State {
         // At most ~247 keysyms fit one spare keymap (keycodes 9..=255); leave margin.
         const BATCH: usize = 240;
         for batch in keysyms.chunks(BATCH) {
-            keyboard.inject_text_keysyms(self, batch);
+            keyboard.inject_text_keysyms(self, batch, InputTime::now());
         }
     }
 }
