@@ -207,11 +207,6 @@ impl Config {
         // Listen for updates to the toolkit config
         if let Ok(tk_config) = cosmic_config::Config::new("com.system76.CosmicTk", 1) {
             fn handle_new_toolkit_config(config: CosmicTk, state: &mut State) {
-                if cosmic::icon_theme::default() != config.icon_theme {
-                    cosmic::icon_theme::set_default(config.icon_theme.clone());
-                    state.common.update_xwayland_settings();
-                }
-
                 let mut workspace_guard = state.common.workspace_state.update();
                 state.common.shell.write().update_toolkit(
                     config,
