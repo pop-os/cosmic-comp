@@ -23,6 +23,7 @@ use smithay::{
     utils::{Logical, Point, Serial},
     wayland::{
         compositor::with_states,
+        input_method::InputMethodKeyboardGrab,
         seat::WaylandFocus,
         shell::xdg::{
             PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
@@ -120,6 +121,9 @@ impl XdgShellHandler for State {
                         if keyboard.is_grabbed()
                             && !(keyboard.has_grab(serial)
                                 || keyboard.has_grab(grab.previous_serial().unwrap_or(serial)))
+                            && !keyboard
+                                .with_grab(|_, g| g.is::<InputMethodKeyboardGrab>())
+                                .unwrap_or(false)
                         {
                             grab.ungrab(PopupUngrabStrategy::All);
                             return;
