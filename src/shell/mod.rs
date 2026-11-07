@@ -3718,20 +3718,24 @@ impl Shell {
 
         let to_workspace = self.workspaces.space_for_handle_mut(to).unwrap(); // checked above
         if !to_workspace.tiling_enabled {
-            let (position, was_maximized, was_snapped) = match &window_state {
+            let (position, original_size, was_maximized, was_snapped) = match &window_state {
                 WorkspaceRestoreData::Floating(data) => (
                     Some(data.position_relative(to_workspace.output.geometry().size.as_logical())),
+                    Some(data.geometry.size),
                     data.was_maximized,
                     data.was_snapped,
                 ),
-                _ => (None, false, None),
+                _ => (None, None, false, None),
             };
             to_workspace.floating_layer.map(mapped.clone(), position);
             if was_maximized {
-                let geometry = to_workspace
+                let mut geometry = to_workspace
                     .floating_layer
                     .element_geometry(mapped)
                     .unwrap();
+                if let Some(size) = original_size {
+                    geometry.size = size;
+                }
                 *mapped.maximized_state.lock().unwrap() = Some(MaximizedState {
                     original_geometry: geometry,
                     original_layer: ManagedLayer::Floating,
