@@ -716,13 +716,17 @@ impl KmsState {
     }
 
     pub fn schedule_render(&mut self, output: &Output) {
+        self.schedule_render_fullscreen(output, false);
+    }
+
+    pub fn schedule_render_fullscreen(&mut self, output: &Output, is_fullscreen: bool) {
         for surface in self
             .drm_devices
             .values()
             .flat_map(|d| d.inner.surfaces.values())
             .filter(|s| s.output == *output || s.output.mirroring().is_some_and(|o| &o == output))
         {
-            surface.schedule_render();
+            surface.schedule_render_fullscreen(is_fullscreen);
         }
     }
 
@@ -820,13 +824,17 @@ impl KmsState {
 
 impl KmsGuard<'_> {
     pub fn schedule_render(&mut self, output: &Output) {
+        self.schedule_render_fullscreen(output, false);
+    }
+
+    pub fn schedule_render_fullscreen(&mut self, output: &Output, is_fullscreen: bool) {
         for surface in self
             .drm_devices
             .values()
             .flat_map(|d| d.inner.surfaces.values())
             .filter(|s| s.output == *output || s.output.mirroring().is_some_and(|o| &o == output))
         {
-            surface.schedule_render();
+            surface.schedule_render_fullscreen(is_fullscreen);
         }
     }
 
