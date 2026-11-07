@@ -1509,7 +1509,7 @@ impl SpaceElement for CosmicStack {
         })
     }
     fn refresh(&self) {
-        self.0.with_program(|p| {
+        let new_width = self.0.with_program(|p| {
             let mut windows = p.windows.lock().unwrap();
 
             // don't let the stack become empty
@@ -1528,12 +1528,6 @@ impl SpaceElement for CosmicStack {
                 });
             let active = p.active.load(Ordering::SeqCst);
 
-            if old_active != active {
-                self.0
-                    .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
-                self.0.force_redraw();
-            }
-
             windows.iter().enumerate().for_each(|(i, w)| {
                 if i == active {
                     w.set_suspended(false);
@@ -1544,7 +1538,13 @@ impl SpaceElement for CosmicStack {
 
                 SpaceElement::refresh(w)
             });
+
+            (old_active != active).then(|| windows[active].geometry().size.w)
         });
+        if let Some(width) = new_width {
+            self.0.resize(Size::from((width, TAB_HEIGHT)));
+            self.0.force_redraw();
+        }
         SpaceElement::refresh(&self.0);
     }
 }
