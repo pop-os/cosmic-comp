@@ -183,7 +183,7 @@ pub fn init_backend(
     if state.common.with_xwayland {
         // start x11
         let primary = *state.backend.kms().primary_node.read().unwrap();
-        state.launch_xwayland(primary);
+        state.launch_xwayland(primary, None);
     } else {
         state.notify_ready();
     }
