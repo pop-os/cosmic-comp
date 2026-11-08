@@ -23,6 +23,7 @@ use crate::state::{Common, State};
 #[serde(rename_all = "snake_case", tag = "message")]
 pub enum Message {
     SetEnv { variables: HashMap<String, String> },
+    Heartbeat,
 }
 
 struct StreamWrapper {
@@ -54,6 +55,18 @@ unsafe fn set_cloexec(fd: RawFd) -> rustix::io::Result<()> {
     let fd = unsafe { BorrowedFd::borrow_raw(fd) };
     let flags = rustix::io::fcntl_getfd(fd)?;
     rustix::io::fcntl_setfd(fd, flags | rustix::io::FdFlags::CLOEXEC)
+}
+
+fn send(stream: &mut UnixStream, message: &Message) -> Result<()> {
+    let bytes =
+        serde_json::to_vec(message).with_context(|| "Failed to encode message into json")?;
+    let len = (bytes.len() as u16).to_ne_bytes();
+    stream
+        .write_all(&len)
+        .with_context(|| "Failed to write message len")?;
+    stream
+        .write_all(&bytes)
+        .with_context(|| "Failed to write message bytes")
 }
 
 pub fn get_env(common: &Common) -> Result<HashMap<String, String>> {
@@ -92,16 +105,7 @@ pub fn run_socket(handle: LoopHandle<State>, common: &Common) -> Result<()> {
             let mut session_socket = unsafe { UnixStream::from_raw_fd(fd) };
 
             let env = get_env(common)?;
-            let message = serde_json::to_string(&Message::SetEnv { variables: env })
-                .with_context(|| "Failed to encode environment variables into json")?;
-            let bytes = message.into_bytes();
-            let len = (bytes.len() as u16).to_ne_bytes();
-            session_socket
-                .write_all(&len)
-                .with_context(|| "Failed to write message len")?;
-            session_socket
-                .write_all(&bytes)
-                .with_context(|| "Failed to write message bytes")?;
+            send(&mut session_socket, &Message::SetEnv { variables: env })?;
 
             handle.insert_source(
                 Generic::new(StreamWrapper::from(session_socket), Interest::READ, Mode::Level),
@@ -138,6 +142,11 @@ pub fn run_socket(handle: LoopHandle<State>, common: &Common) -> Result<()> {
                             Ok(message) => {
                                 match serde_json::from_str::<'_, Message>(message) {
                                     Ok(Message::SetEnv { .. }) => warn!("Got SetEnv from session? What is this?"),
+                                    Ok(Message::Heartbeat) => {
+                                        if let Err(err) = send(&mut stream.stream, &Message::Heartbeat) {
+                                            warn!(?err, "Failed to answer the session's heartbeat");
+                                        }
+                                    }
                                     _ => warn!("Unknown session socket message, are you using incompatible cosmic-session and cosmic-comp versions?"),
                                 };
                                 Ok(PostAction::Continue)
