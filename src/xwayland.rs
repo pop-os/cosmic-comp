@@ -696,6 +696,10 @@ impl Common {
                                 "Gtk/CursorThemeSize".into(),
                                 ((new_scale * cursor_size as f64).round() as i32).into(),
                             ),
+                            ("Xft/Antialias".into(), 1_i32.into()),
+                            ("Xft/Hinting".into(), 1_i32.into()),
+                            ("Xft/HintStyle".into(), "hintslight".to_string().into()),
+                            ("Xft/RGBA".into(), "none".to_string().into()),
                         ]
                         .into_iter(),
                     ) {
