@@ -45,7 +45,7 @@ impl Ei {
         &self,
         device_types: u32,
         #[zbus(header)] header: zbus::message::Header<'_>,
-    ) -> zbus::fdo::Result<zbus::zvariant::OwnedFd> {
+    ) -> zbus::fdo::Result<zbus::OwnedFd> {
         if let Some(sender) = header.sender() {
             self.check_sender_allowed(sender).await?;
         }

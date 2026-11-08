@@ -1861,16 +1861,14 @@ impl TilingLayout {
             }
 
             if let FocusedNodeData::Group(mut stack, _) = data.clone() {
-                let maybe_id = stack.pop().unwrap();
-                let id = if tree
-                    .children_ids(&last_node_id)
-                    .unwrap()
-                    .any(|id| id == &maybe_id)
-                {
-                    Some(maybe_id)
-                } else {
-                    tree.children_ids(&last_node_id).unwrap().next().cloned()
-                };
+                let id = stack
+                    .pop()
+                    .filter(|maybe_id| {
+                        tree.children_ids(&last_node_id)
+                            .unwrap()
+                            .any(|id| id == maybe_id)
+                    })
+                    .or_else(|| tree.children_ids(&last_node_id).unwrap().next().cloned());
 
                 if let Some(id) = id {
                     return match tree.get(&id).unwrap().data() {
