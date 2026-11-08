@@ -35,7 +35,7 @@ pub trait PowerDaemon {
     /// GetChargeProfiles method
     fn get_charge_profiles(
         &self,
-    ) -> zbus::Result<Vec<std::collections::HashMap<String, zbus::zvariant::OwnedValue>>>;
+    ) -> zbus::Result<Vec<std::collections::HashMap<String, zbus::OwnedVariant>>>;
 
     /// GetChargeThresholds method
     fn get_charge_thresholds(&self) -> zbus::Result<(u8, u8)>;

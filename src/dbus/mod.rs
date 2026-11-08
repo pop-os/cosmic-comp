@@ -38,8 +38,8 @@ struct DBusStateInner {
 impl DBusState {
     pub fn init(evlh: &LoopHandle<'static, State>) -> Self {
         let (source, executor) = calloop::futures::executor().unwrap();
-        let session_conn = futures_executor::block_on(zbus::Connection::session());
-        let system_conn = futures_executor::block_on(zbus::Connection::system());
+        let session_conn = zbus::block_on(zbus::Connection::session());
+        let system_conn = zbus::block_on(zbus::Connection::system());
         let state = Self(Rc::new(DBusStateInner {
             evlh: evlh.clone(),
             executor,
@@ -171,7 +171,7 @@ async fn power_hot_plug_task(
 /// Updated the D-Bus activation environment with `WAYLAND_DISPLAY` and
 /// `DISPLAY` variables.
 pub fn ready(common: &Common) -> Result<()> {
-    futures_executor::block_on(async {
+    zbus::block_on(async {
         let conn = common.dbus_state.session_conn().await?;
         let dbus = zbus::fdo::DBusProxy::new(conn).await?;
 
