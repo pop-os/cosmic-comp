@@ -724,6 +724,7 @@ version = "1.0.0"
 dependencies = [
  "cosmic-config",
  "cosmic-randr-shell",
+ "cosmic-settings-config",
  "input",
  "libdisplay-info",
  "ron 0.12.0",

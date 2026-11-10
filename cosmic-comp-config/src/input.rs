@@ -2,6 +2,7 @@
 
 #![allow(non_snake_case)]
 
+use cosmic_settings_config::shortcuts::Action;
 pub use input::{AccelProfile, ClickMethod, ScrollMethod, TapButtonMap};
 use serde::{Deserialize, Serialize};
 
@@ -31,6 +32,8 @@ pub struct InputConfig {
     pub tap_config: Option<TapConfig>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub map_to_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub gesture_config: Option<GestureConfig>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -71,6 +74,18 @@ pub struct TapConfig {
     pub button_map: Option<TapButtonMap>,
     pub drag: bool,
     pub drag_lock: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GestureConfig {
+    pub three_finger_swipe_up: Option<Action>,
+    pub three_finger_swipe_down: Option<Action>,
+    pub three_finger_swipe_left: Option<Action>,
+    pub three_finger_swipe_right: Option<Action>,
+    pub four_finger_swipe_up: Option<Action>,
+    pub four_finger_swipe_down: Option<Action>,
+    pub four_finger_swipe_left: Option<Action>,
+    pub four_finger_swipe_right: Option<Action>,
 }
 
 mod ClickMethodDef {
