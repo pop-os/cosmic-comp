@@ -59,6 +59,7 @@ pub fn init_backend_auto(
             &mut state.common.seat_state,
             &output,
             &state.common.config,
+            state.common.theme.cosmic().cursor_theme.as_deref(),
             "seat-0".into(),
         );
 
