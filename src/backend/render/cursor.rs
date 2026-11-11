@@ -569,8 +569,8 @@ impl CursorStateInner {
     }
 
     /// Reload theme and size (see [`load_cursor_env`]), dropping every cached image.
-    pub fn reload_theme(&mut self, size: Option<u32>) {
-        let (theme, size) = load_cursor_theme(size);
+    pub fn reload_theme(&mut self, theme: Option<&str>, size: Option<u32>) {
+        let (theme, size) = load_cursor_theme(theme, size);
         self.cursor_theme = theme;
         self.cursor_size = size;
         self.cursors.clear();
@@ -709,10 +709,10 @@ pub fn reload_cursors(state: &mut crate::state::State) {
     let seats: Vec<_> = state.common.shell.read().seats.iter().cloned().collect();
     for seat in seats {
         if let Some(cursor_state) = seat.user_data().get::<CursorState>() {
-            cursor_state
-                .lock()
-                .unwrap()
-                .reload_theme(state.common.config.cosmic_conf.cursor_size);
+            cursor_state.lock().unwrap().reload_theme(
+                state.common.theme.cosmic().cursor_theme.as_deref(),
+                state.common.config.cosmic_conf.cursor_size,
+            );
         }
     }
     state.common.update_xwayland_settings();
@@ -722,10 +722,12 @@ pub fn reload_cursors(state: &mut crate::state::State) {
     }
 }
 
-/// The cursor theme name and size: `size` if configured, else `$XCURSOR_*`, else defaults.
-pub fn load_cursor_env(size: Option<u32>) -> (String, u32) {
-    let name = std::env::var("XCURSOR_THEME")
-        .ok()
+/// The cursor theme name and size: the configured value if set, else `$XCURSOR_*`, else defaults.
+pub fn load_cursor_env(theme: Option<&str>, size: Option<u32>) -> (String, u32) {
+    let name = theme
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+        .or_else(|| std::env::var("XCURSOR_THEME").ok())
         .unwrap_or_else(|| "default".into());
     let size = size
         .filter(|s| *s > 0)
@@ -738,21 +740,21 @@ pub fn load_cursor_env(size: Option<u32>) -> (String, u32) {
     (name, size)
 }
 
-pub fn load_cursor_theme(size: Option<u32>) -> (CursorTheme, u32) {
-    let (name, size) = load_cursor_env(size);
+pub fn load_cursor_theme(theme: Option<&str>, size: Option<u32>) -> (CursorTheme, u32) {
+    let (name, size) = load_cursor_env(theme, size);
     (CursorTheme::load(&name), size)
 }
 
 impl Default for CursorStateInner {
     fn default() -> CursorStateInner {
-        CursorStateInner::new(None)
+        CursorStateInner::new(None, None)
     }
 }
 
 impl CursorStateInner {
-    /// A cursor state using the configured `size` (see [`load_cursor_env`]).
-    pub fn new(size: Option<u32>) -> CursorStateInner {
-        let (theme, size) = load_cursor_theme(size);
+    /// A cursor state using the configured `theme` and `size` (see [`load_cursor_env`]).
+    pub fn new(theme: Option<&str>, size: Option<u32>) -> CursorStateInner {
+        let (theme, size) = load_cursor_theme(theme, size);
         CursorStateInner {
             current_cursor: None,
 
