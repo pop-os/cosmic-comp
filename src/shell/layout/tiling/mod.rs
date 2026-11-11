@@ -482,9 +482,12 @@ impl TilingLayout {
                             *sizes.last_mut().unwrap() += diff;
                         }
                     }
+                    *current_sizes = sizes;
+                } else {
+                    let idx = idx.min(current_sizes.len());
+                    node.data_mut().add_window(idx);
                 }
 
-                *current_sizes = sizes;
                 let new_node = Node::new(Data::Mapped {
                     mapped: window.clone(),
                     last_geometry: Rectangle::from_size((100, 100).into()),
