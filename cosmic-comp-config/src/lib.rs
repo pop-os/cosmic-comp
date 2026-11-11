@@ -111,6 +111,8 @@ pub struct CosmicCompConfig {
     pub cursor_hide: CursorHideConfig,
     /// Briefly magnify the cursor when the pointer is shaken, to help locate it
     pub cursor_shake_to_find: bool,
+    /// Cursor size in logical pixels. `None` falls back to `$XCURSOR_SIZE`
+    pub cursor_size: Option<u32>,
     pub activation_policy: ActivationPolicy,
     pub decoration_preference: DecorationPreference,
 }
@@ -151,6 +153,7 @@ impl Default for CosmicCompConfig {
             appearance_settings: AppearanceConfig::default(),
             cursor_hide: CursorHideConfig::default(),
             cursor_shake_to_find: true,
+            cursor_size: None,
             activation_policy: ActivationPolicy::default(),
             decoration_preference: DecorationPreference::default(),
         }
