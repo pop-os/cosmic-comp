@@ -139,6 +139,7 @@ pub struct SurfaceThreadState {
     compositor: Option<GbmDrmOutput>,
 
     state: QueueState,
+    paused: bool,
     timings: Timings,
     frame_callback_seq: usize,
     thread_sender: Sender<SurfaceCommand>,
@@ -196,9 +197,26 @@ pub enum QueueState {
     },
 }
 
+impl QueueState {
+    fn tokens(&self) -> Vec<RegistrationToken> {
+        match *self {
+            QueueState::Idle | QueueState::WaitingForVBlank { .. } => Vec::new(),
+            QueueState::Queued(token) | QueueState::WaitingForEstimatedVBlank(token) => {
+                vec![token]
+            }
+            QueueState::WaitingForEstimatedVBlankAndQueued {
+                estimated_vblank,
+                queued_render,
+            } => vec![estimated_vblank, queued_render],
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ThreadCommand {
     Suspend(SyncSender<()>),
+    Pause(SyncSender<()>),
+    Unpause(SyncSender<()>),
     Resume {
         compositor: GbmDrmOutput,
     },
@@ -430,6 +448,18 @@ impl Surface {
         let _ = rx.recv();
     }
 
+    pub fn pause(&self) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self.thread_command.send(ThreadCommand::Pause(tx));
+        let _ = rx.recv();
+    }
+
+    pub fn unpause(&self) {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let _ = self.thread_command.send(ThreadCommand::Unpause(tx));
+        let _ = rx.recv();
+    }
+
     pub fn resume(
         &mut self,
         compositor: GbmDrmOutput,
@@ -538,6 +568,7 @@ fn surface_thread(
         vrr_mode: AdaptiveSync::Disabled,
 
         state: QueueState::Idle,
+        paused: false,
         timings: Timings::new(None, None, false, target_node),
         frame_callback_seq: 0,
         thread_sender,
@@ -566,6 +597,14 @@ fn surface_thread(
         .handle()
         .insert_source(thread_receiver, move |command, _, state| match command {
             Event::Msg(ThreadCommand::Suspend(tx)) => state.suspend(tx),
+            Event::Msg(ThreadCommand::Pause(sync)) => {
+                state.pause();
+                let _ = sync.send(());
+            }
+            Event::Msg(ThreadCommand::Unpause(sync)) => {
+                state.unpause();
+                let _ = sync.send(());
+            }
             Event::Msg(ThreadCommand::Resume { compositor }) => {
                 state.resume(compositor);
             }
@@ -686,6 +725,20 @@ impl SurfaceThreadState {
         };
 
         let _ = tx.send(());
+    }
+
+    fn pause(&mut self) {
+        self.paused = true;
+        for token in self.state.tokens() {
+            let _ = self.loop_handle.disable(&token);
+        }
+    }
+
+    fn unpause(&mut self) {
+        self.paused = false;
+        for token in self.state.tokens() {
+            let _ = self.loop_handle.enable(&token);
+        }
     }
 
     fn resume(&mut self, compositor: GbmDrmOutput) {
@@ -960,6 +1013,9 @@ impl SurfaceThreadState {
                 TimeoutAction::Drop
             })
             .expect("Failed to schedule render");
+        if self.paused {
+            let _ = self.loop_handle.disable(&token);
+        }
 
         match &self.state {
             QueueState::Idle => {
