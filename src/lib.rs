@@ -367,6 +367,12 @@ fn refresh(state: &mut State) {
     }
 
     state.common.refresh();
+    {
+        let shell = state.common.shell.read();
+        for seat in shell.seats.iter() {
+            wayland::handlers::seat::update_cursor_surface_outputs(seat, shell.outputs());
+        }
+    }
     state::Common::refresh_focus(state);
     OverlapNotifyState::refresh(state);
     state.common.update_x11_stacking_order();
