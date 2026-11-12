@@ -3,7 +3,8 @@ use std::os::unix::net::UnixStream;
 use reis::eis;
 use smithay::reexports::reis;
 
-use smithay::backend::libei::{EiInput, EiInputEvent, EiRegion};
+use smithay::backend::input::{Event, InputEvent};
+use smithay::backend::libei::{EiInput, EiInputEvent, EiRegion, SpecialEvent};
 use smithay::input::keyboard::Keysym;
 use smithay::reexports::calloop;
 use smithay::wayland::input_method::InputMethodSeat;
@@ -128,34 +129,29 @@ pub fn setup_ei(
                             data.broadcast_ei_keyboard_modifiers(&keyboard);
                         }
                     }
-                    EiInputEvent::Event(event) => {
-                        use smithay::backend::input::{InputEvent, KeyboardKeyEvent};
-                        match event {
-                            InputEvent::Keyboard { event } => {
-                                data.inject_ei_key(
-                                    connection.eis_connection(),
-                                    event.key_code(),
-                                    event.state(),
-                                );
+                    EiInputEvent::Event(event) => match event {
+                        InputEvent::Keyboard { event } => {
+                            data.inject_ei_key(connection.eis_connection(), event);
+                        }
+                        InputEvent::Special(event) => match event {
+                            SpecialEvent::TextKeysym(event) => {
+                                data.inject_ei_text_keysym(connection.eis_connection(), event);
                             }
-                            other => {
-                                let backend_id =
-                                    InputBackendId::Ei(connection.eis_connection().clone());
-                                data.process_input_event(other, backend_id);
-                                if matches!(data.backend, BackendData::Kms(_)) {
-                                    for output in data.common.shell.read().outputs() {
-                                        data.backend.kms().schedule_render(output);
-                                    }
+                            SpecialEvent::TextUtf8(event) => {
+                                data.inject_ei_text(event);
+                            }
+                        },
+                        other => {
+                            let backend_id =
+                                InputBackendId::Ei(connection.eis_connection().clone());
+                            data.process_input_event(other, backend_id);
+                            if matches!(data.backend, BackendData::Kms(_)) {
+                                for output in data.common.shell.read().outputs() {
+                                    data.backend.kms().schedule_render(output);
                                 }
                             }
                         }
-                    }
-                    EiInputEvent::TextKeysym { keysym, state } => {
-                        data.inject_ei_text_keysym(connection.eis_connection(), keysym, state);
-                    }
-                    EiInputEvent::TextUtf8 { text } => {
-                        data.inject_ei_text(&text);
-                    }
+                    },
                 })
             {
                 tracing::error!("Failed to insert EI input source: {}", err);
@@ -194,14 +190,14 @@ impl State {
     }
 
     /// Inject UTF-8 text (from an EI `ei_text` device) into the focused client.
-    pub fn inject_ei_text(&mut self, text: &str) {
+    pub fn inject_ei_text(&mut self, event: reis::request::TextUtf8) {
         let seat = self.common.shell.read().seats.last_active().clone();
         // Only commit through text-input when we're the active input method (no real IME)
         if !seat.input_method().has_instance() {
             let text_input = seat.text_input();
             let mut injected = false;
             text_input.with_active_text_input(|ti, _surface| {
-                ti.commit_string(Some(text.to_owned()));
+                ti.commit_string(Some(event.text.to_owned()));
                 injected = true;
             });
             if injected {
@@ -210,10 +206,17 @@ impl State {
             }
         }
 
+        crate::wayland::handlers::virtual_keyboard::update_virtual_keyboard_keymap(
+            self,
+            &seat,
+            &event.device(),
+        );
+
         // Bind the whole chunk to spare keycodes in one temporary keymap per batch (delivered
         // to just the focused client), so we change the keymap ~once per chunk instead of once
         // per character. Leaves the seat's own keyboard state untouched.
-        let keysyms: Vec<Keysym> = text
+        let keysyms: Vec<Keysym> = event
+            .text
             .chars()
             .map(Keysym::from_char)
             .filter(|keysym| keysym.raw() != 0)
@@ -224,7 +227,7 @@ impl State {
         // At most ~247 keysyms fit one spare keymap (keycodes 9..=255); leave margin.
         const BATCH: usize = 240;
         for batch in keysyms.chunks(BATCH) {
-            keyboard.inject_text_keysyms(self, batch);
+            keyboard.inject_text_keysyms(self, batch, event.time());
         }
     }
 }
