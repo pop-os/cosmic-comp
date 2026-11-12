@@ -144,12 +144,71 @@ pub fn init_backend(
     });
 
     // manually add already present gpus
+    let mut failed_gpus = Vec::new();
     let mut outputs = Vec::new();
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
         match state.device_added(dev, path, dh) {
             Ok(added) => outputs.extend(added),
-            Err(err) => warn!("Failed to add device {}: {:?}", path.display(), err),
+            Err(err) => {
+                warn!(
+                    "Failed to add device {}: {:?}. Retrying...",
+                    path.display(),
+                    err,
+                );
+                failed_gpus.push((dev, path.to_path_buf()));
+            }
         }
+    }
+
+    if outputs.is_empty() && !failed_gpus.is_empty() {
+        let mut duration = Duration::from_millis(500);
+        'retry_loop: while duration < Duration::from_secs(5) {
+            std::thread::sleep(duration);
+            duration *= 2;
+
+            for (i, (dev, path)) in failed_gpus.iter().enumerate() {
+                match state.device_added(*dev, path, &dh.clone()) {
+                    Ok(added) => {
+                        outputs.extend(added);
+                        failed_gpus.remove(i);
+                        break 'retry_loop;
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to add device {}: {:?}. Retrying",
+                            path.display(),
+                            err
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    for (dev, path) in failed_gpus {
+        let dh = dh.clone();
+        let mut duration = Duration::from_millis(500);
+        event_loop
+            .handle()
+            .insert_source(Timer::from_duration(duration), move |_, _, state| {
+                match state.device_added(dev, &path, &dh.clone()) {
+                    Ok(added) => state.refresh_devices(true, added),
+                    Err(err) => {
+                        warn!(
+                            "Failed to add device {}: {:?}. Retrying",
+                            path.display(),
+                            err
+                        );
+                        duration *= 2;
+                        if duration < Duration::from_secs(5) {
+                            return TimeoutAction::ToDuration(duration);
+                        }
+                    }
+                }
+                TimeoutAction::Drop
+            })
+            .map_err(|err| err.error)
+            .with_context(|| "Failed to schedule delayed device scan")?;
     }
 
     if let Err(err) = state.select_primary_gpu(dh) {
@@ -331,29 +390,10 @@ fn init_udev(
             Ok(added) => {
                 debug!("Successfully handled udev event.");
 
-                {
-                    let backend = state.backend.kms();
-                    if matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. }) {
-                        if backend.primary_node.read().unwrap().is_none()
-                            && let Err(err) = state.select_primary_gpu(&dh)
-                        {
-                            warn!("Failed to determine a new primary gpu: {}", err);
-                        }
-                        state.update_default_feedback();
-                    }
-                }
-
-                if let Err(err) = state.refresh_output_config() {
-                    warn!("Unable to load output config: {}", err);
-                    if !added.is_empty() {
-                        for output in added {
-                            output.config_mut().enabled = OutputState::Disabled;
-                        }
-                        if let Err(err) = state.refresh_output_config() {
-                            error!("Unrecoverable config error: {}", err);
-                        }
-                    }
-                }
+                state.refresh_devices(
+                    matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. }),
+                    added,
+                );
             }
             Err(err) => {
                 error!(?err, "Error while handling udev event.")
@@ -642,6 +682,33 @@ impl State {
                     .expect("Primary node but no dmabuf global?"),
                 &default_feedback,
             );
+        }
+    }
+
+    fn refresh_devices(&mut self, refresh_primary: bool, added_outputs: Vec<Output>) {
+        {
+            let backend = self.backend.kms();
+            if refresh_primary {
+                let dh = self.common.display_handle.clone();
+                if backend.primary_node.read().unwrap().is_none()
+                    && let Err(err) = self.select_primary_gpu(&dh)
+                {
+                    warn!("Failed to determine a new primary gpu: {}", err);
+                }
+                self.update_default_feedback();
+            }
+        }
+
+        if let Err(err) = self.refresh_output_config() {
+            warn!("Unable to load output config: {}", err);
+            if !added_outputs.is_empty() {
+                for output in added_outputs {
+                    output.config_mut().enabled = OutputState::Disabled;
+                }
+                if let Err(err) = self.refresh_output_config() {
+                    error!("Unrecoverable config error: {}", err);
+                }
+            }
         }
     }
 }
