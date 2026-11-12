@@ -690,10 +690,7 @@ impl Device {
         let path = path.as_ref();
         let fd = DrmDeviceFd::new(DeviceFd::from(
             session
-                .open(
-                    path,
-                    OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
-                )
+                .open(path, OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY)
                 .with_context(|| {
                     format!(
                         "Failed to obtain file descriptor for drm device: {}",
