@@ -688,19 +688,42 @@ impl Device {
         reuse: Option<ReusableDevice>,
     ) -> Result<Self> {
         let path = path.as_ref();
-        let fd = DrmDeviceFd::new(DeviceFd::from(
-            session
+        let mut attempts = 100;
+        let fd_res = loop {
+            match session
                 .open(
                     path,
                     OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
                 )
-                .with_context(|| {
-                    format!(
-                        "Failed to obtain file descriptor for drm device: {}",
-                        path.display()
-                    )
-                })?,
-        ));
+                .map(DeviceFd::from)
+                .map(DrmDeviceFd::new)
+            {
+                Ok(fd) => {
+                    break Ok(fd);
+                }
+                Err(err) => match err {
+                    smithay::backend::session::libseat::Error::FailedToOpenDevice(
+                        rustix::io::Errno::AGAIN | rustix::io::Errno::WOULDBLOCK,
+                    ) if attempts > 0 => {
+                        attempts -= 1;
+                        warn!(
+                            ?err,
+                            "Failed to obtain file descriptor for drm device: {}",
+                            path.display()
+                        );
+                    }
+                    _ => {
+                        break Err(err);
+                    }
+                },
+            }
+        };
+        let fd = fd_res.with_context(|| {
+            format!(
+                "Failed to obtain file descriptor for drm device: {}",
+                path.display()
+            )
+        })?;
         let (drm, notifier) = DrmDevice::new(fd.clone(), false)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let dev_node = DrmNode::from_dev_id(dev)?;
