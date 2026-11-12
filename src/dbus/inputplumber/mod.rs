@@ -1,14 +1,11 @@
 use anyhow::Result;
 use futures_util::{Stream, StreamExt, stream::SelectAll};
 use inputplumber_zbus::{
-    composite_device::CompositeDeviceProxy,
-    dbus_device::{DBusDeviceProxy, InputEvent},
-    debug::{DebugProxy, InputReport},
-    input_manager::InputManagerProxy,
+    composite_device::CompositeDeviceProxy, debug::DebugProxy, input_manager::InputManagerProxy,
     target::TargetProxy,
 };
-use packed_struct::PackedStruct;
-use std::collections::BTreeSet;
+use packed_struct::{PackedStruct, PrimitiveEnum};
+use std::collections::{BTreeMap, BTreeSet};
 
 use self::unified_gamepad::{
     capability::InputCapability,
@@ -18,6 +15,7 @@ use self::unified_gamepad::{
 
 // From InputPlumber, license GPLv3
 //TODO: break into crate that can be reused from upstream
+#[allow(unused)]
 mod unified_gamepad;
 
 const DESTINATION: &'static str = "org.shadowblip.InputPlumber";
@@ -38,7 +36,7 @@ pub(super) async fn task(conn: zbus::Connection) -> Result<()> {
 
     let mut gamepad_stream = manager.receive_gamepad_order_changed().await.fuse();
     let mut select_all =
-        SelectAll::<Box<dyn Stream<Item = Vec<(InputCapability, Value)>> + Unpin>>::new();
+        SelectAll::<Box<dyn Stream<Item = (String, Vec<(InputCapability, Value)>)> + Unpin>>::new();
     loop {
         futures::select! {
             _ = gamepad_stream.next() => {
@@ -55,9 +53,16 @@ pub(super) async fn task(conn: zbus::Connection) -> Result<()> {
                         .await?;
                     tracing::warn!("  - name: {}", comp.name().await?);
 
-                    //TODO: limit number of tries?
+                    /*
+                    // Intercept all events
+                    if comp.intercept_mode().await? != 2 {
+                        comp.set_intercept_mode(2).await?;
+                    }
+                    */
+                    tracing::warn!("  - intercept mode {}", comp.intercept_mode().await?);
+
                     let mut debug_path = None;
-                    while debug_path.is_none() {
+                    for _ in 0..2 {
                         let mut target_device_types = BTreeSet::new();
                         for target_path in comp.target_devices().await? {
                             tracing::warn!("  - target device: {}", target_path);
@@ -79,6 +84,8 @@ pub(super) async fn task(conn: zbus::Connection) -> Result<()> {
                             target_device_types.insert("debug".to_string());
                             let target_device_types_str: Vec<&str> = target_device_types.iter().map(|x| x.as_str()).collect();
                             comp.set_target_devices(&target_device_types_str).await?;
+                        } else {
+                            break;
                         }
                     }
 
@@ -86,7 +93,7 @@ pub(super) async fn task(conn: zbus::Connection) -> Result<()> {
                         tracing::warn!("  - debug device: {}", debug_path);
                         let debug_dev = DebugProxy::builder(&conn)
                             .destination(DESTINATION)?
-                            .path(debug_path)?
+                            .path(debug_path.clone())?
                             .interface("org.shadowblip.Input.Debug")?
                             .build()
                             .await?;
@@ -95,6 +102,7 @@ pub(super) async fn task(conn: zbus::Connection) -> Result<()> {
                         let cap_res = InputCapabilityReport::unpack(&cap_bytes);
                         tracing::warn!("    - input capability: {:X?}", cap_res);
                         if let Ok(cap) = cap_res {
+                            let mut state = BTreeMap::new();
                             let stream = debug_dev.receive_input_report().await?.map(move |x| {
                                 let data_bytes = match x.message().body().deserialize::<Vec<u8>>() {
                                     Ok(ok) => ok,
@@ -124,30 +132,41 @@ pub(super) async fn task(conn: zbus::Connection) -> Result<()> {
                                         return Vec::new();
                                     }
                                 };
-                                cap.get_capabilities().iter().map(|x| x.capability).zip(values.into_iter()).collect()
+                                let mut changed = Vec::new();
+                                for (capability, value) in cap.get_capabilities().iter().map(|x| x.capability).zip(values.into_iter()) {
+                                    let old = state.insert(capability.to_primitive(), value.clone());
+                                    if old.as_ref() != Some(&value) {
+                                        changed.push((capability, value));
+                                    }
+                                }
+                                changed
                             });
-                            select_all.push(Box::new(stream));
+                            {
+                                let debug_path = debug_path.clone();
+                                select_all.push(Box::new(stream.map(move |changed| (debug_path.clone(), changed))));
+                            }
                         }
-                    }
-
-                    for dbus_path in comp.dbus_devices().await? {
-                        tracing::warn!("  - dbus device: {}", dbus_path);
-                        let dbus = DBusDeviceProxy::builder(&conn)
-                            .destination(DESTINATION)?
-                            .path(dbus_path)?
-                            .interface("org.shadowblip.Input.DBusDevice")?
-                            .build()
-                            .await?;
-                        /*TODO: testing debug device
-                        let stream = dbus.receive_input_event().await?;
-                        select_all.push(Box::new(stream));
-                        */
                     }
                 }
             }
-            input_opt = select_all.next() => {
-                if let Some(input) = input_opt {
-                    tracing::warn!("input {:#?}", input);
+            events_opt = select_all.next() => {
+                if let Some((debug_path, events)) = events_opt {
+                    for (capability, value) in events {
+                        // Ignore axes for now, it causes too much noise
+                        if matches!(capability, InputCapability::GamepadAxisLeftStick | InputCapability::GamepadAxisRightStick) {
+                            continue;
+                        }
+                        let str = match value {
+                            Value::None => "none".to_string(),
+                            Value::Bool(v) => v.value.to_string(),
+                            Value::UInt8(v) => v.value.to_string(),
+                            Value::UInt16(v) => v.value.to_string(),
+                            Value::UInt16Vector2(v) => format!("{}, {}", v.x, v.y),
+                            Value::Int16Vector3(v) => format!("{}, {}, {}", v.x, v.y, v.z),
+                            Value::Touch(v) => format!("{:?}", v),
+                        };
+                        eprintln!("{}: {:?}: {}", debug_path.trim_start_matches("/org/shadowblip/InputPlumber/devices/target/debug"), capability, str);
+                    }
                 }
             }
         }
