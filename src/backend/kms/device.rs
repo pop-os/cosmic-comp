@@ -688,19 +688,31 @@ impl Device {
         reuse: Option<ReusableDevice>,
     ) -> Result<Self> {
         let path = path.as_ref();
-        let fd = DrmDeviceFd::new(DeviceFd::from(
-            session
-                .open(
-                    path,
-                    OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+        let fd = session
+            .open(path, OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY)
+            .with_context(|| {
+                format!(
+                    "Failed to obtain file descriptor for drm device: {}",
+                    path.display()
                 )
-                .with_context(|| {
-                    format!(
-                        "Failed to obtain file descriptor for drm device: {}",
-                        path.display()
-                    )
-                })?,
-        ));
+            })?;
+
+        {
+            let flags = rustix::fs::fcntl_getfl(&fd).with_context(|| {
+                format!(
+                    "Failed to get file descriptor flags for drm device: {}",
+                    path.display()
+                )
+            })?;
+            rustix::fs::fcntl_setfl(&fd, flags | OFlags::NONBLOCK).with_context(|| {
+                format!(
+                    "Failed to set file descriptor flags for drm device: {}",
+                    path.display()
+                )
+            })?;
+        }
+
+        let fd = DrmDeviceFd::new(DeviceFd::from(fd));
         let (drm, notifier) = DrmDevice::new(fd.clone(), false)
             .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
         let dev_node = DrmNode::from_dev_id(dev)?;
