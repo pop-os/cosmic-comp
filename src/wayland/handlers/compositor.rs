@@ -31,7 +31,11 @@ use smithay::{
     },
     xwayland::XWaylandClientData,
 };
-use std::{collections::VecDeque, sync::Mutex, time::Duration};
+use std::{collections::VecDeque, sync::LazyLock, sync::Mutex, time::Duration};
+
+pub static FULLSCREEN_IMMEDIATE_RENDER: LazyLock<bool> = LazyLock::new(|| {
+    crate::utils::env::bool_var("COSMIC_FULLSCREEN_IMMEDIATE_RENDER").unwrap_or(true)
+});
 
 fn toplevel_ensure_initial_configure(
     toplevel: &ToplevelSurface,
@@ -274,7 +278,14 @@ impl CompositorHandler for State {
 
         // schedule a new render
         if let Some(output) = shell.visible_output_for_surface(surface) {
-            self.backend.schedule_render(output);
+            let is_fullscreen =
+                output
+                    .is_foreground_fullscreen_occupied()
+                    .is_some_and(|cosmic_surface| {
+                        cosmic_surface.has_surface(surface, WindowSurfaceType::ALL)
+                    });
+            self.backend
+                .schedule_render_fullscreen(output, is_fullscreen);
         }
 
         if mapped {
