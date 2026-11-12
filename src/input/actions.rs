@@ -29,8 +29,6 @@ use tracing::{error, warn};
 
 use std::{os::unix::process::CommandExt, thread};
 
-use super::gestures;
-
 const MAX_ZOOM: f64 = 256.0;
 
 fn propagate_by_default(action: &shortcuts::Action) -> bool {
@@ -38,6 +36,11 @@ fn propagate_by_default(action: &shortcuts::Action) -> bool {
         action,
         shortcuts::Action::Focus(_) | shortcuts::Action::Move(_)
     )
+}
+
+pub enum Origin {
+    Keyboard,
+    Touchpad,
 }
 
 impl State {
@@ -50,6 +53,7 @@ impl State {
         time: InputTime,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
+        origin: Origin,
     ) {
         // TODO: Detect if started from login manager or tty, and only allow
         // `Terminate` if it will return to login manager.
@@ -75,7 +79,7 @@ impl State {
             Action::Shortcut(action) => {
                 let propagate = propagate_by_default(&action);
                 self.handle_shortcut_action(
-                    action, backend_id, seat, serial, time, pattern, direction, propagate,
+                    action, backend_id, seat, serial, time, pattern, direction, origin, propagate,
                 )
             }
             Action::Private(PrivateAction::Escape) => {
@@ -114,37 +118,6 @@ impl State {
         }
     }
 
-    pub fn handle_swipe_action(&mut self, action: gestures::SwipeAction, seat: &Seat<State>) {
-        use gestures::SwipeAction;
-        let wraparound: bool = self
-            .common
-            .config
-            .cosmic_conf
-            .workspaces
-            .workspace_wraparound;
-
-        match action {
-            SwipeAction::NextWorkspace => {
-                let _ = to_next_workspace(
-                    &mut self.common.shell.write(),
-                    seat,
-                    true,
-                    wraparound,
-                    &mut self.common.workspace_state.update(),
-                );
-            }
-            SwipeAction::PrevWorkspace => {
-                let _ = to_previous_workspace(
-                    &mut self.common.shell.write(),
-                    seat,
-                    true,
-                    wraparound,
-                    &mut self.common.workspace_state.update(),
-                );
-            }
-        }
-    }
-
     #[profiling::function]
     pub fn handle_shortcut_action(
         &mut self,
@@ -155,6 +128,7 @@ impl State {
         time: InputTime,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
+        origin: Origin,
         propagate: bool,
     ) {
         use shortcuts::Action;
@@ -245,6 +219,7 @@ impl State {
                         time,
                         pattern,
                         direction,
+                        origin,
                         true,
                     )
                 }
@@ -285,6 +260,7 @@ impl State {
                         time,
                         pattern,
                         direction,
+                        origin,
                         true,
                     )
                 };
@@ -407,6 +383,7 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
+                                origin,
                                 true,
                             )
                         }
@@ -433,6 +410,7 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
+                                origin,
                                 false,
                             )
                         }
@@ -500,6 +478,7 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
+                                origin,
                                 true,
                             )
                         }
@@ -526,6 +505,7 @@ impl State {
                                 time,
                                 pattern,
                                 direction,
+                                origin,
                                 false,
                             )
                         }
@@ -726,6 +706,7 @@ impl State {
                                 time,
                                 pattern,
                                 Some(direction),
+                                origin,
                                 true,
                             )
                         }
@@ -799,6 +780,7 @@ impl State {
                                 time,
                                 pattern,
                                 Some(direction),
+                                origin,
                                 true,
                             )
                         }
@@ -858,51 +840,61 @@ impl State {
                             time,
                             pattern,
                             Some(direction),
+                            origin,
                             true,
                         )
                     }
-                    MoveResult::ShiftFocus(shift) => {
-                        Shell::set_focus(self, Some(&shift), seat, None, true);
-                    }
-                    _ => {
-                        let current_output = seat.active_output();
-                        let mut shell = self.common.shell.write();
-                        let workspace = shell.active_space(&current_output).unwrap();
-                        if let Some(FocusTarget::Window(focused_window)) =
-                            workspace.focus_stack.get(seat).last()
-                            && workspace.is_tiled(&focused_window.active_window())
-                        {
-                            shell.set_overview_mode(
-                                Some(Trigger::KeyboardMove(pattern.modifiers)),
-                                self.common.event_loop_handle.clone(),
-                            );
+                    MoveResult::ShiftFocus(shift) => match origin {
+                        Origin::Keyboard => {
+                            Shell::set_focus(self, Some(&shift), seat, None, true);
                         }
+                        Origin::Touchpad => {}
+                    },
+                    _ => match origin {
+                        Origin::Keyboard => {
+                            let current_output = seat.active_output();
+                            let mut shell = self.common.shell.write();
+                            let workspace = shell.active_space(&current_output).unwrap();
+                            if let Some(FocusTarget::Window(focused_window)) =
+                                workspace.focus_stack.get(seat).last()
+                                && workspace.is_tiled(&focused_window.active_window())
+                            {
+                                shell.set_overview_mode(
+                                    Some(Trigger::KeyboardMove(pattern.modifiers)),
+                                    self.common.event_loop_handle.clone(),
+                                );
+                            }
+                        }
+                        Origin::Touchpad => {}
+                    },
+                }
+            }
+
+            Action::SwapWindow => match origin {
+                Origin::Keyboard => {
+                    let Some(focused_output) = seat.focused_output() else {
+                        return;
+                    };
+                    let mut shell = self.common.shell.write();
+
+                    let workspace = shell.active_space_mut(&focused_output).unwrap();
+                    let keyboard_handle = seat.get_keyboard().unwrap();
+
+                    if let Some(focus) = keyboard_handle.current_focus()
+                        && let Some(descriptor) = workspace.node_desc(focus)
+                    {
+                        let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
+                        drop(shell);
+                        keyboard_handle.set_grab(self, grab, serial);
+                        let mut shell = self.common.shell.write();
+                        shell.set_overview_mode(
+                            Some(Trigger::KeyboardSwap(pattern, descriptor)),
+                            self.common.event_loop_handle.clone(),
+                        );
                     }
                 }
-            }
-
-            Action::SwapWindow => {
-                let Some(focused_output) = seat.focused_output() else {
-                    return;
-                };
-                let mut shell = self.common.shell.write();
-
-                let workspace = shell.active_space_mut(&focused_output).unwrap();
-                let keyboard_handle = seat.get_keyboard().unwrap();
-
-                if let Some(focus) = keyboard_handle.current_focus()
-                    && let Some(descriptor) = workspace.node_desc(focus)
-                {
-                    let grab = SwapWindowGrab::new(seat.clone(), descriptor.clone());
-                    drop(shell);
-                    keyboard_handle.set_grab(self, grab, serial);
-                    let mut shell = self.common.shell.write();
-                    shell.set_overview_mode(
-                        Some(Trigger::KeyboardSwap(pattern, descriptor)),
-                        self.common.event_loop_handle.clone(),
-                    );
-                }
-            }
+                Origin::Touchpad => {}
+            },
 
             Action::Minimize => {
                 let mut shell = self.common.shell.write();
@@ -961,11 +953,14 @@ impl State {
                 }
             }
 
-            Action::Resizing(direction) => self.common.shell.write().set_resize_mode(
-                Some((pattern, direction)),
-                &self.common.config,
-                self.common.event_loop_handle.clone(),
-            ),
+            Action::Resizing(direction) => match origin {
+                Origin::Keyboard => self.common.shell.write().set_resize_mode(
+                    Some((pattern, direction)),
+                    &self.common.config,
+                    self.common.event_loop_handle.clone(),
+                ),
+                Origin::Touchpad => {}
+            },
             // NOTE: implementation currently assumes actions that apply to outputs should apply to the active output
             // rather than the output that has keyboard focus
             Action::ToggleOrientation => {

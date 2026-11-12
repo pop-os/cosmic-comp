@@ -87,6 +87,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
                 description: None,
             },
             None,
+            crate::input::actions::Origin::Keyboard,
             true,
         );
     }
