@@ -4,6 +4,7 @@ use std::{
     os::unix::io::OwnedFd,
     process::Stdio,
     sync::mpsc::{self, Receiver, Sender},
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -13,10 +14,11 @@ use crate::{
         focus::target::KeyboardFocusTarget,
         grabs::{GrabType, ReleaseMode},
     },
-    state::State,
+    state::{BackendData, State},
     utils::prelude::*,
     wayland::handlers::xdg_activation::ActivationContext,
 };
+use calloop::timer::{TimeoutAction, Timer};
 use cosmic_comp_config::{EavesdroppingKeyboardMode, XwaylandDescaling};
 use smithay::{
     backend::{
@@ -67,6 +69,7 @@ pub struct XWaylandState {
     pub client: Client,
     pub xwm: Option<X11Wm>,
     pub display: u32,
+    pub started: Instant,
     pub pressed_keys: Vec<Keycode>,
     pub pressed_buttons: Vec<u32>,
     pub last_modifier_state: Option<ModifiersState>,
@@ -108,14 +111,14 @@ fn xrdb_thread(rx: Receiver<(String, u32)>, display: u32) {
 }
 
 impl State {
-    pub fn launch_xwayland(&mut self, render_node: Option<DrmNode>) {
+    pub fn launch_xwayland(&mut self, render_node: Option<DrmNode>, display: Option<u32>) {
         if self.common.xwayland_state.is_some() {
             return;
         }
 
         let (xwayland, client) = match XWayland::spawn(
             &self.common.display_handle,
-            None,
+            display,
             std::iter::empty::<(OsString, OsString)>(),
             ["-enable-ei-portal"],
             true,
@@ -150,6 +153,7 @@ impl State {
                         client: client.clone(),
                         xwm: None,
                         display: display_number,
+                        started: Instant::now(),
                         pressed_keys: Vec::new(),
                         pressed_buttons: Vec::new(),
                         last_modifier_state: None,
@@ -186,7 +190,7 @@ impl State {
                     data.notify_ready();
                 }
             }) {
-            Ok(_token) => {}
+            Ok(token) => self.common.xwayland_source = Some(token),
             Err(err) => {
                 error!(?err, "Failed to listen for Xwayland");
                 self.notify_ready();
@@ -376,7 +380,9 @@ impl Common {
         let keyboard = seat.get_keyboard().unwrap();
         let pointer = seat.get_pointer().unwrap();
 
-        let xstate = self.xwayland_state.as_mut().unwrap();
+        let Some(xstate) = self.xwayland_state.as_mut() else {
+            return;
+        };
         xstate.last_modifier_state.take();
         for key in xstate.pressed_keys.drain(..).rev() {
             for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
@@ -1352,7 +1358,33 @@ impl XwmHandler for State {
     }
 
     fn disconnected(&mut self, _xwm: XwmId) {
-        let xwayland_state = self.common.xwayland_state.as_mut().unwrap();
-        xwayland_state.xwm = None;
+        let Some(xwayland_state) = self.common.xwayland_state.take() else {
+            return;
+        };
+        self.common.xwayland_scale = None;
+
+        if xwayland_state.started.elapsed() < Duration::from_secs(10) {
+            error!("Xwayland exited right after starting, not restarting it");
+            return;
+        }
+        warn!("Xwayland exited, restarting it");
+        let display = xwayland_state.display;
+        let restart = self.common.event_loop_handle.insert_source(
+            Timer::from_duration(Duration::from_secs(1)),
+            move |_, _, state| {
+                if let Some(token) = state.common.xwayland_source.take() {
+                    state.common.event_loop_handle.remove(token);
+                }
+                let render_node = match &state.backend {
+                    BackendData::Kms(kms) => *kms.primary_node.read().unwrap(),
+                    _ => None,
+                };
+                state.launch_xwayland(render_node, Some(display));
+                TimeoutAction::Drop
+            },
+        );
+        if let Err(err) = restart {
+            error!(?err, "Failed to restart Xwayland");
+        }
     }
 }
