@@ -35,7 +35,12 @@ use crate::{
         layout::tiling::ANIMATION_DURATION,
         zoom::ZoomState,
     },
-    utils::{prelude::*, quirks::workspace_overview_is_open},
+    utils::{
+        prelude::*,
+        quirks::{
+            WORKSPACE_OVERVIEW_NAMESPACE, namespace_is_capture_excluded, workspace_overview_is_open,
+        },
+    },
     wayland::{
         handlers::{
             compositor::FRAME_TIME_FILTER,
@@ -612,11 +617,72 @@ pub fn cursor_elements<'a, 'frame, R>(
 #[cfg(not(feature = "debug"))]
 pub type EguiState = ();
 
+/// Which elements a render pass includes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ElementFilter {
-    All,
-    ExcludeWorkspaceOverview,
-    LayerShellOnly,
+pub struct ElementFilter {
+    /// Restrict to layer shell surfaces, as the screen does while the workspace
+    /// overview covers the output.
+    pub layer_shell_only: bool,
+    /// Drop overlays belonging to screen-capture tooling, see
+    /// [`crate::utils::quirks::CAPTURE_EXCLUDED_NAMESPACES`]. Set for any capture.
+    pub exclude_capture_chrome: bool,
+    /// Drop the workspace overview itself. Set only for the captures the overview
+    /// makes to fill its own previews, which would otherwise recurse.
+    pub exclude_workspace_overview: bool,
+}
+
+impl ElementFilter {
+    /// Everything on the output.
+    pub const ALL: Self = Self {
+        layer_shell_only: false,
+        exclude_capture_chrome: false,
+        exclude_workspace_overview: false,
+    };
+
+    /// Only layer shell, for while the workspace overview is up.
+    pub const LAYER_SHELL_ONLY: Self = Self {
+        layer_shell_only: true,
+        exclude_capture_chrome: false,
+        exclude_workspace_overview: false,
+    };
+
+    /// Filter for drawing `output` to the screen.
+    pub fn for_output(output: &Output) -> Self {
+        if workspace_overview_is_open(output) {
+            Self::LAYER_SHELL_ONLY
+        } else {
+            Self::ALL
+        }
+    }
+
+    /// Filter for capturing `output`. Whatever the screen shows, minus the
+    /// capture tooling's own chrome. The workspace overview stays in.
+    pub fn for_output_capture(output: &Output) -> Self {
+        Self {
+            exclude_capture_chrome: true,
+            ..Self::for_output(output)
+        }
+    }
+
+    /// Filter for capturing a workspace to fill the overview's own previews.
+    pub fn for_workspace_capture() -> Self {
+        Self {
+            layer_shell_only: false,
+            exclude_capture_chrome: true,
+            exclude_workspace_overview: true,
+        }
+    }
+
+    /// Whether this pass renders for a capture rather than for the screen.
+    pub fn is_capture(&self) -> bool {
+        self.exclude_capture_chrome
+    }
+
+    /// Whether a layer shell surface with this namespace is filtered out.
+    pub fn excludes_namespace(&self, namespace: &str) -> bool {
+        (self.exclude_capture_chrome && namespace_is_capture_excluded(namespace))
+            || (self.exclude_workspace_overview && namespace == WORKSPACE_OVERVIEW_NAMESPACE)
+    }
 }
 
 pub fn output_elements<R>(
@@ -683,11 +749,7 @@ where
 
     std::mem::drop(shell_guard);
 
-    let element_filter = if workspace_overview_is_open(output) {
-        ElementFilter::LayerShellOnly
-    } else {
-        ElementFilter::All
-    };
+    let element_filter = ElementFilter::for_output(output);
     let zoom_state = shell.read().zoom_state().cloned();
 
     #[allow(unused_mut)]
@@ -757,7 +819,7 @@ where
         now,
         output,
         cursor_mode,
-        element_filter == ElementFilter::ExcludeWorkspaceOverview,
+        element_filter.is_capture(),
         scanout_node,
         &mut |elem| elements.push(elem),
     );
@@ -1273,11 +1335,7 @@ where
     let zoom_state = shell_ref.zoom_state().cloned();
     std::mem::drop(shell_ref);
 
-    let element_filter = if workspace_overview_is_open(output) {
-        ElementFilter::LayerShellOnly
-    } else {
-        ElementFilter::All
-    };
+    let element_filter = ElementFilter::for_output(output);
 
     let mut postprocess_texture = None;
     let result = if !screen_filter.filter.is_noop() {
