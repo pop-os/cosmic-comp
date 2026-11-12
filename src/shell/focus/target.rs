@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    cell::Cell,
     sync::{Arc, Weak},
     time::Duration,
 };
@@ -426,6 +427,17 @@ impl IsAlive for KeyboardFocusTarget {
     }
 }
 
+/// whether a relative motion was sent to the pointer focus in the current frame
+#[derive(Default)]
+struct RelativeMotionSent(Cell<bool>);
+
+fn relative_motion_sent(seat: &Seat<State>) -> &Cell<bool> {
+    &seat
+        .user_data()
+        .get_or_insert(RelativeMotionSent::default)
+        .0
+}
+
 impl PointerTarget<State> for PointerFocusTarget {
     fn enter(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
         self.update_image_copy_cursor_position(seat, data, event);
@@ -433,9 +445,25 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
     fn motion(&self, seat: &Seat<State>, data: &mut State, event: &PointerMotionEvent) {
         self.update_image_copy_cursor_position(seat, data, event);
+        // without a relative motion Xwayland uses its absolute X device, which can
+        // leave the X master pointer stuck in absolute mode
+        if matches!(self, PointerFocusTarget::X11Surface { .. })
+            && !relative_motion_sent(seat).replace(true)
+        {
+            self.inner_pointer_target().relative_motion(
+                seat,
+                data,
+                &RelativeMotionEvent {
+                    delta: (0., 0.).into(),
+                    delta_unaccel: (0., 0.).into(),
+                    time: event.time,
+                },
+            );
+        }
         self.inner_pointer_target().motion(seat, data, event);
     }
     fn relative_motion(&self, seat: &Seat<State>, data: &mut State, event: &RelativeMotionEvent) {
+        relative_motion_sent(seat).set(true);
         self.inner_pointer_target()
             .relative_motion(seat, data, event);
     }
@@ -447,6 +475,7 @@ impl PointerTarget<State> for PointerFocusTarget {
     }
     fn frame(&self, seat: &Seat<State>, data: &mut State) {
         self.inner_pointer_target().frame(seat, data);
+        relative_motion_sent(seat).set(false);
     }
     fn leave(&self, seat: &Seat<State>, data: &mut State, serial: Serial, time: InputTime) {
         let toplevel = self.toplevel(&data.common.shell.read());
