@@ -1080,6 +1080,28 @@ impl State {
                 }
 
                 let ptr = seat.get_pointer().unwrap();
+
+                // TODO: re-evaluate spec compliance for focus, motion, and relative_motion handling
+                // To avoid accidentally changing input mode when clicking an X11 window
+                if ptr.is_grabbed() && event.state() == ButtonState::Released {
+                    let under = State::surface_under(
+                        ptr.current_location().as_global(),
+                        &seat.active_output(),
+                        &self.common.shell.read(),
+                    )
+                    .map(|(target, pos)| (target, pos.as_logical()));
+
+                    ptr.relative_motion(
+                        self,
+                        under,
+                        &RelativeMotionEvent {
+                            delta: (0., 0.).into(),
+                            delta_unaccel: (0., 0.).into(),
+                            time: event.time(),
+                        },
+                    );
+                }
+
                 if pass_event {
                     ptr.button(
                         self,
