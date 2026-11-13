@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 use reis::eis;
 use smithay::reexports::reis;
 
-use smithay::backend::libei::{EiInput, EiInputEvent, EiRegion};
+use smithay::backend::libei::{EiInput, EiInputEvent, EiInputSeat, EiRegion};
 use smithay::input::keyboard::Keysym;
 use smithay::reexports::calloop;
 use smithay::wayland::input_method::InputMethodSeat;
@@ -15,15 +15,16 @@ use crate::state::{BackendData, State};
 use crate::utils::{geometry::RectGlobalExt, prelude::OutputExt};
 
 // Requested device types for an EI connection, mirroring the XDG RemoteDesktop portal `DeviceType` bitmask
-const DEVICE_TYPE_KEYBOARD: u32 = 1;
-const DEVICE_TYPE_POINTER: u32 = 2;
-const DEVICE_TYPE_TOUCHSCREEN: u32 = 4;
+pub(crate) const DEVICE_TYPE_KEYBOARD: u32 = 1;
+pub(crate) const DEVICE_TYPE_POINTER: u32 = 2;
+pub(crate) const DEVICE_TYPE_TOUCHSCREEN: u32 = 4;
 
 // Name of the EI absolute-pointer device. Shared so the connect path and the
 // re-advertise-on-output-change path recreate the same device.
 const ABSOLUTE_POINTER_NAME: &str = "virtual absolute pointer";
 
-pub type EiRequest = (UnixStream, u32);
+/// (Socket, requested device types, whether it came from Xwayland)
+pub type EiRequest = (UnixStream, u32, bool);
 
 /// Build the regions advertised on the EI absolute devices (absolute pointer and touch) for the
 /// output layout: one region per output, each at its **global logical** offset with
@@ -65,8 +66,18 @@ pub fn setup_ei(
     let handle_clone = handle.clone();
     handle
         .insert_source(channel, move |event, _, _| {
-            let calloop::channel::Event::Msg((stream, device_types)) = event else {
+            let calloop::channel::Event::Msg((stream, device_types, from_xwayland)) = event else {
                 return;
+            };
+            // We create a clone, because we don't know if this client is allowed yet!
+            // A denied xWayland client can be cut off later.
+            let mut xwayland_socket = match from_xwayland.then(|| stream.try_clone()) {
+                Some(Ok(socket)) => Some(socket),
+                Some(Err(err)) => {
+                    tracing::error!("Failed to clone Xwayland EI socket: {}", err);
+                    return;
+                }
+                None => None,
             };
             let context = match eis::Context::new(stream) {
                 Ok(context) => context,
@@ -81,35 +92,15 @@ pub fn setup_ei(
                     EiInputEvent::Connected => {
                         let conn = connection.eis_connection().clone();
                         let seat = connection.add_seat("default");
-                        let wants_keyboard = device_types & DEVICE_TYPE_KEYBOARD != 0;
-                        if wants_keyboard {
-                            let conf = data.common.config.xkb_config();
-                            // The ei_keyboard device is given the compositor keymap; its key
-                            // events feed the shared seat like any other keyboard.
-                            let _ = seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&conf));
-                            // The text device lets clients inject keysyms/utf8 directly, delivered
-                            seat.add_text("virtual text");
-                        }
-                        if device_types & DEVICE_TYPE_POINTER != 0 {
-                            seat.add_pointer("virtual pointer");
-                            let regions = absolute_regions(data);
-                            seat.add_pointer_absolute(ABSOLUTE_POINTER_NAME, &regions);
-                        }
-                        if device_types & DEVICE_TYPE_TOUCHSCREEN != 0 {
-                            let regions = absolute_regions(data);
-                            seat.add_touch("virtual touch", &regions);
-                        }
-                        // Kb-capable connections get a shared-seat source so their `ei_keyboard`
-                        // key events feed the seat keyboard tracking.
-                        if wants_keyboard {
-                            data.common.ei_keyboard_source.insert(
-                                conn.clone(),
-                                smithay::input::keyboard::KeyboardSource::new_auxiliary(),
-                            );
-                        }
                         // Track the seat for every connection
-                        data.common.ei_seats.insert(conn, seat);
-                        data.update_ei_input_method();
+                        data.common.ei_seats.insert(conn.clone(), seat.clone());
+                        match xwayland_socket.take() {
+                            Some(socket) => {
+                                let name = connection.name().unwrap_or_default().to_owned();
+                                data.xwayland_ei_connected(conn, seat, name, device_types, socket);
+                            }
+                            None => data.add_ei_devices(&conn, &seat, device_types),
+                        }
                     }
                     EiInputEvent::Disconnected => {
                         let conn = connection.eis_connection().clone();
@@ -121,6 +112,7 @@ pub fn setup_ei(
                         data.common.ei_seats.remove(&conn);
                         data.common.ei_keyboard_source.remove(&conn);
                         data.common.ei_pointer_buttons.remove(&conn);
+                        data.common.xwayland_ei.forget(&conn);
                         data.update_ei_input_method();
                         // Notify the remaining libei clients of the now-cleared modifier state
                         let seat = data.common.shell.read().seats.last_active().clone();
@@ -167,6 +159,42 @@ pub fn setup_ei(
 }
 
 impl State {
+    /// Create the virtual devices an EI connection asked for on its seat.
+    pub(crate) fn add_ei_devices(
+        &mut self,
+        conn: &eis::Connection,
+        seat: &EiInputSeat,
+        device_types: u32,
+    ) {
+        let wants_keyboard = device_types & DEVICE_TYPE_KEYBOARD != 0;
+        if wants_keyboard {
+            let conf = self.common.config.xkb_config();
+            // The ei_keyboard device is given the compositor keymap; its key
+            // events feed the shared seat like any other keyboard.
+            let _ = seat.add_keyboard("virtual keyboard", xkb_config_to_wl(&conf));
+            // The text device lets clients inject keysyms/utf8 directly, delivered
+            seat.add_text("virtual text");
+        }
+        if device_types & DEVICE_TYPE_POINTER != 0 {
+            seat.add_pointer("virtual pointer");
+            let regions = absolute_regions(self);
+            seat.add_pointer_absolute(ABSOLUTE_POINTER_NAME, &regions);
+        }
+        if device_types & DEVICE_TYPE_TOUCHSCREEN != 0 {
+            let regions = absolute_regions(self);
+            seat.add_touch("virtual touch", &regions);
+        }
+        // Kb-capable connections get a shared-seat source so their `ei_keyboard`
+        // key events feed the seat keyboard tracking.
+        if wants_keyboard {
+            self.common.ei_keyboard_source.insert(
+                conn.clone(),
+                smithay::input::keyboard::KeyboardSource::new_auxiliary(),
+            );
+        }
+        self.update_ei_input_method();
+    }
+
     /// Act as the input method for text injection while any text-capable EI connection is
     /// active, so `ei_text` UTF-8 can be committed into the focused app even without a real
     /// IME, but only when none is bound (a real IME always wins)

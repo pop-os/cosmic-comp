@@ -103,6 +103,10 @@ pub struct CosmicCompConfig {
     pub descale_xwayland: XwaylandDescaling,
     /// Let X11 applications snoop on certain key-presses to allow for global shortcuts
     pub xwayland_eavesdropping: XwaylandEavesdropping,
+    /// Let X11 applications emulate input without asking, except those denied in `xwayland_ei_apps`
+    pub xwayland_ei_no_prompt: bool,
+    /// Remembered answers for X11 applications emulating input
+    pub xwayland_ei_apps: HashMap<String, XwaylandEiDecision>,
     /// The threshold before windows snap themselves to output edges
     pub edge_snap_threshold: u32,
     pub accessibility_zoom: ZoomConfig,
@@ -146,6 +150,8 @@ impl Default for CosmicCompConfig {
             focus_follows_cursor_delay: 250,
             descale_xwayland: XwaylandDescaling::Fractional,
             xwayland_eavesdropping: XwaylandEavesdropping::default(),
+            xwayland_ei_no_prompt: false,
+            xwayland_ei_apps: HashMap::new(),
             edge_snap_threshold: 0,
             accessibility_zoom: ZoomConfig::default(),
             appearance_settings: AppearanceConfig::default(),
@@ -327,6 +333,12 @@ pub enum ActivationPolicy {
     Focus,
     FocusIfActiveWorkspace,
     Urgent,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+pub enum XwaylandEiDecision {
+    Allow,
+    Deny,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, Default, PartialEq, Eq)]
