@@ -32,10 +32,12 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), cosmic_config::E
     if let Err(e) = handle.insert_source(ping_rx, move |_, _, state| {
         let new_theme = cosmic::theme::system_preference();
 
+        let cursor_theme_changed =
+            state.common.theme.cosmic().cursor_theme != new_theme.cosmic().cursor_theme;
         let icon_theme_changed =
             state.common.theme.cosmic().icon_theme != new_theme.cosmic().icon_theme;
 
-        if theme.theme_type != new_theme.theme_type {
+        if state.common.theme.theme_type != new_theme.theme_type {
             state.common.theme = new_theme;
             let theme = state.common.theme.clone();
             let mut workspace_guard = state.common.workspace_state.update();
@@ -44,6 +46,10 @@ pub fn watch_theme(handle: LoopHandle<'_, State>) -> Result<(), cosmic_config::E
                 &state.common.xdg_activation_state,
                 &mut workspace_guard,
             );
+        }
+
+        if cursor_theme_changed {
+            crate::backend::render::cursor::reload_cursors(state);
         }
 
         if icon_theme_changed {

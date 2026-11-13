@@ -3,7 +3,7 @@
 use std::{any::Any, cell::RefCell, collections::HashMap, sync::Mutex};
 
 use crate::{
-    backend::render::cursor::CursorState,
+    backend::render::cursor::{CursorState, CursorStateInner},
     config::{Config, xkb_config_to_wl},
     input::{InputBackendId, ModifiersShortcutQueue, SupressedButtons, SupressedKeys},
     state::State,
@@ -214,6 +214,7 @@ pub fn create_seat(
     seat_state: &mut SeatState<State>,
     output: &Output,
     config: &Config,
+    cursor_theme: Option<&str>,
     name: String,
 ) -> Seat<State> {
     let mut seat = seat_state.new_wl_seat(dh, name);
@@ -226,7 +227,12 @@ pub fn create_seat(
     userdata.insert_if_missing(LastModifierChange::default);
     userdata.insert_if_missing_threadsafe(SeatMoveGrabState::default);
     userdata.insert_if_missing_threadsafe(SeatMenuGrabState::default);
-    userdata.insert_if_missing_threadsafe(CursorState::default);
+    userdata.insert_if_missing_threadsafe(|| {
+        CursorState::new(CursorStateInner::new(
+            cursor_theme,
+            config.cosmic_conf.cursor_size,
+        ))
+    });
     userdata.insert_if_missing_threadsafe(|| ActiveOutput(Mutex::new(output.clone())));
     userdata.insert_if_missing_threadsafe(|| FocusedOutput(Mutex::new(None)));
     userdata.insert_if_missing_threadsafe(PointerConstraintHint::default);
