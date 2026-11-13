@@ -273,6 +273,9 @@ pub struct Common {
         std::collections::HashSet<u32>,
     >,
 
+    /// Allow/deny bookkeeping for libei connections coming from Xwayland
+    pub xwayland_ei: crate::xwayland_ei::XwaylandEiAccess,
+
     pub kiosk_child: Option<Child>,
     pub theme: cosmic::Theme,
 
@@ -795,6 +798,7 @@ impl State {
                 ei_seats: std::collections::HashMap::new(),
                 ei_keyboard_source: std::collections::HashMap::new(),
                 ei_pointer_buttons: std::collections::HashMap::new(),
+                xwayland_ei: Default::default(),
 
                 kiosk_child: None,
                 theme: cosmic::theme::system_preference(),

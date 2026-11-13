@@ -54,6 +54,7 @@ pub mod theme;
 pub mod utils;
 pub mod wayland;
 pub mod xwayland;
+pub mod xwayland_ei;
 
 #[cfg(feature = "profile-with-tracy")]
 #[global_allocator]
