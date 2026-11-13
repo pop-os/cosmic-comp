@@ -462,11 +462,7 @@ impl MoveGrab {
                             }
                         }
                         Some(old_overlap) if old_overlap != overlap => {
-                            for (window, offset) in self.window.windows() {
-                                let mut overlap = overlap;
-                                overlap.loc -= offset;
-                                window.output_enter(output, overlap);
-                            }
+                            self.window.output_enter(output, overlap);
                         }
                         Some(_) => {}
                     }
