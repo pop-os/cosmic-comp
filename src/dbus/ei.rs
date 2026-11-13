@@ -59,9 +59,11 @@ impl Ei {
             let sender = guard
                 .as_ref()
                 .ok_or_else(|| zbus::fdo::Error::Failed("EI sender not available".to_string()))?;
-            sender.send((comp_stream, device_types)).map_err(|err| {
-                zbus::fdo::Error::Failed(format!("Failed to hand off EI socket: {err}"))
-            })?;
+            sender
+                .send((comp_stream, device_types, false))
+                .map_err(|err| {
+                    zbus::fdo::Error::Failed(format!("Failed to hand off EI socket: {err}"))
+                })?;
         }
 
         Ok(std::os::fd::OwnedFd::from(client_stream).into())

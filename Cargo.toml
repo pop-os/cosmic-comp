@@ -78,7 +78,7 @@ xdg-user = "0.2.1"
 xkbcommon = "0.9"
 zbus = "6.2.1"
 profiling = { version = "1.0" }
-rustix = { version = "1.1.4", features = ["process"] }
+rustix = { version = "1.1.4", features = ["net", "process"] }
 rand = "0.10"
 # CLI arguments
 clap_lex = "1.0"
@@ -144,5 +144,5 @@ inherits = "release"
 lto = "fat"
 
 [patch.crates-io]
-smithay = { git = "https://github.com/smithay/smithay.git", rev = "8a27023" }
+smithay = { git = "https://github.com/hojjatabdollahi/smithay.git", branch = "hojjat/ei-connection-name" }
 smithay-egui = { git = "https://github.com/Smithay/smithay-egui.git", rev = "6511552" }

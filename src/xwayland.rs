@@ -113,11 +113,28 @@ impl State {
             return;
         }
 
+        let ei_socket = match crate::xwayland_ei::bind_socket() {
+            Ok(socket) => Some(socket),
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "Failed to create Xwayland EI socket, X11 input emulation disabled"
+                );
+                None
+            }
+        };
+        let envs = ei_socket.as_ref().map(|(_, path)| {
+            (
+                OsString::from("LIBEI_SOCKET"),
+                path.clone().into_os_string(),
+            )
+        });
+
         let (xwayland, client) = match XWayland::spawn(
             &self.common.display_handle,
             None,
-            std::iter::empty::<(OsString, OsString)>(),
-            ["-enable-ei-portal"],
+            envs,
+            std::iter::empty::<OsString>(),
             true,
             Stdio::null(),
             Stdio::null(),
@@ -134,6 +151,12 @@ impl State {
                 return;
             }
         };
+
+        if let (Some((listener, _)), Some(ei_sender)) =
+            (ei_socket, self.common.dbus_state.ei_sender())
+        {
+            crate::xwayland_ei::listen(&self.common.event_loop_handle, listener, ei_sender);
+        }
 
         match self
             .common
