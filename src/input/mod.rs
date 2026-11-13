@@ -502,16 +502,15 @@ impl State {
                     let new_under = if pointer_confined && let Some((surface, surface_loc)) = &under
                     {
                         let is_legal = |pos: Point<f64, Global>, shell: &Shell| {
-                            let new_under = State::surface_under(pos, &output, shell)
-                                .map(|(target, pos)| (target, pos.as_logical()));
-
-                            // TODO: We might need a solution that allows constraints to bypass the surface without affecting the constraints themselves
-                            if new_under.as_ref().and_then(|(under, _)| under.wl_surface())
-                                != surface.wl_surface()
+                            // check region if not null
+                            if let Some(region) = &confine_region
+                                && !region
+                                    .contains((pos.as_logical() - *surface_loc).to_i32_floor())
                             {
                                 return (false, None);
                             }
 
+                            // check surface input region
                             match surface {
                                 PointerFocusTarget::WlSurface { surface, .. } => {
                                     if under_from_surface_tree(
@@ -540,12 +539,13 @@ impl State {
                                 _ => {}
                             }
 
-                            if let Some(region) = &confine_region
-                                && !region
-                                    .contains((pos.as_logical() - *surface_loc).to_i32_floor())
-                            {
-                                return (false, None);
-                            }
+                            // pointer may move to another surface within the input region or constraint region,
+                            // in that case, we allow this move, which leaves original surface, changes the focus target,
+                            // and leads to deactivating constraint.
+                            // This is helpful when user moves the pointer to an OSD above the window.
+                            let new_under = State::surface_under(pos, &output, shell)
+                                .map(|(target, pos)| (target, pos.as_logical()));
+
                             (true, new_under)
                         };
 
