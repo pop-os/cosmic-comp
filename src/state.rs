@@ -10,7 +10,9 @@ use crate::{
     config::{CompOutputConfig, Config, ScreenFilter},
     dbus::DBusState,
     input::{PointerFocusState, gestures::GestureState},
-    shell::{CosmicSurface, SeatExt, Shell, grabs::SeatMoveGrabState},
+    shell::{
+        CosmicSurface, SeatExt, Shell, focus::target::KeyboardFocusTarget, grabs::SeatMoveGrabState,
+    },
     utils::prelude::OutputExt,
     wayland::{
         handlers::{data_device::get_dnd_icon, image_copy_capture::SessionHolder},
@@ -323,6 +325,7 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
+    pub pending_click_focus: Option<KeyboardFocusTarget>,
     pub session_lock_layer_state: SessionLockLayerState,
 
     #[cfg(feature = "logind")]
@@ -841,6 +844,7 @@ impl State {
                 xwayland_state: None,
                 xwayland_shell_state,
                 pointer_focus_state: None,
+                pending_click_focus: None,
                 dbus_state,
                 keyboard_layout_state,
                 session_lock_layer_state,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{state::State, utils::prelude::SeatExt};
+use crate::utils::prelude::*;
 use smithay::{
     input::{
         Seat,
@@ -121,10 +121,25 @@ impl DndGrabHandler for State {
         _target: Option<DndTarget<'_, Self>>,
         _validated: bool,
         seat: Seat<Self>,
-        _location: Point<f64, Logical>,
+        location: Point<f64, Logical>,
     ) {
         if let Some(icon) = seat.user_data().get::<Mutex<Option<DnDIcon>>>() {
             icon.lock().unwrap().take();
+        }
+
+        // Focus target window on drop
+        let position = location.as_global();
+        let under = {
+            let shell = self.common.shell.read();
+            let output = shell
+                .outputs()
+                .find(|o| o.geometry().to_f64().contains(position))
+                .cloned()
+                .unwrap_or_else(|| seat.active_output());
+            State::element_under(position, &output, &shell, &seat)
+        };
+        if let Some(target) = under {
+            Shell::set_focus(self, Some(&target), &seat, None, false);
         }
     }
 }
