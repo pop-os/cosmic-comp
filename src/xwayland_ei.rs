@@ -53,6 +53,8 @@ pub struct XwaylandEiAccess {
     session: HashMap<String, XwaylandEiDecision>,
     // A key here means a dialog for that name is open
     pending: HashMap<String, Vec<Pending>>,
+    // Live allowed connections, so a revoked app can be cut off
+    allowed: Vec<(String, eis::Connection, UnixStream)>,
 }
 
 impl XwaylandEiAccess {
@@ -74,6 +76,20 @@ impl XwaylandEiAccess {
     pub fn forget(&mut self, conn: &eis::Connection) {
         for pending in self.pending.values_mut() {
             pending.retain(|p| &p.conn != conn);
+        }
+        self.allowed.retain(|(_, c, _)| c != conn);
+    }
+
+    /// Close connections the config no longer allows
+    pub fn revalidate(&self, config: &CosmicCompConfig) {
+        for (name, _, socket) in &self.allowed {
+            if self.decide(config, name) != Some(XwaylandEiDecision::Allow) {
+                info!(
+                    name,
+                    "Closing input emulation for X11 app no longer allowed"
+                );
+                let _ = socket.shutdown(Shutdown::Both);
+            }
         }
     }
 
@@ -202,7 +218,10 @@ impl State {
     ) {
         let access = &mut self.common.xwayland_ei;
         match access.decide(&self.common.config.cosmic_conf, &name) {
-            Some(XwaylandEiDecision::Allow) => self.add_ei_devices(&conn, &seat, device_types),
+            Some(XwaylandEiDecision::Allow) => {
+                access.allowed.push((name, conn.clone(), socket));
+                self.add_ei_devices(&conn, &seat, device_types);
+            }
             Some(XwaylandEiDecision::Deny) => {
                 // Xwayland reconnects for all events in the queue, so keep this to `debug!` level
                 debug!(name, "Refusing input emulation from X11 app denied earlier");
@@ -248,7 +267,7 @@ impl State {
         // saving "" for the name would then match all unnamed apps which is not good
         if remember && !name.is_empty() {
             let apps = &mut self.common.config.cosmic_conf.xwayland_ei_apps;
-            apps.insert(name, decision);
+            apps.insert(name.clone(), decision);
             let apps = apps.clone();
             let config = self.common.config.cosmic_helper.clone();
             std::thread::spawn(move || {
@@ -259,7 +278,13 @@ impl State {
         }
         for p in pending {
             match decision {
-                XwaylandEiDecision::Allow => self.add_ei_devices(&p.conn, &p.seat, p.device_types),
+                XwaylandEiDecision::Allow => {
+                    self.add_ei_devices(&p.conn, &p.seat, p.device_types);
+                    self.common
+                        .xwayland_ei
+                        .allowed
+                        .push((name.clone(), p.conn, p.socket));
+                }
                 XwaylandEiDecision::Deny => {
                     let _ = p.socket.shutdown(Shutdown::Both);
                 }

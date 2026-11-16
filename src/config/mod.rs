@@ -957,6 +957,10 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "xwayland_ei_no_prompt" => {
                 state.common.config.cosmic_conf.xwayland_ei_no_prompt =
                     get_config::<bool>(&config, "xwayland_ei_no_prompt");
+                state
+                    .common
+                    .xwayland_ei
+                    .revalidate(&state.common.config.cosmic_conf);
             }
             "xwayland_ei_apps" => {
                 let new = get_config(&config, "xwayland_ei_apps");
@@ -966,6 +970,10 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     .common
                     .xwayland_ei
                     .saved_apps_removed(&old, &state.common.config.cosmic_conf.xwayland_ei_apps);
+                state
+                    .common
+                    .xwayland_ei
+                    .revalidate(&state.common.config.cosmic_conf);
             }
             "focus_follows_cursor" => {
                 let new = get_config::<bool>(&config, "focus_follows_cursor");
