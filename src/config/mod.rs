@@ -959,8 +959,13 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     get_config::<bool>(&config, "xwayland_ei_no_prompt");
             }
             "xwayland_ei_apps" => {
-                state.common.config.cosmic_conf.xwayland_ei_apps =
-                    get_config(&config, "xwayland_ei_apps");
+                let new = get_config(&config, "xwayland_ei_apps");
+                let old =
+                    std::mem::replace(&mut state.common.config.cosmic_conf.xwayland_ei_apps, new);
+                state
+                    .common
+                    .xwayland_ei
+                    .saved_apps_removed(&old, &state.common.config.cosmic_conf.xwayland_ei_apps);
             }
             "focus_follows_cursor" => {
                 let new = get_config::<bool>(&config, "focus_follows_cursor");

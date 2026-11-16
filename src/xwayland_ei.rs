@@ -76,6 +76,17 @@ impl XwaylandEiAccess {
             pending.retain(|p| &p.conn != conn);
         }
     }
+
+    /// Apps removed from the saved answers (e.g. in Settings) should be asked about again,
+    /// not fall back to this session's answer.
+    pub fn saved_apps_removed(
+        &mut self,
+        old: &HashMap<String, XwaylandEiDecision>,
+        new: &HashMap<String, XwaylandEiDecision>,
+    ) {
+        self.session
+            .retain(|name, _| !old.contains_key(name) || new.contains_key(name));
+    }
 }
 
 /// Bind the socket Xwayland gets as `LIBEI_SOCKET`.
