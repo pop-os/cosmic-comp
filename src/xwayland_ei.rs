@@ -30,6 +30,7 @@ use tracing::{debug, error, info, warn};
 use zbus::{ObjectPath, OwnedVariant, Variant};
 
 use crate::{
+    fl,
     libei::{DEVICE_TYPE_KEYBOARD, DEVICE_TYPE_POINTER, DEVICE_TYPE_TOUCHSCREEN, EiRequest},
     state::State,
 };
@@ -266,23 +267,21 @@ pub async fn access_dialog(
         "/com/system76/CosmicComp/request/xwayland_ei_{}",
         REQUEST.fetch_add(1, Ordering::Relaxed)
     ))?;
-    let app = if name.is_empty() {
-        "An X11 app".to_owned()
+    let body = if name.is_empty() {
+        fl!("xwayland-ei-body-unnamed")
     } else {
-        format!("An X11 app claiming to be “{name}”")
+        fl!("xwayland-ei-body", app = name)
     };
-    // TODO: localization!
-    let body = format!("{app} wants to control your keyboard and pointer.");
 
     let mut options: HashMap<&str, Variant> = HashMap::new();
-    options.insert("grant_label", "Allow".into());
-    options.insert("deny_label", "Deny".into());
+    options.insert("grant_label", fl!("xwayland-ei-allow").into());
+    options.insert("deny_label", fl!("xwayland-ei-deny").into());
     options.insert("icon", "input-keyboard-symbolic".into());
     if !name.is_empty() {
         // No options makes it a boolean choice, drawn as a checkbox
         let choices = vec![(
             "remember",
-            "Remember my choice",
+            fl!("xwayland-ei-remember"),
             Vec::<(&str, &str)>::new(),
             "false",
         )];
@@ -295,7 +294,7 @@ pub async fn access_dialog(
             "/org/freedesktop/portal/desktop",
             Some("org.freedesktop.impl.portal.Access"),
             "AccessDialog",
-            &(handle, "", "", "Allow input emulation?", "", body, options),
+            &(handle, "", "", fl!("xwayland-ei-title"), "", body, options),
         )
         .await?;
     let (response, results): (u32, HashMap<String, OwnedVariant>) = reply.body().deserialize()?;

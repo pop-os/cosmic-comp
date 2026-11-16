@@ -26,3 +26,11 @@ window-menu-resize-edge-top = Top
 window-menu-resize-edge-left = Left
 window-menu-resize-edge-right = Right
 window-menu-resize-edge-bottom = Bottom
+
+xwayland-ei-title = Allow input emulation?
+# { $app } is the name the X11 app reports for itself, which is not verified
+xwayland-ei-body = An X11 app claiming to be “{ $app }” wants to control your keyboard and pointer.
+xwayland-ei-body-unnamed = An X11 app wants to control your keyboard and pointer.
+xwayland-ei-allow = Allow
+xwayland-ei-deny = Deny
+xwayland-ei-remember = Remember my choice
