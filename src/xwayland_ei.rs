@@ -9,6 +9,7 @@ use std::{
     collections::HashMap,
     io,
     net::Shutdown,
+    os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd},
     os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     sync::atomic::{AtomicU32, Ordering},
@@ -21,7 +22,9 @@ use smithay::{
     reexports::{
         calloop::{self, LoopHandle, generic::Generic},
         reis::eis,
+        wayland_server::Client,
     },
+    xwayland::XWaylandClientData,
 };
 use tracing::{debug, error, info, warn};
 use zbus::{ObjectPath, OwnedVariant, Variant};
@@ -89,20 +92,45 @@ pub fn bind_socket() -> io::Result<(UnixListener, PathBuf)> {
     Ok((listener, path))
 }
 
-fn is_xwayland_child(status: &str, parent: u32) -> bool {
-    let field = |key: &str| {
-        status
-            .lines()
-            .find_map(|line| line.strip_prefix(key)?.strip_prefix(':'))
-            .map(str::trim)
+/// A pidfd of the process that connected `stream`
+// TODO: replace with `rustix::net::sockopt::socket_peerpidfd` once
+// https://github.com/bytecodealliance/rustix/pull/1474 is released, and drop the `unsafe`.
+fn peer_pidfd(stream: &UnixStream) -> io::Result<OwnedFd> {
+    let mut fd: libc::c_int = -1;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: `fd` and `len` are valid for writes and sized for an int, as the option expects
+    let ret = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERPIDFD,
+            (&raw mut fd).cast(),
+            &mut len,
+        )
     };
-    field("Name") == Some("Xwayland") && field("PPid") == Some(parent.to_string().as_str())
+    if ret != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: on success the kernel installed a new pidfd that we now own
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// Whether two pidfds refer to the same process.
+fn same_process(a: BorrowedFd<'_>, b: BorrowedFd<'_>) -> io::Result<bool> {
+    const PID_FS_MAGIC: i64 = 0x5049_4446;
+    if rustix::fs::fstatfs(a)?.f_type as i64 != PID_FS_MAGIC {
+        return Err(io::Error::other(
+            "pidfds aren't on pidfs (Linux 6.9+ needed)",
+        ));
+    }
+    Ok(rustix::fs::fstat(a)?.st_ino == rustix::fs::fstat(b)?.st_ino)
 }
 
 /// Accept only EI connections from our own Xwayland.
 pub fn listen(
     handle: &LoopHandle<'static, State>,
     listener: UnixListener,
+    xwayland: Client,
     ei_sender: calloop::channel::Sender<EiRequest>,
 ) {
     let source = Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level);
@@ -116,18 +144,23 @@ pub fn listen(
                     break;
                 }
             };
-            // HACK: we can't get the xwayland pid, but any of our children called xwayland is ok.
-            let peer = rustix::net::sockopt::socket_peercred(&stream).map(|cred| cred.pid);
-            let ok = peer.as_ref().is_ok_and(|pid| {
-                std::fs::read_to_string(format!("/proc/{}/status", pid.as_raw_nonzero()))
-                    .is_ok_and(|status| is_xwayland_child(&status, std::process::id()))
-            });
-            if !ok {
-                warn!(
-                    ?peer,
-                    "Rejecting EI connection on the Xwayland socket from another process"
-                );
+            let Some(xwayland_pidfd) = xwayland
+                .get_data::<XWaylandClientData>()
+                .and_then(|data| data.pidfd())
+            else {
+                warn!("No pidfd for Xwayland, rejecting its EI connection");
                 continue;
+            };
+            match peer_pidfd(&stream).and_then(|peer| same_process(peer.as_fd(), xwayland_pidfd)) {
+                Ok(true) => {}
+                Ok(false) => {
+                    warn!("Rejecting EI connection on the Xwayland socket from another process");
+                    continue;
+                }
+                Err(err) => {
+                    warn!(?err, "Can't verify the Xwayland EI peer, rejecting it");
+                    continue;
+                }
             }
             if let Err(err) = stream.set_nonblocking(true) {
                 warn!(?err, "Failed to set Xwayland EI socket non-blocking");

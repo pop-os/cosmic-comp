@@ -155,7 +155,12 @@ impl State {
         if let (Some((listener, _)), Some(ei_sender)) =
             (ei_socket, self.common.dbus_state.ei_sender())
         {
-            crate::xwayland_ei::listen(&self.common.event_loop_handle, listener, ei_sender);
+            crate::xwayland_ei::listen(
+                &self.common.event_loop_handle,
+                listener,
+                client.clone(),
+                ei_sender,
+            );
         }
 
         match self
