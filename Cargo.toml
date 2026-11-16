@@ -7,7 +7,7 @@ version = "1.0.0"
 rust-version = "1.95"
 
 [workspace]
-members = ["cosmic-comp-config"]
+members = ["cosmic-comp-config", "cosmic-comp-ipc"]
 
 [dependencies]
 anyhow = { version = "1.0.102", features = ["backtrace"] }
@@ -17,6 +17,7 @@ cosmic-comp-config = { path = "cosmic-comp-config", features = [
     "libdisplay-info",
     "output",
 ] }
+cosmic-comp-ipc = { path = "cosmic-comp-ipc" }
 cosmic-config = { git = "https://github.com/pop-os/libcosmic", features = [
     "calloop",
     "macro",

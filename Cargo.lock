@@ -678,6 +678,7 @@ dependencies = [
  "calloop",
  "clap_lex",
  "cosmic-comp-config",
+ "cosmic-comp-ipc",
  "cosmic-config",
  "cosmic-login1-zbus",
  "cosmic-protocols",
@@ -743,6 +744,17 @@ dependencies = [
  "ron",
  "serde",
  "tracing",
+]
+
+[[package]]
+name = "cosmic-comp-ipc"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "rustix 1.1.6",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
