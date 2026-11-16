@@ -122,10 +122,20 @@ async fn init_session(state: &DBusState) -> zbus::Result<()> {
     let a11y_keyboard_monitor_state =
         A11yKeyboardMonitorState::new(conn, &name_owners, &state.0.executor).await?;
     *state.0.a11y_keyboard_monitor.borrow_mut() = Some(a11y_keyboard_monitor_state);
+    let (forget_xwayland_app, forget_channel) = calloop::channel::channel::<String>();
+    let _ = state
+        .0
+        .evlh
+        .insert_source(forget_channel, |event, _, state: &mut State| {
+            if let calloop::channel::Event::Msg(name) = event {
+                state.xwayland_ei_forget_session(&name);
+            }
+        });
     let ei_state = ei::EiState::new(
         conn,
         &name_owners,
         state.0.ei_sender.clone(),
+        forget_xwayland_app,
         &state.0.executor,
     )
     .await?;

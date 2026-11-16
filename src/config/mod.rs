@@ -974,6 +974,7 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                     .common
                     .xwayland_ei
                     .revalidate(&state.common.config.cosmic_conf);
+                state.publish_xwayland_ei_session();
             }
             "focus_follows_cursor" => {
                 let new = get_config::<bool>(&config, "focus_follows_cursor");

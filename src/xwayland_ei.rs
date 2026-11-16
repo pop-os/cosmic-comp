@@ -208,6 +208,31 @@ pub fn listen(
 }
 
 impl State {
+    /// Show this session's unsaved answers in Settings, over D-Bus.
+    pub(crate) fn publish_xwayland_ei_session(&self) {
+        let config = &self.common.config.cosmic_conf;
+        let apps = self
+            .common
+            .xwayland_ei
+            .session
+            .iter()
+            .filter(|(name, _)| !config.xwayland_ei_apps.contains_key(*name))
+            .map(|(name, decision)| (name.clone(), *decision == XwaylandEiDecision::Allow))
+            .collect();
+        if let Some(ei) = self.common.dbus_state.ei_state() {
+            ei.set_xwayland_session_apps(apps);
+        }
+    }
+
+    /// Settings asked to drop this session's answer for `name`, it is asked again next time.
+    pub(crate) fn xwayland_ei_forget_session(&mut self, name: &str) {
+        self.common.xwayland_ei.session.remove(name);
+        self.common
+            .xwayland_ei
+            .revalidate(&self.common.config.cosmic_conf);
+        self.publish_xwayland_ei_session();
+    }
+
     pub(crate) fn xwayland_ei_connected(
         &mut self,
         conn: eis::Connection,
@@ -276,6 +301,7 @@ impl State {
                 }
             });
         }
+        self.publish_xwayland_ei_session();
         for p in pending {
             match decision {
                 XwaylandEiDecision::Allow => {

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     os::unix::net::UnixStream,
     sync::{Arc, Mutex},
 };
@@ -26,6 +27,8 @@ type EiSender = Arc<Mutex<Option<calloop::channel::Sender<crate::libei::EiReques
 struct Ei {
     ei_sender: EiSender,
     name_owners: NameOwners,
+    xwayland_session_apps: HashMap<String, bool>,
+    forget_xwayland_app: calloop::channel::Sender<String>,
 }
 
 impl Ei {
@@ -69,6 +72,17 @@ impl Ei {
         Ok(std::os::fd::OwnedFd::from(client_stream).into())
     }
 
+    /// Input emulation answers for X11 apps that last until logout
+    #[zbus(property)]
+    fn xwayland_session_apps(&self) -> HashMap<String, bool> {
+        self.xwayland_session_apps.clone()
+    }
+
+    /// Drop this session's answer for an X11 app
+    fn forget_xwayland_app(&self, name: String) {
+        let _ = self.forget_xwayland_app.send(name);
+    }
+
     #[zbus(signal)]
     async fn activated(
         ctx: SignalEmitter<'_>,
@@ -92,11 +106,14 @@ impl EiState {
         conn: &zbus::Connection,
         name_owners: &NameOwners,
         ei_sender: EiSender,
+        forget_xwayland_app: calloop::channel::Sender<String>,
         executor: &calloop::futures::Scheduler<()>,
     ) -> zbus::Result<Self> {
         let ei = Ei {
             ei_sender,
             name_owners: name_owners.clone(),
+            xwayland_session_apps: HashMap::new(),
+            forget_xwayland_app,
         };
         conn.object_server()
             .at("/com/system76/CosmicComp/Ei", ei)
@@ -115,6 +132,25 @@ impl EiState {
         let future = Ei::activated(signal_context, content_hint.bits(), content_purpose.into());
         let _ = self.executor.schedule(async {
             let _ = future.await;
+        });
+    }
+
+    pub fn set_xwayland_session_apps(&self, apps: HashMap<String, bool>) {
+        let conn = self.conn.clone();
+        let _ = self.executor.schedule(async move {
+            let Ok(iface) = conn
+                .object_server()
+                .interface::<_, Ei>("/com/system76/CosmicComp/Ei")
+                .await
+            else {
+                return;
+            };
+            iface.get_mut().await.xwayland_session_apps = apps;
+            let _ = iface
+                .get()
+                .await
+                .xwayland_session_apps_changed(iface.signal_emitter())
+                .await;
         });
     }
 
