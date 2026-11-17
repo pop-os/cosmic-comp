@@ -9,6 +9,7 @@ use smithay::{
         allocator::{Fourcc, Modifier},
         egl::EGLDevice,
         renderer::{
+            buffer_dimensions,
             damage::OutputDamageTracker,
             gles::{Capability, GlesRenderer},
             glow::GlowRenderer,
@@ -295,6 +296,24 @@ impl ImageCopyCaptureHandler for State {
                 let Some(mut output) = weak.upgrade() else {
                     return;
                 };
+
+                let mode = output
+                    .current_mode()
+                    .map(|mode| mode.size.to_logical(1).to_buffer(1, Transform::Normal));
+                if mode != buffer_dimensions(&frame.buffer()) {
+                    let Some(constraints) = constraints_for_output(&output, &mut self.backend)
+                    else {
+                        output.remove_session(session);
+                        return;
+                    };
+                    session.update_constraints(constraints);
+                    if let Some(data) = session.user_data().get::<SessionData>() {
+                        *data.lock().unwrap() =
+                            SessionUserData::new(OutputDamageTracker::from_output(&output));
+                    }
+                    frame.fail(CaptureFailureReason::BufferConstraints);
+                    return;
+                }
 
                 output.add_frame(session.clone(), frame);
                 self.backend.schedule_render(&output);
