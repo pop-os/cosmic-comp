@@ -352,9 +352,9 @@ impl<P: Program + Send + 'static> IcedElement<P> {
         IcedElement(Arc::new(Mutex::new(internal)))
     }
 
-    pub fn with_program<R>(&self, func: impl FnOnce(&P) -> R) -> R {
-        let internal = self.0.lock().unwrap();
-        func(&internal.state.program().program)
+    pub fn with_program<R>(&self, func: impl FnOnce(&mut P) -> R) -> R {
+        let mut internal = self.0.lock().unwrap();
+        func(&mut internal.state.program_mut().program)
     }
 
     pub fn minimum_size(&self) -> Size<i32, Logical> {
