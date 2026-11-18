@@ -1,9 +1,6 @@
 use std::{
     fmt,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
 };
 
 use calloop::LoopHandle;
@@ -220,21 +217,21 @@ impl Item {
 #[derive(Debug)]
 pub struct ContextMenu {
     items: Vec<Item>,
-    selected: AtomicBool,
-    row_width: Mutex<Option<f32>>,
+    selected: bool,
+    row_width: Option<f32>,
 }
 
 impl ContextMenu {
     pub fn new(items: Vec<Item>) -> ContextMenu {
         ContextMenu {
             items,
-            selected: AtomicBool::new(false),
-            row_width: Mutex::new(None),
+            selected: false,
+            row_width: None,
         }
     }
 
-    pub fn set_row_width(&self, width: f32) {
-        *self.row_width.lock().unwrap() = Some(width);
+    pub fn set_row_width(&mut self, width: f32) {
+        self.row_width = Some(width);
     }
 }
 
@@ -268,7 +265,7 @@ impl Program for ContextMenu {
             Message::ItemPressed(idx) => {
                 if let Some(Item::Entry { on_press, .. }) = self.items.get_mut(idx) {
                     (on_press)(loop_handle);
-                    self.selected.store(true, Ordering::SeqCst);
+                    self.selected = true;
                 }
                 // TODO: If Submenu, then also expand on "Pressed" for touch events.
                 // But right now we don't have any touch responsive menus with submenus
@@ -301,7 +298,7 @@ impl Program for ContextMenu {
 
                             let min_size = element.minimum_size();
                             element.with_program(|p| {
-                                *p.row_width.lock().unwrap() = Some(min_size.w as f32);
+                                p.row_width = Some(min_size.w as f32);
                             });
                             element.resize(min_size);
 
@@ -392,12 +389,7 @@ impl Program for ContextMenu {
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        let width = self
-            .row_width
-            .lock()
-            .unwrap()
-            .map(Length::Fixed)
-            .unwrap_or(Length::Shrink);
+        let width = self.row_width.map(Length::Fixed).unwrap_or(Length::Shrink);
         let mode = match width {
             Length::Shrink => Length::Shrink,
             _ => Length::Fill,
@@ -1279,7 +1271,7 @@ impl MenuGrab {
         let element = IcedElement::new(ContextMenu::new(items), Size::default(), handle, theme);
         let min_size = element.minimum_size();
         element.with_program(|p| {
-            *p.row_width.lock().unwrap() = Some(min_size.w as f32);
+            p.row_width = Some(min_size.w as f32);
         });
         element.resize(min_size);
 
