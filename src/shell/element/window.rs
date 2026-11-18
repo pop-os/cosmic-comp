@@ -63,7 +63,7 @@ use smithay::{
     },
     wayland::{pointer_constraints::with_pointer_constraint, seat::WaylandFocus},
 };
-use std::{borrow::Cow, fmt, hash::Hash, sync::Arc};
+use std::{borrow::Cow, fmt, hash::Hash, mem, sync::Arc};
 use wayland_backend::server::ObjectId;
 
 use super::CosmicSurface;
@@ -87,14 +87,13 @@ pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
     activated: bool,
     /// TODO: This needs to be per seat
-    pointer_entered: u8,
+    pointer_entered: Option<Focus>,
     last_title: String,
     tiled: bool,
     theme: cosmic::Theme,
     appearance_conf: AppearanceConfig,
 }
 
-#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Focus {
     Header = 1,
@@ -152,26 +151,15 @@ impl Focus {
             Focus::Header => CursorIcon::Default,
         }
     }
-
-    /// # Safety
-    /// `value` must be in the range of `Focus`
-    pub unsafe fn from_u8(value: u8) -> Option<Focus> {
-        match value {
-            0 => None,
-            focus => unsafe { Some(std::mem::transmute::<u8, Focus>(focus)) },
-        }
-    }
 }
 
 impl CosmicWindowInternal {
     pub fn swap_focus(&mut self, focus: Option<Focus>) -> Option<Focus> {
-        let old = unsafe { Focus::from_u8(self.pointer_entered) };
-        self.pointer_entered = focus.map_or(0, |x| x as u8);
-        old
+        mem::replace(&mut self.pointer_entered, focus)
     }
 
     pub fn current_focus(&self) -> Option<Focus> {
-        unsafe { Focus::from_u8(self.pointer_entered) }
+        self.pointer_entered
     }
 
     /// returns if the window has any current or pending server-side decorations
@@ -209,7 +197,7 @@ impl CosmicWindow {
             CosmicWindowInternal {
                 window,
                 activated: false,
-                pointer_entered: 0,
+                pointer_entered: None,
                 last_title,
                 tiled: false,
                 theme: theme.clone(),

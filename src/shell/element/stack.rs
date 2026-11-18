@@ -118,7 +118,7 @@ pub struct CosmicStackInternal {
     previous_index: Option<(Serial, usize)>,
     scroll_to_focus: bool,
     previous_keyboard: usize,
-    pointer_entered: u8,
+    pointer_entered: Option<Focus>,
     touch_serial: u32,
     tablet_serial: u32,
     reenter: bool,
@@ -133,13 +133,11 @@ pub struct CosmicStackInternal {
 
 impl CosmicStackInternal {
     pub fn swap_focus(&mut self, focus: Option<Focus>) -> Option<Focus> {
-        let old = unsafe { Focus::from_u8(self.pointer_entered) };
-        self.pointer_entered = focus.map_or(0, |x| x as u8);
-        old
+        mem::replace(&mut self.pointer_entered, focus)
     }
 
     pub fn current_focus(&self) -> Option<Focus> {
-        unsafe { Focus::from_u8(self.pointer_entered) }
+        self.pointer_entered
     }
 }
 
@@ -179,7 +177,7 @@ impl CosmicStack {
                 previous_index: None,
                 scroll_to_focus: false,
                 previous_keyboard: 0,
-                pointer_entered: 0,
+                pointer_entered: None,
                 touch_serial: 0,
                 tablet_serial: 0,
                 reenter: false,
