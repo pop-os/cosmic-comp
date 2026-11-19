@@ -416,6 +416,11 @@ impl<P: Program + Send + 'static> IcedElement<P> {
     pub fn set_theme(&self, theme: cosmic::Theme) {
         let mut guard = self.0.lock().unwrap();
         guard.theme = theme.clone();
+        // Rebuild the layers with the new theme
+        guard.update(true);
+        for (_buffer, old_primitives) in guard.buffers.values_mut() {
+            *old_primitives = None;
+        }
     }
 
     pub fn force_redraw(&self) {
