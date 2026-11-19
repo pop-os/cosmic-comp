@@ -117,7 +117,9 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
 
     let mut kiosk_command = None;
-    let mut with_xwayland = true;
+    let mut with_xwayland =
+        !crate::utils::env::bool_var("COSMIC_DISABLE_XWAYLAND").unwrap_or(false);
+
     // Parse the arguments
     while let Some(arg) = raw_args.next_os(&mut cursor) {
         match arg.to_str() {
