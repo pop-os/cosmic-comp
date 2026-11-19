@@ -17,6 +17,7 @@ pub use self::nonblocking::*;
 #[serde(rename_all = "snake_case", tag = "message")]
 pub enum Message {
     SetEnv { variables: HashMap<String, String> },
+    Heartbeat,
 }
 
 #[derive(Debug, thiserror::Error)]
