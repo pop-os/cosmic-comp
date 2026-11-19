@@ -115,6 +115,8 @@ pub struct CosmicStackInternal {
     // Index of active window
     active: usize,
     activated: bool,
+    /// Activation state as of the client's last commit (a change triggers a header redraw)
+    committed_activated: bool,
     group_focused: bool,
     previous_index: Option<(Serial, usize)>,
     scroll_to_focus: bool,
@@ -212,6 +214,7 @@ impl CosmicStack {
                 tiled: false,
                 theme: theme.clone(),
                 appearance_conf: appearance,
+                committed_activated: false,
             },
             (width, TAB_HEIGHT),
             handle,
@@ -591,6 +594,12 @@ impl CosmicStack {
             if self.active() == surface {
                 self.0
                     .resize(Size::from((surface.geometry().size.w, TAB_HEIGHT)));
+                let activated = surface.is_activated(false);
+                if self.0.with_program(|p| {
+                    mem::replace(&mut p.committed_activated, activated) != activated
+                }) {
+                    self.0.force_update();
+                }
             }
         }
     }
