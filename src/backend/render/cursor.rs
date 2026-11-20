@@ -145,8 +145,11 @@ impl Cursor {
 /// `size / nominal_size`. The returned [`Image`] uses the same premultiplied
 /// byte order (BGRA / little-endian ARGB) as xcursor images.
 fn rasterize_svg_frame(frame: &SvgFrame, size: u32) -> Image {
-    let factor = size as f32 / frame.nominal_size;
     let svg_size = frame.tree.size();
+    let max_side = size.saturating_mul(4).max(1) as f32;
+    let factor = (size as f32 / frame.nominal_size)
+        .min(max_side / svg_size.width())
+        .min(max_side / svg_size.height());
     let width = ((svg_size.width() * factor).floor() as u32).max(1);
     let height = ((svg_size.height() * factor).floor() as u32).max(1);
 
@@ -344,6 +347,14 @@ fn parse_svg_dir(dir: &std::path::Path, options: &usvg::Options) -> Option<Vec<S
 
     let mut frames = Vec::with_capacity(metas.len());
     for meta in metas {
+        if !(meta.nominal_size.is_finite() && meta.nominal_size > 0.0) {
+            warn!(
+                ?dir,
+                nominal_size = meta.nominal_size,
+                "Invalid SVG cursor nominal size"
+            );
+            break;
+        }
         let svg_path = dir.join(&meta.filename);
         let svg_data = match std::fs::read(&svg_path) {
             Ok(data) => data,
