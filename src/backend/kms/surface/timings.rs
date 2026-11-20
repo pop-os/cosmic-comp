@@ -141,7 +141,7 @@ impl Timings {
         if let Some(frame) = self.pending_frame.as_mut() {
             frame.render_duration_draw = Some(
                 Time::elapsed(&frame.render_start, clock.now())
-                    - frame.render_duration_elements.unwrap_or(Duration::ZERO),
+                    .saturating_sub(frame.render_duration_elements.unwrap_or(Duration::ZERO)),
             );
         }
     }
@@ -305,13 +305,13 @@ impl Timings {
                     now = ?orig_now,
                     ?last_presentation_time,
                     "got a 2+ early VBlank, {:?} until presentation",
-                    last_presentation_time - now,
+                    last_presentation_time.saturating_sub(now),
                 );
                 now = last_presentation_time + Duration::from_nanos(refresh_interval_ns);
             }
         }
 
-        let since_last = now - last_presentation_time;
+        let since_last = now.saturating_sub(last_presentation_time);
         let since_last_ns =
             since_last.as_secs() * 1_000_000_000 + u64::from(since_last.subsec_nanos());
         let to_next_ns = (since_last_ns / refresh_interval_ns + 1) * refresh_interval_ns;
@@ -321,7 +321,7 @@ impl Timings {
         if self.vrr && to_next_ns > refresh_interval_ns {
             Duration::ZERO
         } else {
-            last_presentation_time + Duration::from_nanos(to_next_ns) - now
+            (last_presentation_time + Duration::from_nanos(to_next_ns)).saturating_sub(now)
         }
     }
 
