@@ -49,6 +49,14 @@ pub fn run_socket(handle: LoopHandle<State>, common: &mut Common) -> Result<()> 
                             warn!("Got SetEnv from session? What is this?");
                             Ok(PostAction::Continue)
                         }
+                        Message::Heartbeat => {
+                            if let Err(err) =
+                                cosmic_comp_ipc::write_msg_blocking(stream, &Message::Heartbeat)
+                            {
+                                warn!(?err, "Failed to answer the session's heartbeat");
+                            }
+                            Ok(PostAction::Continue)
+                        }
                     },
                     Err(cosmic_comp_ipc::Error::IO(err)) => {
                         error!(?err, "Error reading from session socket");
