@@ -892,25 +892,31 @@ impl State {
 
                 let mut pass_event = !seat.supressed_buttons().remove(&backend_id, button);
                 if event.state() == ButtonState::Pressed {
+                    self.common.pending_click_focus = None;
                     // change the keyboard focus unless the pointer is grabbed
                     // We test for any matching surface type here but always use the root
                     // (in case of a window the toplevel) surface for the focus.
                     // see: https://gitlab.freedesktop.org/wayland/wayland/-/issues/294
                     if !seat.get_pointer().unwrap().is_grabbed() {
                         let output = seat.active_output();
-
                         let global_position =
                             seat.get_pointer().unwrap().current_location().as_global();
                         let under = {
                             let shell = self.common.shell.read();
                             State::element_under(global_position, &output, &shell, &seat)
                         };
+
                         // Grabbing a tiling resize handle (the gap between tiles) must not change keyboard focus
                         let on_resize_fork = matches!(
                             seat.get_pointer().unwrap().current_focus(),
                             Some(PointerFocusTarget::ResizeFork(_))
                         );
                         if let Some(target) = under.filter(|_| !on_resize_fork) {
+                            let redirect = self.common.shell.read().resolve_modal_redirect(&target);
+                            if let Some(dialog) = redirect {
+                                self.common.shell.write().shake_modal_dialog(&dialog);
+                            }
+
                             if let Some(surface) = target.toplevel().map(Cow::into_owned)
                                 && self.source_modifiers(&backend_id, &seat).logo
                                 && !shortcuts_inhibited
@@ -1046,13 +1052,10 @@ impl State {
                                         _ => {}
                                     }
                                 }
+                                Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
+                            } else {
+                                self.common.pending_click_focus = Some(target);
                             }
-
-                            let redirect = self.common.shell.read().resolve_modal_redirect(&target);
-                            if let Some(dialog) = redirect {
-                                self.common.shell.write().shake_modal_dialog(&dialog);
-                            }
-                            Shell::set_focus(self, Some(&target), &seat, Some(serial), false);
                         }
                     }
                 } else {
@@ -1064,6 +1067,19 @@ impl State {
                         shell.set_overview_mode(None, self.common.event_loop_handle.clone());
                     }
                     std::mem::drop(shell);
+
+                    if let Some(pending) = self.common.pending_click_focus.take() {
+                        let output = seat.active_output();
+                        let global_position =
+                            seat.get_pointer().unwrap().current_location().as_global();
+                        let under = {
+                            let shell = self.common.shell.read();
+                            State::element_under(global_position, &output, &shell, &seat)
+                        };
+                        if under.as_ref() == Some(&pending) {
+                            Shell::set_focus(self, Some(&pending), &seat, Some(serial), false);
+                        }
+                    }
                 };
 
                 if pass_event
