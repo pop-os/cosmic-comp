@@ -50,6 +50,7 @@ impl SecurityContextHandler for State {
                     warn!(?err, "Error adding wayland client");
                 };
             })
-            .expect("Failed to init the wayland socket source.");
+            .inspect_err(|err| warn!(?err, "Failed to listen on the security context socket"))
+            .ok();
     }
 }
