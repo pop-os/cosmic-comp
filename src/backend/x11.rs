@@ -388,7 +388,7 @@ pub fn init_backend(
     }
 
     if state.common.with_xwayland {
-        state.launch_xwayland(None);
+        state.launch_xwayland(None, None);
     } else {
         state.notify_ready();
     }
