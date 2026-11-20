@@ -743,6 +743,7 @@ dependencies = [
  "libdisplay-info",
  "ron",
  "serde",
+ "slotmap",
  "tracing",
 ]
 

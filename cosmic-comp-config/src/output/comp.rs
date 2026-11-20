@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::EdidProduct;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs::OpenOptions, path::Path};
 use tracing::{error, warn};
@@ -70,18 +71,23 @@ impl Default for OutputConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OutputInfo {
-    pub connector: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
     pub make: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edid: Option<EdidProduct>,
 }
 
 pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
     if let Some(path) = path.as_ref() {
         let path: &Path = path.as_ref();
         if path.exists() {
-            match ron::de::from_reader::<_, OutputsConfig>(
-                OpenOptions::new().read(true).open(path).unwrap(),
-            ) {
+            // IMPLICIT_SOME neede for configs written before `connector` became optional
+            match ron::Options::default()
+                .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+                .from_reader::<_, OutputsConfig>(OpenOptions::new().read(true).open(path).unwrap())
+            {
                 Ok(mut config) => {
                     config.config.retain(|info, configs| {
                         let valid = info.len() == configs.len();
@@ -94,11 +100,9 @@ pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
                         let config_clone = config.clone();
                         for conf in config.iter_mut() {
                             if let OutputState::Mirroring(conn) = &conf.enabled {
-                                if let Some((j, _)) = info
-                                    .iter()
-                                    .enumerate()
-                                    .find(|(_, info)| &info.connector == conn)
-                                {
+                                if let Some((j, _)) = info.iter().enumerate().find(|(_, info)| {
+                                    info.connector.as_deref() == Some(conn.as_str())
+                                }) {
                                     if config_clone[j].enabled != OutputState::Enabled {
                                         warn!(
                                             "Invalid Mirroring tag, overriding with `Enabled` instead"
