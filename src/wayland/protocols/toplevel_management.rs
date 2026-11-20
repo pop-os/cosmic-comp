@@ -186,43 +186,63 @@ where
     ) {
         match request {
             zcosmic_toplevel_manager_v1::Request::Activate { toplevel, seat } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.activate(dh, &window, Seat::from_resource(&seat));
             }
             zcosmic_toplevel_manager_v1::Request::Close { toplevel } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.close(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::SetFullscreen { toplevel, output } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.fullscreen(dh, &window, output.as_ref().and_then(Output::from_resource))
             }
             zcosmic_toplevel_manager_v1::Request::UnsetFullscreen { toplevel } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.unfullscreen(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::SetMaximized { toplevel } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.maximize(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::UnsetMaximized { toplevel } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.unmaximize(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::SetMinimized { toplevel } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.minimize(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::UnsetMinimized { toplevel } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.unminimize(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::SetSticky { toplevel } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.set_sticky(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::UnsetSticky { toplevel } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 state.unset_sticky(dh, &window);
             }
             zcosmic_toplevel_manager_v1::Request::SetRectangle {
@@ -233,8 +253,11 @@ where
                 width,
                 height,
             } => {
-                let window =
-                    window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel).unwrap();
+                let Some(window) =
+                    window_from_handle::<<D as ToplevelInfoHandler>::Window>(toplevel)
+                else {
+                    return;
+                };
                 if let Some(toplevel_state) = window.user_data().get::<ToplevelState>() {
                     let mut toplevel_state = toplevel_state.lock().unwrap();
                     toplevel_state
@@ -254,7 +277,9 @@ where
                 workspace,
                 output,
             } => {
-                let window = window_from_handle(toplevel).unwrap();
+                let Some(window) = window_from_handle(toplevel) else {
+                    return;
+                };
                 if let Some(workspace_handle) =
                     state.workspace_state().get_ext_workspace_handle(&workspace)
                     && let Some(output) = Output::from_resource(&output)
