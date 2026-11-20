@@ -56,6 +56,7 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     fmt,
+    mem::ManuallyDrop,
     os::fd::OwnedFd,
     path::Path,
     sync::{Arc, RwLock, atomic::AtomicBool, mpsc::Receiver},
@@ -119,7 +120,16 @@ struct OldDeviceState {
 #[derive(Debug)]
 pub struct LockedDevice<'a> {
     pub inner: &'a mut InnerDevice,
-    pub drm: LockedGbmDrmOutputManager<'a>,
+    pub drm: ManuallyDrop<LockedGbmDrmOutputManager<'a>>,
+}
+
+impl Drop for LockedDevice<'_> {
+    fn drop(&mut self) {
+        unsafe { ManuallyDrop::drop(&mut self.drm) };
+        for surface in self.inner.surfaces.values() {
+            surface.unpause();
+        }
+    }
 }
 
 pub struct InnerDevice {
@@ -857,9 +867,12 @@ impl Device {
     }
 
     pub fn lock(&mut self) -> LockedDevice<'_> {
+        for surface in self.inner.surfaces.values() {
+            surface.pause();
+        }
         LockedDevice {
             inner: &mut self.inner,
-            drm: self.drm.lock(),
+            drm: ManuallyDrop::new(self.drm.lock()),
         }
     }
 
