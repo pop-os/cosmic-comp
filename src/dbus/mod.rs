@@ -79,6 +79,29 @@ impl DBusState {
         *self.0.ei_sender.lock().unwrap() = Some(sender);
     }
 
+    pub fn ei_sender(&self) -> Option<calloop::channel::Sender<crate::libei::EiRequest>> {
+        self.0.ei_sender.lock().unwrap().clone()
+    }
+
+    /// Ask the user whether the X11 app `name` is allowed to emulate input
+    pub fn xwayland_ei_access_dialog(&self, name: String) {
+        let state = self.clone();
+        self.spawn(async move {
+            let answer = match state.session_conn().await {
+                Ok(conn) => crate::xwayland_ei::access_dialog(conn, &name).await,
+                Err(err) => Err(err),
+            };
+            let (decision, remember) = answer.unwrap_or_else(|err| {
+                warn!(?err, "Xwayland EI access dialog failed, denying");
+                (cosmic_comp_config::XwaylandEiDecision::Deny, false)
+            });
+            state
+                .0
+                .evlh
+                .insert_idle(move |state| state.xwayland_ei_answered(name, decision, remember));
+        });
+    }
+
     // TODO Lazy async init when we don't have anything blocking main thread
     async fn session_conn(&self) -> zbus::Result<&zbus::Connection> {
         self.0.session_conn.as_ref().map_err(|err| err.clone())
@@ -99,10 +122,20 @@ async fn init_session(state: &DBusState) -> zbus::Result<()> {
     let a11y_keyboard_monitor_state =
         A11yKeyboardMonitorState::new(conn, &name_owners, &state.0.executor).await?;
     *state.0.a11y_keyboard_monitor.borrow_mut() = Some(a11y_keyboard_monitor_state);
+    let (forget_xwayland_app, forget_channel) = calloop::channel::channel::<String>();
+    let _ = state
+        .0
+        .evlh
+        .insert_source(forget_channel, |event, _, state: &mut State| {
+            if let calloop::channel::Event::Msg(name) = event {
+                state.xwayland_ei_forget_session(&name);
+            }
+        });
     let ei_state = ei::EiState::new(
         conn,
         &name_owners,
         state.0.ei_sender.clone(),
+        forget_xwayland_app,
         &state.0.executor,
     )
     .await?;

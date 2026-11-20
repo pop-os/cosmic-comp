@@ -954,6 +954,28 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
                         .xwayland_reset_eavesdropping(SERIAL_COUNTER.next_serial());
                 }
             }
+            "xwayland_ei_no_prompt" => {
+                state.common.config.cosmic_conf.xwayland_ei_no_prompt =
+                    get_config::<bool>(&config, "xwayland_ei_no_prompt");
+                state
+                    .common
+                    .xwayland_ei
+                    .revalidate(&state.common.config.cosmic_conf);
+            }
+            "xwayland_ei_apps" => {
+                let new = get_config(&config, "xwayland_ei_apps");
+                let old =
+                    std::mem::replace(&mut state.common.config.cosmic_conf.xwayland_ei_apps, new);
+                state
+                    .common
+                    .xwayland_ei
+                    .saved_apps_removed(&old, &state.common.config.cosmic_conf.xwayland_ei_apps);
+                state
+                    .common
+                    .xwayland_ei
+                    .revalidate(&state.common.config.cosmic_conf);
+                state.publish_xwayland_ei_session();
+            }
             "focus_follows_cursor" => {
                 let new = get_config::<bool>(&config, "focus_follows_cursor");
                 if new != state.common.config.cosmic_conf.focus_follows_cursor {

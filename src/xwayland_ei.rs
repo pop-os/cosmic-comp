@@ -1,0 +1,385 @@
+//! libei access for Xwayland.
+//!
+//! Instead of the RemoteDesktop portal (which can't tell X clients apart or remember a choice),
+//! Xwayland gets a private `LIBEI_SOCKET` that only its own pid may use.
+//! Each connection is then allowed by config, by an earlier answer, or after asking the user
+//! through the cosmic portal's Access dialog.
+
+use std::{
+    collections::HashMap,
+    io,
+    net::Shutdown,
+    os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd},
+    os::unix::net::{UnixListener, UnixStream},
+    path::PathBuf,
+    sync::atomic::{AtomicU32, Ordering},
+};
+
+use cosmic_comp_config::{CosmicCompConfig, XwaylandEiDecision};
+use cosmic_config::ConfigSet;
+use smithay::{
+    backend::libei::EiInputSeat,
+    reexports::{
+        calloop::{self, LoopHandle, generic::Generic},
+        reis::eis,
+        wayland_server::Client,
+    },
+    xwayland::XWaylandClientData,
+};
+use tracing::{debug, error, info, warn};
+use zbus::{ObjectPath, OwnedVariant, Variant};
+
+use crate::{
+    fl,
+    libei::{DEVICE_TYPE_KEYBOARD, DEVICE_TYPE_POINTER, DEVICE_TYPE_TOUCHSCREEN, EiRequest},
+    state::State,
+};
+
+#[derive(Debug)]
+struct Pending {
+    conn: eis::Connection,
+    seat: EiInputSeat,
+    device_types: u32,
+    socket: UnixStream,
+}
+
+#[derive(Debug, Default)]
+pub struct XwaylandEiAccess {
+    // By default answers are all kept until the compositor restarts
+    // TODO: The issue is xWayland will keep asking for all queued events if you deny it, so we have
+    // to save for the session to avoid a flood of requests. Also "allow once" is not possible since
+    // xWayland is just gonna use the socket we give it. So, any decision is either per session, or
+    // permanent (saved to disk).
+    session: HashMap<String, XwaylandEiDecision>,
+    // A key here means a dialog for that name is open
+    pending: HashMap<String, Vec<Pending>>,
+    // Live allowed connections, so a revoked app can be cut off
+    allowed: Vec<(String, eis::Connection, UnixStream)>,
+}
+
+impl XwaylandEiAccess {
+    /// `None` means ask the user.
+    fn decide(&self, config: &CosmicCompConfig, name: &str) -> Option<XwaylandEiDecision> {
+        // A saved answer wins over both the global switch and this session's answers
+        // TODO: does this make sense? If a user toggles the "allow all X11 apps" and still their
+        // app gets denied, is that OK?
+        if let Some(saved) = config.xwayland_ei_apps.get(name) {
+            Some(*saved)
+        } else if config.xwayland_ei_no_prompt {
+            Some(XwaylandEiDecision::Allow)
+        } else {
+            self.session.get(name).copied()
+        }
+    }
+
+    /// Drop a connection that went away while its dialog was still open.
+    pub fn forget(&mut self, conn: &eis::Connection) {
+        for pending in self.pending.values_mut() {
+            pending.retain(|p| &p.conn != conn);
+        }
+        self.allowed.retain(|(_, c, _)| c != conn);
+    }
+
+    /// Close connections the config no longer allows
+    pub fn revalidate(&self, config: &CosmicCompConfig) {
+        for (name, _, socket) in &self.allowed {
+            if self.decide(config, name) != Some(XwaylandEiDecision::Allow) {
+                info!(
+                    name,
+                    "Closing input emulation for X11 app no longer allowed"
+                );
+                let _ = socket.shutdown(Shutdown::Both);
+            }
+        }
+    }
+
+    /// Apps removed from the saved answers (e.g. in Settings) should be asked about again,
+    /// not fall back to this session's answer.
+    pub fn saved_apps_removed(
+        &mut self,
+        old: &HashMap<String, XwaylandEiDecision>,
+        new: &HashMap<String, XwaylandEiDecision>,
+    ) {
+        self.session
+            .retain(|name, _| !old.contains_key(name) || new.contains_key(name));
+    }
+}
+
+/// Bind the socket Xwayland gets as `LIBEI_SOCKET`.
+pub fn bind_socket() -> io::Result<(UnixListener, PathBuf)> {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR")
+        .ok_or_else(|| io::Error::other("XDG_RUNTIME_DIR is not set"))?;
+    let path = PathBuf::from(dir).join(format!("cosmic-xwayland-eis-{}", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path)?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    listener.set_nonblocking(true)?;
+    Ok((listener, path))
+}
+
+/// A pidfd of the process that connected `stream`
+// TODO: replace with `rustix::net::sockopt::socket_peerpidfd` once
+// https://github.com/bytecodealliance/rustix/pull/1474 is released, and drop the `unsafe`.
+fn peer_pidfd(stream: &UnixStream) -> io::Result<OwnedFd> {
+    let mut fd: libc::c_int = -1;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: `fd` and `len` are valid for writes and sized for an int, as the option expects
+    let ret = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERPIDFD,
+            (&raw mut fd).cast(),
+            &mut len,
+        )
+    };
+    if ret != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: on success the kernel installed a new pidfd that we now own
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// Whether two pidfds refer to the same process.
+fn same_process(a: BorrowedFd<'_>, b: BorrowedFd<'_>) -> io::Result<bool> {
+    const PID_FS_MAGIC: i64 = 0x5049_4446;
+    if rustix::fs::fstatfs(a)?.f_type as i64 != PID_FS_MAGIC {
+        return Err(io::Error::other(
+            "pidfds aren't on pidfs (Linux 6.9+ needed)",
+        ));
+    }
+    Ok(rustix::fs::fstat(a)?.st_ino == rustix::fs::fstat(b)?.st_ino)
+}
+
+/// Accept only EI connections from our own Xwayland.
+pub fn listen(
+    handle: &LoopHandle<'static, State>,
+    listener: UnixListener,
+    xwayland: Client,
+    ei_sender: calloop::channel::Sender<EiRequest>,
+) {
+    let source = Generic::new(listener, calloop::Interest::READ, calloop::Mode::Level);
+    let result = handle.insert_source(source, move |_, listener, _| {
+        loop {
+            let stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+                Err(err) => {
+                    warn!(?err, "Failed to accept Xwayland EI connection");
+                    break;
+                }
+            };
+            let Some(xwayland_pidfd) = xwayland
+                .get_data::<XWaylandClientData>()
+                .and_then(|data| data.pidfd())
+            else {
+                warn!("No pidfd for Xwayland, rejecting its EI connection");
+                continue;
+            };
+            match peer_pidfd(&stream).and_then(|peer| same_process(peer.as_fd(), xwayland_pidfd)) {
+                Ok(true) => {}
+                Ok(false) => {
+                    warn!("Rejecting EI connection on the Xwayland socket from another process");
+                    continue;
+                }
+                Err(err) => {
+                    warn!(?err, "Can't verify the Xwayland EI peer, rejecting it");
+                    continue;
+                }
+            }
+            if let Err(err) = stream.set_nonblocking(true) {
+                warn!(?err, "Failed to set Xwayland EI socket non-blocking");
+                continue;
+            }
+            let _ = ei_sender.send((
+                stream,
+                DEVICE_TYPE_KEYBOARD | DEVICE_TYPE_POINTER | DEVICE_TYPE_TOUCHSCREEN,
+                true,
+            ));
+        }
+        Ok(calloop::PostAction::Continue)
+    });
+    if let Err(err) = result {
+        error!(?err, "Failed to listen for Xwayland EI connections");
+    }
+}
+
+impl State {
+    /// Show this session's unsaved answers in Settings, over D-Bus.
+    pub(crate) fn publish_xwayland_ei_session(&self) {
+        let config = &self.common.config.cosmic_conf;
+        let apps = self
+            .common
+            .xwayland_ei
+            .session
+            .iter()
+            .filter(|(name, _)| !config.xwayland_ei_apps.contains_key(*name))
+            .map(|(name, decision)| (name.clone(), *decision == XwaylandEiDecision::Allow))
+            .collect();
+        if let Some(ei) = self.common.dbus_state.ei_state() {
+            ei.set_xwayland_session_apps(apps);
+        }
+    }
+
+    /// Settings asked to drop this session's answer for `name`, it is asked again next time.
+    pub(crate) fn xwayland_ei_forget_session(&mut self, name: &str) {
+        self.common.xwayland_ei.session.remove(name);
+        self.common
+            .xwayland_ei
+            .revalidate(&self.common.config.cosmic_conf);
+        self.publish_xwayland_ei_session();
+    }
+
+    pub(crate) fn xwayland_ei_connected(
+        &mut self,
+        conn: eis::Connection,
+        seat: EiInputSeat,
+        name: String,
+        device_types: u32,
+        socket: UnixStream,
+    ) {
+        let access = &mut self.common.xwayland_ei;
+        match access.decide(&self.common.config.cosmic_conf, &name) {
+            Some(XwaylandEiDecision::Allow) => {
+                access.allowed.push((name, conn.clone(), socket));
+                self.add_ei_devices(&conn, &seat, device_types);
+            }
+            Some(XwaylandEiDecision::Deny) => {
+                // Xwayland reconnects for all events in the queue, so keep this to `debug!` level
+                debug!(name, "Refusing input emulation from X11 app denied earlier");
+                let _ = socket.shutdown(Shutdown::Both);
+            }
+            None => {
+                let first = !access.pending.contains_key(&name);
+                access
+                    .pending
+                    .entry(name.clone())
+                    .or_default()
+                    .push(Pending {
+                        conn,
+                        seat,
+                        device_types,
+                        socket,
+                    });
+                if first {
+                    self.common.dbus_state.xwayland_ei_access_dialog(name);
+                }
+            }
+        }
+    }
+
+    /// The dialog for `name` closed with `decision`, `remember` saves it to the config.
+    pub(crate) fn xwayland_ei_answered(
+        &mut self,
+        name: String,
+        decision: XwaylandEiDecision,
+        remember: bool,
+    ) {
+        info!(
+            name,
+            ?decision,
+            remember,
+            "User answered input emulation for X11 app"
+        );
+        let access = &mut self.common.xwayland_ei;
+        let pending = access.pending.remove(&name).unwrap_or_default();
+        access.session.insert(name.clone(), decision);
+        // Never save an unnamed app
+        // TODO: make sure this doesn't cause issues, and make sure all apps do return a name
+        // saving "" for the name would then match all unnamed apps which is not good
+        if remember && !name.is_empty() {
+            let apps = &mut self.common.config.cosmic_conf.xwayland_ei_apps;
+            apps.insert(name.clone(), decision);
+            let apps = apps.clone();
+            let config = self.common.config.cosmic_helper.clone();
+            std::thread::spawn(move || {
+                if let Err(err) = config.set("xwayland_ei_apps", apps) {
+                    error!(?err, "Failed to update xwayland_ei_apps key");
+                }
+            });
+        }
+        self.publish_xwayland_ei_session();
+        for p in pending {
+            match decision {
+                XwaylandEiDecision::Allow => {
+                    self.add_ei_devices(&p.conn, &p.seat, p.device_types);
+                    self.common
+                        .xwayland_ei
+                        .allowed
+                        .push((name.clone(), p.conn, p.socket));
+                }
+                XwaylandEiDecision::Deny => {
+                    let _ = p.socket.shutdown(Shutdown::Both);
+                }
+            }
+        }
+    }
+}
+
+/// Ask the user through the cosmic portals Access dialog.
+pub async fn access_dialog(
+    conn: &zbus::Connection,
+    name: &str,
+) -> zbus::Result<(XwaylandEiDecision, bool)> {
+    static REQUEST: AtomicU32 = AtomicU32::new(0);
+    let handle = ObjectPath::try_from(format!(
+        "/com/system76/CosmicComp/request/xwayland_ei_{}",
+        REQUEST.fetch_add(1, Ordering::Relaxed)
+    ))?;
+    let body = if name.is_empty() {
+        fl!("xwayland-ei-body-unnamed")
+    } else {
+        fl!("xwayland-ei-body", app = name)
+    };
+
+    let mut options: HashMap<&str, Variant> = HashMap::new();
+    options.insert("grant_label", fl!("xwayland-ei-allow").into());
+    options.insert("deny_label", fl!("xwayland-ei-deny").into());
+    options.insert("icon", "input-keyboard-symbolic".into());
+    if !name.is_empty() {
+        // No options makes it a boolean choice, drawn as a checkbox
+        let choices = vec![(
+            "remember",
+            fl!("xwayland-ei-remember"),
+            Vec::<(&str, &str)>::new(),
+            "false",
+        )];
+        options.insert("choices", choices.into());
+    }
+
+    let reply = conn
+        .call_method(
+            Some("org.freedesktop.impl.portal.desktop.cosmic"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.impl.portal.Access"),
+            "AccessDialog",
+            &(handle, "", "", fl!("xwayland-ei-title"), "", body, options),
+        )
+        .await?;
+    let (response, results): (u32, HashMap<String, OwnedVariant>) = reply.body().deserialize()?;
+    Ok(read_answer(response, &results))
+}
+
+fn read_answer(
+    response: u32,
+    results: &HashMap<String, OwnedVariant>,
+) -> (XwaylandEiDecision, bool) {
+    let decision = match response {
+        0 => XwaylandEiDecision::Allow,
+        _ => XwaylandEiDecision::Deny,
+    };
+    // The deny button reports choices too
+    let remember = response <= 1
+        && results
+            .get("choices")
+            .and_then(|choices| Vec::<(String, String)>::try_from(choices.try_clone().ok()?).ok())
+            .is_some_and(|choices| {
+                choices
+                    .iter()
+                    .any(|(id, v)| id == "remember" && v == "true")
+            });
+    (decision, remember)
+}
