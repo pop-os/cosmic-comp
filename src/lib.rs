@@ -195,8 +195,10 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         warn!(?err, "Failed to watch theme");
     }
 
+    utils::watchdog::start(&event_loop.handle());
+
     // run the event loop
-    event_loop.run(None, &mut state, |state| {
+    let result = event_loop.run(None, &mut state, |state| {
         // shall we shut down?
         if state.common.should_stop {
             info!("Shutting down");
@@ -248,7 +250,9 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-    })?;
+    });
+    utils::watchdog::stop();
+    result?;
 
     // kill kiosk child if loop exited
     if let Some(mut child) = state.common.kiosk_child.take() {
