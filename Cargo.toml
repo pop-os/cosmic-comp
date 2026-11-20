@@ -45,6 +45,7 @@ iced_graphics = { git = "https://github.com/pop-os/libcosmic/", features = [
 indexmap = "2.13"
 keyframe = "1.1.1"
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
+libseat = { version = "0.2.3", features = ["custom_logger"] }
 libsystemd = { version = "0.7", optional = true }
 log-panics = { version = "2", features = ["with-backtrace"] }
 ordered-float = "5.1"

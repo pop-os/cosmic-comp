@@ -699,6 +699,7 @@ dependencies = [
  "keyframe",
  "libcosmic",
  "libdisplay-info",
+ "libseat",
  "libsystemd",
  "log-panics",
  "ordered-float",
@@ -2968,9 +2969,11 @@ version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6656c69b6e0366ffb83faa232f3e4fda5fc91161722d140f2c95ce2e90b1ef31"
 dependencies = [
+ "cc",
  "errno",
  "libseat-sys",
  "log",
+ "pkg-config",
 ]
 
 [[package]]
