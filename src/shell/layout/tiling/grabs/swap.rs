@@ -5,7 +5,7 @@ use smithay::{
         Seat, SeatHandler,
         keyboard::{
             GrabStartData as KeyboardGrabStartData, KeyboardGrab, KeyboardInnerHandle,
-            ModifiersState,
+            KeysymHandle, ModifiersState,
         },
     },
     utils::Serial,
@@ -50,7 +50,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
             return;
         }
 
-        let syms = handle.keysym_handle(keycode).raw_syms();
+        let syms = KeysymHandle::new(&handle.xkb(), keycode).raw_syms();
         let focus_bindings = &data
             .common
             .config
@@ -83,7 +83,7 @@ impl KeyboardGrab<State> for SwapWindowGrab {
                     .map(cosmic_modifiers_from_smithay)
                     .unwrap_or_default(),
                 keycode: None,
-                key: Some(handle.keysym_handle(keycode).modified_sym()),
+                key: Some(KeysymHandle::new(&handle.xkb(), keycode).modified_sym()),
                 description: None,
             },
             None,
