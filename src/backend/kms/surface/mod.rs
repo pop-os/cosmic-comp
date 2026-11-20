@@ -1551,6 +1551,16 @@ fn get_surface_dmabuf_feedback(
     let mut builder = DmabufFeedbackBuilder::new(render_node.dev_id(), render_formats.clone());
 
     if target_node != render_node {
+        let shared_formats = render_formats
+            .intersection(&target_formats)
+            .cloned()
+            .collect::<FormatSet>();
+        builder = builder.add_preference_tranche(
+            render_node.dev_id(),
+            zwp_linux_dmabuf_feedback_v1::TrancheFlags::empty(),
+            shared_formats,
+            4..=6,
+        );
         builder = builder.add_preference_tranche(
             target_node.dev_id(),
             zwp_linux_dmabuf_feedback_v1::TrancheFlags::Sampling,
@@ -1558,6 +1568,7 @@ fn get_surface_dmabuf_feedback(
             6..=6,
         );
     };
+
     let render_feedback = builder.clone().build().unwrap();
 
     let primary_scanout_feedback = builder
