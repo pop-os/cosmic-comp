@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::state::State;
+use crate::state::{BackendData, State};
 use crate::wayland::protocols::a11y::A11yHandler;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use cosmic_comp_config::NumlockState;
 use cosmic_config::CosmicConfigEntry;
 use cosmic_settings_daemon_config::greeter;
-use smithay::reexports::{calloop::EventLoop, wayland_server::DisplayHandle};
+use smithay::{
+    output::{Output, PhysicalProperties},
+    reexports::{calloop::EventLoop, wayland_server::DisplayHandle},
+};
 use tracing::{info, warn};
 
 pub mod render;
@@ -46,14 +49,16 @@ pub fn init_backend_auto(
     };
 
     if res.is_ok() {
-        let output = state
-            .common
-            .shell
-            .read()
-            .outputs()
-            .next()
-            .with_context(|| "Backend initialized without output")
-            .cloned()?;
+        let output = state.common.shell.read().outputs().next().cloned();
+        let output = match output {
+            Some(output) => output,
+            // monitors may still be connected later (e.g. a KVM switched to another machine)
+            // the seat moves to the first real output once it is added
+            None if matches!(&state.backend, BackendData::Kms(kms) if !kms.drm_devices.is_empty()) => {
+                Output::new("placeholder".into(), PhysicalProperties::default())
+            }
+            None => anyhow::bail!("Backend initialized without output"),
+        };
         let initial_seat = crate::shell::create_seat(
             dh,
             &mut state.common.seat_state,
