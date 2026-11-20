@@ -175,6 +175,7 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, move |state, _dh, surface| {
+            crate::shell::layout::tiling::TilingBlocker::pre_commit(surface);
             let mut acquire_point = None;
             let maybe_dmabuf = with_states(surface, |surface_data| {
                 acquire_point = surface_data
