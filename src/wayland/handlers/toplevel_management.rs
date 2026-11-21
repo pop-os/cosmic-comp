@@ -184,6 +184,7 @@ impl ToplevelManagementHandler for State {
         let mut shell = self.common.shell.write();
         let seat = shell.seats.last_active().clone();
         let output = output
+            .filter(|output| shell.workspaces.sets.contains_key(output))
             .or_else(|| {
                 window
                     .wl_surface()

@@ -2833,6 +2833,7 @@ impl Shell {
         if let Some(FullscreenRestoreState::Sticky { output, state, .. }) = &state {
             let output = output
                 .upgrade()
+                .filter(|output| self.workspaces.sets.contains_key(output))
                 .unwrap_or_else(|| self.seats.last_active().active_output());
             toplevel_enter_output(&window.active_window(), &output);
             let set = self
@@ -3011,6 +3012,13 @@ impl Shell {
             maximized: should_be_maximized,
             sticky: mut should_be_sticky,
         } = self.pending_windows.remove(pos);
+        let output = output.map(|output| {
+            if self.workspaces.sets.contains_key(&output) {
+                output
+            } else {
+                seat.active_output()
+            }
+        });
 
         if !should_be_sticky
             && let Some(toplevel) = window.0.toplevel()
