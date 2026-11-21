@@ -86,6 +86,7 @@ impl fmt::Debug for CosmicWindow {
 pub struct CosmicWindowInternal {
     pub(super) window: CosmicSurface,
     activated: bool,
+    last_activated: bool,
     /// TODO: This needs to be per seat
     pointer_entered: Option<Focus>,
     last_title: String,
@@ -202,6 +203,7 @@ impl CosmicWindow {
                 tiled: false,
                 theme: theme.clone(),
                 appearance_conf: appearance,
+                last_activated: false,
             },
             (width, SSD_HEIGHT),
             handle,
@@ -241,14 +243,20 @@ impl CosmicWindow {
 
     pub fn on_commit(&self, surface: &WlSurface) {
         let mut geo = None;
+        let mut activation_changed = false;
         self.0.with_program(|p| {
             if &p.window == surface {
                 p.window.0.on_commit();
                 geo = Some(p.window.geometry());
+                let activated = p.window.is_activated(false);
+                activation_changed = mem::replace(&mut p.last_activated, activated) != activated;
             }
         });
         if let Some(geo) = geo {
             self.0.resize(Size::from((geo.size.w, SSD_HEIGHT)));
+        }
+        if activation_changed {
+            self.0.force_update();
         }
     }
 
