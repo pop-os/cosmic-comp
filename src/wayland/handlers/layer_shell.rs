@@ -46,11 +46,13 @@ impl WlrLayerShellHandler for State {
 
         if let Err(err) = popup.send_configure() {
             tracing::warn!("Unable to configure popup. {err:?}",);
-        } else {
-            self.common
-                .popups
-                .track_popup(PopupKind::from(popup))
-                .unwrap();
+        } else if let Err(err) = self
+            .common
+            .popups
+            .track_popup(PopupKind::from(popup.clone()))
+        {
+            tracing::warn!("Failed to track popup: {}", err);
+            popup.send_popup_done();
         }
     }
 

@@ -79,11 +79,13 @@ impl XdgShellHandler for State {
 
             if let Err(err) = surface.send_configure() {
                 warn!("Unable to configure popup. {err:?}",);
-            } else {
-                self.common
-                    .popups
-                    .track_popup(PopupKind::from(surface))
-                    .unwrap();
+            } else if let Err(err) = self
+                .common
+                .popups
+                .track_popup(PopupKind::from(surface.clone()))
+            {
+                warn!("Failed to track popup: {}", err);
+                surface.send_popup_done();
             }
         }
     }
