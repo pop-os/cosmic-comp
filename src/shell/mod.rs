@@ -880,9 +880,10 @@ impl Workspaces {
         }
     }
 
-    pub fn add_output(
+    pub fn add_output<'a>(
         &mut self,
         output: &Output,
+        seats: impl Iterator<Item = &'a Seat<State>>,
         workspace_state: &mut WorkspaceUpdateGuard<'_, State>,
     ) {
         if self.sets.contains_key(output) {
@@ -948,6 +949,18 @@ impl Workspaces {
             }
         }
         self.sets.insert(output.clone(), set);
+
+        for seat in seats {
+            if !self.sets.contains_key(&seat.active_output()) {
+                seat.set_active_output(output);
+            }
+            if seat
+                .focused_output()
+                .is_some_and(|focused| !self.sets.contains_key(&focused))
+            {
+                seat.set_focused_output(None);
+            }
+        }
     }
 
     pub fn remove_output<'a>(
@@ -1393,7 +1406,7 @@ impl Workspaces {
     }
 
     pub fn idx_for_handle(&self, output: &Output, handle: &WorkspaceHandle) -> Option<usize> {
-        let set = self.sets.get(output).unwrap();
+        let set = self.sets.get(output).or(self.backup_set.as_ref())?;
         set.workspaces
             .iter()
             .enumerate()
@@ -1401,8 +1414,10 @@ impl Workspaces {
     }
 
     pub fn len(&self, output: &Output) -> usize {
-        let set = self.sets.get(output).unwrap();
-        set.workspaces.len()
+        self.sets
+            .get(output)
+            .or(self.backup_set.as_ref())
+            .map_or(0, |set| set.workspaces.len())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&Output, &WorkspaceSet)> {
@@ -1561,9 +1576,12 @@ impl Drop for OutputId {
 impl Common {
     pub fn add_output(&mut self, output: &Output) {
         let mut shell = self.shell.write();
-        shell
-            .workspaces
-            .add_output(output, &mut self.workspace_state.update());
+        let shell_ref = &mut *shell;
+        shell_ref.workspaces.add_output(
+            output,
+            shell_ref.seats.iter(),
+            &mut self.workspace_state.update(),
+        );
 
         output
             .user_data()
@@ -4256,7 +4274,14 @@ impl Shell {
             return FocusResult::None;
         }
 
-        let set = self.workspaces.sets.get(&output).unwrap();
+        let Some(set) = self
+            .workspaces
+            .sets
+            .get(&output)
+            .or(self.workspaces.backup_set.as_ref())
+        else {
+            return FocusResult::None;
+        };
         let sticky_layer = &set.sticky_layer;
         let workspace = &set.workspaces[set.active];
 
@@ -4916,7 +4941,11 @@ impl Shell {
         loop_handle: &LoopHandle<'static, State>,
     ) -> Option<KeyboardFocusTarget> {
         let focused_output = seat.focused_output()?;
-        let set = self.workspaces.sets.get_mut(&focused_output).unwrap();
+        let set = self
+            .workspaces
+            .sets
+            .get_mut(&focused_output)
+            .or(self.workspaces.backup_set.as_mut())?;
         let workspace = &mut set.workspaces[set.active];
 
         if matches!(
@@ -5070,7 +5099,14 @@ impl Shell {
         ) {
             return;
         }
-        let set = self.workspaces.sets.get_mut(&seat.active_output()).unwrap();
+        let Some(set) = self
+            .workspaces
+            .sets
+            .get_mut(&seat.active_output())
+            .or(self.workspaces.backup_set.as_mut())
+        else {
+            return;
+        };
         let workspace = &mut set.workspaces[set.active];
 
         let maybe_window = workspace.focus_stack.get(seat).iter().next().cloned();
