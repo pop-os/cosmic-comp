@@ -90,6 +90,7 @@ pub struct CosmicWindowInternal {
     pointer_entered: Option<Focus>,
     last_title: String,
     tiled: bool,
+    auto_maximized: bool,
     theme: cosmic::Theme,
     appearance_conf: AppearanceConfig,
 }
@@ -172,6 +173,10 @@ impl CosmicWindowInternal {
         self.tiled
     }
 
+    fn looks_maximized(&self) -> bool {
+        self.window.is_maximized(false) || self.auto_maximized
+    }
+
     fn has_tiled_state(&self) -> bool {
         self.window.is_tiled(false).unwrap_or(false)
     }
@@ -200,6 +205,7 @@ impl CosmicWindow {
                 pointer_entered: None,
                 last_title,
                 tiled: false,
+                auto_maximized: false,
                 theme: theme.clone(),
                 appearance_conf: appearance,
             },
@@ -395,7 +401,7 @@ impl CosmicWindow {
             let is_tiled = p.is_tiled();
             let activated = p.window.is_activated(false);
 
-            if p.window.is_maximized(false) {
+            if p.looks_maximized() {
                 return None;
             }
 
@@ -474,7 +480,7 @@ impl CosmicWindow {
             (
                 p.has_ssd(false),
                 p.is_tiled(),
-                p.window.is_maximized(false),
+                p.looks_maximized(),
                 p.theme
                     .cosmic()
                     .radius_s()
@@ -632,22 +638,33 @@ impl CosmicWindow {
     pub fn set_tiled(&self, tiled: bool) {
         self.0.with_program(|p| {
             p.tiled = tiled;
+            if !tiled {
+                p.auto_maximized = false;
+            }
             if !p.appearance_conf.clip_floating_windows {
                 p.window.set_tiled(tiled);
             }
         });
     }
 
+    pub fn set_auto_maximized(&self, auto_maximized: bool) {
+        self.0.with_program(|p| p.auto_maximized = auto_maximized);
+    }
+
+    pub fn is_auto_maximized(&self) -> bool {
+        self.0.with_program(|p| p.auto_maximized)
+    }
+
     pub fn corner_radius(&self, geometry_size: Size<i32, Logical>, default_radius: u8) -> [u8; 4] {
         self.0.with_program(|p| {
             let has_ssd = p.has_ssd(false);
             let is_tiled = p.is_tiled();
+            let maximized = p.looks_maximized();
 
             let clip = ((!is_tiled && p.appearance_conf.clip_floating_windows)
                 || (is_tiled && p.appearance_conf.clip_tiled_windows))
-                && !p.window.is_maximized(false);
-            let round = (!is_tiled || p.appearance_conf.clip_tiled_windows)
-                && !p.window.is_maximized(false);
+                && !maximized;
+            let round = (!is_tiled || p.appearance_conf.clip_tiled_windows) && !maximized;
             let radii = if round {
                 {
                     p.theme
@@ -825,7 +842,7 @@ impl Program for CosmicWindowInternal {
     }
 
     fn background_color(&self, theme: &cosmic::Theme) -> Color {
-        if self.window.is_maximized(false) {
+        if self.looks_maximized() {
             theme
                 .cosmic()
                 .background(theme.cosmic().frosted_windows)
@@ -846,8 +863,8 @@ pub struct DefaultDecorations;
 
 impl Decorations<CosmicWindowInternal, Message> for DefaultDecorations {
     fn view(&self, win: &CosmicWindowInternal) -> cosmic::Element<'_, Message> {
-        let sharp_corners = win.window.is_maximized(false)
-            || (win.is_tiled() && !win.appearance_conf.clip_tiled_windows);
+        let sharp_corners =
+            win.looks_maximized() || (win.is_tiled() && !win.appearance_conf.clip_tiled_windows);
 
         let mut header = cosmic::widget::header_bar()
             .title(win.last_title.clone())
