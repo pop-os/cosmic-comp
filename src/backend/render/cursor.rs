@@ -289,7 +289,9 @@ fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error
             let mut cursor_data = Vec::new();
             cursor_file.read_to_end(&mut cursor_data)?;
 
-            if let Some(images) = parse_xcursor(&cursor_data) {
+            if let Some(images) = parse_xcursor(&cursor_data)
+                && !images.is_empty()
+            {
                 return Ok(images);
             }
         }
@@ -733,6 +735,7 @@ pub fn load_cursor_env(size: Option<u32>) -> (String, u32) {
             std::env::var("XCURSOR_SIZE")
                 .ok()
                 .and_then(|s| s.parse().ok())
+                .filter(|s| *s > 0)
         })
         .unwrap_or(24);
     (name, size)
