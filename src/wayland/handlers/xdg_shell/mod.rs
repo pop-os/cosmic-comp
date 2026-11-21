@@ -290,6 +290,7 @@ impl XdgShellHandler for State {
         let output = output
             .as_ref()
             .and_then(Output::from_resource)
+            .filter(|output| shell.workspaces.sets.contains_key(output))
             .or_else(|| {
                 shell
                     .visible_output_for_surface(surface.wl_surface())
