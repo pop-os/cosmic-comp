@@ -1392,7 +1392,7 @@ impl SpaceElement for CosmicStack {
             .with_program(|p| SpaceElement::z_index(&p.windows[p.active]))
     }
     fn refresh(&self) {
-        self.0.with_program(|p| {
+        let new_width = self.0.with_program(|p| {
             // don't let the stack become empty
             let old_active = p.active;
             let active = p.windows[old_active].clone();
@@ -1402,12 +1402,6 @@ impl SpaceElement for CosmicStack {
             }
 
             p.active = p.active.min(p.windows.len() - 1);
-
-            if old_active != p.active {
-                self.0
-                    .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
-                self.0.force_redraw();
-            }
 
             p.windows.iter().enumerate().for_each(|(i, w)| {
                 if i == p.active {
@@ -1419,7 +1413,13 @@ impl SpaceElement for CosmicStack {
 
                 SpaceElement::refresh(w)
             });
+
+            (old_active != p.active).then(|| p.windows[p.active].geometry().size.w)
         });
+        if let Some(width) = new_width {
+            self.0.resize(Size::from((width, TAB_HEIGHT)));
+            self.0.force_redraw();
+        }
         SpaceElement::refresh(&self.0);
     }
 }
