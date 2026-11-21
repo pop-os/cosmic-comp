@@ -399,12 +399,7 @@ impl MoveGrab {
             return;
         };
         if self.cursor_output != current_output {
-            shell
-                .workspaces
-                .active_mut(&self.cursor_output)
-                .unwrap()
-                .tiling_layer
-                .cleanup_drag();
+            cleanup_drag(&mut shell, &self.cursor_output);
             self.cursor_output = current_output.clone();
         }
 
@@ -898,6 +893,16 @@ impl MoveGrab {
     }
 }
 
+fn cleanup_drag(shell: &mut Shell, output: &Output) {
+    match shell.workspaces.active_mut(output) {
+        Some(workspace) => workspace.tiling_layer.cleanup_drag(),
+        None => shell
+            .workspaces
+            .spaces_mut()
+            .for_each(|workspace| workspace.tiling_layer.cleanup_drag()),
+    }
+}
+
 impl Drop for MoveGrab {
     fn drop(&mut self) {
         // No more buttons are pressed, release the grab.
@@ -922,6 +927,11 @@ impl Drop for MoveGrab {
                         (grab_state.location.to_i32_round() + grab_state.window_offset).as_global();
                     let mut shell = state.common.shell.write();
 
+                    let output = if shell.workspaces.sets.contains_key(&output) {
+                        output
+                    } else {
+                        seat.active_output()
+                    };
                     let workspace_handle = shell.active_space(&output).unwrap().handle;
                     for old_output in window_outputs.iter().filter(|o| *o != &output) {
                         grab_state.window.output_leave(old_output);
@@ -940,7 +950,12 @@ impl Drop for MoveGrab {
                                 window_location,
                                 grab_state.window.geometry().size.as_global(),
                             ));
-                            let set = shell.workspaces.sets.get_mut(&output).unwrap();
+                            let workspaces = &mut shell.workspaces;
+                            let set = workspaces
+                                .sets
+                                .get_mut(&output)
+                                .or(workspaces.backup_set.as_mut())
+                                .unwrap();
                             let (window, location) = set
                                 .sticky_layer
                                 .drop_window(grab_state.window, window_location.to_local(&output));
@@ -1034,12 +1049,7 @@ impl Drop for MoveGrab {
             };
 
             let mut shell = state.common.shell.write();
-            shell
-                .workspaces
-                .active_mut(&cursor_output)
-                .unwrap()
-                .tiling_layer
-                .cleanup_drag();
+            cleanup_drag(&mut shell, &cursor_output);
             shell.set_overview_mode(None, state.common.event_loop_handle.clone());
             drop(shell);
 
