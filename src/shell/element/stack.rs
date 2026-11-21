@@ -128,11 +128,16 @@ pub struct CosmicStackInternal {
     geometry: Option<Rectangle<i32, Global>>,
     mask: Option<tiny_skia::Mask>,
     tiled: bool,
+    auto_maximized: bool,
     theme: cosmic::Theme,
     appearance_conf: AppearanceConfig,
 }
 
 impl CosmicStackInternal {
+    fn looks_maximized(&self, window: &CosmicSurface) -> bool {
+        window.is_maximized(false) || self.auto_maximized
+    }
+
     pub fn swap_focus(&mut self, focus: Option<Focus>) -> Option<Focus> {
         mem::replace(&mut self.pointer_entered, focus)
     }
@@ -210,6 +215,7 @@ impl CosmicStack {
                 geometry: None,
                 mask: None,
                 tiled: false,
+                auto_maximized: false,
                 theme: theme.clone(),
                 appearance_conf: appearance,
             },
@@ -499,7 +505,18 @@ impl CosmicStack {
     pub fn set_tiled(&self, tiled: bool) {
         self.0.with_program(|p| {
             p.tiled = tiled;
+            if !tiled {
+                p.auto_maximized = false;
+            }
         });
+    }
+
+    pub fn set_auto_maximized(&self, auto_maximized: bool) {
+        self.0.with_program(|p| p.auto_maximized = auto_maximized);
+    }
+
+    pub fn is_auto_maximized(&self) -> bool {
+        self.0.with_program(|p| p.auto_maximized)
     }
 
     pub fn surfaces(&self) -> impl Iterator<Item = CosmicSurface> {
@@ -652,7 +669,7 @@ impl CosmicStack {
         C: From<CosmicStackRenderElement<R>>,
     {
         self.0.with_program(|p| {
-            if p.windows[p.active].is_maximized(false) {
+            if p.looks_maximized(&p.windows[p.active]) {
                 return None;
             }
 
@@ -730,7 +747,7 @@ impl CosmicStack {
             }
         });
         let radii = self.0.with_program(|p| {
-            let maximized = p.windows[p.active].is_maximized(false);
+            let maximized = p.looks_maximized(&p.windows[p.active]);
             let round = (p.appearance_conf.clip_tiled_windows || !p.tiled) && !maximized;
             round.then(|| {
                 p.theme
@@ -742,7 +759,7 @@ impl CosmicStack {
         });
 
         self.0.with_program(|p| {
-            let maximized = p.windows[p.active].is_maximized(false);
+            let maximized = p.looks_maximized(&p.windows[p.active]);
 
             let mut geo = SpaceElement::geometry(&p.windows[p.active]).to_f64();
             geo.loc += location.to_f64().to_logical(scale);
@@ -918,7 +935,7 @@ impl CosmicStack {
     pub fn corner_radius(&self, geometry_size: Size<i32, Logical>, default_radius: u8) -> [u8; 4] {
         self.0.with_program(|p| {
             let active_window = &p.windows[p.active];
-            let maximized = active_window.is_maximized(false);
+            let maximized = p.looks_maximized(active_window);
 
             let round = (p.appearance_conf.clip_tiled_windows || !p.tiled) && !maximized;
             let radii = p
@@ -1270,7 +1287,7 @@ impl Decorations<CosmicStackInternal, Message> for DefaultDecorations {
                 .into(),
         ];
 
-        let radius = if stack.windows[stack.active].is_maximized(false)
+        let radius = if stack.looks_maximized(&stack.windows[stack.active])
             || (stack.tiled && !stack.appearance_conf.clip_tiled_windows)
         {
             Radius::from(0.0)
