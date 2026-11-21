@@ -217,6 +217,18 @@ impl Shell {
         let redirect = redirect.map(KeyboardFocusTarget::Element);
         let target = redirect.as_ref().or(target);
 
+        // Report pid of focus target to system76-scheduler.
+        // It is possible for programs to spoof the PID, but merely changing priority shouldn't cause any security issues.
+        if let Some(pid) = target
+            .and_then(KeyboardFocusTarget::wl_surface)
+            .as_deref()
+            .and_then(WlSurface::client)
+            .and_then(|client| client.get_credentials(&state.common.display_handle).ok())
+            .and_then(|credentials| credentials.pid.try_into().ok())
+        {
+            state.common.dbus_state.report_foreground_process(pid);
+        }
+
         let focus_target = match target {
             Some(KeyboardFocusTarget::Element(mapped)) => Some(FocusTarget::Window(mapped.clone())),
             Some(KeyboardFocusTarget::Fullscreen(surface)) => {

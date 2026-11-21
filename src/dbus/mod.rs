@@ -1,4 +1,5 @@
 use crate::{
+    dbus::scheduler::Sys76Scheduler,
     state::{BackendData, Common, State},
     utils::prelude::OutputExt,
 };
@@ -20,6 +21,7 @@ pub mod ei;
 pub mod logind;
 mod name_owners;
 mod power;
+mod scheduler;
 
 #[derive(Clone, Debug)]
 pub struct DBusState(Rc<DBusStateInner>);
@@ -33,6 +35,12 @@ struct DBusStateInner {
     a11y_keyboard_monitor: RefCell<Option<a11y_keyboard_monitor::A11yKeyboardMonitorState>>,
     ei_state: RefCell<Option<ei::EiState>>,
     ei_sender: Arc<Mutex<Option<calloop::channel::Sender<crate::libei::EiRequest>>>>,
+    /// The DBus proxy to system76-scheduler.
+    ///
+    /// This is an [`Option`] because system76-scheduler may or may not be running.
+    ///
+    /// Currently, connection is only attempted once.
+    system76_scheduler: Option<Sys76Scheduler>,
 }
 
 impl DBusState {
@@ -40,6 +48,20 @@ impl DBusState {
         let (source, executor) = calloop::futures::executor().unwrap();
         let session_conn = zbus::block_on(zbus::Connection::session());
         let system_conn = zbus::block_on(zbus::Connection::system());
+        let system76_scheduler = match &system_conn {
+            // Attempt to connect once
+            Ok(conn) => match zbus::block_on(Sys76Scheduler::new(conn)) {
+                Ok(scheduler) => Some(scheduler),
+                Err(err) => {
+                    tracing::info!(?err, "failed to connect to com.system76.Scheduler");
+                    None
+                }
+            },
+            Err(err) => {
+                tracing::error!(?err, "failed to initialize system DBus connection");
+                None
+            }
+        };
         let state = Self(Rc::new(DBusStateInner {
             evlh: evlh.clone(),
             executor,
@@ -48,6 +70,7 @@ impl DBusState {
             a11y_keyboard_monitor: RefCell::new(None),
             ei_state: RefCell::new(None),
             ei_sender: Arc::new(Mutex::new(None)),
+            system76_scheduler,
         }));
         evlh.insert_source(source, |_, _, _| {}).unwrap();
         let state_clone = state.clone();
@@ -77,6 +100,24 @@ impl DBusState {
 
     pub fn set_ei_sender(&self, sender: calloop::channel::Sender<crate::libei::EiRequest>) {
         *self.0.ei_sender.lock().unwrap() = Some(sender);
+    }
+
+    /// Attempts to report the process ID of the foreground process to system76-scheduler.
+    pub fn report_foreground_process(&self, pid: u32) {
+        let state_clone = self.clone();
+        self.spawn(async move {
+            match &state_clone.0.system76_scheduler {
+                Some(sched) => {
+                    if let Err(err) = sched.set_foreground_process(pid).await {
+                        tracing::warn!(
+                            ?err,
+                            "failed to report foreground process to system76-scheduler"
+                        );
+                    }
+                }
+                None => tracing::trace!("not reporting foreground process to system76-scheduler"),
+            }
+        });
     }
 
     // TODO Lazy async init when we don't have anything blocking main thread
