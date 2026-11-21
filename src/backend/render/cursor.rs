@@ -247,43 +247,13 @@ enum Error {
     File(#[from] std::io::Error),
 }
 
-fn cursor_aliases(name: &str) -> &[&str] {
-    match name {
-        "default" => &["default", "left_ptr", "arrow"],
-        "pointer" => &["pointer", "hand2", "hand"],
-        "text" => &["text", "xterm"],
-        "wait" => &["wait", "watch"],
-        "progress" => &["progress", "left_ptr_watch"],
-
-        "ew-resize" => &["ew-resize", "h_double_arrow", "sb_h_double_arrow"],
-        "ns-resize" => &["ns-resize", "v_double_arrow", "sb_v_double_arrow"],
-        "nw-resize" => &["nw-resize", "top_left_corner"],
-        "ne-resize" => &["ne-resize", "top_right_corner"],
-        "sw-resize" => &["sw-resize", "bottom_left_corner"],
-        "se-resize" => &["se-resize", "bottom_right_corner"],
-
-        "w-resize" => &["w-resize", "left_side"],
-        "e-resize" => &["e-resize", "right_side"],
-        "n-resize" => &["n-resize", "top_side"],
-        "s-resize" => &["s-resize", "bottom_side"],
-
-        "move" => &["move", "fleur"],
-        "not-allowed" => &["not-allowed", "crossed_circle"],
-        "crosshair" => &["crosshair", "cross"],
-        "help" => &["help", "question_arrow", "left_ptr_help"],
-
-        _ => &[],
-    }
+/// The CSS name of `shape`, then the legacy X11 names
+fn cursor_names(shape: &CursorIcon) -> impl Iterator<Item = &'static str> + '_ {
+    std::iter::once(shape.name()).chain(shape.alt_names().iter().copied())
 }
 
 fn load_icon(theme: &CursorTheme, shape: CursorIcon) -> Result<Vec<Image>, Error> {
-    let shape_name = shape.to_string();
-
-    for name in cursor_aliases(&shape_name)
-        .iter()
-        .copied()
-        .chain(std::iter::once(shape_name.as_str()))
-    {
+    for name in cursor_names(&shape) {
         if let Some(icon_path) = theme.load_icon(name) {
             let mut cursor_file = std::fs::File::open(&icon_path)?;
             let mut cursor_data = Vec::new();
@@ -313,13 +283,8 @@ struct SvgCursorMeta {
 
 /// Resolves a scalable (SVG) cursor for `shape`
 fn load_svg_icon(theme: &CursorTheme, shape: CursorIcon) -> Option<Vec<SvgFrame>> {
-    let shape_name = shape.to_string();
     let options = usvg::Options::default();
-    for name in cursor_aliases(&shape_name)
-        .iter()
-        .copied()
-        .chain(std::iter::once(shape_name.as_str()))
-    {
+    for name in cursor_names(&shape) {
         if let Some(dir) = theme.load_scalable(name)
             && let Some(frames) = parse_svg_dir(&dir, &options)
         {
@@ -569,8 +534,8 @@ impl CursorStateInner {
     }
 
     /// Reload theme and size (see [`load_cursor_env`]), dropping every cached image.
-    pub fn reload_theme(&mut self, size: Option<u32>) {
-        let (theme, size) = load_cursor_theme(size);
+    pub fn reload_theme(&mut self, theme: Option<&str>, size: Option<u32>) {
+        let (theme, size) = load_cursor_theme(theme, size);
         self.cursor_theme = theme;
         self.cursor_size = size;
         self.cursors.clear();
@@ -709,10 +674,10 @@ pub fn reload_cursors(state: &mut crate::state::State) {
     let seats: Vec<_> = state.common.shell.read().seats.iter().cloned().collect();
     for seat in seats {
         if let Some(cursor_state) = seat.user_data().get::<CursorState>() {
-            cursor_state
-                .lock()
-                .unwrap()
-                .reload_theme(state.common.config.cosmic_conf.cursor_size);
+            cursor_state.lock().unwrap().reload_theme(
+                state.common.theme.cosmic().cursor_theme.as_deref(),
+                state.common.config.cosmic_conf.cursor_size,
+            );
         }
     }
     state.common.update_xwayland_settings();
@@ -722,10 +687,12 @@ pub fn reload_cursors(state: &mut crate::state::State) {
     }
 }
 
-/// The cursor theme name and size: `size` if configured, else `$XCURSOR_*`, else defaults.
-pub fn load_cursor_env(size: Option<u32>) -> (String, u32) {
-    let name = std::env::var("XCURSOR_THEME")
-        .ok()
+/// The cursor theme name and size: the configured value if set, else `$XCURSOR_*`, else defaults.
+pub fn load_cursor_env(theme: Option<&str>, size: Option<u32>) -> (String, u32) {
+    let name = theme
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+        .or_else(|| std::env::var("XCURSOR_THEME").ok())
         .unwrap_or_else(|| "default".into());
     let size = size
         .filter(|s| *s > 0)
@@ -738,21 +705,21 @@ pub fn load_cursor_env(size: Option<u32>) -> (String, u32) {
     (name, size)
 }
 
-pub fn load_cursor_theme(size: Option<u32>) -> (CursorTheme, u32) {
-    let (name, size) = load_cursor_env(size);
+pub fn load_cursor_theme(theme: Option<&str>, size: Option<u32>) -> (CursorTheme, u32) {
+    let (name, size) = load_cursor_env(theme, size);
     (CursorTheme::load(&name), size)
 }
 
 impl Default for CursorStateInner {
     fn default() -> CursorStateInner {
-        CursorStateInner::new(None)
+        CursorStateInner::new(None, None)
     }
 }
 
 impl CursorStateInner {
-    /// A cursor state using the configured `size` (see [`load_cursor_env`]).
-    pub fn new(size: Option<u32>) -> CursorStateInner {
-        let (theme, size) = load_cursor_theme(size);
+    /// A cursor state using the configured `theme` and `size` (see [`load_cursor_env`]).
+    pub fn new(theme: Option<&str>, size: Option<u32>) -> CursorStateInner {
+        let (theme, size) = load_cursor_theme(theme, size);
         CursorStateInner {
             current_cursor: None,
 
