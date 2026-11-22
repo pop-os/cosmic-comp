@@ -305,7 +305,7 @@ pub fn render_workspace_to_buffer(
         return;
     };
 
-    let mut output = workspace.output().clone();
+    let output = workspace.output().clone();
     let idx = shell.workspaces.idx_for_handle(&output, &handle).unwrap();
     std::mem::drop(shell);
 
@@ -317,7 +317,15 @@ pub fn render_workspace_to_buffer(
     let buffer_size = buffer_dimensions(&buffer).unwrap();
     if mode != Some(buffer_size) {
         let Some(constraints) = constraints_for_output(&output, &mut state.backend) else {
-            output.remove_session(session);
+            if let Some(workspace) = state
+                .common
+                .shell
+                .write()
+                .workspaces
+                .space_for_handle_mut(&handle)
+            {
+                workspace.remove_session(session);
+            }
             return;
         };
         session.update_constraints(constraints);
