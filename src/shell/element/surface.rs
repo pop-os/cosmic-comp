@@ -202,6 +202,8 @@ impl PartialEq<WeakCosmicSurface> for CosmicSurface {
     }
 }
 
+const MAX_TITLE_LEN: usize = 512;
+
 #[derive(Default)]
 struct Minimized(AtomicBool);
 
@@ -215,17 +217,19 @@ impl CosmicSurface {
     pub fn title(&self) -> String {
         let title = match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
-                states
+                let data = states
                     .data_map
                     .get::<XdgToplevelSurfaceData>()
                     .unwrap()
                     .lock()
-                    .unwrap()
-                    .title
-                    .clone()
-                    .unwrap_or_default()
+                    .unwrap();
+                let title = data.title.as_deref().unwrap_or_default();
+                title[..title.floor_char_boundary(MAX_TITLE_LEN)].to_owned()
             }),
-            WindowSurface::X11(surface) => surface.title().replace('\0', ""),
+            WindowSurface::X11(surface) => {
+                let title = surface.title();
+                title[..title.floor_char_boundary(MAX_TITLE_LEN)].replace('\0', "")
+            }
         };
         title.replace(['\u{2029}', '\u{85}', '\u{1c}', '\u{1d}', '\u{1e}'], " ")
     }
