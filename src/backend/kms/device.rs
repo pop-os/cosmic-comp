@@ -593,8 +593,8 @@ impl State {
             if let Some(mut leasing_global) = device.inner.leasing_global.take() {
                 leasing_global.disable_global::<State>();
             }
+            outputs_removed.extend(device.inner.outputs.values().cloned());
             for (_, surface) in device.inner.surfaces.drain() {
-                outputs_removed.push(surface.output.clone());
                 surface.drop_and_join();
             }
             if let Some(token) = device.event_token.take() {
@@ -615,11 +615,10 @@ impl State {
             .output_configuration_state
             .remove_heads(outputs_removed.iter());
 
-        if backend.session.is_active() {
-            for output in outputs_removed {
-                self.common.remove_output(&output);
-            }
-        } else {
+        for output in outputs_removed {
+            self.common.remove_output(&output);
+        }
+        if !backend.session.is_active() {
             self.common.output_configuration_state.update();
         }
 
