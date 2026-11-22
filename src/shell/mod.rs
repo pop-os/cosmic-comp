@@ -3999,6 +3999,7 @@ impl Shell {
         if old_mapped.is_minimized() {
             return None;
         }
+        let move_out_of_stack = move_out_of_stack && old_mapped.is_stack();
 
         let (window, _) = old_mapped
             .windows()

@@ -1051,8 +1051,9 @@ impl Program for CosmicStackInternal {
                     loop_handle.insert_idle(move |state| {
                         if let Some(mapped) =
                             state.common.shell.read().element_for_surface(&surface)
+                            && let Some(stack) = mapped.stack_ref()
                         {
-                            mapped.stack_ref().unwrap().set_active(&surface);
+                            stack.set_active(&surface);
                         }
                     });
                     self.scroll_to_focus = true;
