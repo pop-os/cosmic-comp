@@ -905,13 +905,25 @@ impl CosmicStack {
                     ),
                 }
             })
-            .map(|size| size + (0, TAB_HEIGHT).into());
+            .map(|size| {
+                if size.h == 0 {
+                    size
+                } else {
+                    size + (0, TAB_HEIGHT).into()
+                }
+            });
         // The problem is, with accumulated sizes, the minimum size could be larger than our maximum...
         let min_size = self.min_size();
         match (theoretical_max, min_size) {
             (None, _) => None,
             (Some(max), None) => Some(max),
-            (Some(max), Some(min)) => Some((max.w.max(min.w), max.h.max(min.h)).into()),
+            (Some(max), Some(min)) => Some(
+                (
+                    if max.w == 0 { 0 } else { max.w.max(min.w) },
+                    if max.h == 0 { 0 } else { max.h.max(min.h) },
+                )
+                    .into(),
+            ),
         }
     }
 

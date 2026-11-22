@@ -621,7 +621,7 @@ impl CosmicWindow {
         self.0
             .with_program(|p| p.window.max_size_without_ssd())
             .map(|size| {
-                if self.0.with_program(|p| !p.window.is_decorated(false)) {
+                if size.h != 0 && self.0.with_program(|p| !p.window.is_decorated(false)) {
                     size + (0, SSD_HEIGHT).into()
                 } else {
                     size

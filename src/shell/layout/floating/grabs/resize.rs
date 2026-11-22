@@ -161,8 +161,8 @@ impl ResizeSurfaceGrab {
 
         let min_width = min_size.map(|s| s.w).unwrap_or(360);
         let min_height = min_size.map(|s| s.h).unwrap_or(240);
-        let max_width = max_size.map(|s| s.w).unwrap_or(i32::MAX);
-        let max_height = max_size.map(|s| s.h).unwrap_or(i32::MAX);
+        let max_width = max_size.map(|s| s.w).filter(|w| *w > 0).unwrap_or(i32::MAX);
+        let max_height = max_size.map(|s| s.h).filter(|h| *h > 0).unwrap_or(i32::MAX);
 
         new_window_width = new_window_width.max(min_width).min(max_width);
         new_window_height = new_window_height.max(min_height).min(max_height);
