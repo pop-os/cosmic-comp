@@ -410,6 +410,13 @@ where
                     );
                     return;
                 }
+                if width <= 0 || height <= 0 || refresh < 0 {
+                    obj.post_error(
+                        zwlr_output_configuration_head_v1::Error::InvalidCustomMode,
+                        format!("{width}x{height}@{refresh} is not a valid custom mode"),
+                    );
+                    return;
+                }
                 pending.mode = Some(ModeConfiguration::Custom {
                     size: Size::from((width, height)),
                     refresh: if refresh == 0 { None } else { Some(refresh) },
@@ -432,6 +439,13 @@ where
                     obj.post_error(
                         zwlr_output_configuration_head_v1::Error::AlreadySet,
                         format!("{:?} already had a scale configured", obj),
+                    );
+                    return;
+                }
+                if !(scale.is_finite() && scale > 0.0) {
+                    obj.post_error(
+                        zwlr_output_configuration_head_v1::Error::InvalidScale,
+                        format!("{scale} is not a valid scale"),
                     );
                     return;
                 }
