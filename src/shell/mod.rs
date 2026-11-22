@@ -300,14 +300,7 @@ pub struct Shell {
     overview_mode: OverviewMode,
     swap_indicator: Option<SwapIndicator>,
     resize_mode: ResizeMode,
-    resize_state: Option<(
-        KeyboardFocusTarget,
-        ResizeDirection,
-        ResizeEdge,
-        i32,
-        usize,
-        Output,
-    )>,
+    resize_state: Option<(KeyboardFocusTarget, ResizeDirection, ResizeEdge, i32)>,
     resize_indicator: Option<ResizeIndicator>,
     zoom_state: Option<ZoomState>,
     appearance_conf: AppearanceConfig,
@@ -2534,7 +2527,7 @@ impl Shell {
             ));
         } else if let Some(direction) = self.resize_mode.active_direction() {
             self.resize_mode = ResizeMode::Ended(Instant::now(), direction);
-            if let Some((_, direction, edge, _, _, _)) = self.resize_state.as_ref() {
+            if let Some((_, direction, edge, _)) = self.resize_state.as_ref() {
                 self.finish_resize(*direction, *edge);
             }
         }
@@ -4818,7 +4811,7 @@ impl Shell {
         let amount = (self
             .resize_state
             .take()
-            .map(|(_, _, _, amount, _, _)| amount)
+            .map(|(_, _, _, amount)| amount)
             .unwrap_or(10)
             + 2)
         .min(20);
@@ -4831,41 +4824,23 @@ impl Shell {
             .sticky_layer
             .resize(&focused, direction, edge, amount)
         {
-            self.resize_state = Some((focused, direction, edge, amount, idx, output));
+            self.resize_state = Some((focused, direction, edge, amount));
         } else if let Some(workspace) = self.workspaces.get_mut(idx, &output)
             && workspace.resize(&focused, direction, edge, amount)
         {
-            self.resize_state = Some((focused, direction, edge, amount, idx, output));
+            self.resize_state = Some((focused, direction, edge, amount));
         }
     }
 
     pub fn finish_resize(&mut self, direction: ResizeDirection, edge: ResizeEdge) {
-        if let Some((old_focused, old_direction, old_edge, _, idx, output)) =
-            self.resize_state.take()
+        if let Some((old_focused, old_direction, old_edge, _)) = self.resize_state.take()
             && old_direction == direction
             && old_edge == edge
         {
             let Some(toplevel) = old_focused.toplevel() else {
                 return;
             };
-            let Some(mapped) = self
-                .workspaces
-                .sets
-                .values()
-                .find_map(|set| {
-                    set.sticky_layer
-                        .mapped()
-                        .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
-                })
-                .cloned()
-                .or_else(|| {
-                    let workspace = self.workspaces.get(idx, &output).unwrap();
-                    workspace
-                        .mapped()
-                        .find(|m| m.has_surface(&toplevel, WindowSurfaceType::TOPLEVEL))
-                        .cloned()
-                })
-            else {
+            let Some(mapped) = self.element_for_surface(&*toplevel).cloned() else {
                 return;
             };
 
