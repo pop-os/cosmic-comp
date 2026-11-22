@@ -1047,12 +1047,14 @@ impl FloatingLayout {
         let (min_size, max_size) = (mapped.min_size(), mapped.max_size());
         let min_width = min_size.map(|s| s.w).unwrap_or(360);
         let min_height = min_size.map(|s| s.h).unwrap_or(240);
-        let max_width = max_size.map(|s| s.w).unwrap_or(i32::MAX);
-        let max_height = max_size.map(|s| s.h).unwrap_or(i32::MAX);
+        let max_width = max_size.map(|s| s.w).filter(|w| *w > 0).unwrap_or(i32::MAX);
+        let max_height = max_size.map(|s| s.h).filter(|h| *h > 0).unwrap_or(i32::MAX);
 
         geo.size.w = min_width.max(geo.size.w).min(max_width);
         geo.size.h = min_height.max(geo.size.h).min(max_height);
-        geo = geo.intersection(bounding_box).unwrap();
+        let Some(geo) = geo.intersection(bounding_box) else {
+            return false;
+        };
 
         *mapped.resize_state.lock().unwrap() = Some(ResizeState::Resizing(ResizeData {
             edges: edge,
