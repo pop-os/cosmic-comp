@@ -78,10 +78,13 @@ pub struct OutputInfo {
 pub fn load_outputs(path: Option<impl AsRef<Path>>) -> OutputsConfig {
     if let Some(path) = path.as_ref() {
         let path: &Path = path.as_ref();
-        if path.exists() {
-            match ron::de::from_reader::<_, OutputsConfig>(
-                OpenOptions::new().read(true).open(path).unwrap(),
-            ) {
+        if path.exists()
+            && let Ok(file) = OpenOptions::new()
+                .read(true)
+                .open(path)
+                .inspect_err(|err| warn!(?err, "Failed to open output_config"))
+        {
+            match ron::de::from_reader::<_, OutputsConfig>(file) {
                 Ok(mut config) => {
                     config.config.retain(|info, configs| {
                         let valid = info.len() == configs.len();
