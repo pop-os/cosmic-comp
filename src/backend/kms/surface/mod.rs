@@ -141,6 +141,7 @@ pub struct SurfaceThreadState {
     state: QueueState,
     timings: Timings,
     frame_callback_seq: usize,
+    failed_redraws: u32,
     thread_sender: Sender<SurfaceCommand>,
 
     output: Output,
@@ -540,6 +541,7 @@ fn surface_thread(
         state: QueueState::Idle,
         timings: Timings::new(None, None, false, target_node),
         frame_callback_seq: 0,
+        failed_redraws: 0,
         thread_sender,
 
         output,
@@ -703,6 +705,7 @@ impl SurfaceThreadState {
         let interval =
             Duration::from_secs_f64(1_000. / drm_helpers::calculate_refresh_rate(mode) as f64);
         self.timings.set_refresh_interval(Some(interval));
+        self.failed_redraws = 0;
 
         const SAFETY_MARGIN: u32 = 2; // Magic two frames margin taken from kwin to not trigger low-framerate-compensation
         let min_min_refresh_interval = Duration::from_secs_f64(1. / 30.); // 30Hz
@@ -941,7 +944,11 @@ impl SurfaceThreadState {
         let estimated_presentation = self.timings.next_presentation_time(&self.clock);
         let render_start = self.timings.next_render_time(&self.clock);
 
-        let timer = if render_start.is_zero() {
+        let timer = if self.failed_redraws > 1 {
+            Timer::from_duration(
+                Duration::from_millis(10) * 2u32.pow(self.failed_redraws.min(9) - 2),
+            )
+        } else if render_start.is_zero() {
             trace!("Running late for frame.");
             // TODO triple buffering
             Timer::immediate()
@@ -952,10 +959,14 @@ impl SurfaceThreadState {
         let token = self
             .loop_handle
             .insert_source(timer, move |_time, _, state| {
-                if let Err(err) = state.redraw(estimated_presentation) {
-                    let name = state.output.name();
-                    warn!(?name, "Failed to submit rendering: {:?}", err);
-                    state.queue_redraw(true);
+                match state.redraw(estimated_presentation) {
+                    Ok(()) => state.failed_redraws = 0,
+                    Err(err) => {
+                        let name = state.output.name();
+                        warn!(?name, "Failed to submit rendering: {:?}", err);
+                        state.failed_redraws = state.failed_redraws.saturating_add(1);
+                        state.queue_redraw(true);
+                    }
                 }
                 TimeoutAction::Drop
             })
