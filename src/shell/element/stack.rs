@@ -339,7 +339,7 @@ impl CosmicStack {
                             (true, true)
                         } else {
                             let old = p.active;
-                            p.active = p.previous_index.unwrap().1;
+                            p.active = p.previous_index.map_or(old, |(_, index)| index);
                             if p.active != old {
                                 p.scroll_to_focus = true;
                                 (false, true)
@@ -360,7 +360,7 @@ impl CosmicStack {
                             (true, true)
                         } else {
                             let old = p.active;
-                            p.active = p.previous_index.unwrap().1;
+                            p.active = p.previous_index.map_or(old, |(_, index)| index);
                             if old != p.active {
                                 p.scroll_to_focus = true;
                                 (false, true)
@@ -398,7 +398,7 @@ impl CosmicStack {
                 FocusDirection::Up | FocusDirection::Down => {
                     if !p.group_focused {
                         let old = p.active;
-                        p.active = p.previous_index.unwrap().1;
+                        p.active = p.previous_index.map_or(old, |(_, index)| index);
                         if old != p.active {
                             p.scroll_to_focus = true;
                         }
