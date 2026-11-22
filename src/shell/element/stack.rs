@@ -257,19 +257,19 @@ impl CosmicStack {
         self.0.force_redraw()
     }
 
-    pub fn remove_window(&self, window: &CosmicSurface) {
-        self.0.with_program(|p| {
+    pub fn remove_window(&self, window: &CosmicSurface) -> bool {
+        let removed = self.0.with_program(|p| {
+            let Some(idx) = p.windows.iter().position(|w| w == window) else {
+                return false;
+            };
             if p.windows.len() == 1 {
                 p.override_alive = false;
                 let window = p.windows.first().unwrap();
                 window.try_force_undecorated(false);
                 window.set_tiled(false);
-                return;
+                return true;
             }
 
-            let Some(idx) = p.windows.iter().position(|w| w == window) else {
-                return;
-            };
             let window = p.windows.remove(idx);
             // TODO Send `leave` if window matches `p.previous_keyboard`?
             window.try_force_undecorated(false);
@@ -277,10 +277,14 @@ impl CosmicStack {
 
             p.active = p.active.min(p.windows.len() - 1);
             p.previous_index.take_if(|(_, idx)| *idx >= p.windows.len());
+            true
         });
-        self.0
-            .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
-        self.0.force_redraw()
+        if removed {
+            self.0
+                .resize(Size::from((self.active().geometry().size.w, TAB_HEIGHT)));
+            self.0.force_redraw();
+        }
+        removed
     }
 
     pub fn remove_idx(&self, idx: usize) -> Option<CosmicSurface> {

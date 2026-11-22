@@ -179,7 +179,9 @@ pub fn tab_items(
             let mapped = unstack_clone_stack.clone();
             let surface = unstack_clone_tab.clone();
             let _ = handle.insert_idle(move |state| {
-                mapped.stack_ref().unwrap().remove_window(&surface);
+                if !mapped.stack_ref().unwrap().remove_window(&surface) {
+                    return;
+                }
                 let mapped: CosmicMapped = CosmicWindow::new(
                     surface,
                     state.common.event_loop_handle.clone(),
