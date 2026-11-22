@@ -542,8 +542,9 @@ impl LockedBackend<'_> {
             });
             let transform =
                 Some(final_config.transform()).filter(|x| *x != output.current_transform());
-            let scale = Some(final_config.0.scale)
-                .filter(|x| *x != output.current_scale().fractional_scale());
+            let scale = Some(final_config.0.scale).filter(|x| {
+                x.is_finite() && *x > 0.0 && *x != output.current_scale().fractional_scale()
+            });
             let location = Some(Point::from((
                 final_config.0.position.0 as i32,
                 final_config.0.position.1 as i32,

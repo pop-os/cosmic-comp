@@ -282,6 +282,13 @@ where
                         );
                         return;
                     }
+                    if scale_1000 <= 0 {
+                        obj.post_error(
+                            zwlr_output_configuration_head_v1::Error::InvalidScale,
+                            format!("{scale_1000} is not a valid scale"),
+                        );
+                        return;
+                    }
                     pending.scale = Some((scale_1000 as f64) / 1000.0);
                 }
             }

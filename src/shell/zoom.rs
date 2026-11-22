@@ -320,11 +320,11 @@ impl ZoomState {
                 // Clamp the final focal point to output geometry
                 focal_point.x = focal_point.x.clamp(
                     output_geometry.loc.x,
-                    output_geometry.loc.x + output_geometry.size.w - 1.0,
+                    output_geometry.loc.x + (output_geometry.size.w - 1.0).max(0.0),
                 );
                 focal_point.y = focal_point.y.clamp(
                     output_geometry.loc.y,
-                    output_geometry.loc.y + output_geometry.size.h - 1.0,
+                    output_geometry.loc.y + (output_geometry.size.h - 1.0).max(0.0),
                 );
 
                 output_state_ref.focal_point = focal_point;
