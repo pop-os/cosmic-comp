@@ -652,6 +652,7 @@ impl State {
             &self.common.clock,
         )?;
         self.common.refresh();
+        crate::libei::refresh_absolute_pointer_regions(self);
         Ok(())
     }
 }
