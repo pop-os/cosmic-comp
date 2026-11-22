@@ -726,7 +726,8 @@ impl KmsState {
     ) -> Result<DrmNode> {
         let device_node = dmabuf
             .node()
-            .unwrap_or_else(|| self.primary_node.read().unwrap().unwrap());
+            .or_else(|| *self.primary_node.read().unwrap())
+            .context("No primary GPU to import the dmabuf with")?;
         let mut device = self
             .drm_devices
             .values_mut()
