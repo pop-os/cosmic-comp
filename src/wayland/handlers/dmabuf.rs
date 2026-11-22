@@ -57,7 +57,7 @@ impl DmabufHandler for State {
                 f.ended_at.is_none() && f.surface.has_surface(surface, WindowSurfaceType::all())
             });
 
-        let node = kms.primary_node.read().unwrap().unwrap();
+        let node = (*kms.primary_node.read().unwrap())?;
         let kms_surface = kms
             .drm_devices
             .values()
