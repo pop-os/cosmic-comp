@@ -8,7 +8,7 @@ use crate::state::State;
 impl IdleInhibitHandler for State {
     fn inhibit(&mut self, surface: WlSurface) {
         self.common.idle_inhibiting_surfaces.insert(surface);
-        self.common.idle_notifier_state.set_is_inhibited(true);
+        self.common.refresh_idle_inhibit();
     }
 
     fn uninhibit(&mut self, surface: WlSurface) {
