@@ -877,7 +877,7 @@ impl TilingLayout {
                             &other_desc.node,
                             id_tree::SwapBehavior::TakeChildren,
                         )
-                        .unwrap();
+                        .ok()?;
                 }
             }
             (None, None) => {
@@ -1120,6 +1120,10 @@ impl TilingLayout {
                 let other_mapped = other_mapped.clone();
                 let geometry = *other_node.data().geometry();
                 assert!(other_mapped.is_stack());
+
+                if this_tree.get(&this_desc.node).is_err() {
+                    return None;
+                }
 
                 let surfaces = this_tree
                     .traverse_pre_order(&this_desc.node)
@@ -4326,7 +4330,9 @@ where
                 .into_iter()
                 .flat_map(|tree| {
                     tree.traverse_pre_order_ids(&swap_desc.as_ref().unwrap().node)
-                        .unwrap()
+                        .ok()
+                        .into_iter()
+                        .flatten()
                 })
                 .map(|id| (*swap_tree.as_ref().unwrap(), id)),
         )
