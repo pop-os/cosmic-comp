@@ -174,12 +174,19 @@ pub enum ColorFilter {
 impl Config {
     pub fn load(loop_handle: &LoopHandle<'_, State>, kiosk_mode: bool) -> Config {
         let config = cosmic_config::Config::new("com.system76.CosmicComp", 1).unwrap();
-        let source = cosmic_config::calloop::ConfigWatchSource::new(&config).unwrap();
-        loop_handle
-            .insert_source(source, |(config, keys), (), state| {
-                config_changed(config, keys, state);
-            })
-            .expect("Failed to add cosmic-config to the event loop");
+        match cosmic_config::calloop::ConfigWatchSource::new(&config) {
+            Ok(source) => {
+                if let Err(err) = loop_handle.insert_source(source, |(config, keys), (), state| {
+                    config_changed(config, keys, state);
+                }) {
+                    warn!(?err, "Failed to watch com.system76.CosmicComp config");
+                }
+            }
+            Err(err) => warn!(
+                ?err,
+                "failed to create config watch source for com.system76.CosmicComp"
+            ),
+        }
         let xdg = xdg::BaseDirectories::new();
 
         let mut cosmic_comp_config =
@@ -375,16 +382,19 @@ impl Config {
         path.as_deref()
             .filter(|path| path.exists())
             .and_then(|path| {
-                ron::de::from_reader::<_, NumlockStateConfig>(
-                    OpenOptions::new().read(true).open(path).unwrap(),
-                )
-                .map_err(|err| {
-                    warn!(?err, "Failed to read numlock.ron, resetting..");
-                    if let Err(err) = std::fs::remove_file(path) {
-                        error!(?err, "Failed to remove numlock.ron.");
-                    }
-                })
-                .ok()
+                let file = OpenOptions::new()
+                    .read(true)
+                    .open(path)
+                    .inspect_err(|err| warn!(?err, "Failed to open numlock.ron"))
+                    .ok()?;
+                ron::de::from_reader::<_, NumlockStateConfig>(file)
+                    .map_err(|err| {
+                        warn!(?err, "Failed to read numlock.ron, resetting..");
+                        if let Err(err) = std::fs::remove_file(path) {
+                            error!(?err, "Failed to remove numlock.ron.");
+                        }
+                    })
+                    .ok()
             })
             .unwrap_or_default()
     }
@@ -392,10 +402,12 @@ impl Config {
     fn load_filter_state(path: &Option<PathBuf>) -> ScreenFilter {
         if let Some(path) = path.as_ref()
             && path.exists()
+            && let Ok(file) = OpenOptions::new()
+                .read(true)
+                .open(path)
+                .inspect_err(|err| warn!(?err, "Failed to open screen_filter state"))
         {
-            match ron::de::from_reader::<_, ScreenFilter>(
-                OpenOptions::new().read(true).open(path).unwrap(),
-            ) {
+            match ron::de::from_reader::<_, ScreenFilter>(file) {
                 Ok(config) => return config,
                 Err(err) => {
                     warn!(?err, "Failed to read screen_filter state, resetting..");
