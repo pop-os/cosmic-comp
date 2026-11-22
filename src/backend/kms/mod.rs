@@ -840,11 +840,19 @@ impl KmsState {
         let mut used_devices = HashSet::new();
 
         for device in self.drm_devices.values_mut() {
-            if device
+            match device
                 .inner
-                .update_egl(primary_node.as_ref(), self.api.as_mut())?
+                .update_egl(primary_node.as_ref(), self.api.as_mut())
             {
-                used_devices.insert(device.inner.render_node);
+                Ok(true) => {
+                    used_devices.insert(device.inner.render_node);
+                }
+                Ok(false) => {}
+                Err(err) => warn!(
+                    ?err,
+                    node = ?device.inner.render_node,
+                    "Failed to initialize EGL for a GPU, skipping it"
+                ),
             }
         }
 
@@ -902,11 +910,19 @@ impl KmsGuard<'_> {
         let mut used_devices = HashSet::new();
 
         for device in self.drm_devices.values_mut() {
-            if device
+            match device
                 .inner
-                .update_egl(primary_node.as_ref(), self.api.as_mut())?
+                .update_egl(primary_node.as_ref(), self.api.as_mut())
             {
-                used_devices.insert(device.inner.render_node);
+                Ok(true) => {
+                    used_devices.insert(device.inner.render_node);
+                }
+                Ok(false) => {}
+                Err(err) => warn!(
+                    ?err,
+                    node = ?device.inner.render_node,
+                    "Failed to initialize EGL for a GPU, skipping it"
+                ),
             }
         }
 
