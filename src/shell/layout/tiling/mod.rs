@@ -3571,13 +3571,16 @@ impl TilingLayout {
             Data::Placeholder { .. } => TargetZone::InitialPlaceholder(res_id),
             Data::Group { .. } | Data::Mapped { .. } => {
                 let id = if data.is_group() {
-                    tree.get(&res_id)
+                    let Some(id) = tree
+                        .get(&res_id)
                         .unwrap()
                         .children()
                         .iter()
                         .find(|child_id| tree.get(child_id).unwrap().data().is_mapped(None))
-                        .expect("Placeholder group without real window?")
-                        .clone()
+                    else {
+                        return TargetZone::Initial;
+                    };
+                    id.clone()
                 } else {
                     res_id
                 };
