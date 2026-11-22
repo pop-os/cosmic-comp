@@ -167,6 +167,8 @@ impl State {
                         Ok(wm) => wm,
                         Err(err) => {
                             error!(?err, "Failed to start Xwayland WM");
+                            data.common.xwayland_state = None;
+                            data.notify_ready();
                             return;
                         }
                     };
