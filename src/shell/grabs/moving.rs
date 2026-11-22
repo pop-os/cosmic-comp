@@ -1012,7 +1012,6 @@ impl Drop for MoveGrab {
                                     for direction in directions {
                                         workspace.floating_layer.move_element(
                                             direction,
-                                            &seat,
                                             ManagedLayer::Floating,
                                             &theme,
                                             &window,

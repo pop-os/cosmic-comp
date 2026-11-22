@@ -1171,7 +1171,6 @@ impl FloatingLayout {
     pub fn move_element(
         &mut self,
         direction: Direction,
-        seat: &Seat<State>,
         layer: ManagedLayer,
         theme: &cosmic::Theme,
         element: &CosmicMapped,
@@ -1181,7 +1180,7 @@ impl FloatingLayout {
             StackMoveResult::MoveOut(surface, loop_handle) => {
                 let mapped: CosmicMapped =
                     CosmicWindow::new(surface, loop_handle, theme.clone(), self.appearance).into();
-                let output = seat.active_output();
+                let output = self.space.outputs().next().unwrap().clone();
                 let pos = self.space.element_geometry(element).unwrap().loc
                     + match direction {
                         Direction::Up => Point::from((5, -10)),
@@ -1365,7 +1364,7 @@ impl FloatingLayout {
             return MoveResult::None;
         };
 
-        self.move_element(direction, seat, layer, &theme, &focused.clone())
+        self.move_element(direction, layer, &theme, &focused.clone())
     }
 
     pub fn mapped(&self) -> impl Iterator<Item = &CosmicMapped> {
