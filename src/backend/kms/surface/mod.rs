@@ -1870,8 +1870,10 @@ fn postprocess_elements<'a>(
         .expect("OffscreenShader should be available through `init_shaders`");
 
     let mut elements: [Option<TextureShaderElement>; 2] = [None, None];
-    if let Some(cursor_texture) = postprocess_state.cursor_texture.as_ref() {
-        let cursor_geometry = pre_postprocess_data.cursor_geometry.unwrap();
+    if let (Some(cursor_texture), Some(cursor_geometry)) = (
+        postprocess_state.cursor_texture.as_ref(),
+        pre_postprocess_data.cursor_geometry,
+    ) {
         let texture_elem = TextureRenderElement::from_texture_render_buffer(
             cursor_geometry.loc.to_f64(),
             cursor_texture,
