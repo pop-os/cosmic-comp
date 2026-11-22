@@ -3573,9 +3573,22 @@ impl Shell {
                         previous,
                     }
                 }
-                _ => {
-                    unreachable!()
-                } // MinimizedWindow always has restore data
+                WorkspaceRestoreData::Stack(_) => {
+                    let window = CosmicMapped::from(CosmicWindow::new(
+                        window.clone(),
+                        evlh.clone(),
+                        self.theme.clone(),
+                        self.appearance_conf,
+                    ));
+                    window.set_minimized(true);
+                    MinimizedWindow::Tiling {
+                        window,
+                        previous: TilingRestoreData {
+                            state: None,
+                            was_maximized: false,
+                        },
+                    }
+                }
             };
             to_workspace.minimized_windows.push(minimized_window);
             return None;
