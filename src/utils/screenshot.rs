@@ -11,6 +11,7 @@ use smithay::{
     utils::{Scale, Transform},
     wayland::seat::WaylandFocus,
 };
+use std::path::Path;
 use tracing::warn;
 
 use crate::{
@@ -63,7 +64,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
             bbox.to_buffer(1, Transform::Normal, &bbox.size),
             format,
         )?;
-        let gl_data = renderer.map_texture(&mapping)?;
+        let gl_data = renderer.map_texture(&mapping)?.to_vec();
 
         if let Ok(Some(path)) = xdg_user::pictures() {
             let local_timestamp = jiff::Zoned::now();
@@ -74,25 +75,38 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
                 title,
                 local_timestamp.strftime("%Y-%m-%d_%H:%M:%S_%4f"),
             ));
-            let file = std::fs::File::create(path.join(name))?;
-
-            let writer = &mut std::io::BufWriter::new(file);
-            let mut encoder = png::Encoder::new(writer, bbox.size.w as u32, bbox.size.h as u32);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            encoder.set_source_gamma(png::ScaledFloat::new(1.0 / 2.2)); // 1.0 / 2.2, unscaled, but rounded
-            let source_chromaticities = png::SourceChromaticities::new(
-                // Using unscaled instantiation here
-                (0.31270, 0.32900),
-                (0.64000, 0.33000),
-                (0.30000, 0.60000),
-                (0.15000, 0.06000),
-            );
-            encoder.set_source_chromaticities(source_chromaticities);
-            let mut writer = encoder.write_header()?;
-            writer.write_image_data(gl_data)?;
+            let (width, height) = (bbox.size.w as u32, bbox.size.h as u32);
+            std::thread::Builder::new()
+                .name("screenshot".into())
+                .spawn(move || {
+                    if let Err(err) = save_png(&path.join(name), width, height, &gl_data) {
+                        warn!(?err, "Failed to save screenshot");
+                    }
+                })
+                .context("Failed to spawn screenshot thread")?;
         }
 
+        Ok(())
+    }
+
+    fn save_png(path: &Path, width: u32, height: u32, data: &[u8]) -> anyhow::Result<()> {
+        let file = std::fs::File::create(path)?;
+
+        let writer = &mut std::io::BufWriter::new(file);
+        let mut encoder = png::Encoder::new(writer, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_source_gamma(png::ScaledFloat::new(1.0 / 2.2)); // 1.0 / 2.2, unscaled, but rounded
+        let source_chromaticities = png::SourceChromaticities::new(
+            // Using unscaled instantiation here
+            (0.31270, 0.32900),
+            (0.64000, 0.33000),
+            (0.30000, 0.60000),
+            (0.15000, 0.06000),
+        );
+        encoder.set_source_chromaticities(source_chromaticities);
+        let mut writer = encoder.write_header()?;
+        writer.write_image_data(data)?;
         Ok(())
     }
 
