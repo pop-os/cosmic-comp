@@ -61,16 +61,7 @@ jobs:
               with:
                   rustflags: ""
             - name: System dependencies
-              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libdisplay-info-dev libpixman-1-dev meson ninja-build
-            - name: Build and install Libseat
-              run: |
-                  wget https://git.sr.ht/~kennylevinsen/seatd/archive/0.9.1.tar.gz -O libseat-source.tar.gz
-                  tar xf libseat-source.tar.gz
-                  cd seatd-0.9.1
-                  meson setup -Dlibseat-builtin=enabled -Dserver=disabled -Dexamples=disabled -Dman-pages=disabled build .
-                  ninja -C build
-                  sudo meson install -C build
-                  sudo ldconfig
+              run: sudo apt-get update; sudo apt-get install libudev-dev libgbm-dev libxkbcommon-dev libegl1-mesa-dev libwayland-dev libinput-dev libdbus-1-dev libsystemd-dev libseat-dev libdisplay-info-dev libpixman-1-dev
             - name: Test features
               env:
                   RUST_BACKTRACE: full
