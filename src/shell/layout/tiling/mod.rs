@@ -176,7 +176,12 @@ pub enum PlaceholderType {
 }
 
 impl Data {
-    fn new_group(orientation: Orientation, geo: Rectangle<i32, Local>, h_ratio: f64, v_ratio: f64) -> Data {
+    fn new_group(
+        orientation: Orientation,
+        geo: Rectangle<i32, Local>,
+        h_ratio: f64,
+        v_ratio: f64,
+    ) -> Data {
         let total = match orientation {
             Orientation::Vertical => geo.size.w,
             Orientation::Horizontal => geo.size.h,
@@ -528,8 +533,15 @@ impl TilingLayout {
                 });
 
                 let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
-                let group_id =
-                    TilingLayout::new_group(&mut tree, &sibling_id, &new_id, orientation, self.split.default_h, self.split.default_v).unwrap();
+                let group_id = TilingLayout::new_group(
+                    &mut tree,
+                    &sibling_id,
+                    &new_id,
+                    orientation,
+                    self.split.default_h,
+                    self.split.default_v,
+                )
+                .unwrap();
                 tree.make_nth_sibling(&new_id, idx).unwrap();
                 if let Data::Group {
                     sizes: default_sizes,
@@ -615,8 +627,7 @@ impl TilingLayout {
                 }
             };
             let new_id = tree.insert(new_window, InsertBehavior::AsRoot).unwrap();
-            TilingLayout::new_group(tree, node_id, &new_id, orientation, h_ratio, v_ratio)
-                .unwrap();
+            TilingLayout::new_group(tree, node_id, &new_id, orientation, h_ratio, v_ratio).unwrap();
             new_id
         } else {
             // nothing? then we add to the root
@@ -761,8 +772,15 @@ impl TilingLayout {
                             }
                         };
                         let id = other_tree.insert(node, InsertBehavior::AsRoot).unwrap();
-                        TilingLayout::new_group(&mut other_tree, &focused_node, &id, orientation, other.split.default_h, other.split.default_v)
-                            .unwrap();
+                        TilingLayout::new_group(
+                            &mut other_tree,
+                            &focused_node,
+                            &id,
+                            orientation,
+                            other.split.default_h,
+                            other.split.default_v,
+                        )
+                        .unwrap();
                         other_tree
                             .make_nth_sibling(
                                 &id,
@@ -1565,7 +1583,15 @@ impl TilingLayout {
                         minimize_rect: None,
                     });
                     let new_id = tree.insert(new_node, InsertBehavior::AsRoot).unwrap();
-                    TilingLayout::new_group(&mut tree, &node_id, &new_id, orientation, self.split.default_h, self.split.default_v).unwrap();
+                    TilingLayout::new_group(
+                        &mut tree,
+                        &node_id,
+                        &new_id,
+                        orientation,
+                        self.split.default_h,
+                        self.split.default_v,
+                    )
+                    .unwrap();
                     tree.make_nth_sibling(
                         &new_id,
                         match direction {
@@ -1819,8 +1845,15 @@ impl TilingLayout {
                     MoveResult::Done
                 } else {
                     // else we make a new fork
-                    TilingLayout::new_group(&mut tree, &next_child_id, &node_id, orientation, self.split.default_h, self.split.default_v)
-                        .unwrap();
+                    TilingLayout::new_group(
+                        &mut tree,
+                        &next_child_id,
+                        &node_id,
+                        orientation,
+                        self.split.default_h,
+                        self.split.default_v,
+                    )
+                    .unwrap();
                     tree.make_nth_sibling(
                         &node_id,
                         if direction == Direction::Left || direction == Direction::Up {
@@ -2712,7 +2745,15 @@ impl TilingLayout {
                     Orientation::Horizontal
                 };
                 if tree.get(group_id).unwrap().data().orientation() != orientation {
-                    TilingLayout::new_group(&mut tree, group_id, &new_id, orientation, self.split.default_h, self.split.default_v).unwrap();
+                    TilingLayout::new_group(
+                        &mut tree,
+                        group_id,
+                        &new_id,
+                        orientation,
+                        self.split.default_h,
+                        self.split.default_v,
+                    )
+                    .unwrap();
                 } else {
                     let data = tree.get_mut(group_id).unwrap().data_mut();
                     let len = data.len();
@@ -2779,7 +2820,15 @@ impl TilingLayout {
                 } else {
                     Orientation::Horizontal
                 };
-                TilingLayout::new_group(&mut tree, window_id, &new_id, orientation, self.split.default_h, self.split.default_v).unwrap();
+                TilingLayout::new_group(
+                    &mut tree,
+                    window_id,
+                    &new_id,
+                    orientation,
+                    self.split.default_h,
+                    self.split.default_v,
+                )
+                .unwrap();
                 if matches!(direction, Direction::Left | Direction::Up) {
                     tree.make_first_sibling(&new_id).unwrap();
                 }
@@ -3771,7 +3820,15 @@ impl TilingLayout {
                     Orientation::Horizontal
                 };
 
-                TilingLayout::new_group(&mut tree, node_id, &id, orientation, self.split.default_h, self.split.default_v).unwrap();
+                TilingLayout::new_group(
+                    &mut tree,
+                    node_id,
+                    &id,
+                    orientation,
+                    self.split.default_h,
+                    self.split.default_v,
+                )
+                .unwrap();
 
                 if matches!(dir, Direction::Left | Direction::Up) {
                     tree.make_first_sibling(&id).unwrap();

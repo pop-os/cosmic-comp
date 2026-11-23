@@ -21,8 +21,8 @@ use crate::{
         },
     },
 };
-use cosmic_comp_config::{AppearanceConfig, SplitConfig};
 use cosmic_comp_config::workspace::{OutputMatch, PinnedWorkspace};
+use cosmic_comp_config::{AppearanceConfig, SplitConfig};
 
 use cosmic::theme::CosmicTheme;
 use cosmic_protocols::workspace::v2::server::zcosmic_workspace_handle_v2::TilingState;
