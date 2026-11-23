@@ -4,7 +4,8 @@ use crate::{
     config::{Action, PrivateAction},
     input::InputBackendId,
     shell::{
-        FocusResult, InvalidWorkspaceIndex, MoveResult, SeatExt, Trigger, WorkspaceDelta,
+        FocusResult, InvalidWorkspaceIndex, ModalBehavior, MoveResult, SeatExt, Trigger,
+        WorkspaceDelta,
         focus::{FocusTarget, target::KeyboardFocusTarget},
         layout::tiling::SwapWindowGrab,
     },
@@ -18,6 +19,7 @@ use cosmic_config::ConfigSet;
 use cosmic_settings_config::shortcuts;
 use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
 use smithay::{
+    backend::input::InputTime,
     input::{Seat, pointer::MotionEvent},
     utils::{Point, Serial},
 };
@@ -45,7 +47,7 @@ impl State {
         backend_id: &InputBackendId,
         seat: &Seat<State>,
         serial: Serial,
-        time: u32,
+        time: InputTime,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
     ) {
@@ -150,7 +152,7 @@ impl State {
         backend_id: &InputBackendId,
         seat: &Seat<State>,
         serial: Serial,
-        time: u32,
+        time: InputTime,
         pattern: shortcuts::Binding,
         direction: Option<Direction>,
         propagate: bool,
@@ -910,7 +912,7 @@ impl State {
                     .current_focus()
                     .and_then(|f| f.active_window())
                 {
-                    shell.minimize_request(&focused_window);
+                    shell.minimize_request(&focused_window, ModalBehavior::Block);
                 }
             }
 
@@ -919,7 +921,12 @@ impl State {
                 if let Some(KeyboardFocusTarget::Element(window)) =
                     seat.get_keyboard().unwrap().current_focus()
                 {
-                    shell.maximize_toggle(&window, seat, &self.common.event_loop_handle);
+                    shell.maximize_toggle(
+                        &window,
+                        seat,
+                        &self.common.event_loop_handle,
+                        ModalBehavior::Block,
+                    );
                 }
             }
 
@@ -934,15 +941,18 @@ impl State {
                             &window.active_window(),
                             focused_output,
                             &self.common.event_loop_handle,
+                            ModalBehavior::Block,
                         ) {
                             std::mem::drop(shell);
                             Shell::set_focus(self, Some(&target), seat, Some(serial), true);
                         }
                     }
                     Some(KeyboardFocusTarget::Fullscreen(surface)) => {
-                        if let Some(target) =
-                            shell.unfullscreen_request(&surface, &self.common.event_loop_handle)
-                        {
+                        if let Some(target) = shell.unfullscreen_request(
+                            &surface,
+                            &self.common.event_loop_handle,
+                            ModalBehavior::Block,
+                        ) {
                             std::mem::drop(shell);
                             Shell::set_focus(self, Some(&target), seat, Some(serial), true);
                         }

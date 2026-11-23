@@ -23,6 +23,7 @@ use crate::{
             output_configuration::OutputConfigurationState,
             output_power::OutputPowerState,
             overlap_notify::OverlapNotifyState,
+            session_lock_layer::SessionLockLayerState,
             toplevel_info::ToplevelInfoState,
             toplevel_management::{ManagementCapabilities, ToplevelManagementState},
             workspace::{WorkspaceState, WorkspaceUpdateGuard},
@@ -102,7 +103,7 @@ use smithay::{
         shell::{
             kde::decoration::KdeDecorationState,
             wlr_layer::WlrLayerShellState,
-            xdg::{XdgShellState, decoration::XdgDecorationState},
+            xdg::{XdgShellState, decoration::XdgDecorationState, dialog::XdgDialogState},
         },
         shm::ShmState,
         single_pixel_buffer::SinglePixelBufferState,
@@ -127,6 +128,7 @@ use std::{
     cmp::min,
     collections::HashSet,
     ffi::OsString,
+    os::unix::net::UnixStream,
     process::{Child, Command},
     sync::{Arc, LazyLock, Once, atomic::AtomicBool},
     time::{Duration, Instant},
@@ -237,6 +239,7 @@ pub struct Common {
     pub display_handle: DisplayHandle,
     pub event_loop_handle: LoopHandle<'static, State>,
     pub event_loop_signal: LoopSignal,
+    pub session_sock: Option<UnixStream>,
 
     pub popups: PopupManager,
     pub shell: Arc<parking_lot::RwLock<Shell>>,
@@ -320,6 +323,7 @@ pub struct Common {
     pub xwayland_state: Option<XWaylandState>,
     pub xwayland_shell_state: XWaylandShellState,
     pub pointer_focus_state: Option<PointerFocusState>,
+    pub session_lock_layer_state: SessionLockLayerState,
 
     #[cfg(feature = "logind")]
     pub inhibit_lid_fd: Option<OwnedFd>,
@@ -581,7 +585,10 @@ impl LockedBackend<'_> {
             });
 
             match final_config.enabled {
-                OutputState::Enabled => shell_ref.workspaces.add_output(output, workspace_state),
+                OutputState::Enabled => {
+                    shell_ref.workspaces.add_output(output, workspace_state);
+                    shell_ref.add_output_zoom_state(output, loop_handle);
+                }
                 _ => {
                     let shell = &mut *shell_ref;
                     shell.workspaces.remove_output(
@@ -656,6 +663,7 @@ impl State {
         socket: OsString,
         handle: LoopHandle<'static, State>,
         signal: LoopSignal,
+        session_sock: Option<UnixStream>,
         with_xwayland: bool,
         kiosk_command: Option<Command>,
     ) -> State {
@@ -665,7 +673,7 @@ impl State {
             .unwrap();
 
         let clock = Clock::new();
-        let config = Config::load(&handle);
+        let config = Config::load(&handle, kiosk_command.is_some());
         let compositor_state = CompositorState::new::<Self>(dh);
         let corner_radius_state = CornerRadiusState::new::<Self>(dh);
         let data_device_state = DataDeviceState::new::<Self>(dh);
@@ -743,6 +751,7 @@ impl State {
                 WmCapabilities::WindowMenu,
             ],
         );
+        XdgDialogState::new::<State>(dh);
         let xdg_activation_state = XdgActivationState::new::<State>(dh);
         let xdg_foreign_state = XdgForeignState::new::<State>(dh);
         let toplevel_info_state = ToplevelInfoState::new(dh, client_not_sandboxed);
@@ -763,6 +772,9 @@ impl State {
 
         let dbus_state = DBusState::init(&handle);
 
+        let session_lock_layer_state =
+            SessionLockLayerState::new::<State, _>(dh, client_not_sandboxed);
+
         State {
             common: Common {
                 config,
@@ -770,6 +782,7 @@ impl State {
                 display_handle: dh.clone(),
                 event_loop_handle: handle,
                 event_loop_signal: signal,
+                session_sock,
 
                 popups: PopupManager::default(),
                 shell,
@@ -830,6 +843,7 @@ impl State {
                 pointer_focus_state: None,
                 dbus_state,
                 keyboard_layout_state,
+                session_lock_layer_state,
 
                 #[cfg(feature = "logind")]
                 inhibit_lid_fd: None,
@@ -968,6 +982,8 @@ impl Common {
         output: &Output,
         render_element_states: &RenderElementStates,
     ) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let shell = self.shell.read();
         let processor = |namespace: Option<usize>| {
             move |surface: &WlSurface, states: &SurfaceData| {
@@ -1074,6 +1090,8 @@ impl Common {
         render_element_states: &RenderElementStates,
         mut dmabuf_feedback: impl FnMut(DrmNode) -> Option<SurfaceDmabufFeedback>,
     ) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let shell = self.shell.read();
 
         if let Some(session_lock) = shell.session_lock.as_ref()
@@ -1287,6 +1305,8 @@ impl Common {
 
     #[profiling::function]
     pub fn send_frames(&self, output: &Output, sequence: Option<usize>) {
+        // NOTE: Keep in sync with surface iteration in `render_input_order_internal`
+
         let time = self.clock.now();
         let should_send = |surface: &WlSurface, states: &SurfaceData| {
             // Do the standard primary scanout output check. For pointer surfaces it deduplicates
@@ -1328,8 +1348,12 @@ impl Common {
         const THROTTLE: Option<Duration> = Some(Duration::from_millis(995));
         const SCREENCOPY_THROTTLE: Option<Duration> = Some(Duration::from_nanos(16_666_666));
 
-        fn throttle(session_holder: &impl SessionHolder) -> Option<Duration> {
-            if session_holder.sessions().is_empty() && session_holder.cursor_sessions().is_empty() {
+        fn throttle(session_holder: &impl SessionHolder, is_xwayland: bool) -> Option<Duration> {
+            if is_xwayland {
+                Some(Duration::ZERO)
+            } else if session_holder.sessions().is_empty()
+                && session_holder.cursor_sessions().is_empty()
+            {
                 THROTTLE
             } else {
                 SCREENCOPY_THROTTLE
@@ -1365,7 +1389,8 @@ impl Common {
                 && let Some(grab_state) = move_grab.lock().unwrap().as_ref()
             {
                 for (window, _) in grab_state.element().windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             }
 
@@ -1389,25 +1414,28 @@ impl Common {
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             });
 
         if let Some(active) = shell.active_space(output) {
             if let Some(fs) = active.get_fullscreen(shell.seats.last_active()) {
-                fs.surface
-                    .send_frame(output, time, throttle(&fs.surface), should_send);
+                let throttle = throttle(&fs.surface, fs.surface.x11_surface().is_some());
+                fs.surface.send_frame(output, time, throttle, should_send);
             }
             active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    window.send_frame(output, time, throttle(&window), should_send);
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, should_send);
                 }
             });
 
             // other (throttled) windows
             active.minimized_windows.iter().for_each(|m| {
                 for window in m.windows() {
-                    window.send_frame(output, time, throttle(&window), |_, _| None);
+                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    window.send_frame(output, time, throttle, |_, _| None);
                 }
             });
 
@@ -1417,18 +1445,25 @@ impl Common {
                 .filter(|w| w.handle != active.handle)
             {
                 if let Some(fs) = space.get_fullscreen(shell.seats.last_active()) {
-                    let throttle = min(throttle(space), throttle(&fs.surface));
+                    let throttle = min(
+                        throttle(space, false),
+                        throttle(&fs.surface, fs.surface.x11_surface().is_some()),
+                    );
                     fs.surface.send_frame(output, time, throttle, |_, _| None);
                 }
                 space.mapped().for_each(|mapped| {
                     for (window, _) in mapped.windows() {
-                        let throttle = min(throttle(space), throttle(&window));
+                        let throttle = min(
+                            throttle(space, false),
+                            throttle(&window, window.x11_surface().is_some()),
+                        );
                         window.send_frame(output, time, throttle, |_, _| None);
                     }
                 });
                 space.minimized_windows.iter().for_each(|m| {
                     for window in m.windows() {
-                        window.send_frame(output, time, throttle(&window), |_, _| None);
+                        let throttle = throttle(&window, window.x11_surface().is_some());
+                        window.send_frame(output, time, throttle, |_, _| None);
                     }
                 })
             }

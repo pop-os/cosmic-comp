@@ -21,14 +21,17 @@ use smithay::{
             gbm::{GbmAllocator, GbmDevice},
         },
         drm::{
-            DrmDevice, DrmDeviceFd, DrmEvent, DrmNode, NodeType,
+            CreateDrmNodeError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmNode, NodeType,
             compositor::{FrameError, FrameFlags},
             exporter::gbm::GbmFramebufferExporter,
             output::{DrmOutputManager, LockedDrmOutputManager},
         },
-        egl::{EGLContext, EGLDevice, EGLDisplay, context::ContextPriority},
+        egl::{EGLContext, EGLDevice, EGLDisplay, Error as EGLError, context::ContextPriority},
         renderer::glow::GlowRenderer,
-        session::{Session, libseat::LibSeatSession},
+        session::{
+            Session,
+            libseat::{Error as LibSeatError, LibSeatSession},
+        },
     },
     desktop::utils::OutputPresentationFeedback,
     output::{Mode as OutputMode, Output, PhysicalProperties, Scale, Subpixel},
@@ -39,7 +42,7 @@ use smithay::{
         rustix::fs::{Dev as dev_t, OFlags},
         wayland_server::DisplayHandle,
     },
-    utils::{Clock, DevPath, DeviceFd, Monotonic, Point, Transform},
+    utils::{Clock, DeviceFd, Monotonic, Point, Transform},
     wayland::{
         drm_lease::{DrmLease, DrmLeaseState},
         drm_syncobj::supports_syncobj_eventfd,
@@ -153,30 +156,10 @@ impl fmt::Debug for InnerDevice {
     }
 }
 
-pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals> {
-    let path = gbm.dev_path();
-
-    let display = unsafe { EGLDisplay::new(gbm.clone()) }.with_context(|| {
-        format!(
-            "Failed to create EGLDisplay for device: {:?}",
-            path.as_deref().map(Path::display)
-        )
-    })?;
-    let device = EGLDevice::device_for_display(&display).with_context(|| {
-        format!(
-            "Unable to find matching egl device for {:?}",
-            path.as_deref().map(Path::display)
-        )
-    })?;
-
-    let context =
-        EGLContext::new_with_priority(&display, ContextPriority::High).with_context(|| {
-            format!(
-                "Failed to create EGLContext for device {:?}:{:?}",
-                device,
-                path.as_deref().map(Path::display),
-            )
-        })?;
+pub fn init_egl(gbm: &GbmDevice<DrmDeviceFd>) -> Result<EGLInternals, EGLError> {
+    let display = unsafe { EGLDisplay::new(gbm.clone()) }?;
+    let device = EGLDevice::device_for_display(&display)?;
+    let context = EGLContext::new_with_priority(&display, ContextPriority::High)?;
 
     Ok(EGLInternals {
         display,
@@ -322,7 +305,7 @@ impl State {
                         .find_map(|(crtc, surface)| (surface.connector == conn).then_some(crtc))
                         .cloned()
                     {
-                        device.inner.surfaces.remove(&crtc).unwrap();
+                        device.inner.surfaces.remove(&crtc).unwrap().drop_and_join();
                     }
 
                     if !changes.added.iter().any(|(c, _)| c == &conn) {
@@ -508,6 +491,9 @@ impl State {
                             .with_context(|| "Failed to enumerate connector modes")?;
 
                             if let Some(crtc) = maybe_crtc {
+                                drm_helpers::clear_gamma(new_device.drm.device(), crtc)
+                                    .with_context(|| "Failed to set property GAMMA_LUT")?;
+
                                 match Surface::new(
                                     &output,
                                     crtc,
@@ -675,6 +661,25 @@ pub struct OutputChanges {
     pub removed: Vec<connector::Handle>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum DeviceError {
+    #[error("Failed to open device node")]
+    IO(#[source] rustix::io::Errno),
+    #[error(transparent)]
+    Seat(LibSeatError),
+    #[error(transparent)]
+    Node(CreateDrmNodeError),
+    #[error(transparent)]
+    Drm(DrmError),
+    #[error("Failed to open gbm device")]
+    Gbm(#[source] std::io::Error),
+    #[error("Failed to add node to event loop")]
+    EventLoop(#[source] calloop::Error),
+    #[error("Failed to initialize graphics context for device")]
+    #[allow(clippy::upper_case_acronyms)]
+    EGL(EGLError),
+}
+
 impl Device {
     fn new(
         dev: dev_t,
@@ -683,29 +688,26 @@ impl Device {
         common: &mut Common,
         dh: &DisplayHandle,
         reuse: Option<ReusableDevice>,
-    ) -> Result<Self> {
+    ) -> Result<Self, DeviceError> {
         let path = path.as_ref();
-        let fd = DrmDeviceFd::new(DeviceFd::from(
-            session
-                .open(
-                    path,
-                    OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
-                )
-                .with_context(|| {
-                    format!(
-                        "Failed to optain file descriptor for drm device: {}",
-                        path.display()
-                    )
-                })?,
-        ));
-        let (drm, notifier) = DrmDevice::new(fd.clone(), false)
-            .with_context(|| format!("Failed to initialize drm device for: {}", path.display()))?;
-        let dev_node = DrmNode::from_dev_id(dev)?;
+        let fd = session
+            .open(
+                path,
+                OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK,
+            )
+            .map(DeviceFd::from)
+            .map(DrmDeviceFd::new)
+            .map_err(|err| match err {
+                LibSeatError::FailedToOpenDevice(errno) => DeviceError::IO(errno),
+                err => DeviceError::Seat(err),
+            })?;
 
-        let gbm = GbmDevice::new(fd)
-            .with_context(|| format!("Failed to initialize GBM device for {}", path.display()))?;
+        let (drm, notifier) = DrmDevice::new(fd.clone(), false).map_err(DeviceError::Drm)?;
+        let dev_node = DrmNode::from_dev_id(dev).map_err(DeviceError::Node)?;
+
+        let gbm = GbmDevice::new(fd).map_err(DeviceError::Gbm)?;
         let (render_node, render_formats, texture_formats, is_software) = {
-            let egl = init_egl(&gbm)?;
+            let egl = init_egl(&gbm).map_err(DeviceError::EGL)?;
 
             let render_node = egl
                 .device
@@ -741,7 +743,7 @@ impl Device {
                     }
                 },
             )
-            .with_context(|| format!("Failed to add drm device to event loop: {}", dev))?;
+            .map_err(|err| DeviceError::EventLoop(err.error))?;
 
         let ReusableDevice {
             leasing_global,
@@ -1059,6 +1061,9 @@ impl InnerDevice {
                 .with_context(|| "Failed to enumerate connector modes")?;
 
             let has_surface = if let Some(crtc) = maybe_crtc {
+                drm_helpers::clear_gamma(drm, crtc)
+                    .with_context(|| "Failed to set property GAMMA_LUT")?;
+
                 match Surface::new(
                     &output,
                     crtc,

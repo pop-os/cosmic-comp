@@ -38,7 +38,7 @@ impl PointerWarpHandler for State {
         drop(shell);
 
         if let Some(pointer_handle) = pointer_handle {
-            self.apply_cursor_hint(&surface, &pointer_handle, pos);
+            self.apply_cursor_hint(&surface, &pointer_handle, pos, None);
         }
     }
 }

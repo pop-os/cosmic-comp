@@ -95,9 +95,7 @@ where
                     let output = head_data.output.clone();
 
                     send_head_to_client::<D>(dh, mngr, &output);
-                    for manager in inner.instances.iter() {
-                        manager.obj.done(inner.serial_counter);
-                    }
+                    mngr.obj.done(inner.serial_counter);
                 }
             }
             zcosmic_output_manager_v1::Request::GetConfiguration { extended, config } => {

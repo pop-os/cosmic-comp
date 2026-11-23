@@ -21,6 +21,7 @@ use std::{
 use smithay::{
     backend::{
         drm::DrmNode,
+        input::InputTime,
         renderer::{
             ImportAll, Renderer, buffer_has_alpha,
             element::{Kind, RenderElementStates, surface::KindEvaluation},
@@ -60,6 +61,7 @@ use smithay::{
         seat::WaylandFocus,
         shell::xdg::{
             SurfaceCachedState, ToplevelCachedState, ToplevelSurface, XdgToplevelSurfaceData,
+            dialog::ToplevelDialogHint,
         },
     },
     xwayland::{X11Surface, xwm::X11Relatable},
@@ -211,7 +213,7 @@ struct GlobalGeometry(Mutex<Option<Rectangle<i32, Global>>>);
 
 impl CosmicSurface {
     pub fn title(&self) -> String {
-        match self.0.underlying_surface() {
+        let title = match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
                 states
                     .data_map
@@ -224,7 +226,8 @@ impl CosmicSurface {
                     .unwrap_or_default()
             }),
             WindowSurface::X11(surface) => surface.title().replace('\0', ""),
-        }
+        };
+        title.replace(['\u{2029}', '\u{85}', '\u{1c}', '\u{1d}', '\u{1e}'], " ")
     }
 
     pub fn corner_radius(&self, geometry_size: Size<i32, Logical>) -> Option<[u8; 4]> {
@@ -995,6 +998,34 @@ impl CosmicSurface {
     pub fn downgrade(&self) -> WeakCosmicSurface {
         WeakCosmicSurface(self.0.downgrade())
     }
+
+    pub fn is_modal_dialog(&self) -> bool {
+        match self.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => with_states(toplevel.wl_surface(), |states| {
+                states
+                    .data_map
+                    .get::<XdgToplevelSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .dialog_hint
+                    == ToplevelDialogHint::Modal
+            }),
+            WindowSurface::X11(surface) => surface.is_modal(),
+        }
+    }
+
+    pub fn is_parent_of(&self, child: &CosmicSurface) -> bool {
+        match child.0.underlying_surface() {
+            WindowSurface::Wayland(toplevel) => {
+                toplevel.parent().is_some_and(|parent| *self == parent)
+            }
+            WindowSurface::X11(surface) => surface
+                .is_transient_for()
+                .zip(self.x11_surface())
+                .is_some_and(|(parent_id, parent)| parent_id == parent.window_id()),
+        }
+    }
 }
 
 impl WeakCosmicSurface {
@@ -1084,7 +1115,7 @@ impl KeyboardTarget<State> for CosmicSurface {
         key: KeysymHandle<'_>,
         state: smithay::backend::input::KeyState,
         serial: smithay::utils::Serial,
-        time: u32,
+        time: InputTime,
     ) {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => {

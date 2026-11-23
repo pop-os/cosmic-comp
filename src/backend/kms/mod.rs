@@ -32,7 +32,11 @@ use smithay::{
         calloop::{Dispatcher, EventLoop, LoopHandle},
         drm::{
             Device as _,
-            control::{Device as _, connector::Interface, crtc},
+            control::{
+                Device as _,
+                connector::{Interface, State as ConnectorState},
+                crtc,
+            },
         },
         input::{self, Libinput},
         wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_dmabuf_feedback_v1::TrancheFlags,
@@ -140,12 +144,71 @@ pub fn init_backend(
     });
 
     // manually add already present gpus
+    let mut failed_gpus = Vec::new();
     let mut outputs = Vec::new();
     for (dev, path) in udev_dispatcher.as_source_ref().device_list() {
         match state.device_added(dev, path, dh) {
             Ok(added) => outputs.extend(added),
-            Err(err) => warn!("Failed to add device {}: {:?}", path.display(), err),
+            Err(err) => {
+                warn!(
+                    "Failed to add device {}: {:?}. Retrying...",
+                    path.display(),
+                    err,
+                );
+                failed_gpus.push((dev, path.to_path_buf()));
+            }
         }
+    }
+
+    if outputs.is_empty() && !failed_gpus.is_empty() {
+        let mut duration = Duration::from_millis(500);
+        'retry_loop: while duration < Duration::from_secs(5) {
+            std::thread::sleep(duration);
+            duration *= 2;
+
+            for (i, (dev, path)) in failed_gpus.iter().enumerate() {
+                match state.device_added(*dev, path, &dh.clone()) {
+                    Ok(added) => {
+                        outputs.extend(added);
+                        failed_gpus.remove(i);
+                        break 'retry_loop;
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to add device {}: {:?}. Retrying",
+                            path.display(),
+                            err
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    for (dev, path) in failed_gpus {
+        let dh = dh.clone();
+        let mut duration = Duration::from_millis(500);
+        event_loop
+            .handle()
+            .insert_source(Timer::from_duration(duration), move |_, _, state| {
+                match state.device_added(dev, &path, &dh.clone()) {
+                    Ok(added) => state.refresh_devices(true, added),
+                    Err(err) => {
+                        warn!(
+                            "Failed to add device {}: {:?}. Retrying",
+                            path.display(),
+                            err
+                        );
+                        duration *= 2;
+                        if duration < Duration::from_secs(5) {
+                            return TimeoutAction::ToDuration(duration);
+                        }
+                    }
+                }
+                TimeoutAction::Drop
+            })
+            .map_err(|err| err.error)
+            .with_context(|| "Failed to schedule delayed device scan")?;
     }
 
     if let Err(err) = state.select_primary_gpu(dh) {
@@ -250,13 +313,18 @@ fn determine_primary_gpu(
 
     // try to find builtin display
     for dev in drm_devices.values() {
-        if dev.inner.surfaces.values().any(|s| {
-            if let Ok(conn_info) = dev.drm.device().get_connector(s.connector, false) {
-                let i = conn_info.interface();
-                i == Interface::EmbeddedDisplayPort || i == Interface::LVDS || i == Interface::DSI
-            } else {
-                false
-            }
+        let drm = dev.drm.device();
+        let res_handles = drm.resource_handles()?;
+        let connectors = res_handles.connectors();
+        if connectors.iter().any(|conn| {
+            let Ok(conn_info) = drm.get_connector(*conn, false) else {
+                return false;
+            };
+            let i = conn_info.interface();
+            conn_info.state() == ConnectorState::Connected
+                && (i == Interface::EmbeddedDisplayPort
+                    || i == Interface::LVDS
+                    || i == Interface::DSI)
         }) {
             return Ok(Some(dev.inner.render_node));
         }
@@ -322,29 +390,10 @@ fn init_udev(
             Ok(added) => {
                 debug!("Successfully handled udev event.");
 
-                {
-                    let backend = state.backend.kms();
-                    if matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. }) {
-                        if backend.primary_node.read().unwrap().is_none()
-                            && let Err(err) = state.select_primary_gpu(&dh)
-                        {
-                            warn!("Failed to determine a new primary gpu: {}", err);
-                        }
-                        state.update_default_feedback();
-                    }
-                }
-
-                if let Err(err) = state.refresh_output_config() {
-                    warn!("Unable to load output config: {}", err);
-                    if !added.is_empty() {
-                        for output in added {
-                            output.config_mut().enabled = OutputState::Disabled;
-                        }
-                        if let Err(err) = state.refresh_output_config() {
-                            error!("Unrecoverable config error: {}", err);
-                        }
-                    }
-                }
+                state.refresh_devices(
+                    matches!(event, UdevEvent::Added { .. } | UdevEvent::Removed { .. }),
+                    added,
+                );
             }
             Err(err) => {
                 error!(?err, "Error while handling udev event.")
@@ -606,7 +655,13 @@ impl State {
                 .clone();
 
             let mut feedback =
-                DmabufFeedbackBuilder::new(primary_node.dev_id(), primary_formats.clone());
+                DmabufFeedbackBuilder::new(primary_node.dev_id(), primary_formats.clone())
+                    .add_preference_tranche(
+                        primary_node.dev_id(),
+                        TrancheFlags::Sampling,
+                        primary_formats.iter().cloned(),
+                        3..=6,
+                    );
             for dev in kms
                 .drm_devices
                 .values()
@@ -627,6 +682,33 @@ impl State {
                     .expect("Primary node but no dmabuf global?"),
                 &default_feedback,
             );
+        }
+    }
+
+    fn refresh_devices(&mut self, refresh_primary: bool, added_outputs: Vec<Output>) {
+        {
+            let backend = self.backend.kms();
+            if refresh_primary {
+                let dh = self.common.display_handle.clone();
+                if backend.primary_node.read().unwrap().is_none()
+                    && let Err(err) = self.select_primary_gpu(&dh)
+                {
+                    warn!("Failed to determine a new primary gpu: {}", err);
+                }
+                self.update_default_feedback();
+            }
+        }
+
+        if let Err(err) = self.refresh_output_config() {
+            warn!("Unable to load output config: {}", err);
+            if !added_outputs.is_empty() {
+                for output in added_outputs {
+                    output.config_mut().enabled = OutputState::Disabled;
+                }
+                if let Err(err) = self.refresh_output_config() {
+                    error!("Unrecoverable config error: {}", err);
+                }
+            }
         }
     }
 }
@@ -1038,8 +1120,11 @@ impl KmsGuard<'_> {
                     })
                     // and then select the closest refresh rate (e.g. to match 59.98 as 60)
                     .min_by_key(|mode| {
-                        let refresh_rate = drm_helpers::calculate_refresh_rate(**mode);
-                        (output_config.0.mode.1.unwrap() as i32 - refresh_rate as i32).abs()
+                        let refresh_rate = drm_helpers::calculate_refresh_rate(**mode) as i32;
+                        match output_config.0.mode.1 {
+                            Some(wanted) => (wanted as i32 - refresh_rate).abs(),
+                            None => -refresh_rate,
+                        }
                     })
                     .ok_or(anyhow::anyhow!("Unable to find matching mode"))?;
 

@@ -8,7 +8,10 @@ use std::{
 
 use cosmic_comp_config::AppearanceConfig;
 use cosmic_settings_config::shortcuts::action::ResizeDirection;
-use keyframe::{ease, functions::EaseInOutCubic};
+use keyframe::{
+    ease,
+    functions::{EaseInOutCubic, EaseOutCubic},
+};
 use smallvec::SmallVec;
 use smithay::{
     backend::{
@@ -51,6 +54,8 @@ pub use self::grabs::*;
 
 pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+const SHAKE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+const SHAKE_AMPLITUDE: f32 = 10.0;
 
 #[derive(Debug, Default)]
 pub struct FloatingLayout {
@@ -80,6 +85,10 @@ enum Animation {
         previous_geometry: Rectangle<i32, Local>,
         target_geometry: Rectangle<i32, Local>,
     },
+    Shake {
+        start: Instant,
+        geometry: Rectangle<i32, Local>,
+    },
 }
 
 impl Animation {
@@ -88,12 +97,13 @@ impl Animation {
             Animation::Tiled { start, .. } => start,
             Animation::Minimize { start, .. } => start,
             Animation::Unminimize { start, .. } => start,
+            Animation::Shake { start, .. } => start,
         }
     }
 
     fn alpha(&self) -> f32 {
         match self {
-            Animation::Tiled { .. } => 1.0,
+            Animation::Tiled { .. } | Animation::Shake { .. } => 1.0,
             Animation::Minimize { start, .. } => {
                 let percentage = Instant::now()
                     .duration_since(*start)
@@ -124,6 +134,7 @@ impl Animation {
             Animation::Unminimize {
                 previous_geometry, ..
             } => previous_geometry,
+            Animation::Shake { geometry, .. } => geometry,
         }
     }
 
@@ -135,6 +146,21 @@ impl Animation {
         gaps: (i32, i32),
     ) -> Rectangle<i32, Local> {
         let (duration, target_rect) = match self {
+            Animation::Shake { start, geometry } => {
+                let progress = Instant::now()
+                    .duration_since(*start)
+                    .min(SHAKE_ANIMATION_DURATION)
+                    .as_secs_f32()
+                    / SHAKE_ANIMATION_DURATION.as_secs_f32();
+                let envelope: f32 = ease(EaseOutCubic, 1.0, 0.0, progress);
+                let offset =
+                    (SHAKE_AMPLITUDE * envelope * (progress * 3.0 * std::f32::consts::TAU).sin())
+                        .round() as i32;
+
+                let mut geometry = *geometry;
+                geometry.loc.x += offset;
+                return geometry;
+            }
             Animation::Minimize {
                 target_geometry, ..
             }
@@ -349,6 +375,10 @@ impl FloatingLayout {
         self.map_internal(mapped, position, None, None)
     }
 
+    pub fn map_centered_on(&mut self, mapped: CosmicMapped, anchor: Rectangle<i32, Local>) {
+        self.map_anchored(mapped, None, None, None, Some(anchor))
+    }
+
     pub fn map_maximized(
         &mut self,
         mapped: CosmicMapped,
@@ -379,7 +409,9 @@ impl FloatingLayout {
                     } => {
                         *target_geometry = geometry;
                     }
-                    Animation::Minimize { .. } | Animation::Tiled { .. } => {}
+                    Animation::Minimize { .. }
+                    | Animation::Tiled { .. }
+                    | Animation::Shake { .. } => {}
                 }
             } else {
                 self.animations.insert(
@@ -412,6 +444,17 @@ impl FloatingLayout {
         position: Option<Point<i32, Local>>,
         size: Option<Size<i32, Logical>>,
         prev: Option<Rectangle<i32, Local>>,
+    ) {
+        self.map_anchored(mapped, position, size, prev, None)
+    }
+
+    fn map_anchored(
+        &mut self,
+        mapped: CosmicMapped,
+        position: Option<Point<i32, Local>>,
+        size: Option<Size<i32, Logical>>,
+        prev: Option<Rectangle<i32, Local>>,
+        anchor: Option<Rectangle<i32, Local>>,
     ) {
         let already_mapped = self.space.element_geometry(&mapped).map(RectExt::as_local);
         let mut win_geo = mapped.geometry().as_local();
@@ -473,6 +516,9 @@ impl FloatingLayout {
 
         let position = position
             .or_else(|| last_geometry.map(|g| g.loc))
+            .or_else(|| {
+                anchor.map(|anchor| centered_on(win_geo.size, anchor, output_geometry.as_local()))
+            })
             .unwrap_or_else(|| {
                 // cleanup moved windows
                 if let Some(pos) = self
@@ -1417,11 +1463,31 @@ impl FloatingLayout {
         self.animations.retain(|_, anim| {
             let duration = match anim {
                 Animation::Tiled { .. } => ANIMATION_DURATION,
+                Animation::Shake { .. } => SHAKE_ANIMATION_DURATION,
                 _ => MINIMIZE_ANIMATION_DURATION,
             };
             Instant::now().duration_since(*anim.start()) < duration
         });
         if self.animations.is_empty() != was_empty {
+            self.dirty.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn shake(&mut self, mapped: &CosmicMapped) {
+        if mapped.is_maximized(true) || mapped.is_fullscreen(true) {
+            return;
+        }
+
+        if let Some(geometry) = self.element_geometry(mapped)
+            && !self.animations.contains_key(mapped)
+        {
+            self.animations.insert(
+                mapped.clone(),
+                Animation::Shake {
+                    start: Instant::now(),
+                    geometry,
+                },
+            );
             self.dirty.store(true, Ordering::SeqCst);
         }
     }

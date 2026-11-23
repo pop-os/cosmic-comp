@@ -45,18 +45,11 @@ pub fn surface_corners(states: &SurfaceData, size: Size<i32, Logical>) -> Option
     ])
 }
 
-pub fn surface_padding(states: &SurfaceData, size: Size<i32, Logical>) -> Option<[i32; 4]> {
+pub fn surface_padding(states: &SurfaceData) -> Option<[i32; 4]> {
     let mut guard = states.cached_state.get::<CacheablePadding>();
 
     let padding = guard.current().0?;
-
-    // guard against padding being too large
-    Some([
-        padding.top.min(size.h / 2),
-        padding.right.min(size.w / 2),
-        padding.bottom.min(size.h / 2),
-        padding.left.min(size.w / 2),
-    ])
+    Some([padding.top, padding.right, padding.bottom, padding.left])
 }
 
 pub fn pad_rect(

@@ -86,12 +86,6 @@ impl ShadowShader {
             let offset = [0., 5.];
             let color = [0., 0., 0., if dark_mode { 0.45 } else { 0.35 }];
             let radius = radius.map(|r| ceil(r as f64));
-            let radius = [
-                radius[3], // top_left
-                radius[1], // top_right
-                radius[0], // bottom_right
-                radius[2], // bottom_left
-            ];
 
             let width = softness;
             let sigma = width / 2.;

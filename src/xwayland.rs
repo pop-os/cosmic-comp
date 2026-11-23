@@ -9,7 +9,9 @@ use std::{
 use crate::{
     backend::render::cursor::{Cursor, load_cursor_env, load_cursor_theme},
     shell::{
-        CosmicSurface, PendingWindow, Shell, focus::target::KeyboardFocusTarget, grabs::ReleaseMode,
+        CosmicSurface, ModalBehavior, PendingWindow, Shell,
+        focus::target::KeyboardFocusTarget,
+        grabs::{GrabType, ReleaseMode},
     },
     state::State,
     utils::prelude::*,
@@ -20,7 +22,7 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         drm::DrmNode,
-        input::{ButtonState, KeyState, Keycode},
+        input::{ButtonState, InputTime, KeyState, Keycode},
         renderer::{
             Bind, Frame, Offscreen, Renderer,
             element::{
@@ -32,7 +34,7 @@ use smithay::{
         },
     },
     desktop::space::SpaceElement,
-    input::{keyboard::ModifiersState, pointer::CursorIcon},
+    input::{keyboard::ModifiersState, pointer::CursorIcon, tablet::TabletSeatTrait},
     reexports::{wayland_server::Client, x11rb::protocol::xproto::Window as X11Window},
     utils::{
         Buffer as BufferCoords, Logical, Point, Rectangle, SERIAL_COUNTER, Serial, Size, Transform,
@@ -171,7 +173,7 @@ impl State {
 
                     let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
                     xwayland_state.xwm = Some(wm);
-                    xwayland_state.reload_cursor(1.);
+                    xwayland_state.reload_cursor(1., data.common.config.cosmic_conf.cursor_size);
                     data.notify_ready();
 
                     data.common.update_xwayland_settings();
@@ -260,9 +262,9 @@ fn scale_cursor(
 }
 
 impl XWaylandState {
-    pub fn reload_cursor(&mut self, scale: f64) {
+    pub fn reload_cursor(&mut self, scale: f64, size: Option<u32>) {
         if let Some(wm) = self.xwm.as_mut() {
-            let (theme, size) = load_cursor_theme();
+            let (theme, size) = load_cursor_theme(size);
             let cursor = Cursor::load(&theme, CursorIcon::Default, size);
             let image = cursor.get_image(scale.ceil() as u32, 0);
 
@@ -396,7 +398,7 @@ impl Common {
         state: KeyState,
         modifiers: ModifiersState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         let config = self.config.cosmic_conf.xwayland_eavesdropping.keyboard;
         if config == EavesdroppingKeyboardMode::None {
@@ -458,7 +460,7 @@ impl Common {
 
         tracing::trace!("Forwaring key {} {:?} to xwayland", code.raw() - 8, state);
         for wl_keyboard in keyboard.client_keyboards(&xstate.client) {
-            wl_keyboard.key(serial.into(), time, code.raw() - 8, state.into());
+            wl_keyboard.key(serial.into(), time.millis(), code.raw() - 8, state.into());
             if xstate.last_modifier_state != Some(modifiers) {
                 xstate.last_modifier_state = Some(modifiers);
                 wl_keyboard.modifiers(
@@ -478,7 +480,7 @@ impl Common {
         button: u32,
         state: ButtonState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         if !self.config.cosmic_conf.xwayland_eavesdropping.pointer {
             return;
@@ -518,7 +520,7 @@ impl Common {
 
         tracing::trace!("Forwaring ptr button {} {:?} to Xwayland", button, state);
         for wl_pointer in pointer.client_pointers(&xstate.client) {
-            wl_pointer.button(serial.into(), time, button, state.into());
+            wl_pointer.button(serial.into(), time.millis(), button, state.into());
         }
     }
 
@@ -658,7 +660,7 @@ impl Common {
                 }
             }
         };
-        let (_, cursor_size) = load_cursor_env();
+        let (_, cursor_size) = load_cursor_env(self.config.cosmic_conf.cursor_size);
 
         // compare with current scale
         if let Some(xwayland) = self.xwayland_state.as_mut() {
@@ -694,6 +696,10 @@ impl Common {
                                 "Gtk/CursorThemeSize".into(),
                                 ((new_scale * cursor_size as f64).round() as i32).into(),
                             ),
+                            ("Xft/Antialias".into(), 1_i32.into()),
+                            ("Xft/Hinting".into(), 1_i32.into()),
+                            ("Xft/HintStyle".into(), "hintslight".to_string().into()),
+                            ("Xft/RGBA".into(), "none".to_string().into()),
                         ]
                         .into_iter(),
                     ) {
@@ -718,7 +724,7 @@ impl Common {
             }
 
             // update cursor
-            xwayland.reload_cursor(new_scale);
+            xwayland.reload_cursor(new_scale, self.config.cosmic_conf.cursor_size);
 
             if let Some(geometries) = geometries {
                 // update client scale
@@ -808,6 +814,7 @@ impl XwmHandler for State {
             );
         }
         let fullscreen = window.is_fullscreen().then(|| seat.active_output());
+        let minimized = window.is_hidden();
         let maximized = window.is_maximized();
         if let Some(pending) = shell
             .pending_windows
@@ -816,6 +823,7 @@ impl XwmHandler for State {
         {
             pending.seat = seat;
             pending.fullscreen = fullscreen;
+            pending.minimized = minimized;
             pending.maximized = maximized;
         } else {
             let surface = CosmicSurface::from(window);
@@ -823,6 +831,7 @@ impl XwmHandler for State {
                 surface,
                 seat,
                 fullscreen,
+                minimized,
                 maximized,
                 sticky: false,
             })
@@ -1040,19 +1049,32 @@ impl XwmHandler for State {
                 resize_edge.into(),
                 self.common.config.cosmic_conf.edge_snap_threshold,
                 true,
+                ModalBehavior::Block,
             ) {
                 std::mem::drop(shell);
-                if grab.is_touch_grab() {
-                    seat.get_touch()
-                        .unwrap()
-                        .set_grab(self, grab, SERIAL_COUNTER.next_serial())
-                } else {
-                    seat.get_pointer().unwrap().set_grab(
+                match grab.grab_type() {
+                    GrabType::Touch => {
+                        seat.get_touch()
+                            .unwrap()
+                            .set_grab(self, grab, SERIAL_COUNTER.next_serial())
+                    }
+                    GrabType::Pointer => seat.get_pointer().unwrap().set_grab(
                         self,
                         grab,
                         SERIAL_COUNTER.next_serial(),
                         focus,
-                    )
+                    ),
+                    GrabType::TabletTool => seat
+                        .tablet_seat()
+                        .get_tool(grab.tool().unwrap())
+                        .unwrap()
+                        .set_grab(
+                            self,
+                            grab,
+                            InputTime::now(),
+                            SERIAL_COUNTER.next_serial(),
+                            focus,
+                        ),
                 }
             }
         }
@@ -1071,19 +1093,32 @@ impl XwmHandler for State {
                 &self.common.config,
                 &self.common.event_loop_handle,
                 true,
+                ModalBehavior::Block,
             ) {
                 std::mem::drop(shell);
-                if grab.is_touch_grab() {
-                    seat.get_touch()
-                        .unwrap()
-                        .set_grab(self, grab, SERIAL_COUNTER.next_serial())
-                } else {
-                    seat.get_pointer().unwrap().set_grab(
+                match grab.grab_type() {
+                    GrabType::Touch => {
+                        seat.get_touch()
+                            .unwrap()
+                            .set_grab(self, grab, SERIAL_COUNTER.next_serial())
+                    }
+                    GrabType::Pointer => seat.get_pointer().unwrap().set_grab(
                         self,
                         grab,
                         SERIAL_COUNTER.next_serial(),
                         focus,
-                    )
+                    ),
+                    GrabType::TabletTool => seat
+                        .tablet_seat()
+                        .get_tool(grab.tool().unwrap())
+                        .unwrap()
+                        .set_grab(
+                            self,
+                            grab,
+                            InputTime::now(),
+                            SERIAL_COUNTER.next_serial(),
+                            focus,
+                        ),
                 }
             }
         }
@@ -1093,7 +1128,13 @@ impl XwmHandler for State {
         let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
             let seat = shell.seats.last_active().clone();
-            shell.maximize_request(&mapped, &seat, true, &self.common.event_loop_handle);
+            shell.maximize_request(
+                &mapped,
+                &seat,
+                true,
+                &self.common.event_loop_handle,
+                ModalBehavior::Ignore,
+            );
         } else if let Some(pending) = shell
             .pending_windows
             .iter_mut()
@@ -1106,7 +1147,7 @@ impl XwmHandler for State {
     fn unmaximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
         if let Some(mapped) = shell.element_for_surface(&window).cloned() {
-            shell.unmaximize_request(&mapped);
+            shell.unmaximize_request(&mapped, ModalBehavior::Ignore);
         } else if let Some(pending) = shell
             .pending_windows
             .iter_mut()
@@ -1118,7 +1159,7 @@ impl XwmHandler for State {
 
     fn minimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
         let mut shell = self.common.shell.write();
-        shell.minimize_request(&window);
+        shell.minimize_request(&window, ModalBehavior::Ignore);
     }
 
     fn unminimize_request(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -1135,7 +1176,12 @@ impl XwmHandler for State {
             .and_then(|surface| shell.visible_output_for_surface(&surface).cloned())
             .unwrap_or_else(|| seat.focused_or_active_output());
 
-        match shell.fullscreen_request(&window, output.clone(), &self.common.event_loop_handle) {
+        match shell.fullscreen_request(
+            &window,
+            output.clone(),
+            &self.common.event_loop_handle,
+            ModalBehavior::Ignore,
+        ) {
             Some(target) => {
                 std::mem::drop(shell);
                 Shell::set_focus(self, Some(&target), &seat, None, true);
@@ -1167,7 +1213,11 @@ impl XwmHandler for State {
                 }
             });
 
-        if let Some(target) = shell.unfullscreen_request(&window, &self.common.event_loop_handle) {
+        if let Some(target) = shell.unfullscreen_request(
+            &window,
+            &self.common.event_loop_handle,
+            ModalBehavior::Ignore,
+        ) {
             std::mem::drop(shell);
             if should_focus {
                 Shell::set_focus(self, Some(&target), &seat, None, true);
@@ -1179,6 +1229,16 @@ impl XwmHandler for State {
         {
             pending.fullscreen.take();
         }
+    }
+
+    fn modal_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let _ = window.set_modal(true);
+        Shell::redirect_blocked_focus(self);
+    }
+
+    fn unmodal_request(&mut self, _xwm: XwmId, window: X11Surface) {
+        let _ = window.set_modal(false);
+        Shell::redirect_blocked_focus(self);
     }
 
     fn stick_request(&mut self, _xwm: XwmId, window: X11Surface) {

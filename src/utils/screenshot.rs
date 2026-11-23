@@ -68,7 +68,7 @@ pub fn screenshot_window(state: &mut State, surface: &CosmicSurface) {
         if let Ok(Some(path)) = xdg_user::pictures() {
             let local_timestamp = jiff::Zoned::now();
             let mut title = window.title();
-            title.truncate(227); // 255 - time - png
+            title.truncate(title.floor_char_boundary(227)); // 255 - time - png
             let name = sanitize_filename::sanitize(format!(
                 "{}_{}.png",
                 title,

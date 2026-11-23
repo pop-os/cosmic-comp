@@ -418,6 +418,12 @@ where
                         handle.closed();
                     }
                 }
+                // Remove the foreign handle too, so new subscribers cannot
+                // discover a toplevel whose window has already been destroyed.
+                if let Some(handle) = state.foreign_handle.take() {
+                    self.foreign_toplevel_list.remove_toplevel(&handle);
+                }
+                *state = Default::default();
                 dirty = true;
                 false
             }
@@ -613,6 +619,7 @@ where
                     changed = true;
                 } else if geometry_changed && let Some(geo) = geometry {
                     instance.geometry(&wl_output, geo.loc.x, geo.loc.y, geo.size.w, geo.size.h);
+                    changed = true;
                 }
             }
         }

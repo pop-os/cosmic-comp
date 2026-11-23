@@ -411,11 +411,7 @@ where
                 instance.obj.mode(&mode);
                 mode.size(output_mode.size.w, output_mode.size.h);
                 mode.refresh(output_mode.refresh);
-                if output
-                    .preferred_mode()
-                    .map(|p| p == output_mode)
-                    .unwrap_or(false)
-                {
+                if output.preferred_mode() == Some(output_mode) {
                     mode.preferred();
                 }
                 instance.modes.push(mode);
@@ -426,10 +422,7 @@ where
         } else {
             None
         } && inner.enabled
-            && output
-                .current_mode()
-                .map(|c| c == output_mode)
-                .unwrap_or(false)
+            && (output.current_mode() == Some(output_mode))
         {
             instance.obj.current_mode(mode);
         }

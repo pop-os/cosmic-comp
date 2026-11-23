@@ -12,7 +12,7 @@ use id_tree::NodeId;
 use smithay::{
     backend::{
         drm::DrmNode,
-        input::KeyState,
+        input::{InputTime, KeyState},
         renderer::{
             element::{
                 Element, Kind, RenderElement, UnderlyingStorage,
@@ -428,6 +428,10 @@ impl CosmicMapped {
         for (w, _) in self.windows() {
             w.set_minimized(minimized);
         }
+    }
+
+    pub fn is_sticky(&self) -> bool {
+        self.active_window().is_sticky()
     }
 
     pub fn pending_size(&self) -> Option<Size<i32, Logical>> {
@@ -1012,7 +1016,7 @@ impl KeyboardTarget<State> for CosmicMapped {
         key: KeysymHandle<'_>,
         state: KeyState,
         serial: Serial,
-        time: u32,
+        time: InputTime,
     ) {
         match &self.element {
             CosmicMappedInternal::Stack(s) => {

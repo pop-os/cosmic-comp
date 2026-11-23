@@ -1,9 +1,6 @@
 use std::{
     fmt,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex},
 };
 
 use calloop::LoopHandle;
@@ -11,30 +8,41 @@ use cosmic::{
     Apply as _, Task,
     iced::{
         Alignment, Background,
-        core::{Border, Length, Rectangle as IcedRectangle, alignment::Horizontal},
-        widget::{self as iced_widget, Row, text::Style as TextStyle},
+        core::{Border, Length, Rectangle as IcedRectangle},
+        widget::{Row, text::Style as TextStyle},
     },
     theme,
-    widget::{button, divider, icon::from_name, menu::menu_column::MenuColumn, space, text},
+    widget::{self, button, divider, icon::from_name, menu::menu_column::MenuColumn, space, text},
 };
 use smithay::{
     backend::{
-        input::{ButtonState, TouchSlot},
+        input::{ButtonState, InputTime, TabletToolDescriptor, TouchSlot},
         renderer::ImportMem,
     },
     desktop::space::SpaceElement,
     input::{
         Seat,
         pointer::{
-            AxisFrame, ButtonEvent, GestureHoldBeginEvent, GestureHoldEndEvent,
-            GesturePinchBeginEvent, GesturePinchEndEvent, GesturePinchUpdateEvent,
-            GestureSwipeBeginEvent, GestureSwipeEndEvent, GestureSwipeUpdateEvent,
-            GrabStartData as PointerGrabStartData, MotionEvent as PointerMotionEvent, PointerGrab,
-            PointerInnerHandle, PointerTarget, RelativeMotionEvent,
+            AxisFrame as PointerAxisFrame, ButtonEvent as PointerButtonEvent,
+            GestureHoldBeginEvent, GestureHoldEndEvent, GesturePinchBeginEvent,
+            GesturePinchEndEvent, GesturePinchUpdateEvent, GestureSwipeBeginEvent,
+            GestureSwipeEndEvent, GestureSwipeUpdateEvent, GrabStartData as PointerGrabStartData,
+            MotionEvent as PointerMotionEvent, PointerGrab, PointerInnerHandle, PointerTarget,
+            RelativeMotionEvent,
+        },
+        tablet::{
+            TabletSeatHandler,
+            tool::{
+                AxisFrame as TabletAxisFrame, ButtonEvent as TabletButtonEvent,
+                DownEvent as TabletDownEvent, GrabStartData as TabletGrabStartData,
+                MotionEvent as TabletMotionEvent, ProximityInEvent, ProximityOutEvent,
+                TabletToolGrab, TabletToolInnerHandle, TabletToolTarget, UpEvent as TabletUpEvent,
+            },
         },
         touch::{
-            DownEvent, GrabStartData as TouchGrabStartData, MotionEvent as TouchMotionEvent,
-            TouchGrab, TouchInnerHandle, TouchTarget, UpEvent,
+            DownEvent as TouchDownEvent, GrabStartData as TouchGrabStartData,
+            MotionEvent as TouchMotionEvent, TouchGrab, TouchInnerHandle, TouchTarget,
+            UpEvent as TouchUpEvent,
         },
     },
     output::Output,
@@ -43,7 +51,7 @@ use smithay::{
 
 use crate::{
     backend::render::element::AsGlowRenderer,
-    shell::{SeatExt, focus::target::PointerFocusTarget},
+    shell::{SeatExt, focus::target::PointerFocusTarget, grabs::GrabType},
     state::State,
     utils::{
         iced::{IcedElement, IcedRenderElement, Program},
@@ -209,21 +217,21 @@ impl Item {
 #[derive(Debug)]
 pub struct ContextMenu {
     items: Vec<Item>,
-    selected: AtomicBool,
-    row_width: Mutex<Option<f32>>,
+    selected: bool,
+    row_width: Option<f32>,
 }
 
 impl ContextMenu {
     pub fn new(items: Vec<Item>) -> ContextMenu {
         ContextMenu {
             items,
-            selected: AtomicBool::new(false),
-            row_width: Mutex::new(None),
+            selected: false,
+            row_width: None,
         }
     }
 
-    pub fn set_row_width(&self, width: f32) {
-        *self.row_width.lock().unwrap() = Some(width);
+    pub fn set_row_width(&mut self, width: f32) {
+        self.row_width = Some(width);
     }
 }
 
@@ -257,7 +265,7 @@ impl Program for ContextMenu {
             Message::ItemPressed(idx) => {
                 if let Some(Item::Entry { on_press, .. }) = self.items.get_mut(idx) {
                     (on_press)(loop_handle);
-                    self.selected.store(true, Ordering::SeqCst);
+                    self.selected = true;
                 }
                 // TODO: If Submenu, then also expand on "Pressed" for touch events.
                 // But right now we don't have any touch responsive menus with submenus
@@ -290,7 +298,7 @@ impl Program for ContextMenu {
 
                             let min_size = element.minimum_size();
                             element.with_program(|p| {
-                                *p.row_width.lock().unwrap() = Some(min_size.w as f32);
+                                p.row_width = Some(min_size.w as f32);
                             });
                             element.resize(min_size);
 
@@ -350,6 +358,7 @@ impl Program for ContextMenu {
                                 position,
                                 pointer_entered: false,
                                 touch_entered: None,
+                                tablet_entered: None,
                             })
                         }
                     });
@@ -380,12 +389,7 @@ impl Program for ContextMenu {
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
-        let width = self
-            .row_width
-            .lock()
-            .unwrap()
-            .map(Length::Fixed)
-            .unwrap_or(Length::Shrink);
+        let width = self.row_width.map(Length::Fixed).unwrap_or(Length::Shrink);
         let mode = match width {
             Length::Shrink => Length::Shrink,
             _ => Length::Fill,
@@ -396,8 +400,8 @@ impl Program for ContextMenu {
                 Item::Separator => divider::horizontal::light()
                     .class(theme::Rule::Default)
                     .into(),
-                Item::Submenu { title, .. } => Row::with_children(vec![
-                    space::horizontal().width(16).into(),
+                Item::Submenu { title, .. } => Row::with_children([
+                    space().width(16).into(),
                     text::body(title).width(mode).into(),
                     from_name("go-next-symbolic")
                         .size(16)
@@ -425,12 +429,12 @@ impl Program for ContextMenu {
                                 .size(16)
                                 .prefer_svg(true)
                                 .icon()
-                                .class(theme::Svg::custom(|theme| iced_widget::svg::Style {
+                                .class(theme::Svg::custom(|theme| widget::svg::Style {
                                     color: Some(theme.cosmic().accent.base.into()),
                                 }))
                                 .into()
                         } else {
-                            space::horizontal().width(16).into()
+                            space().width(16).into()
                         },
                         text::body(title)
                             .width(mode)
@@ -447,12 +451,12 @@ impl Program for ContextMenu {
                                 theme::Text::Default
                             })
                             .into(),
-                        space::horizontal().width(16).into(),
+                        space().width(16).into(),
                     ];
                     if let Some(shortcut) = shortcut.as_ref() {
                         components.push(
                             text::body(shortcut)
-                                .align_x(Horizontal::Right)
+                                .align_x(Alignment::End)
                                 .width(Length::Shrink)
                                 .class(theme::Text::Custom(|theme| {
                                     let mut color = theme.cosmic().background(false).component.on;
@@ -480,12 +484,12 @@ impl Program for ContextMenu {
             }
         }))
         .width(Length::Shrink)
-        .apply(iced_widget::container)
+        .apply(widget::container)
         .padding(1)
         .class(theme::Container::custom(|theme| {
             let cosmic = theme.cosmic();
             let component = &cosmic.background(theme.cosmic().frosted_windows).component;
-            iced_widget::container::Style {
+            widget::container::Style {
                 snap: true,
                 icon_color: Some(cosmic.accent.base.into()),
                 text_color: Some(component.on.into()),
@@ -508,6 +512,7 @@ pub struct Element {
     position: Point<i32, Global>,
     pointer_entered: bool,
     touch_entered: Option<TouchSlot>,
+    tablet_entered: Option<TabletToolDescriptor>,
 }
 
 pub struct MenuGrab {
@@ -516,6 +521,7 @@ pub struct MenuGrab {
     seat: Seat<State>,
     screen_space_relative: Option<Output>,
     scale: Arc<Mutex<f64>>,
+    last_tablet_idx: Option<usize>,
 }
 
 impl PointerGrab<State> for MenuGrab {
@@ -564,10 +570,12 @@ impl PointerGrab<State> for MenuGrab {
                     PointerTarget::motion(&element.iced, &self.seat, state, &new_event);
                 }
             } else {
+                // Keep the root menu hovered while a submenu is open
+                let keep_root = usize::from(elements.len() > 1);
                 elements
                     .iter_mut()
                     .filter(|element| element.pointer_entered)
-                    .skip(1)
+                    .skip(keep_root)
                     .for_each(|element| {
                         PointerTarget::leave(
                             &element.iced,
@@ -598,7 +606,7 @@ impl PointerGrab<State> for MenuGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
+        event: &PointerButtonEvent,
     ) {
         let any_entered = self
             .elements
@@ -632,7 +640,7 @@ impl PointerGrab<State> for MenuGrab {
         &mut self,
         state: &mut State,
         handle: &mut PointerInnerHandle<'_, State>,
-        details: AxisFrame,
+        details: PointerAxisFrame,
     ) {
         handle.axis(state, details);
     }
@@ -729,7 +737,7 @@ impl TouchGrab<State> for MenuGrab {
         data: &mut State,
         handle: &mut TouchInnerHandle<'_, State>,
         _focus: Option<(PointerFocusTarget, Point<f64, Logical>)>,
-        event: &DownEvent,
+        event: &TouchDownEvent,
     ) {
         {
             let mut guard = self.elements.lock().unwrap();
@@ -757,7 +765,7 @@ impl TouchGrab<State> for MenuGrab {
             }) {
                 let element = &mut elements[i];
 
-                let new_event = DownEvent {
+                let new_event = TouchDownEvent {
                     slot: event.slot,
                     location: event_location - element.position.as_logical().to_f64(),
                     serial: event.serial,
@@ -772,7 +780,12 @@ impl TouchGrab<State> for MenuGrab {
         handle.down(data, None, event);
     }
 
-    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &TouchUpEvent,
+    ) {
         {
             let elements = self.elements.lock().unwrap();
             for element in elements.iter().filter(|elem| {
@@ -843,6 +856,249 @@ impl TouchGrab<State> for MenuGrab {
             GrabStartData::Touch(start_data) => start_data,
             _ => unreachable!(),
         }
+    }
+
+    fn unset(&mut self, _data: &mut State) {}
+}
+
+impl TabletToolGrab<State> for MenuGrab {
+    fn start_data(&self) -> &TabletGrabStartData<State> {
+        match &self.start_data {
+            GrabStartData::TabletTool { data, .. } => data,
+            _ => unreachable!(),
+        }
+    }
+
+    fn proximity_in(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &ProximityInEvent,
+    ) {
+        {
+            let location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if data.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            let mut elements = self.elements.lock().unwrap();
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(location.to_i32_floor())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = TabletMotionEvent {
+                    location: location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+
+                TabletToolTarget::proximity_in(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                    &handle.current_tablet(),
+                    event.serial,
+                );
+                element.tablet_entered = Some(handle.descriptor().clone());
+                TabletToolTarget::motion(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                    &new_event,
+                );
+                self.last_tablet_idx = Some(i);
+            }
+        }
+        handle.proximity_in(data, None, event);
+    }
+
+    fn proximity_out(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &ProximityOutEvent,
+    ) {
+        {
+            let mut elements = self.elements.lock().unwrap();
+            for element in elements.iter_mut().filter(|elem| {
+                elem.tablet_entered
+                    .as_ref()
+                    .is_some_and(|tool| tool == handle.descriptor())
+            }) {
+                TabletToolTarget::proximity_out(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                );
+                element.tablet_entered.take();
+            }
+            self.last_tablet_idx.take();
+        }
+        handle.unset_grab(self, data, event.serial, event.time, true);
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        _focus: Option<(<State as TabletSeatHandler>::ToolFocus, Point<f64, Logical>)>,
+        event: &TabletMotionEvent,
+    ) {
+        {
+            let location = if let Some(output) = self.screen_space_relative.as_ref() {
+                if data.common.shell.read().zoom_state().is_some() {
+                    event
+                        .location
+                        .as_global()
+                        .to_zoomed(output)
+                        .to_global(output)
+                        .as_logical()
+                } else {
+                    event.location
+                }
+            } else {
+                event.location
+            };
+
+            let mut elements = self.elements.lock().unwrap();
+            if let Some(i) = elements.iter().position(|elem| {
+                let mut bbox = elem.iced.bbox();
+                bbox.loc = elem.position.as_logical();
+
+                bbox.contains(location.to_i32_floor())
+            }) {
+                let element = &mut elements[i];
+
+                let new_event = TabletMotionEvent {
+                    location: location - element.position.as_logical().to_f64(),
+                    serial: event.serial,
+                    time: event.time,
+                };
+
+                if element.tablet_entered.is_none() {
+                    TabletToolTarget::proximity_in(
+                        &element.iced,
+                        &self.seat,
+                        data,
+                        handle.descriptor(),
+                        &handle.current_tablet(),
+                        event.serial,
+                    );
+                    element.tablet_entered = Some(handle.descriptor().clone());
+                }
+                TabletToolTarget::motion(
+                    &element.iced,
+                    &self.seat,
+                    data,
+                    handle.descriptor(),
+                    &new_event,
+                );
+                self.last_tablet_idx = Some(i);
+            } else {
+                let keep_root = usize::from(elements.len() > 1);
+                elements
+                    .iter_mut()
+                    .filter(|element| element.tablet_entered.is_some())
+                    .skip(keep_root)
+                    .for_each(|element| {
+                        TabletToolTarget::proximity_out(
+                            &element.iced,
+                            &self.seat,
+                            data,
+                            handle.descriptor(),
+                        );
+                    });
+                self.last_tablet_idx.take();
+            }
+        }
+        handle.motion(data, None, event);
+    }
+
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletDownEvent,
+    ) {
+        let mut guard = self.elements.lock().unwrap();
+        let elements = &mut *guard;
+
+        if let Some(elem) = self.last_tablet_idx.and_then(|i| elements.get_mut(i))
+            && elem
+                .tablet_entered
+                .as_ref()
+                .is_some_and(|desc| desc == handle.descriptor())
+        {
+            TabletToolTarget::down(&elem.iced, &self.seat, data, handle.descriptor(), event);
+        } else {
+            handle.down(data, event);
+        }
+    }
+
+    fn up(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletUpEvent,
+    ) {
+        let mut guard = self.elements.lock().unwrap();
+        let elements = &mut *guard;
+
+        if let Some(elem) = self.last_tablet_idx.and_then(|i| elements.get_mut(i))
+            && elem
+                .tablet_entered
+                .as_ref()
+                .is_some_and(|desc| desc == handle.descriptor())
+        {
+            TabletToolTarget::up(&elem.iced, &self.seat, data, handle.descriptor(), event);
+        } else {
+            handle.up(data, event);
+        }
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        event: &TabletButtonEvent,
+    ) {
+        handle.button(data, event);
+    }
+
+    fn axis(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        frame: TabletAxisFrame,
+    ) {
+        handle.axis(data, frame);
+    }
+
+    fn frame(
+        &mut self,
+        data: &mut State,
+        handle: &mut TabletToolInnerHandle<'_, State>,
+        time: InputTime,
+    ) {
+        handle.frame(data, time);
     }
 
     fn unset(&mut self, _data: &mut State) {}
@@ -1015,7 +1271,7 @@ impl MenuGrab {
         let element = IcedElement::new(ContextMenu::new(items), Size::default(), handle, theme);
         let min_size = element.minimum_size();
         element.with_program(|p| {
-            *p.row_width.lock().unwrap() = Some(min_size.w as f32);
+            p.row_width = Some(min_size.w as f32);
         });
         element.resize(min_size);
 
@@ -1051,6 +1307,7 @@ impl MenuGrab {
             position,
             pointer_entered: false,
             touch_entered: None,
+            tablet_entered: None,
         }]));
 
         let scale = Arc::new(Mutex::new(screen_space_relative.unwrap_or(1.)));
@@ -1075,6 +1332,7 @@ impl MenuGrab {
             seat: seat.clone(),
             screen_space_relative,
             scale,
+            last_tablet_idx: None,
         }
     }
 
@@ -1085,10 +1343,15 @@ impl MenuGrab {
         }
     }
 
-    pub fn is_touch_grab(&self) -> bool {
-        match self.start_data {
-            GrabStartData::Touch(_) => true,
-            GrabStartData::Pointer(_) => false,
+    pub fn grab_type(&self) -> GrabType {
+        self.start_data.type_()
+    }
+
+    pub fn tool(&self) -> Option<&TabletToolDescriptor> {
+        if let GrabStartData::TabletTool { tool, .. } = &self.start_data {
+            Some(tool)
+        } else {
+            None
         }
     }
 }

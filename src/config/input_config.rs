@@ -120,6 +120,8 @@ pub fn update_device(
     device_config: Option<&InputConfig>,
     default_config: &InputConfig,
 ) {
+    let is_touchpad = device.config_tap_finger_count() > 0;
+
     macro_rules! config {
         ($f:expr) => {
             get_config(device_config, default_config, $f)
@@ -187,7 +189,9 @@ pub fn update_device(
         {
             config_set_error(device, "scroll method", scroll, err, is_default);
         }
-        if let Some(natural) = scroll.natural_scroll
+        // Default to natural scroll only for touchpads
+        let natural_scroll = scroll.natural_scroll.or(is_touchpad.then_some(true));
+        if let Some(natural) = natural_scroll
             && let Err(err) = device.config_scroll_set_natural_scroll_enabled(natural)
         {
             config_set_error(device, "natural scrolling", natural, err, is_default);

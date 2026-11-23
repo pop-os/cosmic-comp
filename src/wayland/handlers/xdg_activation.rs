@@ -89,8 +89,7 @@ impl XdgActivationHandler for State {
         let keyboard = seat.get_keyboard().unwrap();
         let valid = keyboard
             .last_enter()
-            .map(|last_enter| serial.is_no_older_than(&last_enter))
-            .unwrap_or(false);
+            .is_some_and(|last_enter| serial.is_no_older_than(&last_enter));
 
         if valid {
             let output = seat.active_output();
@@ -243,7 +242,7 @@ impl State {
             {
                 for mapped in current_workspace
                     .mapped()
-                    .filter(|m| m.maximized_state.lock().unwrap().is_some())
+                    .filter(|m| m.maximized_state.lock().unwrap().is_some() && *m != &element)
                     .cloned()
                     .collect::<Vec<_>>()
                     .into_iter()

@@ -126,6 +126,13 @@ pub fn update_reactive_popups<'a>(
 // Attempt to constraint to tile, without resize. Return `true` if it fits.
 fn unconstrain_xdg_popup_tile(surface: &PopupKind, mut rect: Rectangle<i32, Logical>) -> bool {
     rect.loc -= get_popup_toplevel_coords(surface);
+    // A submenu of a menu that already anchored outside must follow its parent
+    if let PopupKind::Xdg(xdg) = surface {
+        let anchor = xdg.with_pending_state(|state| state.positioner.get_anchor_point());
+        if !rect.contains(anchor) {
+            return false;
+        }
+    }
     position_popup_within_rect(surface, rect.as_global(), true)
 }
 

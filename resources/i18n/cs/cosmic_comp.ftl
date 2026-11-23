@@ -1,6 +1,6 @@
-a11y-zoom-move-continuously = Zobrazení se pohybuje plynule s ukazatelem
-a11y-zoom-move-onedge = Zobrazení se pohybuje, když ukazatel dosáhne okraje
-a11y-zoom-move-centered = Zobrazení se pohybuje tak, aby ukazatel zůstal uprostřed
+a11y-zoom-move-continuously = Přiblížená oblast se pohybuje plynule s ukazatelem
+a11y-zoom-move-onedge = Přiblížená oblast se pohybuje, když ukazatel dosáhne okraje
+a11y-zoom-move-centered = Přiblížená oblast se pohybuje tak, aby ukazatel zůstal uprostřed
 a11y-zoom-settings = Nastavení lupy...
 grow-window = Zvětšit
 shrink-window = Zmenšit

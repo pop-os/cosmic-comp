@@ -280,8 +280,7 @@ where
                         s.upgrade()
                             .ok()
                             .and_then(|s| s.client())
-                            .map(|c| c.id() != client)
-                            .unwrap_or(false)
+                            .is_some_and(|c| c.id() != client)
                     });
                 }
             }

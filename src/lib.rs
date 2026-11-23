@@ -77,7 +77,7 @@ impl State {
 
             // potentially tell the session we are setup now
             if let Err(err) =
-                session::run_socket(self.common.event_loop_handle.clone(), &self.common)
+                session::run_socket(self.common.event_loop_handle.clone(), &mut self.common)
             {
                 warn!(?err, "Failed to setup cosmic-session communication");
             }
@@ -117,7 +117,9 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
 
     let mut kiosk_command = None;
-    let mut with_xwayland = true;
+    let mut with_xwayland =
+        !crate::utils::env::bool_var("COSMIC_DISABLE_XWAYLAND").unwrap_or(false);
+
     // Parse the arguments
     while let Some(arg) = raw_args.next_os(&mut cursor) {
         match arg.to_str() {
@@ -156,8 +158,12 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
     utils::rlimit::increase_nofile_limit();
     // This needs to be done before any potential program launches
     // (e.g. Xwayland) as it handles passed file descriptors.
-    if let Err(err) = session::setup_socket() {
-        warn!("Session error: {:?}", err);
+    let session_sock = match cosmic_comp_ipc::find_ipc_socket() {
+        Ok(sock) => sock,
+        Err(err) => {
+            warn!("Session error: {:?}", err);
+            None
+        }
     };
 
     // init hook globals
@@ -174,6 +180,7 @@ pub fn run(hooks: crate::hooks::Hooks) -> Result<(), Box<dyn Error>> {
         socket,
         event_loop.handle(),
         event_loop.get_signal(),
+        session_sock,
         with_xwayland,
         kiosk_command,
     );
@@ -289,7 +296,7 @@ Project home page: https://github.com/pop-os/cosmic-comp
 Options:
   -h, --help          Show this message
   --no-xwayland       Run without Xwayland
-  -v, --version       Show the version of cosmic-comp"#
+  -V, --version       Show the version of cosmic-comp"#
     );
 }
 
@@ -298,6 +305,9 @@ fn init_wayland_display(
 ) -> Result<(DisplayHandle, OsString)> {
     let display = Display::new().unwrap();
     let handle = display.handle();
+
+    const WAYLAND_DEFAULT_MAX_BUFFER_SIZE: usize = 1024 * 1024; // 1 MB
+    handle.set_default_max_buffer_size(WAYLAND_DEFAULT_MAX_BUFFER_SIZE);
 
     let source = ListeningSocketSource::new_auto().unwrap();
     let socket_name = source.socket_name().to_os_string();
@@ -359,6 +369,12 @@ fn refresh(state: &mut State) {
     }
 
     state.common.refresh();
+    {
+        let shell = state.common.shell.read();
+        for seat in shell.seats.iter() {
+            wayland::handlers::seat::update_cursor_surface_outputs(seat, shell.outputs());
+        }
+    }
     state::Common::refresh_focus(state);
     OverlapNotifyState::refresh(state);
     state.common.update_x11_stacking_order();

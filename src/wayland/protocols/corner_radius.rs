@@ -5,17 +5,19 @@ use cosmic_protocols::corner_radius::v1::server::cosmic_corner_radius_toplevel_v
 use cosmic_protocols::corner_radius::v1::server::{
     cosmic_corner_radius_manager_v1, cosmic_corner_radius_toplevel_v1,
 };
-use smithay::desktop::utils::bbox_from_surface_tree;
+use smithay::backend::renderer::buffer_dimensions;
+use smithay::backend::renderer::utils::RendererSurfaceStateUserData;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_popup::XdgPopup;
 use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 use smithay::reexports::wayland_server::New;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::utils::{HookId, Logical, Point, Rectangle};
-use smithay::wayland::compositor::Cacheable;
+use smithay::utils::{HookId, Logical, Rectangle};
 use smithay::wayland::compositor::add_pre_commit_hook;
 use smithay::wayland::compositor::with_states;
+use smithay::wayland::compositor::{BufferAssignment, Cacheable, SurfaceAttributes};
 use smithay::wayland::shell::wlr_layer::WlrLayerShellHandler;
 use smithay::wayland::shell::xdg::{SurfaceCachedState, XdgShellSurfaceUserData};
+use smithay::wayland::viewporter::ViewportCachedState;
 use smithay::{
     reexports::{
         wayland_protocols::xdg::shell::server::xdg_toplevel::XdgToplevel,
@@ -655,7 +657,6 @@ fn pad_rect(
 }
 
 fn layer_radius_hook<D: 'static>(_state: &mut D, _dh: &DisplayHandle, surface: &WlSurface) {
-    let bbox = bbox_from_surface_tree(surface, Point::default());
     with_states(surface, |surface_data| {
         let corners = *surface_data
             .cached_state
@@ -665,8 +666,40 @@ fn layer_radius_hook<D: 'static>(_state: &mut D, _dh: &DisplayHandle, surface: &
             .cached_state
             .get::<CacheablePadding>()
             .pending();
+
+        // The wl_surface size after this commit is:
+        // - viewport destination if set
+        // - else the logical size of the buffer that will be current attached now
+        // - else existing
+        let size = surface_data
+            .cached_state
+            .get::<ViewportCachedState>()
+            .pending()
+            .size()
+            .or_else(|| {
+                let mut guard = surface_data.cached_state.get::<SurfaceAttributes>();
+                let attrs = guard.pending();
+                match &attrs.buffer {
+                    Some(BufferAssignment::NewBuffer(buffer)) => buffer_dimensions(buffer)
+                        .map(|d| d.to_logical(attrs.buffer_scale, attrs.buffer_transform.into())),
+                    _ => None,
+                }
+            })
+            .or_else(|| {
+                surface_data
+                    .data_map
+                    .get::<RendererSurfaceStateUserData>()
+                    .and_then(|state| state.lock().unwrap().surface_size())
+            });
+        let Some(size) = size else {
+            return;
+        };
+
         let empty = Padding::default();
-        let Some(padded_box) = pad_rect(bbox, padding.0.as_ref().unwrap_or(&empty)) else {
+        let Some(padded_box) = pad_rect(
+            Rectangle::from_size(size),
+            padding.0.as_ref().unwrap_or(&empty),
+        ) else {
             if let Some(hook) = surface_data.data_map.get::<LayerHookId>() {
                 let hook_ref = hook.lock().unwrap();
                 if let Some((_, obj)) = hook_ref.as_ref()
