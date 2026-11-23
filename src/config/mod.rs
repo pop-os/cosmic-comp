@@ -539,6 +539,15 @@ impl Config {
             output_state.update();
             self.write_outputs(output_state.outputs());
         } else {
+            for output in &outputs {
+                let mut config = output.config_mut();
+                if let OutputState::Mirroring(conn) = &config.enabled
+                    && !outputs.iter().any(|o| &o.name() == conn)
+                {
+                    config.enabled = OutputState::Enabled;
+                    output.set_mirroring(None);
+                }
+            }
             if outputs
                 .iter()
                 .all(|o| o.config().enabled == OutputState::Disabled)
