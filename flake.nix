@@ -70,21 +70,21 @@
               seatd # For libseat
               libxkbcommon
               libinput
-              mesa # For libgbm
+              libgbm
               fontconfig
               stdenv.cc.cc.lib
               pixman
-              libdisplay-info
+              libdisplay-info_0_3 # libdisplay-info-sys 0.3 requires < 0.4
             ];
 
             runtimeDependencies = with pkgs; [
               libglvnd # For libEGL
               wayland # winit->wayland-sys wants to dlopen libwayland-egl.so
               # for running in X11
-              xorg.libX11
-              xorg.libXcursor
-              xorg.libxcb
-              xorg.libXi
+              libx11
+              libxcursor
+              libxcb
+              libxi
               libxkbcommon
               # for vulkan backend
               vulkan-loader
