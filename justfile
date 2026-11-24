@@ -17,6 +17,9 @@ bin-dst := bin-dir / name
 keybindings-src := 'data' / 'keybindings.ron'
 keybindings-dst := share-dir / 'cosmic' / 'com.system76.CosmicSettings.Shortcuts' / 'v1' / 'defaults'
 
+power-behavior-src := 'data' / 'power_button_behavior.ron'
+power-behavior-dst := share-dir / 'cosmic' / 'com.system76.CosmicSettings.Power' / 'v1' / 'power_button_behavior'
+
 tiling-exceptions-src := 'data' / 'tiling-exceptions.ron'
 tiling-exceptions-dst := share-dir / 'cosmic' / 'com.system76.CosmicSettings.WindowRules' / 'v1' / 'tiling_exception_defaults'
 
@@ -45,6 +48,7 @@ default: build-release
 install:
     install -Dm0755 {{bin-src}} {{bin-dst}}
     install -Dm0644 {{keybindings-src}} {{keybindings-dst}}
+    install -Dm0644 {{power-behavior-src}} {{power-behavior-dst}}
     install -Dm0644 {{tiling-exceptions-src}} {{tiling-exceptions-dst}}
 
 # Installs files including bare session files

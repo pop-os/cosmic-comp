@@ -15,9 +15,9 @@ use crate::{
     },
 };
 use cosmic_comp_config::{TileBehavior, workspace::WorkspaceLayout};
-use cosmic_config::ConfigSet;
+use cosmic_config::{ConfigGet, ConfigSet};
 use cosmic_settings_config::shortcuts;
-use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection};
+use cosmic_settings_config::shortcuts::action::{Direction, FocusDirection, System};
 use smithay::{
     backend::input::InputTime,
     input::{Seat, pointer::MotionEvent},
@@ -1041,7 +1041,21 @@ impl State {
             }
 
             // Gets the configured command for a given system action.
-            Action::System(system) => {
+            Action::System(mut system) => {
+                // Check if user setting remaps the power button behavior.
+                if system == System::PowerOff {
+                    let power_button_behavior = self
+                        .common
+                        .config
+                        .power_conf
+                        .get::<Option<System>>("power_button_behavior");
+
+                    // A stored value of None means to ignore the power button press.
+                    let Ok(Some(behavior)) = power_button_behavior else {
+                        return;
+                    };
+                    system = behavior;
+                }
                 if let Some(command) = self.common.config.system_actions.get(&system) {
                     self.spawn_command(command.clone());
                 }

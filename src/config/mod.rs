@@ -68,6 +68,8 @@ pub struct Config {
     pub cosmic_conf: CosmicCompConfig,
     /// cosmic-config context for `com.system76.CosmicSettings.Shortcuts`
     pub settings_context: cosmic_config::Config,
+    /// cosmic-config for handling re-mapping of power button event.
+    pub power_conf: cosmic_config::Config,
     /// Key bindings from `com.system76.CosmicSettings.Shortcuts`
     pub shortcuts: Shortcuts,
     // Tiling exceptions from `com.system76.CosmicSettings.WindowRules`
@@ -330,6 +332,9 @@ impl Config {
             ),
         };
 
+        let power_conf =
+            cosmic_config::Config::new("com.system76.CosmicSettings.Power", 1).unwrap();
+
         let _ = loop_handle.insert_idle(|state| {
             let filter_conf = state.common.config.dynamic_conf.screen_filter();
             state
@@ -347,6 +352,7 @@ impl Config {
             cosmic_conf: cosmic_comp_config,
             cosmic_helper: config,
             settings_context,
+            power_conf,
             shortcuts,
             system_actions,
             tiling_exceptions,
