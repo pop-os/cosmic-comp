@@ -1360,6 +1360,15 @@ impl Common {
             }
         }
 
+        /// A special variant of `throttle`, but don't throttle a window that still has to commit
+        /// a new state (e.g. after unmaximizing).
+        fn window_throttle(window: &CosmicSurface) -> Option<Duration> {
+            if window.has_uncommitted_state_change() {
+                return Some(Duration::ZERO);
+            }
+            throttle(window, window.x11_surface().is_some())
+        }
+
         let shell = self.shell.read();
 
         if let Some(session_lock) = shell.session_lock.as_ref()
@@ -1414,7 +1423,7 @@ impl Common {
             .mapped()
             .for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    let throttle = window_throttle(&window);
                     window.send_frame(output, time, throttle, should_send);
                 }
             });
@@ -1426,7 +1435,7 @@ impl Common {
             }
             active.mapped().for_each(|mapped| {
                 for (window, _) in mapped.windows() {
-                    let throttle = throttle(&window, window.x11_surface().is_some());
+                    let throttle = window_throttle(&window);
                     window.send_frame(output, time, throttle, should_send);
                 }
             });

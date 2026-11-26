@@ -342,6 +342,8 @@ impl Config {
                 .set_screen_filter(filter_conf.color_filter);
         });
 
+        crate::utils::animation::set_durations(cosmic_comp_config.animation_durations);
+
         Config {
             dynamic_conf: Self::load_dynamic(&xdg),
             cosmic_conf: cosmic_comp_config,
@@ -998,6 +1000,14 @@ fn config_changed(config: cosmic_config::Config, keys: Vec<String>, state: &mut 
             "cursor_shake_to_find" => {
                 let new = get_config::<bool>(&config, "cursor_shake_to_find");
                 state.common.config.cosmic_conf.cursor_shake_to_find = new;
+            }
+            "animation_durations" => {
+                let new = get_config::<cosmic_comp_config::AnimationDurations>(
+                    &config,
+                    "animation_durations",
+                );
+                state.common.config.cosmic_conf.animation_durations = new;
+                crate::utils::animation::set_durations(new);
             }
             "cursor_size" => {
                 let new = get_config::<Option<u32>>(&config, "cursor_size");

@@ -1,3 +1,4 @@
+use crate::utils::animation;
 use calloop::LoopHandle;
 use focus::target::WindowGroup;
 use grabs::{MenuAlignment, SeatMoveGrabState};
@@ -125,7 +126,6 @@ use self::{
     },
 };
 
-const ANIMATION_DURATION: Duration = Duration::from_millis(200);
 const GESTURE_MAX_LENGTH: f64 = 150.0;
 const GESTURE_POSITION_THRESHOLD: f64 = 0.5;
 const GESTURE_VELOCITY_THRESHOLD: f64 = 0.02;
@@ -153,14 +153,12 @@ impl OverviewMode {
     pub fn alpha(&self) -> Option<f32> {
         match self {
             OverviewMode::Started(_, start) => {
-                let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                let percentage = animation::progress(*start, animation::overview());
                 Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
             OverviewMode::Active(_) => Some(1.0),
             OverviewMode::Ended(_, end) => {
-                let percentage = Instant::now().duration_since(*end).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                let percentage = animation::progress(*end, animation::overview());
                 if percentage < 1.0 {
                     Some(ease(EaseInOutCubic, 1.0, 0.0, percentage))
                 } else {
@@ -206,14 +204,12 @@ impl ResizeMode {
     pub fn alpha(&self) -> Option<f32> {
         match self {
             ResizeMode::Started(_, start, _) => {
-                let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                let percentage = animation::progress(*start, animation::resize_mode());
                 Some(ease(EaseInOutCubic, 0.0, 1.0, percentage))
             }
             ResizeMode::Active(_, _) => Some(1.0),
             ResizeMode::Ended(end, _) => {
-                let percentage = Instant::now().duration_since(*end).as_millis() as f32
-                    / ANIMATION_DURATION.as_millis() as f32;
+                let percentage = animation::progress(*end, animation::resize_mode());
                 if percentage < 1.0 {
                     Some(ease(EaseInOutCubic, 1.0, 0.0, percentage))
                 } else {
@@ -623,9 +619,7 @@ impl WorkspaceSet {
         if let Some((_, start)) = self.previously_active {
             match start {
                 WorkspaceDelta::Shortcut(st) => {
-                    if Instant::now().duration_since(st).as_millis() as f32
-                        >= ANIMATION_DURATION.as_millis() as f32
-                    {
+                    if Instant::now().duration_since(st) >= animation::workspace() {
                         self.previously_active = None;
                     }
                 }
@@ -2484,8 +2478,10 @@ impl Shell {
             let (reverse_duration, trigger) =
                 if let OverviewMode::Started(trigger, start) = self.overview_mode.clone() {
                     (
-                        ANIMATION_DURATION
-                            - Instant::now().duration_since(start).min(ANIMATION_DURATION),
+                        animation::overview()
+                            - Instant::now()
+                                .duration_since(start)
+                                .min(animation::overview()),
                         Some(trigger),
                     )
                 } else {
@@ -2497,7 +2493,7 @@ impl Shell {
 
     pub fn overview_mode(&self) -> (OverviewMode, Option<SwapIndicator>) {
         if let OverviewMode::Started(trigger, timestamp) = &self.overview_mode
-            && Instant::now().duration_since(*timestamp) > ANIMATION_DURATION
+            && Instant::now().duration_since(*timestamp) > animation::overview()
         {
             return (
                 OverviewMode::Active(trigger.clone()),
@@ -2505,7 +2501,7 @@ impl Shell {
             );
         }
         if let OverviewMode::Ended(_, timestamp) = &self.overview_mode
-            && Instant::now().duration_since(*timestamp) > ANIMATION_DURATION
+            && Instant::now().duration_since(*timestamp) > animation::overview()
         {
             return (OverviewMode::None, None);
         }
@@ -2542,7 +2538,7 @@ impl Shell {
 
     pub fn resize_mode(&self) -> (ResizeMode, Option<ResizeIndicator>) {
         if let ResizeMode::Started(binding, timestamp, direction) = &self.resize_mode
-            && Instant::now().duration_since(*timestamp) > ANIMATION_DURATION
+            && Instant::now().duration_since(*timestamp) > animation::resize_mode()
         {
             return (
                 ResizeMode::Active(binding.clone(), *direction),
@@ -2550,7 +2546,7 @@ impl Shell {
             );
         }
         if let ResizeMode::Ended(timestamp, _) = self.resize_mode
-            && Instant::now().duration_since(timestamp) > ANIMATION_DURATION
+            && Instant::now().duration_since(timestamp) > animation::resize_mode()
         {
             return (ResizeMode::None, None);
         }
@@ -2710,12 +2706,12 @@ impl Shell {
     ) {
         match &self.overview_mode {
             OverviewMode::Started(trigger, timestamp)
-                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > animation::overview() =>
             {
                 self.overview_mode = OverviewMode::Active(trigger.clone());
             }
             OverviewMode::Ended(_, timestamp)
-                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > animation::overview() =>
             {
                 self.overview_mode = OverviewMode::None;
                 self.swap_indicator = None;
@@ -2725,12 +2721,12 @@ impl Shell {
 
         match &self.resize_mode {
             ResizeMode::Started(binding, timestamp, direction)
-                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > animation::resize_mode() =>
             {
                 self.resize_mode = ResizeMode::Active(binding.clone(), *direction);
             }
             ResizeMode::Ended(timestamp, _)
-                if Instant::now().duration_since(*timestamp) > ANIMATION_DURATION =>
+                if Instant::now().duration_since(*timestamp) > animation::resize_mode() =>
             {
                 self.resize_mode = ResizeMode::None;
                 self.resize_indicator = None;
