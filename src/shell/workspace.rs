@@ -1,11 +1,12 @@
 use crate::backend::render::wayland::SurfaceRenderElement;
 use crate::shell::focus::FocusTarget;
 use crate::shell::layout::tiling::RestoreTilingState;
+use crate::utils::animation;
 use crate::wayland::handlers::xdg_activation::ActivationContext;
 use crate::{
     backend::render::{BackdropShader, element::AsGlowRenderer},
     shell::{
-        ANIMATION_DURATION, OverviewMode, SeatMoveGrabState,
+        OverviewMode, SeatMoveGrabState,
         layout::{
             floating::{FloatingLayout, TiledCorners},
             tiling::TilingLayout,
@@ -53,7 +54,7 @@ use smithay::{
 use std::{
     collections::{HashMap, VecDeque},
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use wayland_backend::server::ClientId;
 
@@ -71,8 +72,6 @@ use super::{
     grabs::ResizeEdge,
     layout::tiling::{Data, NodeDesc},
 };
-
-const FULLSCREEN_ANIMATION_DURATION: Duration = Duration::from_millis(200);
 
 // For stable workspace id, generate random 24-bit integer, as a hex string
 // Must be compared with existing workspaces work uniqueness.
@@ -551,7 +550,7 @@ impl Workspace {
         for f in self.fullscreen_surfaces.iter_mut() {
             if let Some(start) = f.start_at.as_ref() {
                 let duration_since = Instant::now().duration_since(*start);
-                if duration_since > FULLSCREEN_ANIMATION_DURATION {
+                if duration_since > animation::fullscreen() {
                     f.start_at.take();
                     self.dirty.store(true, Ordering::SeqCst);
                 }
@@ -560,7 +559,7 @@ impl Workspace {
 
         self.fullscreen_surfaces.retain(|f| {
             if let Some(end) = f.ended_at
-                && Instant::now().duration_since(end) >= FULLSCREEN_ANIMATION_DURATION
+                && Instant::now().duration_since(end) >= animation::fullscreen()
             {
                 self.dirty.store(true, Ordering::SeqCst);
                 return false;
@@ -1011,6 +1010,7 @@ impl Workspace {
                         // should still be mapped in tiling
                         let geo = self.tiling_layer.element_geometry(elem);
                         self.floating_layer.unmap(elem, geo);
+                        self.floating_layer.hold_unmaximize_animation(elem);
                         elem.output_enter(&self.output, elem.bbox());
                         elem.set_maximized(false);
                         elem.set_geometry(state.original_geometry.to_global(&self.output));
@@ -1057,15 +1057,15 @@ impl Workspace {
                 f.previous_geometry = Some(to);
                 f.ended_at = Some(
                     Instant::now()
-                        - (FULLSCREEN_ANIMATION_DURATION
+                        - (animation::fullscreen()
                             - f.start_at
                                 .take()
                                 .map(|earlier| {
                                     Instant::now()
                                         .duration_since(earlier)
-                                        .min(FULLSCREEN_ANIMATION_DURATION)
+                                        .min(animation::fullscreen())
                                 })
-                                .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
+                                .unwrap_or(animation::fullscreen())),
                 );
             }
 
@@ -1339,16 +1339,16 @@ impl Workspace {
 
         surface.ended_at = Some(
             Instant::now()
-                - (FULLSCREEN_ANIMATION_DURATION
+                - (animation::fullscreen()
                     - surface
                         .start_at
                         .take()
                         .map(|earlier| {
                             Instant::now()
                                 .duration_since(earlier)
-                                .min(FULLSCREEN_ANIMATION_DURATION)
+                                .min(animation::fullscreen())
                         })
-                        .unwrap_or(FULLSCREEN_ANIMATION_DURATION)),
+                        .unwrap_or(animation::fullscreen())),
         );
 
         Some((
@@ -1656,8 +1656,7 @@ impl Workspace {
 
                 let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
                     (Some(started), _) => {
-                        let duration = Instant::now().duration_since(started).as_secs_f64()
-                            / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                        let duration = animation::progress(started, animation::fullscreen()) as f64;
                         (
                             ease(
                                 EaseInOutCubic,
@@ -1670,8 +1669,7 @@ impl Workspace {
                         )
                     }
                     (_, Some(ended)) => {
-                        let duration = Instant::now().duration_since(ended).as_secs_f64()
-                            / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                        let duration = animation::progress(ended, animation::fullscreen()) as f64;
                         (
                             ease(
                                 EaseInOutCubic,
@@ -1754,17 +1752,12 @@ impl Workspace {
             // floating surfaces
             let alpha = match &overview.0 {
                 OverviewMode::Started(_, started) => {
-                    (1.0 - (Instant::now().duration_since(*started).as_millis()
-                        / ANIMATION_DURATION.as_millis()) as f32)
-                        .max(0.0)
+                    (1.0 - animation::progress(*started, animation::overview()).floor()).max(0.0)
                         * 0.4
                         + 0.6
                 }
                 OverviewMode::Ended(_, ended) => {
-                    ((Instant::now().duration_since(*ended).as_millis()
-                        / ANIMATION_DURATION.as_millis()) as f32)
-                        * 0.4
-                        + 0.6
+                    (animation::progress(*ended, animation::overview()).floor()) * 0.4 + 0.6
                 }
                 OverviewMode::Active(_) => 0.6,
                 OverviewMode::None => 1.0,
@@ -1885,8 +1878,7 @@ impl Workspace {
 
             let (target_geo, alpha) = match (fullscreen.start_at, fullscreen.ended_at) {
                 (Some(started), _) => {
-                    let duration = Instant::now().duration_since(started).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                    let duration = animation::progress(started, animation::fullscreen()) as f64;
                     (
                         ease(
                             EaseInOutCubic,
@@ -1899,8 +1891,7 @@ impl Workspace {
                     )
                 }
                 (_, Some(ended)) => {
-                    let duration = Instant::now().duration_since(ended).as_secs_f64()
-                        / FULLSCREEN_ANIMATION_DURATION.as_secs_f64();
+                    let duration = animation::progress(ended, animation::fullscreen()) as f64;
                     (
                         ease(
                             EaseInOutCubic,
@@ -1945,17 +1936,12 @@ impl Workspace {
             // floating surfaces
             let alpha = match &overview.0 {
                 OverviewMode::Started(_, started) => {
-                    (1.0 - (Instant::now().duration_since(*started).as_millis()
-                        / ANIMATION_DURATION.as_millis()) as f32)
-                        .max(0.0)
+                    (1.0 - animation::progress(*started, animation::overview()).floor()).max(0.0)
                         * 0.4
                         + 0.6
                 }
                 OverviewMode::Ended(_, ended) => {
-                    ((Instant::now().duration_since(*ended).as_millis()
-                        / ANIMATION_DURATION.as_millis()) as f32)
-                        * 0.4
-                        + 0.6
+                    (animation::progress(*ended, animation::overview()).floor()) * 0.4 + 0.6
                 }
                 OverviewMode::Active(_) => 0.6,
                 OverviewMode::None => 1.0,

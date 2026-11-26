@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::utils::animation;
 use std::{
     collections::{HashMap, VecDeque},
     sync::atomic::{AtomicBool, Ordering},
@@ -52,9 +53,9 @@ use crate::{
 mod grabs;
 pub use self::grabs::*;
 
-pub const ANIMATION_DURATION: Duration = Duration::from_millis(200);
-pub const MINIMIZE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
-const SHAKE_ANIMATION_DURATION: Duration = Duration::from_millis(320);
+/// Limit the time an umaximize animation will wait for the window to commit
+const UNMAXIMIZE_HOLD_LIMIT: Duration = Duration::from_millis(500);
+
 const SHAKE_AMPLITUDE: f32 = 10.0;
 
 #[derive(Debug, Default)]
@@ -79,6 +80,8 @@ enum Animation {
         start: Instant,
         previous_geometry: Rectangle<i32, Local>,
         target_geometry: Rectangle<i32, Local>,
+        /// Hold the final frame after the animation has ended until the window responds back
+        hold: bool,
     },
     Unminimize {
         start: Instant,
@@ -104,20 +107,18 @@ impl Animation {
     fn alpha(&self) -> f32 {
         match self {
             Animation::Tiled { .. } | Animation::Shake { .. } => 1.0,
-            Animation::Minimize { start, .. } => {
-                let percentage = Instant::now()
-                    .duration_since(*start)
-                    .min(MINIMIZE_ANIMATION_DURATION)
-                    .as_secs_f32()
-                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32();
-                1.0 - ((percentage - 0.5).max(0.0) * 2.0)
+            Animation::Minimize { start, hold, .. } => {
+                let percentage = animation::progress(*start, animation::minimize()).min(1.0);
+                if *hold && percentage >= 1.0 {
+                    // Holding the window's last frame untill it hasn't commited the new state
+                    // otherwise we'd show an empty place
+                    1.0
+                } else {
+                    1.0 - ((percentage - 0.5).max(0.0) * 2.0)
+                }
             }
             Animation::Unminimize { start, .. } => {
-                let percentage = Instant::now()
-                    .duration_since(*start)
-                    .min(MINIMIZE_ANIMATION_DURATION)
-                    .as_secs_f32()
-                    / MINIMIZE_ANIMATION_DURATION.as_secs_f32();
+                let percentage = animation::progress(*start, animation::minimize()).min(1.0);
                 (percentage * 2.0).min(1.0)
             }
         }
@@ -147,11 +148,7 @@ impl Animation {
     ) -> Rectangle<i32, Local> {
         let (duration, target_rect) = match self {
             Animation::Shake { start, geometry } => {
-                let progress = Instant::now()
-                    .duration_since(*start)
-                    .min(SHAKE_ANIMATION_DURATION)
-                    .as_secs_f32()
-                    / SHAKE_ANIMATION_DURATION.as_secs_f32();
+                let progress = animation::progress(*start, animation::shake()).min(1.0);
                 let envelope: f32 = ease(EaseOutCubic, 1.0, 0.0, progress);
                 let offset =
                     (SHAKE_AMPLITUDE * envelope * (progress * 3.0 * std::f32::consts::TAU).sin())
@@ -166,7 +163,7 @@ impl Animation {
             }
             | Animation::Unminimize {
                 target_geometry, ..
-            } => (MINIMIZE_ANIMATION_DURATION, *target_geometry),
+            } => (animation::minimize(), *target_geometry),
             Animation::Tiled { .. } => {
                 let target_geometry = if let Some(target_rect) =
                     tiled_state.map(|state| state.relative_geometry(output_geometry, gaps))
@@ -175,14 +172,12 @@ impl Animation {
                 } else {
                     current_geometry
                 };
-                (ANIMATION_DURATION, target_geometry)
+                (animation::floating(), target_geometry)
             }
         };
         let previous_rect = *self.previous_geometry();
         let start = *self.start();
-        let now = Instant::now();
-        let progress =
-            now.duration_since(start).min(duration).as_secs_f64() / duration.as_secs_f64();
+        let progress = animation::progress(start, duration).min(1.0) as f64;
 
         ease(
             EaseInOutCubic,
@@ -729,6 +724,7 @@ impl FloatingLayout {
                         mapped_geometry
                     },
                     target_geometry: to,
+                    hold: false,
                 },
             );
         }
@@ -1458,15 +1454,30 @@ impl FloatingLayout {
         self.dirty.swap(false, Ordering::SeqCst) || !self.animations.is_empty()
     }
 
+    /// Hold the last frame until it commits the unmaximized state
+    pub fn hold_unmaximize_animation(&mut self, mapped: &CosmicMapped) {
+        if let Some(Animation::Minimize { hold, .. }) = self.animations.get_mut(mapped) {
+            *hold = true;
+        }
+    }
+
     pub fn update_animation_state(&mut self) {
         let was_empty = self.animations.is_empty();
-        self.animations.retain(|_, anim| {
+        self.animations.retain(|mapped, anim| {
             let duration = match anim {
-                Animation::Tiled { .. } => ANIMATION_DURATION,
-                Animation::Shake { .. } => SHAKE_ANIMATION_DURATION,
-                _ => MINIMIZE_ANIMATION_DURATION,
+                Animation::Tiled { .. } => animation::floating(),
+                Animation::Shake { .. } => animation::shake(),
+                _ => animation::minimize(),
             };
-            Instant::now().duration_since(*anim.start()) < duration
+            let elapsed = Instant::now().duration_since(*anim.start());
+            if elapsed < duration {
+                return true;
+            }
+            //  keep showing the final frame until the window committed its new state
+            matches!(anim, Animation::Minimize { hold: true, .. })
+                && mapped.alive()
+                && mapped.is_maximized(false)
+                && elapsed < duration + UNMAXIMIZE_HOLD_LIMIT
         });
         if self.animations.is_empty() != was_empty {
             self.dirty.store(true, Ordering::SeqCst);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::utils::animation;
 use crate::{
     backend::render::{
         element::AsGlowRenderer,
@@ -538,8 +539,6 @@ const SHAKE_HOLD: Duration = Duration::from_millis(2000);
 const OVER_MAGNIFICATION: f32 = 1.0;
 /// Upper bound on the nominal size (in px) a cursor frame is rasterized at.
 const MAX_RASTER_SIZE: u32 = 512;
-/// Duration of the grow/shrink animation.
-const MAGNIFICATION_ANIM: Duration = Duration::from_millis(200);
 
 /// small movement is ignored and direction stays the same
 fn same_direction(a: f64, b: f64) -> bool {
@@ -684,7 +683,7 @@ impl CursorStateInner {
         self.magnification = match self.anim_start {
             Some(start) => {
                 // `ease` clamps the time to `0.0..=1.0` for us.
-                let t = now.duration_since(start).as_secs_f32() / MAGNIFICATION_ANIM.as_secs_f32();
+                let t = animation::progress(start, animation::cursor_magnify());
                 if t >= 1.0 {
                     self.anim_start = None;
                 }

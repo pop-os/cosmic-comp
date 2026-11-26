@@ -466,6 +466,12 @@ impl CosmicSurface {
         }
     }
 
+    /// Has the window been asked to chane maximized/fullesceen state but asn't commited a frame yet?
+    pub fn has_uncommitted_state_change(&self) -> bool {
+        self.is_maximized(true) != self.is_maximized(false)
+            || self.is_fullscreen(true) != self.is_fullscreen(false)
+    }
+
     pub fn is_fullscreen(&self, pending: bool) -> bool {
         match self.0.underlying_surface() {
             WindowSurface::Wayland(toplevel) => with_toplevel_state(toplevel, pending, |state| {

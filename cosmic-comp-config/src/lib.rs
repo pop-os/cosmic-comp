@@ -74,6 +74,49 @@ pub enum DecorationPreference {
     ServerSide,
 }
 
+/// Animations config. Anything below 1.0ms disables the specific animation
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AnimationDurations {
+    pub workspace: f32,
+    pub overview: f32,
+    pub resize_mode: f32,
+    pub zoom: f32,
+    pub tiling: f32,
+    pub floating: f32,
+    pub minimize: f32,
+    pub fullscreen: f32,
+    pub shake: f32,
+    pub tab: f32,
+    pub tab_scroll: f32,
+    pub move_rescale: f32,
+    pub cursor_magnify: f32,
+}
+
+impl AnimationDurations {
+    pub const DEFAULT: Self = Self {
+        workspace: 200.0,
+        overview: 200.0,
+        resize_mode: 200.0,
+        zoom: 200.0,
+        tiling: 200.0,
+        floating: 200.0,
+        minimize: 320.0,
+        fullscreen: 200.0,
+        shake: 320.0,
+        tab: 150.0,
+        tab_scroll: 200.0,
+        move_rescale: 150.0,
+        cursor_magnify: 200.0,
+    };
+}
+
+impl Default for AnimationDurations {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, CosmicConfigEntry)]
 #[version = 1]
 pub struct CosmicCompConfig {
@@ -113,6 +156,8 @@ pub struct CosmicCompConfig {
     pub cursor_shake_to_find: bool,
     /// Cursor size in logical pixels. `None` falls back to `$XCURSOR_SIZE`
     pub cursor_size: Option<u32>,
+    /// Durations of compositor animations
+    pub animation_durations: AnimationDurations,
     pub activation_policy: ActivationPolicy,
     pub decoration_preference: DecorationPreference,
 }
@@ -154,6 +199,7 @@ impl Default for CosmicCompConfig {
             cursor_hide: CursorHideConfig::default(),
             cursor_shake_to_find: true,
             cursor_size: None,
+            animation_durations: AnimationDurations::DEFAULT,
             activation_policy: ActivationPolicy::default(),
             decoration_preference: DecorationPreference::default(),
         }

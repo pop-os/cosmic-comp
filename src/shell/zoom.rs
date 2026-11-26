@@ -1,5 +1,6 @@
 use std::{sync::Mutex, time::Instant};
 
+use crate::utils::animation;
 use calloop::LoopHandle;
 use cosmic::{
     Apply,
@@ -55,7 +56,7 @@ use crate::{
 };
 
 use super::{
-    ANIMATION_DURATION, check_grab_preconditions,
+    check_grab_preconditions,
     focus::target::PointerFocusTarget,
     grabs::{ContextMenu, Item, MenuAlignment, MenuGrab},
 };
@@ -113,13 +114,12 @@ impl OutputZoomState {
     pub fn animating_focal_point(&mut self) -> Point<f64, Local> {
         if let Some((old_point, start)) = self.previous_point.as_ref() {
             let duration_since = Instant::now().duration_since(*start);
-            if duration_since > ANIMATION_DURATION {
+            if duration_since > animation::zoom() {
                 self.previous_point.take();
                 return self.focal_point;
             }
 
-            let percentage =
-                duration_since.as_millis() as f32 / ANIMATION_DURATION.as_millis() as f32;
+            let percentage = animation::progress(*start, animation::zoom());
             ease(
                 Linear,
                 EasePoint(*old_point),
@@ -142,8 +142,7 @@ impl OutputZoomState {
 
     pub fn animating_level(&self) -> f64 {
         if let Some((old_level, start)) = self.previous_level.as_ref() {
-            let percentage = Instant::now().duration_since(*start).as_millis() as f32
-                / ANIMATION_DURATION.as_millis() as f32;
+            let percentage = animation::progress(*start, animation::zoom());
 
             ease(Linear, *old_level, self.level, percentage)
         } else {
@@ -159,7 +158,7 @@ impl OutputZoomState {
         if self
             .previous_level
             .as_ref()
-            .is_some_and(|(_, start)| Instant::now().duration_since(*start) > ANIMATION_DURATION)
+            .is_some_and(|(_, start)| Instant::now().duration_since(*start) > animation::zoom())
         {
             self.previous_level.take();
         }

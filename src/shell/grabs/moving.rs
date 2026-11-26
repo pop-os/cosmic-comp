@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+use crate::utils::animation;
 use crate::{
     backend::render::{
         BackdropShader, IndicatorShader, Key, Usage, cursor::CursorState, element::AsGlowRenderer,
@@ -66,8 +67,6 @@ use super::{GrabStartData, ReleaseMode};
 
 pub type SeatMoveGrabState = Mutex<Option<MoveGrabState>>;
 
-const RESCALE_ANIMATION_DURATION: f64 = 150.0;
-
 pub struct MoveGrabState {
     window: CosmicMapped,
     window_offset: Point<i32, Logical>,
@@ -96,9 +95,7 @@ impl MoveGrabState {
     {
         let scale = if self.previous == ManagedLayer::Tiling {
             0.6 + ((1.0
-                - (Instant::now().duration_since(self.start).as_millis() as f64
-                    / RESCALE_ANIMATION_DURATION)
-                    .min(1.0))
+                - (animation::progress(self.start, animation::move_rescale()) as f64).min(1.0))
                 * 0.4)
         } else {
             1.0
