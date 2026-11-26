@@ -699,10 +699,6 @@ impl Common {
                                 "Gdk/WindowScalingFactor".into(),
                                 (new_scale.floor() as i32).into(),
                             ),
-                            (
-                                "Gtk/CursorThemeSize".into(),
-                                ((new_scale * cursor_size as f64).round() as i32).into(),
-                            ),
                             ("Xft/Antialias".into(), 1_i32.into()),
                             ("Xft/Hinting".into(), 1_i32.into()),
                             ("Xft/HintStyle".into(), "hintslight".to_string().into()),
@@ -718,6 +714,16 @@ impl Common {
             } else {
                 None
             };
+
+            // the cursor size can change on its own, or on scale change
+            if let Some(xwm) = xwayland.xwm.as_mut()
+                && let Err(err) = xwm.set_xsettings(std::iter::once((
+                    "Gtk/CursorThemeSize".into(),
+                    ((new_scale * cursor_size as f64).round() as i32).into(),
+                )))
+            {
+                warn!(wm_id = ?xwm.id(), ?err, "Failed to update XSETTINGS.");
+            }
 
             if xwayland
                 .xrdb_thread
