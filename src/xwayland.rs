@@ -664,7 +664,7 @@ impl Common {
                 }
             }
         };
-        let (_, cursor_size) = load_cursor_env(
+        let (cursor_theme, cursor_size) = load_cursor_env(
             self.theme.cosmic().cursor_theme.as_deref(),
             self.config.cosmic_conf.cursor_size,
         );
@@ -728,7 +728,7 @@ impl Common {
             if xwayland
                 .xrdb_thread
                 .send((
-                    cosmic::icon_theme::default(),
+                    cursor_theme,
                     (new_scale * cursor_size as f64).round() as u32,
                 ))
                 .is_err()
