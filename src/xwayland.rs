@@ -173,7 +173,11 @@ impl State {
 
                     let xwayland_state = data.common.xwayland_state.as_mut().unwrap();
                     xwayland_state.xwm = Some(wm);
-                    xwayland_state.reload_cursor(1., data.common.config.cosmic_conf.cursor_size);
+                    xwayland_state.reload_cursor(
+                        1.,
+                        data.common.theme.cosmic().cursor_theme.as_deref(),
+                        data.common.config.cosmic_conf.cursor_size,
+                    );
                     data.notify_ready();
 
                     data.common.update_xwayland_settings();
@@ -262,9 +266,9 @@ fn scale_cursor(
 }
 
 impl XWaylandState {
-    pub fn reload_cursor(&mut self, scale: f64, size: Option<u32>) {
+    pub fn reload_cursor(&mut self, scale: f64, theme: Option<&str>, size: Option<u32>) {
         if let Some(wm) = self.xwm.as_mut() {
-            let (theme, size) = load_cursor_theme(size);
+            let (theme, size) = load_cursor_theme(theme, size);
             let cursor = Cursor::load(&theme, CursorIcon::Default, size);
             let image = cursor.get_image(scale.ceil() as u32, 0);
 
@@ -660,7 +664,10 @@ impl Common {
                 }
             }
         };
-        let (_, cursor_size) = load_cursor_env(self.config.cosmic_conf.cursor_size);
+        let (cursor_theme, cursor_size) = load_cursor_env(
+            self.theme.cosmic().cursor_theme.as_deref(),
+            self.config.cosmic_conf.cursor_size,
+        );
 
         // compare with current scale
         if let Some(xwayland) = self.xwayland_state.as_mut() {
@@ -692,10 +699,6 @@ impl Common {
                                 "Gdk/WindowScalingFactor".into(),
                                 (new_scale.floor() as i32).into(),
                             ),
-                            (
-                                "Gtk/CursorThemeSize".into(),
-                                ((new_scale * cursor_size as f64).round() as i32).into(),
-                            ),
                             ("Xft/Antialias".into(), 1_i32.into()),
                             ("Xft/Hinting".into(), 1_i32.into()),
                             ("Xft/HintStyle".into(), "hintslight".to_string().into()),
@@ -712,10 +715,20 @@ impl Common {
                 None
             };
 
+            // the cursor size can change on its own, or on scale change
+            if let Some(xwm) = xwayland.xwm.as_mut()
+                && let Err(err) = xwm.set_xsettings(std::iter::once((
+                    "Gtk/CursorThemeSize".into(),
+                    ((new_scale * cursor_size as f64).round() as i32).into(),
+                )))
+            {
+                warn!(wm_id = ?xwm.id(), ?err, "Failed to update XSETTINGS.");
+            }
+
             if xwayland
                 .xrdb_thread
                 .send((
-                    cosmic::icon_theme::default(),
+                    cursor_theme,
                     (new_scale * cursor_size as f64).round() as u32,
                 ))
                 .is_err()
@@ -724,7 +737,11 @@ impl Common {
             }
 
             // update cursor
-            xwayland.reload_cursor(new_scale, self.config.cosmic_conf.cursor_size);
+            xwayland.reload_cursor(
+                new_scale,
+                self.theme.cosmic().cursor_theme.as_deref(),
+                self.config.cosmic_conf.cursor_size,
+            );
 
             if let Some(geometries) = geometries {
                 // update client scale
